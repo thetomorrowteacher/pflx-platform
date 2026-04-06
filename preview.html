@@ -8011,7 +8011,7 @@
                 loginView.classList.remove('active');
                 loginView.style.opacity = '';
                 loginView.style.filter = '';
-                document.querySelector('.toolbar').style.display = 'flex'; if (typeof pflxInjectRolePill === 'function') pflxInjectRolePill();
+                document.querySelector('.toolbar').style.display = 'flex'; window.activeSession = activeSession; if (typeof pflxInjectRolePill === 'function') pflxInjectRolePill();
                 updateToolbarStatus();
                 initPlatform(displayName);
                 // Sound: stop login music, reinit with player prefs, start home music
@@ -8345,7 +8345,6 @@
                 this.showSingleGalleryImage();
 
                 this.screen.classList.add('active');
-                (function(){ var p=document.getElementById('pflx-role-pill'); if(p) p.style.display='none'; })();
 
                 // Play loading SFX — ambient electronic hum
                 this.playLoadingSfx();
@@ -8386,7 +8385,7 @@
                 }
 
                 this.showSingleGalleryImage();
-                this.screen.classList.add('active'); (function(){ var p=document.getElementById("pflx-role-pill"); if(p) p.style.display="none"; })();
+                this.screen.classList.add('active');
 
                 // Play loading SFX — ambient electronic hum
                 this.playLoadingSfx();
@@ -8423,7 +8422,7 @@
             hide() {
                 if (!this.screen) return;
                 this.stopLoadingSfx();
-                this.screen.classList.remove('active'); var _rp = document.getElementById('pflx-role-pill'); if (_rp) _rp.style.display = '';
+                this.screen.classList.remove('active');
                 this.hideGalleryImage();
             },
 
@@ -15880,16 +15879,23 @@ RESPONSE RULES:
             // ── Inject a small Host/Player toggle pill into the header ──
             function pflxInjectRolePill() {
                 if (document.getElementById('pflx-role-pill')) return;
-                // Look for the top header area — fall back to body if not found
-                var header = document.querySelector('.mc-header, .top-header, .header, header') || document.body;
+                // Only hosts (admin role) get the toggle pill
+                var sess = window.activeSession;
+                if (!sess || (sess.role || '').toLowerCase() !== 'admin') return;
                 var pill = document.createElement('button');
                 pill.id = 'pflx-role-pill';
                 pill.type = 'button';
                 pill.title = 'Click to toggle Host ↔ Player mode';
                 pill.textContent = window.pflxRole === 'host' ? '⚙ HOST MODE' : '👤 PLAYER MODE';
-                pill.style.cssText = 'position:fixed;top:14px;left:820px;padding:6px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.18);color:#fff;font-family:\'Share Tech Mono\',monospace;font-size:10px;font-weight:800;letter-spacing:0.1em;cursor:pointer;z-index:99998;background:' + (window.pflxRole === 'host' ? 'linear-gradient(135deg,#f5c842,#f59e0b)' : 'linear-gradient(135deg,#00d4ff,#7c3aed)') + ';box-shadow:0 2px 12px rgba(0,0,0,0.35);';
+                pill.style.cssText = 'padding:6px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.18);color:#fff;font-family:Share Tech Mono,monospace;font-size:10px;font-weight:800;letter-spacing:0.1em;cursor:pointer;margin-left:12px;margin-right:8px;white-space:nowrap;background:' + (window.pflxRole === 'host' ? 'linear-gradient(135deg,#f5c842,#f59e0b)' : 'linear-gradient(135deg,#00d4ff,#7c3aed)') + ';box-shadow:0 2px 12px rgba(0,0,0,0.35);';
                 pill.onclick = function(){ window.pflxToggleRole(); };
-                document.body.appendChild(pill);
+                // Insert into toolbar, right before the profile section
+                var profile = document.querySelector('.toolbar-profile');
+                if (profile && profile.parentNode) {
+                    profile.parentNode.insertBefore(pill, profile);
+                } else {
+                    document.body.appendChild(pill);
+                }
             }
 
             // ── Init hook: runs after DOMContentLoaded ──
