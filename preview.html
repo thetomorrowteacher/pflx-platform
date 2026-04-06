@@ -6020,9 +6020,9 @@
             display:none;align-items:center;justify-content:center;
             opacity:1;transition:opacity 1s ease;
         ">
-            <video id="pflx-motion-video" muted playsinline
+            <video id="pflx-motion-video" playsinline
                 style="width:100%;height:100%;object-fit:cover;"
-                src="public/PFLX Motion Graphic.mp4"></video>
+                src="public/Official PFLX Transition.mp4"></video>
         </div>
     </main>
 
@@ -8273,7 +8273,7 @@
             }, 600);
         }
 
-        /** Play the PFLX Motion Graphic full-screen video for ~4s then fade out */
+        /** Play the Official PFLX Transition video full-screen with sound, then fade into platform */
         function playMotionIntro() {
             return new Promise(resolve => {
                 const container = document.getElementById('pflx-motion-intro');
@@ -8283,17 +8283,39 @@
                 container.style.display = 'flex';
                 container.style.opacity = '1';
                 video.currentTime = 0;
-                video.play().catch(() => {});
+                video.muted = false;
+                video.volume = 1.0;
+                video.play().catch(() => {
+                    // Autoplay with sound may be blocked — try muted fallback
+                    video.muted = true;
+                    video.play().catch(() => {});
+                });
 
-                // After 4 seconds, fade out over 1s
-                setTimeout(() => {
+                // When the full video ends, fade out over 1.2s then resolve
+                video.onended = function() {
+                    container.style.transition = 'opacity 1.2s ease';
                     container.style.opacity = '0';
                     setTimeout(() => {
                         container.style.display = 'none';
                         video.pause();
+                        video.onended = null;
                         resolve();
-                    }, 1000); // 1s fade-out transition
-                }, 4000); // 4s of video playback
+                    }, 1200);
+                };
+
+                // Safety timeout: if video stalls or is very long, cap at 30s
+                setTimeout(() => {
+                    if (container.style.display !== 'none') {
+                        container.style.transition = 'opacity 1.2s ease';
+                        container.style.opacity = '0';
+                        setTimeout(() => {
+                            container.style.display = 'none';
+                            video.pause();
+                            video.onended = null;
+                            resolve();
+                        }, 1200);
+                    }
+                }, 30000);
             });
         }
 
