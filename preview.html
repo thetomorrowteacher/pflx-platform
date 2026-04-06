@@ -4221,7 +4221,7 @@
                         <div class="iframe-loader-spinner"></div>
                         <div class="iframe-loader-text">Loading X-Coin...</div>
                     </div>
-                    <iframe src="about:blank" allow="fullscreen; clipboard-write; clipboard-read" style="width: 100%; height: 100%; border: none;" data-app="xcoin"></iframe>
+                    <iframe id="xcoin-frame" src="about:blank" allow="fullscreen; clipboard-write; clipboard-read" style="width: 100%; height: 100%; border: none;" data-app="xcoin"></iframe>
                 </div>
 
                 <div class="view pathways-view" style="position:relative;">
@@ -4852,6 +4852,38 @@
                                     </div>
                                 </div>
 
+                                <!-- Active Users Panel -->
+                                <h3 style="color: var(--cyan); font-family: 'Orbitron', sans-serif; font-size: 13px; margin-bottom: 12px; letter-spacing: 1.5px;">PLAYER ACTIVITY</h3>
+                                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px;">
+                                    <div class="hmc-stat-card" style="border-color: rgba(16,185,129,0.3);">
+                                        <div class="hmc-stat-icon" style="color: #10b981;">●</div>
+                                        <div class="hmc-stat-num" id="hmc-online-count" style="color:#10b981;">0</div>
+                                        <div class="hmc-stat-label">Online Now</div>
+                                    </div>
+                                    <div class="hmc-stat-card" style="border-color: rgba(245,158,11,0.3);">
+                                        <div class="hmc-stat-icon" style="color: #f59e0b;">●</div>
+                                        <div class="hmc-stat-num" id="hmc-away-count" style="color:#f59e0b;">0</div>
+                                        <div class="hmc-stat-label">Away (&lt;48h)</div>
+                                    </div>
+                                    <div class="hmc-stat-card" style="border-color: rgba(239,68,68,0.3);">
+                                        <div class="hmc-stat-icon" style="color: #ef4444;">●</div>
+                                        <div class="hmc-stat-num" id="hmc-inactive-count" style="color:#ef4444;">0</div>
+                                        <div class="hmc-stat-label">Inactive (48h+)</div>
+                                    </div>
+                                </div>
+                                <div id="hmc-activity-roster" style="max-height: 260px; overflow-y: auto; border: 1px solid rgba(0,240,255,0.08); border-radius: 8px; margin-bottom: 20px;">
+                                    <table style="width:100%;border-collapse:collapse;">
+                                        <thead>
+                                            <tr style="background:rgba(0,240,255,0.04);position:sticky;top:0;z-index:1;">
+                                                <th style="text-align:left;padding:8px 12px;font-size:10px;color:#6a7290;text-transform:uppercase;letter-spacing:1px;font-family:'Share Tech Mono',monospace;">Player</th>
+                                                <th style="text-align:center;padding:8px 12px;font-size:10px;color:#6a7290;text-transform:uppercase;letter-spacing:1px;font-family:'Share Tech Mono',monospace;">Status</th>
+                                                <th style="text-align:right;padding:8px 12px;font-size:10px;color:#6a7290;text-transform:uppercase;letter-spacing:1px;font-family:'Share Tech Mono',monospace;">Last Seen</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="hmc-activity-tbody"></tbody>
+                                    </table>
+                                </div>
+
                                 <!-- App Status Grid -->
                                 <h3 style="color: var(--cyan); font-family: 'Orbitron', sans-serif; font-size: 13px; margin-bottom: 12px; letter-spacing: 1.5px;">APP STATUS</h3>
                                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-bottom: 20px;">
@@ -5184,7 +5216,26 @@
                             <!-- ═══ TAB: LOADING GALLERY ═══ -->
                             <div class="host-panel" id="host-gallery">
                                 <h3 style="color: var(--cyan); font-family: 'Orbitron', sans-serif; font-size: 13px; margin-bottom: 6px; letter-spacing: 1.5px;">LOADING SCREEN GALLERY</h3>
-                                <p style="color: #6a7290; font-size: 12px; margin-bottom: 12px; font-family: 'Jura', sans-serif;">One image per loading screen. Max <strong style="color:var(--gold);">20</strong> images. <span id="hmc-gallery-count" style="color:var(--cyan);">0</span>/20 loaded. Hover to delete.</p>
+                                <p style="color: #6a7290; font-size: 12px; margin-bottom: 12px; font-family: 'Jura', sans-serif;">One image per loading screen. Max <strong style="color:var(--gold);">20</strong> images. <span id="hmc-gallery-count" style="color:var(--cyan);">0</span>/20 loaded.</p>
+
+                                <!-- Loading Screen Music -->
+                                <div class="dashboard-card" style="margin-bottom:14px;">
+                                    <h4 style="color: var(--gold); margin-bottom: 8px; font-family: 'Orbitron', sans-serif; font-size: 12px; letter-spacing: 1px;">LOADING SCREEN MUSIC</h4>
+                                    <p style="color: #6a7290; font-size: 11px; margin-bottom: 10px;">Upload audio that plays during loading screens. Loops until the loading screen closes.</p>
+                                    <div class="settings-row" style="border:none;">
+                                        <div class="settings-label">Enable Loading Music</div>
+                                        <div class="settings-value"><label class="toggle-switch"><input type="checkbox" checked id="loading-music-enabled" onchange="seHostSave()"><span class="toggle-slider"></span></label></div>
+                                    </div>
+                                    <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
+                                        <span id="loading-music-name" style="font-size:12px;color:#e0e6ff;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">No loading music loaded</span>
+                                        <label class="hmc-btn-sm hmc-btn-gold" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;">
+                                            Upload Music
+                                            <input type="file" accept="audio/*" style="display:none;" onchange="uploadLoadingMusic(this)">
+                                        </label>
+                                        <button onclick="previewLoadingMusic()" class="hmc-btn-sm hmc-btn-cyan" style="font-size:10px;">&#x25B6; Preview</button>
+                                        <button onclick="removeLoadingMusic()" class="hmc-btn-sm hmc-btn-ghost" style="font-size:10px;color:#ef4444;">&#x2716; Remove</button>
+                                    </div>
+                                </div>
 
                                 <!-- Display Mode -->
                                 <div class="settings-row" style="border:none;margin-bottom:8px;">
@@ -5198,12 +5249,22 @@
                                     </div>
                                 </div>
 
-                                <!-- Add Image -->
+                                <!-- Add Image via URL -->
                                 <div class="settings-row" style="border:none;">
                                     <div class="settings-label">Add Image URL</div>
                                     <div class="settings-value" style="display:flex;gap:6px;">
                                         <input type="text" placeholder="Image URL..." id="loading-img-url" style="background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.12);color:#e0e6ff;padding:6px 12px;border-radius:6px;font-family:'Rajdhani',sans-serif;width:220px;">
                                         <button onclick="addLoadingImage()" class="hmc-btn-sm hmc-btn-cyan" id="gallery-add-btn">+ ADD</button>
+                                    </div>
+                                </div>
+                                <!-- Upload Image from file -->
+                                <div class="settings-row" style="border:none;margin-bottom:4px;">
+                                    <div class="settings-label">Upload Image File</div>
+                                    <div class="settings-value" style="display:flex;gap:6px;">
+                                        <label class="hmc-btn-sm hmc-btn-green" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;">
+                                            Upload Image
+                                            <input type="file" accept="image/*" style="display:none;" onchange="uploadLoadingImageFile(this)">
+                                        </label>
                                     </div>
                                 </div>
 
@@ -6973,6 +7034,9 @@
             el('hmc-total-xc', totalXC.toLocaleString());
             el('hmc-cohort-count', cohorts.length);
 
+            // ── Player Activity Tracker ──
+            hmcRefreshActivityRoster(players);
+
             // Update app statuses
             ['xcoin', 'pathways', 'arena', 'darkcampus'].forEach(app => {
                 const viewEl = document.querySelector(`.${app}-view`);
@@ -6992,6 +7056,102 @@
             const mins = Math.floor((Date.now() - hmcSessionStart) / 60000);
             el('hmc-session-uptime', `${Math.floor(mins / 60)}:${String(mins % 60).padStart(2, '0')}`);
             el('hmc-xc-awarded', hmcXCAwardedSession.toLocaleString());
+        }
+
+        // ── Player Activity Tracking ──
+        // Stores { playerId: timestamp } for last-seen tracking
+        const ACTIVITY_KEY = 'pflx_player_activity';
+        function pflxGetActivity() {
+            try { return JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '{}'); } catch(e) { return {}; }
+        }
+        function pflxSetActivity(data) {
+            localStorage.setItem(ACTIVITY_KEY, JSON.stringify(data));
+        }
+        // Record current user as active (called on login + periodic heartbeat)
+        function pflxHeartbeat() {
+            if (!activeSession || !activeSession.id) return;
+            const act = pflxGetActivity();
+            act[activeSession.id] = Date.now();
+            pflxSetActivity(act);
+        }
+        // Heartbeat every 60s while logged in
+        setInterval(function() { pflxHeartbeat(); }, 60000);
+
+        function hmcRefreshActivityRoster(players) {
+            const act = pflxGetActivity();
+            const now = Date.now();
+            const H48 = 48 * 60 * 60 * 1000; // 48 hours in ms
+            const H1 = 60 * 60 * 1000;       // 1 hour
+            const M5 = 5 * 60 * 1000;         // 5 minutes (online threshold)
+
+            let online = 0, away = 0, inactive = 0;
+            const rows = [];
+
+            players.forEach(function(p) {
+                const lastSeen = act[p.id] || 0;
+                const elapsed = now - lastSeen;
+                let status, statusColor, statusLabel, lastSeenText;
+
+                if (lastSeen === 0) {
+                    status = 'inactive'; statusColor = '#ef4444'; statusLabel = 'NEVER SEEN';
+                    lastSeenText = '—';
+                    inactive++;
+                } else if (elapsed < M5) {
+                    status = 'online'; statusColor = '#10b981'; statusLabel = 'ONLINE';
+                    lastSeenText = 'Just now';
+                    online++;
+                } else if (elapsed < H48) {
+                    status = 'away'; statusColor = '#f59e0b'; statusLabel = 'AWAY';
+                    if (elapsed < H1) {
+                        lastSeenText = Math.floor(elapsed / 60000) + 'm ago';
+                    } else {
+                        lastSeenText = Math.floor(elapsed / H1) + 'h ago';
+                    }
+                    away++;
+                } else {
+                    status = 'inactive'; statusColor = '#ef4444'; statusLabel = 'INACTIVE';
+                    const days = Math.floor(elapsed / (24 * H1));
+                    lastSeenText = days + 'd ago';
+                    inactive++;
+                }
+
+                rows.push({
+                    name: p.brandName || p.name || p.brand || 'Unknown',
+                    cohort: p.cohort || '',
+                    status: status,
+                    statusColor: statusColor,
+                    statusLabel: statusLabel,
+                    lastSeenText: lastSeenText,
+                    lastSeen: lastSeen,
+                    sortOrder: status === 'online' ? 0 : status === 'away' ? 1 : 2
+                });
+            });
+
+            // Sort: online first, then away, then inactive
+            rows.sort(function(a, b) { return a.sortOrder - b.sortOrder || b.lastSeen - a.lastSeen; });
+
+            // Update count badges
+            const elSet = function(id, v) { var e = document.getElementById(id); if (e) e.textContent = v; };
+            elSet('hmc-online-count', online);
+            elSet('hmc-away-count', away);
+            elSet('hmc-inactive-count', inactive);
+
+            // Render roster table
+            var tbody = document.getElementById('hmc-activity-tbody');
+            if (!tbody) return;
+            tbody.innerHTML = rows.map(function(r) {
+                return '<tr style="border-bottom:1px solid rgba(0,240,255,0.05);">' +
+                    '<td style="padding:6px 12px;font-size:12px;color:#e0e6ff;font-family:Rajdhani,sans-serif;">' +
+                        r.name + (r.cohort ? ' <span style="color:#6a7290;font-size:10px;">(' + r.cohort + ')</span>' : '') +
+                    '</td>' +
+                    '<td style="text-align:center;padding:6px 12px;">' +
+                        '<span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:9px;font-weight:700;letter-spacing:0.5px;font-family:Share Tech Mono,monospace;background:' + r.statusColor + '22;color:' + r.statusColor + ';border:1px solid ' + r.statusColor + '33;">' +
+                            r.statusLabel +
+                        '</span>' +
+                    '</td>' +
+                    '<td style="text-align:right;padding:6px 12px;font-size:11px;color:#6a7290;font-family:Share Tech Mono,monospace;">' + r.lastSeenText + '</td>' +
+                '</tr>';
+            }).join('');
         }
 
         // ── App Controls ──
@@ -7483,6 +7643,91 @@
             localStorage.setItem('pflx_loading_gallery', JSON.stringify(loadingGallery));
             hmcRenderGallery();
             pflxToast('Image removed (' + loadingGallery.length + '/20)', 'success');
+        }
+
+        // ── Loading Screen Music ──
+        var _loadingMusicPreview = null;
+        function uploadLoadingMusic(input) {
+            if (!input.files || !input.files[0]) return;
+            var file = input.files[0];
+            if (file.size > 10 * 1024 * 1024) { pflxToast('Max 10MB for loading music', 'error'); return; }
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                // Save as a loading-screen SFX in the sound engine config
+                var sfxList = (SE && SE.config && SE.config.sfx) ? SE.config.sfx : [];
+                // Remove existing loading-screen entry
+                sfxList = sfxList.filter(function(s) { return s.event !== 'loading-screen'; });
+                sfxList.push({ event: 'loading-screen', name: file.name, dataUrl: e.target.result });
+                if (SE && SE.config) SE.config.sfx = sfxList;
+                localStorage.setItem('pflx_se_config', JSON.stringify(SE.config));
+                var nameEl = document.getElementById('loading-music-name');
+                if (nameEl) nameEl.textContent = file.name;
+                pflxToast('Loading music uploaded: ' + file.name, 'success');
+            };
+            reader.readAsDataURL(file);
+            input.value = '';
+        }
+        function previewLoadingMusic() {
+            if (_loadingMusicPreview) { _loadingMusicPreview.pause(); _loadingMusicPreview = null; return; }
+            var sfxList = (SE && SE.config && SE.config.sfx) ? SE.config.sfx : [];
+            var entry = sfxList.find(function(s) { return s.event === 'loading-screen'; });
+            if (!entry || !(entry.dataUrl || entry.url)) { pflxToast('No loading music uploaded', 'error'); return; }
+            _loadingMusicPreview = new Audio(entry.dataUrl || entry.url);
+            _loadingMusicPreview.volume = 0.5;
+            _loadingMusicPreview.loop = false;
+            _loadingMusicPreview.play().catch(function(){});
+            _loadingMusicPreview.onended = function() { _loadingMusicPreview = null; };
+            pflxToast('Previewing loading music...', 'success');
+        }
+        function removeLoadingMusic() {
+            if (_loadingMusicPreview) { _loadingMusicPreview.pause(); _loadingMusicPreview = null; }
+            var sfxList = (SE && SE.config && SE.config.sfx) ? SE.config.sfx : [];
+            sfxList = sfxList.filter(function(s) { return s.event !== 'loading-screen'; });
+            if (SE && SE.config) SE.config.sfx = sfxList;
+            localStorage.setItem('pflx_se_config', JSON.stringify(SE.config));
+            var nameEl = document.getElementById('loading-music-name');
+            if (nameEl) nameEl.textContent = 'No loading music loaded';
+            pflxToast('Loading music removed', 'success');
+        }
+        // Init loading music name display
+        (function() {
+            setTimeout(function() {
+                var sfxList = (SE && SE.config && SE.config.sfx) ? SE.config.sfx : [];
+                var entry = sfxList.find(function(s) { return s.event === 'loading-screen'; });
+                var nameEl = document.getElementById('loading-music-name');
+                if (nameEl && entry && entry.name) nameEl.textContent = entry.name;
+            }, 2000);
+        })();
+
+        // ── Upload Image File (converts to base64 → adds to gallery) ──
+        function uploadLoadingImageFile(input) {
+            if (!input.files || !input.files[0]) return;
+            var file = input.files[0];
+            if (file.size > 5 * 1024 * 1024) { pflxToast('Max 5MB per image', 'error'); return; }
+            if (loadingGallery.length >= 20) { pflxToast('Max 20 images. Delete some first.', 'error'); return; }
+            // Compress and resize
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                var img = new Image();
+                img.onload = function() {
+                    // Resize to max 1280px wide, JPEG for compression
+                    var maxW = 1280;
+                    var w = img.width, h = img.height;
+                    if (w > maxW) { h = Math.round(h * (maxW / w)); w = maxW; }
+                    var canvas = document.createElement('canvas');
+                    canvas.width = w; canvas.height = h;
+                    var ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, w, h);
+                    var dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+                    loadingGallery.push(dataUrl);
+                    localStorage.setItem('pflx_loading_gallery', JSON.stringify(loadingGallery));
+                    hmcRenderGallery();
+                    pflxToast('Image uploaded (' + loadingGallery.length + '/20)', 'success');
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+            input.value = '';
         }
 
         function populateCohortSelect() {
@@ -8011,12 +8256,15 @@
                 loginView.classList.remove('active');
                 loginView.style.opacity = '';
                 loginView.style.filter = '';
-                document.querySelector('.toolbar').style.display = 'flex'; window.activeSession = activeSession; if (typeof pflxInjectRolePill === 'function') pflxInjectRolePill();
+                document.querySelector('.toolbar').style.display = 'flex'; window.activeSession = activeSession; if (typeof pflxHeartbeat === 'function') pflxHeartbeat(); if (typeof pflxInjectRolePill === 'function') pflxInjectRolePill();
                 updateToolbarStatus();
                 initPlatform(displayName);
                 // Sound: stop login music, reinit with player prefs, start home music
                 seStopLoginMusic();
                 seInit();
+
+                // Pre-load X-Coin iframe in background so Mission Control can sync data from Supabase
+                if (typeof preloadIframe === 'function') preloadIframe('xcoin');
 
                 // Play PFLX Motion Graphic intro (3-5s), then navigate to home
                 playMotionIntro().then(() => {
@@ -8587,6 +8835,11 @@
                     iframeLoadResolvers[viewName]();
                     delete iframeLoadResolvers[viewName];
                 }
+                // When X-Coin iframe loads, request fresh Supabase data for Mission Control
+                if (viewName === 'xcoin' && typeof mcRequestXCoinData === 'function') {
+                    // Give X-Coin store a moment to initialize from Supabase
+                    setTimeout(mcRequestXCoinData, 3000);
+                }
             };
             iframe.onerror = function() {
                 console.log(`[PFLX] ${viewName} iframe failed to load`);
@@ -8860,6 +9113,28 @@
         function initMissionControl() {
             mcLoadData();
             mcNav('dashboard');
+            // Request fresh data from X-Coin Supabase once the iframe is ready
+            mcRequestXCoinData();
+        }
+
+        // Request all data from X-Coin app (Supabase) via postMessage
+        // X-Coin's PflxBridge listens for pflx_data_request and responds with pflx_cloud_data
+        function mcRequestXCoinData() {
+            var xcoinFrame = document.getElementById('xcoin-frame');
+            if (!xcoinFrame || !xcoinFrame.contentWindow) {
+                // Retry after 2s — iframe may not be loaded yet
+                setTimeout(mcRequestXCoinData, 2000);
+                return;
+            }
+            var dataKeys = ['users', 'checkpoints', 'tasks', 'projects', 'jobs', 'badges', 'cohortGroups'];
+            dataKeys.forEach(function(key) {
+                try {
+                    xcoinFrame.contentWindow.postMessage(JSON.stringify({
+                        type: 'pflx_data_request', key: key
+                    }), '*');
+                } catch(e) {}
+            });
+            console.log('[MC] Requested data from X-Coin:', dataKeys.join(', '));
         }
 
         // ── Data Load — pull from localStorage (shared with X-Coin) ─
@@ -9047,15 +9322,24 @@
                 var msg = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
                 if (msg.type === 'pflx_cloud_data') {
                     // X-Coin is sending fresh Supabase data — update MC stores
-                    if (msg.key === 'users' && msg.data) { mcPlayers = msg.data; mcSaveData('players'); }
-                    if (msg.key === 'checkpoints' && msg.data) { mcCheckpoints = msg.data; mcSaveData('checkpoints'); }
-                    if (msg.key === 'tasks' && msg.data) { mcTasks = msg.data; mcSaveData('tasks'); }
-                    if (msg.key === 'projects' && msg.data) { mcProjects = msg.data; mcSaveData('projects'); }
-                    if (msg.key === 'seasons' && msg.data) { mcSeasons = msg.data; mcSaveData('seasons'); }
-                    if (msg.key === 'badges' && msg.data) { mcBadges = msg.data; mcSaveData('badges'); }
-                    if (msg.key === 'jobs' && msg.data) { mcJobs = msg.data; mcSaveData('jobs'); }
-                    if (msg.key === 'cohortGroups' && msg.data) { mcCohortGroups = msg.data; mcSaveData('cohortgroups'); }
-                    console.log('[MC] Cloud data received:', msg.key);
+                    var dataUpdated = false;
+                    if (msg.key === 'users' && msg.data && msg.data.length) { mcPlayers = msg.data; mcSaveData('players'); dataUpdated = true; }
+                    if (msg.key === 'checkpoints' && msg.data && msg.data.length) { mcCheckpoints = msg.data; mcSaveData('checkpoints'); dataUpdated = true; }
+                    if (msg.key === 'tasks' && msg.data && msg.data.length) { mcTasks = msg.data; mcSaveData('tasks'); dataUpdated = true; }
+                    if (msg.key === 'projects' && msg.data && msg.data.length) { mcProjects = msg.data; mcSaveData('projects'); dataUpdated = true; }
+                    if (msg.key === 'seasons' && msg.data && msg.data.length) { mcSeasons = msg.data; mcSaveData('seasons'); dataUpdated = true; }
+                    if (msg.key === 'badges' && msg.data && msg.data.length) { mcBadges = msg.data; mcSaveData('badges'); dataUpdated = true; }
+                    if (msg.key === 'jobs' && msg.data && msg.data.length) { mcJobs = msg.data; mcSaveData('jobs'); dataUpdated = true; }
+                    if (msg.key === 'cohortGroups' && msg.data && msg.data.length) { mcCohortGroups = msg.data; mcSaveData('cohortgroups'); dataUpdated = true; }
+                    console.log('[MC] Cloud data received:', msg.key, msg.data ? msg.data.length + ' items' : 'empty');
+                    // Refresh the active MC panel so the user sees the data
+                    if (dataUpdated) {
+                        var activePanel = document.querySelector('.mc-panel.active');
+                        if (activePanel) {
+                            var panelId = activePanel.id.replace('mc-panel-', '');
+                            if (typeof mcNav === 'function') mcNav(panelId);
+                        }
+                    }
                 }
                 if (msg.type === 'pflx_player_login_sync') {
                     // Auto-select player in sub-apps after PFLX login
