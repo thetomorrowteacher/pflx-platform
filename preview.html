@@ -9409,6 +9409,204 @@
             console.log('[MC Broadcast]', eventType, data);
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // PUSH TO DARKCAMPUS — Mission Control → Darkcampus Broadcast
+        // ═══════════════════════════════════════════════════════════════
+        // Gate: hosts + players at evolution rank Expert or higher (≥2000 XC).
+        // Tier order: Player < Specialist < Expert < Master < Legend < Mythic
+        var MC_PUSH_DC_RANK_ORDER = ['Player','Specialist','Expert','Master','Legend','Mythic'];
+        var MC_PUSH_DC_MIN_RANK = 'Expert';
+        var MC_PUSH_DC_MIN_XC = 2000;
+        // DarkCampus API endpoint (xbot-notify already broadcasts to all cohorts)
+        var MC_PUSH_DC_ENDPOINT = 'https://pflx-darkcampus.vercel.app/api/xbot-notify';
+
+        function mcIsHost() {
+            try {
+                var r = (localStorage.getItem('pflx_active_role') || '').toLowerCase();
+                if (r === 'host') return true;
+            } catch(e) {}
+            if (window.activeSession && window.activeSession.role) {
+                var role = String(window.activeSession.role).toLowerCase();
+                if (role === 'host' || role === 'admin' || role === 'teacher' || role === 'instructor') return true;
+            }
+            return false;
+        }
+
+        function mcCurrentPlayerRank() {
+            if (!window.activeSession) return 'Player';
+            // Prefer explicit rank set by task-approval flow
+            if (window.activeSession.rank && MC_PUSH_DC_RANK_ORDER.indexOf(window.activeSession.rank) >= 0) {
+                return window.activeSession.rank;
+            }
+            // Derive from XC using the same thresholds as task approval
+            var xc = window.activeSession.xc || 0;
+            if (xc >= 25000) return 'Mythic';
+            if (xc >= 10000) return 'Legend';
+            if (xc >= 5000)  return 'Master';
+            if (xc >= 2000)  return 'Expert';
+            if (xc >= 500)   return 'Specialist';
+            return 'Player';
+        }
+
+        function mcCanPushToDarkcampus() {
+            if (mcIsHost()) return true;
+            var rank = mcCurrentPlayerRank();
+            var idx = MC_PUSH_DC_RANK_ORDER.indexOf(rank);
+            var minIdx = MC_PUSH_DC_RANK_ORDER.indexOf(MC_PUSH_DC_MIN_RANK);
+            return idx >= minIdx;
+        }
+
+        // State for the push modal
+        var mcPushDCState = { type: null, entity: null };
+
+        function mcOpenPushDC(type, index) {
+            if (!mcCanPushToDarkcampus()) {
+                if (typeof pflxToast === 'function') pflxToast('Push access requires Expert+ rank or Host role', 'error');
+                else alert('Push access requires Expert+ rank or Host role.');
+                return;
+            }
+            var entity = null;
+            if (type === 'task')    entity = mcTasks[index];
+            if (type === 'project') entity = mcProjects[index];
+            if (type === 'job')     entity = mcJobs[index];
+            if (!entity) { if (typeof pflxToast === 'function') pflxToast('Entity not found', 'error'); return; }
+
+            mcPushDCState = { type: type, entity: entity };
+            if (typeof pflxPlaySfx === 'function') pflxPlaySfx('open');
+
+            // Reset form state
+            document.querySelectorAll('.mc-push-dc-ch').forEach(function(cb) {
+                if (cb.value !== 'mc-terminal') cb.checked = false;
+            });
+            var note = document.getElementById('mc-push-dc-note');
+            if (note) note.value = '';
+
+            // Build analysis card
+            var analysis = document.getElementById('mc-push-dc-analysis');
+            if (analysis) analysis.innerHTML = mcBuildPushDCAnalysis(type, entity);
+
+            var modal = document.getElementById('mc-push-dc-modal');
+            if (modal) modal.style.display = 'flex';
+        }
+
+        function mcBuildPushDCAnalysis(type, e) {
+            var typeLabel = type === 'task' ? '✅ TASK'
+                : type === 'project' ? '🎬 PROJECT'
+                : type === 'job' ? '💼 JOB' : '📋 ITEM';
+            var title = escapeHtml(e.title || e.name || 'Untitled');
+            var desc = escapeHtml((e.description || '').slice(0, 240));
+            var cp = (type !== 'job') ? mcCheckpoints.find(function(c){ return c.id === (e.roundId || e.checkpointId); }) : null;
+            var badges = e.rewardBadges || [];
+
+            var metaRows = [];
+            if (type === 'task') {
+                if (e.xcReward) metaRows.push('⚡ ' + e.xcReward + ' XC Reward');
+                if (e.category) metaRows.push('🏷 ' + escapeHtml(e.category));
+                if (e.dueDate) metaRows.push('📅 Due ' + escapeHtml(e.dueDate));
+                if (e.status) metaRows.push('Status: ' + escapeHtml(e.status));
+                if (e.peerReviewCount) metaRows.push('👥 ' + e.peerReviewCount + ' peer reviews');
+                if (cp) metaRows.push('🏁 ' + escapeHtml(cp.name));
+                if (badges.length) metaRows.push('🎖 ' + badges.length + ' badge reward' + (badges.length > 1 ? 's' : ''));
+            } else if (type === 'project') {
+                if (e.budget) metaRows.push('⚡ ' + e.budget + ' XC Budget');
+                if (e.status) metaRows.push('Status: ' + escapeHtml(e.status));
+                if (e.team && e.team.length) metaRows.push('👥 ' + e.team.length + ' team members');
+                if ((e.taskIds || []).length) metaRows.push('✅ ' + e.taskIds.length + ' linked tasks');
+                if (cp) metaRows.push('🏁 ' + escapeHtml(cp.name));
+                if (badges.length) metaRows.push('🎖 ' + badges.length + ' badge reward' + (badges.length > 1 ? 's' : ''));
+            } else if (type === 'job') {
+                if (e.xcReward) metaRows.push('⚡ ' + e.xcReward + ' XC Reward');
+                if (e.slots) metaRows.push('🎯 ' + e.slots + ' slot' + (e.slots > 1 ? 's' : ''));
+                if (e.status) metaRows.push('Status: ' + escapeHtml(e.status));
+                if ((e.applicants || []).length) metaRows.push('📋 ' + e.applicants.length + ' applicants');
+                if ((e.hired || []).length) metaRows.push('✅ ' + e.hired.length + ' hired');
+            }
+
+            var metaHtml = metaRows.length
+                ? '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">' +
+                  metaRows.map(function(m) { return '<span style="font-size:11px;color:rgba(255,255,255,0.7);background:rgba(88,167,255,0.1);border:1px solid rgba(88,167,255,0.2);padding:4px 10px;border-radius:20px;">' + m + '</span>'; }).join('') +
+                  '</div>'
+                : '';
+
+            return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">' +
+                '<span style="font-size:10px;font-weight:900;letter-spacing:0.1em;color:#58a7ff;background:rgba(88,167,255,0.12);padding:4px 10px;border-radius:6px;">' + typeLabel + '</span>' +
+                '<span style="font-size:10px;color:rgba(255,255,255,0.35);">ANALYSIS</span>' +
+                '</div>' +
+                '<div style="font-size:16px;font-weight:900;color:#f0f0ff;margin-bottom:6px;">' + title + '</div>' +
+                (desc ? '<div style="font-size:12px;color:rgba(255,255,255,0.55);line-height:1.5;">' + desc + (e.description && e.description.length > 240 ? '…' : '') + '</div>' : '') +
+                metaHtml;
+        }
+
+        function mcPushDCClose() {
+            var modal = document.getElementById('mc-push-dc-modal');
+            if (modal) modal.style.display = 'none';
+            mcPushDCState = { type: null, entity: null };
+        }
+
+        async function mcPushDCSend() {
+            var st = mcPushDCState;
+            if (!st || !st.entity) { mcPushDCClose(); return; }
+
+            // Collect selected channels
+            var channels = [];
+            document.querySelectorAll('.mc-push-dc-ch:checked').forEach(function(cb) { channels.push(cb.value); });
+            if (channels.indexOf('mc-terminal') === -1) channels.unshift('mc-terminal');
+
+            var note = (document.getElementById('mc-push-dc-note')?.value || '').trim();
+            var postedBy = (window.activeSession && (window.activeSession.brand || window.activeSession.name)) || 'Mission Control';
+
+            var e = st.entity;
+            var title = e.title || e.name || 'Untitled';
+            var description = (e.description || '') + (note ? '\n\n' + note : '');
+            var xc = st.type === 'project' ? (e.budget || 0) : (e.xcReward || 0);
+            var badges = e.rewardBadges || [];
+            var url = e.link || '';
+
+            var payload = {
+                type: st.type, // task | project | job
+                title: title,
+                description: description,
+                postedBy: postedBy,
+                xc: xc,
+                badges: badges,
+                url: url,
+                channels: channels
+            };
+
+            if (typeof pflxPlaySfx === 'function') pflxPlaySfx('save');
+            try {
+                var res = await fetch(MC_PUSH_DC_ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                var data = await res.json().catch(function() { return {}; });
+                if (res.ok && data && data.success) {
+                    var bridged = (data.bridgedTo || []).length;
+                    var msg = '📡 Broadcast sent — ' + channels.length + ' DarkCampus channel' + (channels.length > 1 ? 's' : '') +
+                              (bridged ? ', bridged to ' + bridged + ' #missioncontrol channel' + (bridged > 1 ? 's' : '') : '');
+                    if (typeof pflxToast === 'function') pflxToast(msg, 'success');
+                    else alert(msg);
+                    mcBroadcastToApps('pflx_darkcampus_push', { type: st.type, id: e.id, title: title, channels: channels });
+                    mcPushDCClose();
+                } else {
+                    var err = (data && data.error) || ('HTTP ' + res.status);
+                    if (typeof pflxToast === 'function') pflxToast('Push failed: ' + err, 'error');
+                    else alert('Push failed: ' + err);
+                }
+            } catch(err) {
+                console.error('[MC Push DC] error', err);
+                if (typeof pflxToast === 'function') pflxToast('Push failed: network error', 'error');
+                else alert('Push failed: network error');
+            }
+        }
+
+        // Expose on window for inline onclick handlers
+        window.mcOpenPushDC = mcOpenPushDC;
+        window.mcPushDCSend = mcPushDCSend;
+        window.mcPushDCClose = mcPushDCClose;
+        window.mcCanPushToDarkcampus = mcCanPushToDarkcampus;
+
         // ── Navigation ──────────────────────────────────────────────
         function mcNav(tab) {
             pflxPlaySfx('nav');
@@ -9987,10 +10185,11 @@
                     (t.dueDate ? '<span style="font-size:11px;color:rgba(255,255,255,0.25);">Due: ' + t.dueDate + '</span>' : '') +
                     '</div>' +
                     submissionStatus +
-                    '<div style="display:flex;gap:8px;margin-top:10px;">' +
+                    '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">' +
                     (t.status === 'open' ? '<button class="mc-btn" style="padding:4px 12px;font-size:10px;background:rgba(0,240,255,0.1);color:var(--cyan);border-color:rgba(0,240,255,0.3);" onclick="mcOpenSubmitModal(' + realIndex + ')">📤 Submit</button>' : '') +
                     '<button class="mc-btn" style="padding:4px 12px;font-size:10px;" onclick="mcEditTask(' + realIndex + ')">Edit</button>' +
                     (t.status === 'submitted' ? '<button class="mc-btn mc-btn-green" style="padding:4px 12px;font-size:10px;" onclick="mcApproveTask(' + realIndex + ')">Approve</button>' : '') +
+                    (mcCanPushToDarkcampus() ? '<button class="mc-btn" style="padding:4px 12px;font-size:10px;background:rgba(88,167,255,0.12);color:#58a7ff;border-color:rgba(88,167,255,0.35);" onclick="mcOpenPushDC(\'task\',' + realIndex + ')" title="Broadcast to DarkCampus">📡 Push to DarkCampus</button>' : '') +
                     '<button class="mc-btn mc-btn-red" style="padding:4px 12px;font-size:10px;" onclick="mcDeleteTask(' + realIndex + ')">Delete</button>' +
                     '</div></div>';
             }).join('');
@@ -10267,8 +10466,9 @@
                     (p.team && p.team.length ? '<span style="font-size:11px;color:rgba(255,255,255,0.3);">&#x1F465; ' + p.team.length + ' members</span>' : '') +
                     (p.createdAt ? '<span style="font-size:11px;color:rgba(255,255,255,0.2);">Created: ' + p.createdAt + '</span>' : '') +
                     '</div>' +
-                    '<div style="display:flex;gap:8px;">' +
+                    '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
                     '<button class="mc-btn" style="padding:4px 12px;font-size:10px;" onclick="mcEditProject(' + i + ')">Edit</button>' +
+                    (mcCanPushToDarkcampus() ? '<button class="mc-btn" style="padding:4px 12px;font-size:10px;background:rgba(88,167,255,0.12);color:#58a7ff;border-color:rgba(88,167,255,0.35);" onclick="mcOpenPushDC(\'project\',' + i + ')" title="Broadcast to DarkCampus">📡 Push to DarkCampus</button>' : '') +
                     '<button class="mc-btn mc-btn-red" style="padding:4px 12px;font-size:10px;" onclick="mcDeleteProject(' + i + ')">Delete</button>' +
                     '</div></div>';
             }).join('');
@@ -10925,6 +11125,7 @@
                         (j.status === 'open' ? '<button class="mc-btn" style="font-size:10px;padding:4px 10px;background:rgba(0,240,255,0.1);color:var(--cyan);border-color:rgba(0,240,255,0.3);" onclick="mcApplyForJob(' + ri + ')">&#x1F4CB; Apply</button>' : '') +
                         '<button class="mc-btn" style="font-size:10px;padding:4px 10px;" onclick="mcShowJobForm(' + ri + ')">Edit</button>' +
                         (hired.length > 0 && j.status !== 'completed' ? '<button class="mc-btn" style="font-size:10px;padding:4px 10px;background:rgba(139,92,246,0.1);color:#a78bfa;border-color:rgba(139,92,246,0.3);" onclick="mcConvertJobToProject(' + ri + ')">&#x1F4E6; Convert to Project</button>' : '') +
+                        (mcCanPushToDarkcampus() ? '<button class="mc-btn" style="font-size:10px;padding:4px 10px;background:rgba(88,167,255,0.12);color:#58a7ff;border-color:rgba(88,167,255,0.35);" onclick="mcOpenPushDC(\'job\',' + ri + ')" title="Broadcast to DarkCampus">📡 Push to DarkCampus</button>' : '') +
                         '<button class="mc-btn" style="font-size:10px;padding:4px 10px;color:#ef4444;border-color:rgba(239,68,68,0.3);" onclick="mcDeleteJob(' + ri + ')">Delete</button></div></div>';
                 }).join('');
         }
@@ -16346,6 +16547,49 @@ RESPONSE RULES:
                     <button class="mc-btn mc-btn-green" style="flex:1;padding:12px;font-size:12px;font-weight:600;" onclick="mcSubmitSelfEval()">Submit Evaluation</button>
                     <button class="mc-btn" style="flex:1;padding:12px;font-size:12px;font-weight:600;" onclick="mcCloseSelfEval()">Cancel</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ PUSH TO DARKCAMPUS MODAL ═══ -->
+    <div id="mc-push-dc-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(5,10,25,0.85);backdrop-filter:blur(8px);z-index:999999;align-items:center;justify-content:center;">
+        <div style="background:linear-gradient(180deg,rgba(12,18,38,0.98),rgba(8,14,30,0.98));border:1px solid rgba(88,167,255,0.35);border-radius:14px;padding:28px;max-width:620px;width:92%;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.7),0 0 40px rgba(88,167,255,0.15);">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">
+                <span style="font-size:24px;">&#x1F4E1;</span>
+                <div style="font-size:18px;font-weight:900;color:#f0f0ff;letter-spacing:0.04em;font-family:'Orbitron',sans-serif;">PUSH TO DARKCAMPUS</div>
+            </div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.45);margin-bottom:20px;">X-Bot will broadcast through #terminal &rarr; all cohort #missioncontrol channels.</div>
+
+            <!-- Entity Analysis Card -->
+            <div id="mc-push-dc-analysis" style="background:rgba(10,18,40,0.6);border:1px solid rgba(88,167,255,0.2);border-radius:10px;padding:16px;margin-bottom:18px;"></div>
+
+            <!-- Destination Channels -->
+            <div style="margin-bottom:16px;">
+                <label style="display:block;font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:8px;text-transform:uppercase;letter-spacing:1px;">Additional DarkCampus Channels (Terminal is always included)</label>
+                <div id="mc-push-dc-channels" style="display:flex;flex-direction:column;gap:6px;max-height:140px;overflow-y:auto;padding:10px;background:rgba(10,18,40,0.4);border:1px solid rgba(255,255,255,0.06);border-radius:8px;">
+                    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;"><input type="checkbox" class="mc-push-dc-ch" value="mc-terminal" checked disabled> #Terminal (required)</label>
+                    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;"><input type="checkbox" class="mc-push-dc-ch" value="mc-ops-briefing"> #Ops-Briefing</label>
+                    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;"><input type="checkbox" class="mc-push-dc-ch" value="mc-intel-feed"> #Intel-Feed</label>
+                    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;"><input type="checkbox" class="mc-push-dc-ch" value="mc-squad-comms"> #Squad-Comms</label>
+                    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;"><input type="checkbox" class="mc-push-dc-ch" value="mc-xbot-alerts"> #XBot-Alerts</label>
+                </div>
+            </div>
+
+            <!-- Optional note -->
+            <div style="margin-bottom:18px;">
+                <label style="display:block;font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">Optional Note</label>
+                <textarea id="mc-push-dc-note" placeholder="Add an optional message for players..." style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:10px;border-radius:8px;font-size:13px;min-height:60px;box-sizing:border-box;font-family:'Jura',sans-serif;"></textarea>
+            </div>
+
+            <!-- Cross-cohort broadcast indicator -->
+            <div style="background:rgba(0,240,255,0.05);border:1px solid rgba(0,240,255,0.2);border-radius:8px;padding:10px 14px;margin-bottom:18px;display:flex;align-items:center;gap:10px;">
+                <span style="font-size:16px;">&#x1F310;</span>
+                <div style="font-size:11px;color:#a0d8ff;line-height:1.5;">DarkCampus will cross-post to <strong>all connected Discord servers</strong> and <strong>all Slack workspaces</strong> #missioncontrol channels &mdash; every cohort will see this.</div>
+            </div>
+
+            <div style="display:flex;gap:10px;">
+                <button class="mc-btn mc-btn-green" style="flex:1;padding:12px;font-size:12px;font-weight:800;letter-spacing:0.05em;" onclick="mcPushDCSend()">&#x1F4E1; BROADCAST TO ALL COHORTS</button>
+                <button class="mc-btn" style="flex:1;padding:12px;font-size:12px;font-weight:600;" onclick="mcPushDCClose()">Cancel</button>
             </div>
         </div>
     </div>
