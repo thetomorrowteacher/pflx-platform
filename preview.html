@@ -3609,25 +3609,17 @@
                                     <span class="mc-badge" id="mc-player-count">0</span>
                                 </button>
                                 <div class="mc-nav-label">TASK MANAGEMENT</div>
-                                <button class="mc-nav-btn" data-mc="checkpoints" onclick="mcNav('checkpoints')">
-                                    <span class="mc-icon">&#x1F3C1;</span> Checkpoints
-                                    <span class="mc-badge" id="mc-cp-count">0</span>
-                                </button>
-                                <button class="mc-nav-btn" data-mc="tasks" onclick="mcNav('tasks')">
-                                    <span class="mc-icon">&#x2705;</span> Tasks
+                                <!--
+                                  Single "Task Management" entry — embeds the
+                                  X-Coin /admin/task-management page (the
+                                  canonical UI). All 6 legacy tabs
+                                  (Checkpoints, Tasks, Job Board, Projects,
+                                  Pitches, Cohort Groups) live inside that
+                                  iframe now.
+                                -->
+                                <button class="mc-nav-btn" data-mc="taskmgmt" onclick="mcNav('taskmgmt')">
+                                    <span class="mc-icon">&#x1F4CB;</span> Task Management
                                     <span class="mc-badge" id="mc-task-count">0</span>
-                                </button>
-                                <button class="mc-nav-btn" data-mc="jobboard" onclick="mcNav('jobboard')">
-                                    <span class="mc-icon">&#x1F4BC;</span> Job Board
-                                </button>
-                                <button class="mc-nav-btn" data-mc="projects" onclick="mcNav('projects')">
-                                    <span class="mc-icon">&#x1F4C1;</span> Projects
-                                </button>
-                                <button class="mc-nav-btn" data-mc="pitches" onclick="mcNav('pitches')">
-                                    <span class="mc-icon">&#x1F4A1;</span> Pitches
-                                </button>
-                                <button class="mc-nav-btn" data-mc="cohortgroups" onclick="mcNav('cohortgroups')">
-                                    <span class="mc-icon">&#x1F465;</span> Cohort Groups
                                 </button>
                                 <div class="mc-nav-label">SYSTEM</div>
                                 <button class="mc-nav-btn" data-mc="studios" onclick="mcNav('studios')">
@@ -3711,7 +3703,38 @@
                                 </div>
                             </div>
 
-                            <!-- ═══ CHECKPOINTS PANEL ═══ -->
+                            <!-- ═══ TASK MANAGEMENT PANEL (X-Coin iframe) ═══ -->
+                            <!--
+                              Embeds X-Coin's /admin/task-management page. That
+                              page is the canonical task/project/checkpoint
+                              system UI (Checkpoints, Tasks, Job Board, Projects,
+                              Pitches, Cohort Groups tabs). X-Coin's SideNav is
+                              auto-hidden in ?embed=mc mode so the iframe renders
+                              chrome-free inside Mission Control.
+                            -->
+                            <div class="mc-panel" id="mc-panel-taskmgmt" style="padding:0;">
+                                <div style="padding:24px 28px 12px;">
+                                    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+                                        <div>
+                                            <h1 class="mc-page-title" style="margin:0;">&#x1F4CB; Task Management</h1>
+                                            <p class="mc-page-desc" style="margin:4px 0 0;">Checkpoints, Tasks, Job Board, Projects, Pitches, and Cohort Groups — all in one place.</p>
+                                        </div>
+                                        <div style="display:flex;gap:8px;">
+                                            <button class="mc-btn" onclick="mcReloadTaskMgmtFrame()" title="Reload">&#x21bb; Reload</button>
+                                            <button class="mc-btn mc-btn-green" onclick="mcOpenTaskMgmtInNewTab()">Open in X-Coin ↗</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div id="mc-taskmgmt-frame-wrap" style="position:relative;width:100%;height:calc(100vh - 220px);min-height:560px;background:#05070f;border-top:1px solid rgba(0,240,255,0.1);">
+                                    <div id="mc-taskmgmt-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;color:#8a92b0;font-family:'Jura',sans-serif;font-size:12px;letter-spacing:1.5px;z-index:2;">
+                                        <div style="width:32px;height:32px;border:2px solid rgba(0,240,255,0.2);border-top-color:var(--cyan);border-radius:50%;animation:spin 0.9s linear infinite;"></div>
+                                        LOADING TASK MANAGEMENT…
+                                    </div>
+                                    <iframe id="mc-taskmgmt-iframe" src="about:blank" style="position:absolute;inset:0;width:100%;height:100%;border:0;opacity:0;transition:opacity 0.3s;background:#05070f;" allow="clipboard-read; clipboard-write"></iframe>
+                                </div>
+                            </div>
+
+                            <!-- ═══ CHECKPOINTS PANEL (LEGACY — unused, hidden) ═══ -->
                             <div class="mc-panel" id="mc-panel-checkpoints">
                                 <h1 class="mc-page-title">Checkpoints</h1>
                                 <p class="mc-page-desc">Manage rounds, milestones, and checkpoint schedules.</p>
@@ -9853,12 +9876,10 @@
             // Leaderboard lives only in the X-Coin app — Mission Control no longer has one
             if (tab === 'players') mcRenderPlayers();
             if (tab === 'badges') mcRenderBadges();
-            if (tab === 'checkpoints') mcRenderCheckpoints();
-            if (tab === 'tasks') mcRenderTasks();
-            if (tab === 'jobboard') mcRenderJobs();
-            if (tab === 'projects') mcRenderProjects();
-            if (tab === 'pitches') mcRenderPitches();
-            if (tab === 'cohortgroups') mcRenderCohortGroups();
+            // Task Management (checkpoints/tasks/jobs/projects/pitches/cohortgroups)
+            // is rendered by the X-Coin /admin/task-management iframe. The legacy
+            // per-tab render functions are kept as no-ops for backwards compat.
+            if (tab === 'taskmgmt') mcRenderTaskMgmt();
             if (tab === 'studios') mcRenderStudios();
             if (tab === 'gamemgmt') mcRenderGameMgmt();
             if (tab === 'approvals') mcRenderApprovals();
@@ -9997,6 +10018,57 @@
             const url = mcBuildPlayersFrameURL();
             try { window.open(url, '_blank', 'noopener'); } catch(e) {}
         }
+
+        // ── Task Management ─────────────────────────────────────────
+        // === PORTED TASK MANAGEMENT — loads X-Coin admin/task-management in an iframe ===
+        function mcBuildTaskMgmtFrameURL() {
+            try {
+                const base = (typeof APP_BASE_URLS !== 'undefined' && APP_BASE_URLS.xcoin)
+                    ? APP_BASE_URLS.xcoin
+                    : 'https://pflx-xcoin-app.vercel.app';
+                const s = activeSession || {};
+                const params = new URLSearchParams({
+                    embed: 'mc',
+                    sso: 'pflx',
+                    brand: s.brand || 'PrototypeFLX',
+                    role: s.role || 'admin',
+                    name: s.name || 'Host',
+                });
+                return base.replace(/\/$/, '') + '/admin/task-management?' + params.toString();
+            } catch(e) { return 'about:blank'; }
+        }
+        function mcReloadTaskMgmtFrame() {
+            const iframe = document.getElementById('mc-taskmgmt-iframe');
+            const loading = document.getElementById('mc-taskmgmt-loading');
+            if (!iframe) return;
+            if (loading) loading.style.display = 'flex';
+            iframe.style.opacity = '0';
+            iframe.src = mcBuildTaskMgmtFrameURL();
+        }
+        function mcOpenTaskMgmtInNewTab() {
+            const url = mcBuildTaskMgmtFrameURL();
+            try { window.open(url, '_blank', 'noopener'); } catch(e) {}
+        }
+        function mcRenderTaskMgmt() {
+            const iframe = document.getElementById('mc-taskmgmt-iframe');
+            const loading = document.getElementById('mc-taskmgmt-loading');
+            if (!iframe) return;
+            if (!iframe.src || iframe.src === 'about:blank' || iframe.dataset.needsReload === '1') {
+                iframe.src = mcBuildTaskMgmtFrameURL();
+                iframe.dataset.needsReload = '0';
+                iframe.addEventListener('load', function onLoad() {
+                    iframe.style.opacity = '1';
+                    if (loading) loading.style.display = 'none';
+                    iframe.removeEventListener('load', onLoad);
+                });
+            } else {
+                iframe.style.opacity = '1';
+                if (loading) loading.style.display = 'none';
+            }
+        }
+        window.mcReloadTaskMgmtFrame = mcReloadTaskMgmtFrame;
+        window.mcOpenTaskMgmtInNewTab = mcOpenTaskMgmtInNewTab;
+        window.mcRenderTaskMgmt = mcRenderTaskMgmt;
 
         function mcRenderPlayers() {
             mcLoadData();
