@@ -3925,9 +3925,25 @@
                                         <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Assign To</label>
                                         <div id="mc-task-cohorts" style="display:flex;flex-direction:column;gap:6px;max-height:100px;overflow-y:auto;"></div>
                                     </div>
+                                    <!-- CHECKLIST SECTION -->
+                                    <div style="margin-bottom:12px;padding:12px;background:rgba(0,212,255,0.03);border:1px solid rgba(0,212,255,0.08);border-radius:8px;">
+                                        <div style="font-size:12px;font-weight:700;color:var(--cyan);margin-bottom:10px;">CHECKLIST / TO-DO ITEMS</div>
+                                        <div id="mc-task-checklist" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;"></div>
+                                        <div style="display:flex;gap:6px;">
+                                            <input type="text" id="mc-task-checklist-input" placeholder="Add checklist item..." style="flex:1;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px 8px;border-radius:6px;font-size:11px;box-sizing:border-box;">
+                                            <button class="mc-btn" onclick="mcAddChecklistItem()" style="font-size:10px;padding:4px 10px;">+ Add</button>
+                                        </div>
+                                    </div>
+
+                                    <!-- RESOURCE LINKS (multiple) -->
                                     <div style="margin-bottom:12px;">
-                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Resource Link</label>
-                                        <input type="url" id="mc-task-link" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="https://...">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Resource Links</label>
+                                        <div id="mc-task-links" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;"></div>
+                                        <div style="display:flex;gap:6px;">
+                                            <input type="text" id="mc-task-link-label" placeholder="Label..." style="width:120px;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px 8px;border-radius:6px;font-size:11px;box-sizing:border-box;">
+                                            <input type="url" id="mc-task-link-url" placeholder="https://..." style="flex:1;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px 8px;border-radius:6px;font-size:11px;box-sizing:border-box;">
+                                            <button class="mc-btn" onclick="mcAddTaskLink()" style="font-size:10px;padding:4px 10px;">+ Add</button>
+                                        </div>
                                     </div>
                                     <div style="margin-bottom:12px;">
                                         <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Status</label>
@@ -3962,10 +3978,129 @@
                                                 <input type="checkbox" id="mc-task-post-feedback-upload"> Require post-feedback file upload
                                             </label>
                                         </div>
+                                        <div style="margin-top:10px;">
+                                            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;">
+                                                <input type="checkbox" id="mc-task-allow-file-upload" checked> Allow file upload on submission
+                                            </label>
+                                        </div>
+                                        <div style="margin-top:10px;">
+                                            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;">
+                                                <input type="checkbox" id="mc-task-allow-link-submit"> Allow link submission
+                                            </label>
+                                        </div>
+                                        <div style="margin-top:8px;">
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:4px;text-transform:uppercase;">Submission Instructions</label>
+                                            <textarea id="mc-task-submit-instructions" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:6px;font-size:11px;min-height:40px;box-sizing:border-box;font-family:'Jura',sans-serif;" placeholder="Instructions for players when submitting..."></textarea>
+                                        </div>
+                                    </div>
+
+                                    <!-- DEADLINE PENALTY LOGIC -->
+                                    <div style="margin-bottom:12px;padding:12px;background:rgba(239,68,68,0.03);border:1px solid rgba(239,68,68,0.1);border-radius:8px;">
+                                        <div style="font-size:12px;font-weight:700;color:#f87171;margin-bottom:10px;">DEADLINE PENALTY LOGIC</div>
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;margin-bottom:10px;">
+                                            <input type="checkbox" id="mc-task-deadline-penalty" onchange="document.getElementById('mc-task-penalty-fields').style.display=this.checked?'grid':'none'"> Enable late penalty
+                                        </label>
+                                        <div id="mc-task-penalty-fields" style="display:none;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+                                            <div>
+                                                <label style="display:block;font-size:10px;color:rgba(255,255,255,0.3);margin-bottom:4px;">PENALTY TYPE</label>
+                                                <select id="mc-task-penalty-type" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:6px;font-size:11px;">
+                                                    <option value="fine">XC Fine</option>
+                                                    <option value="tax">XC Tax (%)</option>
+                                                    <option value="badge_revoke">Badge Revoke</option>
+                                                    <option value="xc_reduction">Reduce Reward</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label style="display:block;font-size:10px;color:rgba(255,255,255,0.3);margin-bottom:4px;">AMOUNT / VALUE</label>
+                                                <input type="number" id="mc-task-penalty-amount" min="0" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:6px;font-size:11px;box-sizing:border-box;" placeholder="50">
+                                            </div>
+                                            <div>
+                                                <label style="display:block;font-size:10px;color:rgba(255,255,255,0.3);margin-bottom:4px;">GRACE PERIOD (days)</label>
+                                                <input type="number" id="mc-task-penalty-grace" min="0" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:6px;font-size:11px;box-sizing:border-box;" placeholder="0" value="0">
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- UPGRADE INTERACTIONS -->
+                                    <div style="margin-bottom:12px;padding:12px;background:rgba(34,197,94,0.03);border:1px solid rgba(34,197,94,0.1);border-radius:8px;">
+                                        <div style="font-size:12px;font-weight:700;color:#4ade80;margin-bottom:10px;">UPGRADE INTERACTIONS</div>
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;margin-bottom:8px;">
+                                            <input type="checkbox" id="mc-task-allow-time-extend" checked> Allow Time Manipulator (extend deadline)
+                                        </label>
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;margin-bottom:8px;">
+                                            <input type="checkbox" id="mc-task-allow-multiplier" checked> Allow XC Multiplier upgrades
+                                        </label>
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;">
+                                            <input type="checkbox" id="mc-task-allow-shield"> Allow Penalty Shield (blocks late fine)
+                                        </label>
+                                    </div>
+
+                                    <!-- ACTIVE TIMEFRAME -->
+                                    <div style="margin-bottom:12px;padding:12px;background:rgba(245,200,66,0.03);border:1px solid rgba(245,200,66,0.1);border-radius:8px;">
+                                        <div style="font-size:12px;font-weight:700;color:#fbbf24;margin-bottom:10px;">ACTIVE TIMEFRAME</div>
+                                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                                            <div>
+                                                <label style="display:block;font-size:10px;color:rgba(255,255,255,0.3);margin-bottom:4px;">INHERIT FROM</label>
+                                                <select id="mc-task-timeframe-inherit" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:6px;font-size:11px;">
+                                                    <option value="global">Global (Season/Checkpoint)</option>
+                                                    <option value="custom">Custom Override</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label style="display:block;font-size:10px;color:rgba(255,255,255,0.3);margin-bottom:4px;">SCOPE</label>
+                                                <select id="mc-task-timeframe-scope" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:6px;font-size:11px;">
+                                                    <option value="season">Season Duration</option>
+                                                    <option value="checkpoint">Checkpoint Duration</option>
+                                                    <option value="project">Project Duration</option>
+                                                    <option value="task">Task Due Date Only</option>
+                                                </select>
+                                            </div>
+                                        </div>
                                     </div>
                                     <div style="display:flex;gap:8px;justify-content:flex-end;">
                                         <button class="mc-btn" onclick="mcCancelTaskForm()" style="padding:8px 16px;">Cancel</button>
                                         <button class="mc-btn mc-btn-green" onclick="mcSaveTaskForm()" style="padding:8px 16px;">Save</button>
+                                    </div>
+                                </div>
+
+                                <!-- PLAYER SUBMISSION AREA -->
+                                <div id="mc-player-submit-area" style="display:none;margin-bottom:20px;">
+                                    <div style="font-size:14px;font-weight:700;color:#a7f3d0;margin-bottom:12px;">YOUR TASKS</div>
+                                    <div id="mc-player-tasks-list" style="display:flex;flex-direction:column;gap:12px;"></div>
+                                </div>
+
+                                <!-- Player Task Submission Modal -->
+                                <div id="mc-player-submit-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;">
+                                    <div style="background:rgba(10,18,40,0.98);border:1px solid rgba(79,142,247,0.3);border-radius:16px;padding:24px;max-width:500px;width:90%;max-height:80vh;overflow-y:auto;">
+                                        <div style="font-size:14px;font-weight:700;color:#a7f3d0;margin-bottom:16px;">SUBMIT TASK</div>
+                                        <div id="mc-submit-task-title" style="font-size:16px;font-weight:900;color:#f0f0ff;margin-bottom:4px;"></div>
+                                        <div id="mc-submit-task-desc" style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:12px;"></div>
+                                        <div id="mc-submit-task-instructions" style="font-size:11px;color:var(--cyan);margin-bottom:12px;padding:8px;background:rgba(0,212,255,0.03);border-radius:6px;display:none;"></div>
+                                        <!-- Checklist -->
+                                        <div id="mc-submit-checklist" style="margin-bottom:12px;display:none;">
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Checklist</label>
+                                            <div id="mc-submit-checklist-items" style="display:flex;flex-direction:column;gap:6px;"></div>
+                                        </div>
+                                        <!-- File Upload -->
+                                        <div id="mc-submit-file-area" style="margin-bottom:12px;">
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Upload File</label>
+                                            <input type="file" id="mc-submit-file" style="font-size:11px;color:rgba(255,255,255,0.5);">
+                                            <div id="mc-submit-file-name" style="font-size:10px;color:var(--cyan);margin-top:4px;"></div>
+                                        </div>
+                                        <!-- Link Submission -->
+                                        <div id="mc-submit-link-area" style="margin-bottom:12px;display:none;">
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Submission Link</label>
+                                            <input type="url" id="mc-submit-link" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="https://...">
+                                        </div>
+                                        <!-- Notes -->
+                                        <div style="margin-bottom:12px;">
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Notes</label>
+                                            <textarea id="mc-submit-notes" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;min-height:60px;box-sizing:border-box;font-family:'Jura',sans-serif;" placeholder="Add notes about your submission..."></textarea>
+                                        </div>
+                                        <div style="display:flex;gap:8px;justify-content:flex-end;">
+                                            <button class="mc-btn" onclick="mcCloseSubmitModal()" style="padding:8px 16px;">Cancel</button>
+                                            <button class="mc-btn mc-btn-green" onclick="mcPlayerSubmitTask()" style="padding:8px 16px;">Submit</button>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -11355,6 +11490,212 @@
                     '</div>' +
                     '</div>';
             }).join('');
+            // Render player submission view
+            mcRenderPlayerTasks();
+        }
+
+        // ═══ CHECKLIST & LINKS MANAGEMENT ═══
+        var mcTaskChecklist = [];
+        var mcTaskLinks = [];
+        var mcSubmitTaskIndex = -1;
+        var mcSubmitFileData = '';
+
+        function mcAddChecklistItem() {
+            var input = document.getElementById('mc-task-checklist-input');
+            if (!input || !input.value.trim()) return;
+            mcTaskChecklist.push({ text: input.value.trim(), required: true });
+            input.value = '';
+            mcRenderTaskChecklist();
+        }
+
+        function mcRemoveChecklistItem(i) {
+            mcTaskChecklist.splice(i, 1);
+            mcRenderTaskChecklist();
+        }
+
+        function mcRenderTaskChecklist() {
+            var container = document.getElementById('mc-task-checklist');
+            if (!container) return;
+            container.innerHTML = mcTaskChecklist.length === 0 ? '<span style="font-size:11px;color:rgba(255,255,255,0.2);">No checklist items yet</span>' :
+                mcTaskChecklist.map(function(item, i) {
+                    return '<div style="display:flex;align-items:center;gap:8px;padding:4px 8px;background:rgba(255,255,255,0.02);border-radius:6px;">' +
+                        '<span style="font-size:12px;color:#e0e6ff;flex:1;">' + escapeHtml(item.text) + '</span>' +
+                        '<button onclick="mcRemoveChecklistItem(' + i + ')" style="background:none;border:none;color:#f87171;cursor:pointer;font-size:12px;">&#x2715;</button></div>';
+                }).join('');
+        }
+
+        function mcAddTaskLink() {
+            var label = document.getElementById('mc-task-link-label');
+            var url = document.getElementById('mc-task-link-url');
+            if (!url || !url.value.trim()) return;
+            mcTaskLinks.push({ label: (label?.value || '').trim() || 'Link', url: url.value.trim() });
+            if (label) label.value = '';
+            url.value = '';
+            mcRenderTaskLinks();
+        }
+
+        function mcRemoveTaskLink(i) {
+            mcTaskLinks.splice(i, 1);
+            mcRenderTaskLinks();
+        }
+
+        function mcRenderTaskLinks() {
+            var container = document.getElementById('mc-task-links');
+            if (!container) return;
+            container.innerHTML = mcTaskLinks.length === 0 ? '<span style="font-size:11px;color:rgba(255,255,255,0.2);">No links added</span>' :
+                mcTaskLinks.map(function(lnk, i) {
+                    return '<div style="display:flex;align-items:center;gap:8px;padding:4px 8px;background:rgba(255,255,255,0.02);border-radius:6px;">' +
+                        '<span style="font-size:11px;color:var(--cyan);">' + escapeHtml(lnk.label) + '</span>' +
+                        '<span style="font-size:10px;color:rgba(255,255,255,0.3);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(lnk.url) + '</span>' +
+                        '<button onclick="mcRemoveTaskLink(' + i + ')" style="background:none;border:none;color:#f87171;cursor:pointer;font-size:12px;">&#x2715;</button></div>';
+                }).join('');
+        }
+
+        // ═══ PLAYER SUBMISSION FUNCTIONS ═══
+        function mcOpenSubmitModal(taskIndex) {
+            mcSubmitTaskIndex = taskIndex;
+            var t = mcTasks[taskIndex];
+            if (!t) return;
+            pflxPlaySfx('open');
+            var modal = document.getElementById('mc-player-submit-modal');
+            if (modal) modal.style.display = 'flex';
+
+            document.getElementById('mc-submit-task-title').textContent = t.title || '';
+            document.getElementById('mc-submit-task-desc').textContent = t.description || '';
+
+            var instrEl = document.getElementById('mc-submit-task-instructions');
+            if (instrEl) {
+                if (t.submitInstructions) { instrEl.textContent = t.submitInstructions; instrEl.style.display = 'block'; }
+                else { instrEl.style.display = 'none'; }
+            }
+
+            // Checklist
+            var clArea = document.getElementById('mc-submit-checklist');
+            var clItems = document.getElementById('mc-submit-checklist-items');
+            if (t.checklist && t.checklist.length > 0) {
+                if (clArea) clArea.style.display = 'block';
+                if (clItems) clItems.innerHTML = t.checklist.map(function(item, i) {
+                    return '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;">' +
+                        '<input type="checkbox" class="mc-submit-cl-cb" data-idx="' + i + '"> ' + escapeHtml(item.text) + '</label>';
+                }).join('');
+            } else {
+                if (clArea) clArea.style.display = 'none';
+            }
+
+            // File upload area
+            var fileArea = document.getElementById('mc-submit-file-area');
+            if (fileArea) fileArea.style.display = (t.allowFileUpload !== false) ? 'block' : 'none';
+
+            // Link submit area
+            var linkArea = document.getElementById('mc-submit-link-area');
+            if (linkArea) linkArea.style.display = t.allowLinkSubmit ? 'block' : 'none';
+
+            // Reset
+            var fileInput = document.getElementById('mc-submit-file');
+            if (fileInput) fileInput.value = '';
+            var linkInput = document.getElementById('mc-submit-link');
+            if (linkInput) linkInput.value = '';
+            var notesInput = document.getElementById('mc-submit-notes');
+            if (notesInput) notesInput.value = '';
+            mcSubmitFileData = '';
+        }
+
+        function mcCloseSubmitModal() {
+            var modal = document.getElementById('mc-player-submit-modal');
+            if (modal) modal.style.display = 'none';
+            mcSubmitTaskIndex = -1;
+        }
+
+        function mcPlayerSubmitTask() {
+            if (mcSubmitTaskIndex < 0 || !mcTasks[mcSubmitTaskIndex]) return;
+            var t = mcTasks[mcSubmitTaskIndex];
+
+            // Check required checklist items
+            if (t.checklist && t.checklist.length > 0) {
+                var required = t.checklist.filter(function(item) { return item.required !== false; });
+                var checked = document.querySelectorAll('.mc-submit-cl-cb:checked').length;
+                if (checked < required.length) {
+                    pflxPlaySfx('error');
+                    alert('Please complete all required checklist items before submitting.');
+                    return;
+                }
+            }
+
+            pflxPlaySfx('save');
+
+            // Read file if uploaded
+            var fileInput = document.getElementById('mc-submit-file');
+            var fileName = fileInput && fileInput.files && fileInput.files[0] ? fileInput.files[0].name : '';
+
+            var submission = {
+                id: 'sub-' + Date.now(),
+                playerId: (typeof activeSession !== 'undefined' && activeSession) ? activeSession.id : 'unknown',
+                playerName: (typeof activeSession !== 'undefined' && activeSession) ? (activeSession.brand || activeSession.name || 'Player') : 'Player',
+                date: new Date().toISOString(),
+                link: document.getElementById('mc-submit-link')?.value || '',
+                notes: document.getElementById('mc-submit-notes')?.value || '',
+                fileName: fileName,
+                fileData: mcSubmitFileData || '',
+                checklistCompleted: [],
+                status: 'pending'
+            };
+
+            // Record which checklist items were checked
+            document.querySelectorAll('.mc-submit-cl-cb').forEach(function(cb) {
+                if (cb.checked) submission.checklistCompleted.push(parseInt(cb.dataset.idx, 10));
+            });
+
+            if (!t.submissions) t.submissions = [];
+            t.submissions.push(submission);
+            t.status = 'submitted';
+            t.submittedDate = new Date().toISOString().split('T')[0];
+
+            mcSaveData('tasks');
+            mcCloseSubmitModal();
+            mcRenderTasks();
+            mcRenderPlayerTasks();
+            if (typeof mcBroadcastToApps === 'function') mcBroadcastToApps('pflx_task_submitted', { taskId: t.id, submission: submission });
+            if (typeof pflxToast === 'function') pflxToast('Task submitted for review!', 'success');
+        }
+
+        function mcRenderPlayerTasks() {
+            var area = document.getElementById('mc-player-submit-area');
+            var list = document.getElementById('mc-player-tasks-list');
+            if (!area || !list) return;
+
+            // Show player area only for players
+            var isPlayer = (typeof window.pflxRole !== 'undefined' && window.pflxRole === 'player');
+            area.style.display = isPlayer ? 'block' : 'none';
+            if (!isPlayer) return;
+
+            var playerId = (typeof activeSession !== 'undefined' && activeSession) ? activeSession.id : '';
+            var playerTasks = mcTasks.filter(function(t) {
+                return t.status === 'open' || t.status === 'submitted';
+            });
+
+            if (playerTasks.length === 0) {
+                list.innerHTML = '<div style="color:rgba(255,255,255,0.25);font-size:12px;">No tasks assigned to you right now.</div>';
+                return;
+            }
+
+            list.innerHTML = playerTasks.map(function(t, i) {
+                var realIdx = mcTasks.indexOf(t);
+                var hasSubmitted = t.submissions && t.submissions.some(function(s) { return s.playerId === playerId; });
+                var statusColor = hasSubmitted ? '#f5c842' : '#4ade80';
+                var statusText = hasSubmitted ? 'SUBMITTED' : 'OPEN';
+                var duePill = t.dueDate ? '<span style="font-size:10px;padding:2px 8px;border-radius:6px;background:rgba(239,68,68,0.1);color:#f87171;">Due: ' + t.dueDate + '</span>' : '';
+                var xcPill = '<span style="font-size:10px;padding:2px 8px;border-radius:6px;background:rgba(245,200,66,0.1);color:#fbbf24;">' + (t.xcReward || 0) + ' XC</span>';
+
+                return '<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:14px;padding:16px;">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+                    '<span style="font-weight:700;color:#f0f0ff;font-size:14px;">' + escapeHtml(t.title) + '</span>' +
+                    '<span style="font-size:9px;padding:2px 8px;border-radius:6px;background:rgba(255,255,255,0.04);color:' + statusColor + ';font-weight:700;">' + statusText + '</span></div>' +
+                    (t.description ? '<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;">' + escapeHtml(t.description) + '</div>' : '') +
+                    '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">' + xcPill + duePill + '</div>' +
+                    (hasSubmitted ? '<span style="font-size:11px;color:#f5c842;">Awaiting review...</span>' :
+                    '<button class="mc-btn mc-btn-green" onclick="mcOpenSubmitModal(' + realIdx + ')" style="font-size:11px;padding:6px 14px;">Submit Task</button>') +
+                    '</div>';
+            }).join('');
         }
 
         var mcTaskEditIndex = -1;
@@ -11421,6 +11762,25 @@
                 document.querySelectorAll('.mc-task-badge-cb').forEach(function(cb) {
                     cb.checked = badges.indexOf(cb.value) >= 0;
                 });
+                // Populate new fields
+                mcTaskChecklist = (t.checklist || []).slice();
+                mcRenderTaskChecklist();
+                mcTaskLinks = (t.links || []).slice();
+                mcRenderTaskLinks();
+                el = document.getElementById('mc-task-allow-file-upload'); if (el) el.checked = t.allowFileUpload !== false;
+                el = document.getElementById('mc-task-allow-link-submit'); if (el) el.checked = t.allowLinkSubmit !== false;
+                el = document.getElementById('mc-task-submit-instructions'); if (el) el.value = t.submitInstructions || '';
+                el = document.getElementById('mc-task-deadline-penalty'); if (el) el.checked = t.deadlinePenalty && t.deadlinePenalty.enabled;
+                el = document.getElementById('mc-task-penalty-type'); if (el) el.value = (t.deadlinePenalty && t.deadlinePenalty.type) || 'fine';
+                el = document.getElementById('mc-task-penalty-amount'); if (el) el.value = (t.deadlinePenalty && t.deadlinePenalty.amount) || 10;
+                el = document.getElementById('mc-task-penalty-grace'); if (el) el.value = (t.deadlinePenalty && t.deadlinePenalty.graceDays) || 0;
+                var penaltyFields = document.getElementById('mc-task-penalty-fields');
+                if (penaltyFields) penaltyFields.style.display = (t.deadlinePenalty && t.deadlinePenalty.enabled) ? 'grid' : 'none';
+                el = document.getElementById('mc-task-allow-time-extend'); if (el) el.checked = t.upgradeInteractions && t.upgradeInteractions.allowTimeExtend;
+                el = document.getElementById('mc-task-allow-multiplier'); if (el) el.checked = t.upgradeInteractions && t.upgradeInteractions.allowMultiplier;
+                el = document.getElementById('mc-task-allow-shield'); if (el) el.checked = t.upgradeInteractions && t.upgradeInteractions.allowShield;
+                el = document.getElementById('mc-task-timeframe-inherit'); if (el) el.value = t.timeframeInherit || 'Global';
+                el = document.getElementById('mc-task-timeframe-scope'); if (el) el.value = t.timeframeScope || 'Season';
             } else {
                 // Reset for new task
                 ['mc-task-title','mc-task-desc','mc-task-link'].forEach(function(id) {
@@ -11439,6 +11799,25 @@
                 el = document.getElementById('mc-task-post-feedback-upload'); if (el) el.checked = false;
                 document.querySelectorAll('.mc-task-cohort-cb').forEach(function(cb) { cb.checked = false; });
                 document.querySelectorAll('.mc-task-badge-cb').forEach(function(cb) { cb.checked = false; });
+                // Reset new fields
+                mcTaskChecklist = [];
+                mcRenderTaskChecklist();
+                mcTaskLinks = [];
+                mcRenderTaskLinks();
+                el = document.getElementById('mc-task-allow-file-upload'); if (el) el.checked = true;
+                el = document.getElementById('mc-task-allow-link-submit'); if (el) el.checked = true;
+                el = document.getElementById('mc-task-submit-instructions'); if (el) el.value = '';
+                el = document.getElementById('mc-task-deadline-penalty'); if (el) el.checked = false;
+                el = document.getElementById('mc-task-penalty-type'); if (el) el.value = 'fine';
+                el = document.getElementById('mc-task-penalty-amount'); if (el) el.value = 10;
+                el = document.getElementById('mc-task-penalty-grace'); if (el) el.value = 0;
+                var penaltyFields = document.getElementById('mc-task-penalty-fields');
+                if (penaltyFields) penaltyFields.style.display = 'none';
+                el = document.getElementById('mc-task-allow-time-extend'); if (el) el.checked = false;
+                el = document.getElementById('mc-task-allow-multiplier'); if (el) el.checked = false;
+                el = document.getElementById('mc-task-allow-shield'); if (el) el.checked = false;
+                el = document.getElementById('mc-task-timeframe-inherit'); if (el) el.value = 'Global';
+                el = document.getElementById('mc-task-timeframe-scope'); if (el) el.value = 'Season';
             }
             form.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
@@ -11478,7 +11857,26 @@
                 postFeedbackUpload: document.getElementById('mc-task-post-feedback-upload')?.checked || false,
                 rewardBadges: rewardBadges,
                 createdBy: mcTaskEditIndex >= 0 ? (mcTasks[mcTaskEditIndex].createdBy || 'host') : (activeSession ? activeSession.brand : 'host'),
-                createdAt: mcTaskEditIndex >= 0 ? (mcTasks[mcTaskEditIndex].createdAt || new Date().toISOString().split('T')[0]) : new Date().toISOString().split('T')[0]
+                createdAt: mcTaskEditIndex >= 0 ? (mcTasks[mcTaskEditIndex].createdAt || new Date().toISOString().split('T')[0]) : new Date().toISOString().split('T')[0],
+                checklist: mcTaskChecklist || [],
+                links: mcTaskLinks || [],
+                allowFileUpload: document.getElementById('mc-task-allow-file-upload')?.checked !== false,
+                allowLinkSubmit: document.getElementById('mc-task-allow-link-submit')?.checked !== false,
+                submitInstructions: document.getElementById('mc-task-submit-instructions')?.value || '',
+                deadlinePenalty: document.getElementById('mc-task-deadline-penalty')?.checked ? {
+                    enabled: true,
+                    type: document.getElementById('mc-task-penalty-type')?.value || 'fine',
+                    amount: parseInt(document.getElementById('mc-task-penalty-amount')?.value || '10', 10),
+                    graceDays: parseInt(document.getElementById('mc-task-penalty-grace')?.value || '0', 10)
+                } : null,
+                upgradeInteractions: {
+                    allowTimeExtend: document.getElementById('mc-task-allow-time-extend')?.checked || false,
+                    allowMultiplier: document.getElementById('mc-task-allow-multiplier')?.checked || false,
+                    allowShield: document.getElementById('mc-task-allow-shield')?.checked || false
+                },
+                timeframeInherit: document.getElementById('mc-task-timeframe-inherit')?.value || 'Global',
+                timeframeScope: document.getElementById('mc-task-timeframe-scope')?.value || 'Season',
+                submissions: mcTaskEditIndex >= 0 && mcTasks[mcTaskEditIndex] ? (mcTasks[mcTaskEditIndex].submissions || []) : []
             };
 
             if (mcTaskEditIndex >= 0) { mcTasks[mcTaskEditIndex] = obj; }
@@ -11575,6 +11973,15 @@
             mcRenderTasks();
             mcLoadData();
         }
+
+        // Expose task submission functions on window for inline onclick
+        window.mcAddChecklistItem = mcAddChecklistItem;
+        window.mcRemoveChecklistItem = mcRemoveChecklistItem;
+        window.mcAddTaskLink = mcAddTaskLink;
+        window.mcRemoveTaskLink = mcRemoveTaskLink;
+        window.mcOpenSubmitModal = mcOpenSubmitModal;
+        window.mcCloseSubmitModal = mcCloseSubmitModal;
+        window.mcPlayerSubmitTask = mcPlayerSubmitTask;
 
         // ── Projects ────────────────────────────────────────────────
         function mcRenderProjects() {
