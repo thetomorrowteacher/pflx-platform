@@ -4312,11 +4312,11 @@
                             <!-- ═══ GAME MANAGEMENT PANEL ═══ -->
                             <div class="mc-panel" id="mc-panel-gamemgmt">
                                 <h1 class="mc-page-title">&#x1F396; Evolution Rankings</h1>
-                                <p class="mc-page-desc">Configure how players rank up through the evolution tiers. XC Economy, Modifiers, and Arena Config are managed in their respective apps.</p>
+                                <p class="mc-page-desc">The 10-tier progression system. Players evolve by earning XC, completing checkpoints, and collecting badges. Economy rules (Upgrades, Fines, Taxes) are managed in X-Coin.</p>
                                 <div class="mc-card">
                                     <div class="mc-card-title">EVOLUTION RANKING TIERS</div>
-                                    <p style="color:#6a7290;font-size:12px;margin-bottom:14px;">Define XC thresholds, checkpoint requirements, and badge requirements for each rank.</p>
-                                    <div id="mc-rankings-list" style="display:flex;flex-direction:column;gap:10px;"></div>
+                                    <p style="color:#6a7290;font-size:12px;margin-bottom:14px;">Each tier requires a minimum XC balance, checkpoint count, and badge categories. Higher tiers also require maintaining XC above a threshold.</p>
+                                    <div id="mc-rankings-list" style="display:flex;flex-direction:column;gap:8px;"></div>
                                 </div>
                             </div>
 
@@ -12377,20 +12377,41 @@
         function mcRenderRankings() {
             var list = document.getElementById('mc-rankings-list');
             if (!list) return;
+            // ── Authoritative 10-tier Evolution Rankings from X-Coin ──
             var tiers = [
-                { name: 'Player', min: 0, color: '#6a7290' },
-                { name: 'Specialist', min: 500, color: '#4f8ef7' },
-                { name: 'Expert', min: 2000, color: '#a78bfa' },
-                { name: 'Master', min: 5000, color: '#f5c842' },
-                { name: 'Legend', min: 10000, color: '#ef4444' },
-                { name: 'Mythic', min: 25000, color: 'var(--cyan)' }
+                { level:1,  name:'Player',           icon:'👤', unlock:1000,    maintain:0,      cp:0,  badges:'Signature', specific:'Personal Branding L1, Portfolio Starter, Design Thinker L1, Digital Citizen L1, PFLX User Cert', color:'#6a7290', group:'FOUNDATION' },
+                { level:2,  name:'Advanced Player',   icon:'🛡️', unlock:5000,    maintain:3500,   cp:3,  badges:'Primary', specific:'', color:'#4f8ef7', group:'FOUNDATION' },
+                { level:3,  name:'Apprentice',        icon:'🔧', unlock:15000,   maintain:10000,  cp:5,  badges:'Primary, Premium', specific:'', color:'#a78bfa', group:'FOUNDATION' },
+                { level:4,  name:'Manager/Head',      icon:'📋', unlock:50000,   maintain:35000,  cp:7,  badges:'Primary, Premium, Executive', specific:'', color:'#f5c842', group:'PRODUCTION' },
+                { level:5,  name:'Director/Producer',  icon:'🎬', unlock:125000,  maintain:90000,  cp:10, badges:'Primary, Premium, Signature', specific:'Executive Producer, Creative Director, Technical Director', color:'#ef4444', group:'PRODUCTION' },
+                { level:6,  name:'Mentor/Intern',      icon:'🎓', unlock:250000,  maintain:180000, cp:12, badges:'Primary, Premium, Executive, Signature', specific:'Global Digital Intern L1', color:'#22c55e', group:'LEADERSHIP' },
+                { level:7,  name:'Associate',          icon:'🏢', unlock:400000,  maintain:300000, cp:15, badges:'Primary, Premium, Executive, Signature', specific:'Global Digital Intern L1 & L2', color:'#3b82f6', group:'LEADERSHIP' },
+                { level:8,  name:'Senior',             icon:'💎', unlock:600000,  maintain:450000, cp:17, badges:'Primary, Premium, Executive, Signature', specific:'', color:'#8b5cf6', group:'EXECUTIVE' },
+                { level:9,  name:'Chief',              icon:'🎖️', unlock:800000,  maintain:600000, cp:19, badges:'Primary, Premium, Executive, Signature', specific:'', color:'#f97316', group:'EXECUTIVE' },
+                { level:10, name:'Partner',            icon:'🦅', unlock:1000000, maintain:750000, cp:20, badges:'Primary, Premium, Executive, Signature', specific:'', color:'var(--cyan)', group:'EXECUTIVE' }
             ];
+            var currentGroup = '';
             list.innerHTML = tiers.map(function(t) {
-                var count = mcPlayers.filter(function(p) { return (p.xc || 0) >= t.min; }).length;
-                return '<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.04);border-radius:8px;border-left:3px solid ' + t.color + ';">' +
-                    '<span style="font-weight:900;color:' + t.color + ';min-width:100px;">' + t.name + '</span>' +
-                    '<span style="font-size:11px;color:rgba(255,255,255,0.4);">Min ' + t.min.toLocaleString() + ' XC</span>' +
-                    '<span style="margin-left:auto;font-size:12px;color:#e0e6ff;">' + count + ' players</span></div>';
+                var count = mcPlayers.filter(function(p) { return (p.xc || 0) >= t.unlock; }).length;
+                var groupHeader = '';
+                if (t.group !== currentGroup) {
+                    currentGroup = t.group;
+                    groupHeader = '<div style="font-size:11px;font-weight:900;color:rgba(255,255,255,0.25);letter-spacing:0.15em;margin:16px 0 8px;padding-left:4px;">' + t.group + '</div>';
+                }
+                var maintainPill = t.maintain > 0 ? '<span style="font-size:10px;padding:2px 8px;border-radius:6px;background:rgba(239,68,68,0.1);color:#f87171;">🔒 Maintain: ' + t.maintain.toLocaleString() + ' XC</span>' : '';
+                var cpPill = t.cp > 0 ? '<span style="font-size:10px;padding:2px 8px;border-radius:6px;background:rgba(167,139,250,0.1);color:#a78bfa;">📍 ' + t.cp + ' Checkpoints</span>' : '';
+                var badgePill = t.badges ? '<span style="font-size:10px;padding:2px 8px;border-radius:6px;background:rgba(79,142,247,0.1);color:#60a5fa;">' + t.badges + '</span>' : '';
+                var specificLine = t.specific ? '<div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:4px;">Req: ' + t.specific + '</div>' : '';
+                return groupHeader +
+                    '<div style="display:flex;align-items:flex-start;gap:14px;padding:14px 16px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:10px;border-left:3px solid ' + t.color + ';">' +
+                    '<div style="display:flex;flex-direction:column;align-items:center;min-width:40px;"><span style="font-size:10px;font-weight:900;color:' + t.color + ';background:rgba(255,255,255,0.05);padding:2px 8px;border-radius:4px;margin-bottom:4px;">TIER ' + t.level + '</span><span style="font-size:20px;">' + t.icon + '</span></div>' +
+                    '<div style="flex:1;min-width:0;">' +
+                    '<div style="font-weight:900;font-size:14px;color:#f0f0ff;">' + t.name + '</div>' +
+                    '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">' +
+                    '<span style="font-size:10px;padding:2px 8px;border-radius:6px;background:rgba(0,212,255,0.1);color:var(--cyan);">⚡ Unlock: ' + t.unlock.toLocaleString() + ' XC</span>' +
+                    maintainPill + cpPill + badgePill + '</div>' +
+                    specificLine + '</div>' +
+                    '<div style="text-align:right;min-width:60px;"><div style="font-size:16px;font-weight:900;color:#e0e6ff;">' + count + '</div><div style="font-size:10px;color:rgba(255,255,255,0.3);">players</div></div></div>';
             }).join('');
         }
 
