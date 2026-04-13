@@ -10786,14 +10786,14 @@
             if (!list) return;
 
             if (mcCheckpoints.length === 0) {
-                list.innerHTML = '<div class="mc-card" style="text-align:center;color:rgba(255,255,255,0.3);padding:40px;">No checkpoints yet. Click <strong>+ New Checkpoint</strong> to create one.</div>';
+                list.innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.3);padding:40px;">No checkpoints yet. Click <strong>+ New Checkpoint</strong> to create one.</div>';
                 return;
             }
 
             list.innerHTML = mcCheckpoints.map(function(cp, i) {
-                var sc = cp.status === 'active' ? { bg:'rgba(34,197,94,0.1)', border:'rgba(34,197,94,0.25)', text:'#22c55e' }
-                    : cp.status === 'upcoming' ? { bg:'rgba(79,142,247,0.1)', border:'rgba(79,142,247,0.25)', text:'#4f8ef7' }
-                    : { bg:'rgba(255,255,255,0.05)', border:'rgba(255,255,255,0.1)', text:'rgba(255,255,255,0.4)' };
+                var sc = cp.status === 'active' ? { text:'#22c55e', borderCol:'rgba(0,212,255,0.3)' }
+                    : cp.status === 'upcoming' ? { text:'#4f8ef7', borderCol:'rgba(0,212,255,0.3)' }
+                    : { text:'rgba(255,255,255,0.4)', borderCol:'rgba(255,255,255,0.06)' };
                 var taskCount = (cp.taskIds || []).length || mcTasks.filter(function(t) { return t.roundId === cp.id; }).length;
                 var projectCount = (cp.projectIds || []).length;
                 var jobCount = (cp.jobIds || []).length;
@@ -10801,29 +10801,36 @@
                 var badgeXC = (cp.rewardBadges || []).reduce(function(sum, b) { return sum + (typeof b === 'object' ? (b.xc || 0) : 0); }, 0);
                 var totalXC = (cp.xcReward || 0) + badgeXC;
                 var seasonObj = cp.seasonId ? mcSeasons.find(function(s) { return s.id === cp.seasonId; }) : null;
-                var bannerHtml = cp.bannerImage ? '<div style="width:100%;height:80px;border-radius:8px;overflow:hidden;margin-bottom:12px;"><img src="' + cp.bannerImage + '" style="width:100%;height:100%;object-fit:cover;"></div>' : '';
-                return '<div class="mc-card" style="border-color:' + sc.border + ';">' +
-                    bannerHtml +
-                    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">' +
-                    '<div><div style="font-size:16px;font-weight:900;color:#f0f0ff;margin-bottom:4px;">' + escapeHtml(cp.name) + '</div>' +
-                    (seasonObj ? '<div style="font-size:10px;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Season: ' + escapeHtml(seasonObj.name) + '</div>' : '') +
-                    '<div style="font-size:12px;color:rgba(255,255,255,0.4);">' + escapeHtml(cp.description || '') + '</div></div>' +
-                    '<span class="mc-pill" style="background:' + sc.bg + ';border:1px solid ' + sc.border + ';color:' + sc.text + ';">' + (cp.status || 'upcoming') + '</span>' +
+                var iconHtml = cp.bannerImage ? '<img src="' + cp.bannerImage + '" style="width:100%;height:100%;object-fit:cover;border-radius:14px;">' : '<div style="font-size:28px;display:flex;align-items:center;justify-content:center;">🏁</div>';
+                return '<div style="background:rgba(22,22,31,0.6);border:1px solid ' + sc.borderCol + ';border-radius:20px;padding:20px;">' +
+                    '<div style="display:flex;gap:16px;margin-bottom:12px;">' +
+                    '<div style="width:60px;height:60px;border-radius:14px;background:rgba(255,255,255,0.05);flex-shrink:0;overflow:hidden;">' + iconHtml + '</div>' +
+                    '<div style="flex:1;min-width:0;">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">' +
+                    '<div style="font-size:15px;font-weight:800;color:#f0f0ff;">' + escapeHtml(cp.name) + '</div>' +
+                    '<span style="background:' + (cp.status === 'active' ? 'rgba(34,197,94,0.15)' : cp.status === 'upcoming' ? 'rgba(79,142,247,0.15)' : 'rgba(255,255,255,0.05)') + ';color:' + sc.text + ';padding:4px 10px;border-radius:12px;font-size:11px;font-weight:600;">' + (cp.status || 'upcoming') + '</span>' +
                     '</div>' +
-                    '<div style="display:flex;flex-wrap:wrap;gap:12px;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:10px;">' +
-                    '<span>&#x1F4C5; ' + (cp.startDate || 'TBD') + ' — ' + (cp.endDate || 'TBD') + '</span>' +
-                    '<span>&#x1F4CB; ' + taskCount + ' task' + (taskCount !== 1 ? 's' : '') + '</span>' +
-                    (projectCount > 0 ? '<span>&#x1F4C1; ' + projectCount + ' project' + (projectCount !== 1 ? 's' : '') + '</span>' : '') +
-                    (jobCount > 0 ? '<span>&#x1F4BC; ' + jobCount + ' job' + (jobCount !== 1 ? 's' : '') + '</span>' : '') +
-                    (badgeCount > 0 ? '<span style="color:#4f8ef7;">&#x1F3C5; ' + badgeCount + ' badge' + (badgeCount !== 1 ? 's' : '') + '</span>' : '') +
-                    (totalXC > 0 ? '<span style="color:#f5c842;font-weight:800;">' + totalXC.toLocaleString() + ' XC</span>' : '') +
+                    '<div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:8px;">' + escapeHtml(cp.description || '') + '</div>' +
+                    '</div></div>' +
+                    '<div style="background:rgba(0,212,255,0.05);border:1px solid rgba(0,212,255,0.2);border-radius:12px;padding:10px;margin-bottom:12px;font-size:11px;color:rgba(255,255,255,0.5);">' +
+                    '<div style="margin-bottom:4px;"><strong>Season:</strong> ' + (seasonObj ? escapeHtml(seasonObj.name) : '—') + '</div>' +
+                    '<div><strong>Dates:</strong> ' + (cp.startDate || 'TBD') + ' → ' + (cp.endDate || 'TBD') + '</div>' +
                     '</div>' +
-                    '<div style="display:flex;gap:8px;">' +
-                    '<button class="mc-btn" style="padding:5px 14px;font-size:10px;" onclick="mcEditCheckpoint(' + i + ')">Edit</button>' +
-                    '<button class="mc-btn" style="padding:5px 14px;font-size:10px;" onclick="mcDuplicateCheckpoint(' + i + ')">Duplicate</button>' +
-                    '<button class="mc-btn mc-btn-red" style="padding:5px 14px;font-size:10px;" onclick="mcDeleteCheckpoint(' + i + ')">Delete</button>' +
+                    '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">' +
+                    '<span style="background:rgba(79,142,247,0.1);color:#4f8ef7;padding:4px 10px;border-radius:12px;font-size:11px;font-weight:600;">📋 ' + taskCount + ' Tasks</span>' +
+                    (projectCount > 0 ? '<span style="background:rgba(139,92,246,0.1);color:#a78bfa;padding:4px 10px;border-radius:12px;font-size:11px;font-weight:600;">🎬 ' + projectCount + ' Projects</span>' : '') +
+                    (jobCount > 0 ? '<span style="background:rgba(245,200,66,0.1);color:#f5c842;padding:4px 10px;border-radius:12px;font-size:11px;font-weight:600;">💼 ' + jobCount + ' Jobs</span>' : '') +
+                    (totalXC > 0 ? '<span style="background:rgba(245,200,66,0.1);color:#f5c842;padding:4px 10px;border-radius:12px;font-size:11px;font-weight:600;">⚡ ' + totalXC.toLocaleString() + ' XC</span>' : '') +
+                    '</div>' +
+                    '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+                    '<button class="mc-btn" style="padding:6px 14px;font-size:10px;" onclick="mcEditCheckpoint(' + i + ')">Edit</button>' +
+                    '<button class="mc-btn" style="padding:6px 14px;font-size:10px;" onclick="mcDuplicateCheckpoint(' + i + ')">Duplicate</button>' +
+                    '<button class="mc-btn mc-btn-red" style="padding:6px 14px;font-size:10px;" onclick="mcDeleteCheckpoint(' + i + ')">Delete</button>' +
                     '</div></div>';
             }).join('');
+            list.style.display = 'grid';
+            list.style.gridTemplateColumns = 'repeat(auto-fill, minmax(380px, 1fr))';
+            list.style.gap = '20px';
         }
 
         var mcCPEditIndex = -1;
@@ -11110,55 +11117,76 @@
             });
 
             if (filtered.length === 0) {
-                list.innerHTML = '<div class="mc-card" style="text-align:center;color:rgba(255,255,255,0.3);padding:40px;">No tasks match the filter. Click <strong>+ New Task</strong> to create one.</div>';
+                list.innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.3);padding:40px;">No tasks match the filter. Click <strong>+ New Task</strong> to create one.</div>';
                 return;
             }
 
+            // Apply grid layout to container
+            list.style.display = 'grid';
+            list.style.gridTemplateColumns = 'repeat(auto-fill, minmax(380px, 1fr))';
+            list.style.gap = '20px';
+
             list.innerHTML = filtered.map(function(t, i) {
                 var realIndex = mcTasks.indexOf(t);
-                var sc = t.status === 'open' ? { bg:'rgba(34,197,94,0.1)', text:'#22c55e' }
-                    : t.status === 'submitted' ? { bg:'rgba(245,200,66,0.1)', text:'#f5c842' }
-                    : t.status === 'approved' ? { bg:'rgba(79,142,247,0.1)', text:'#4f8ef7' }
+
+                // Status badge colors
+                var statusColors = t.status === 'open' ? { bg:'rgba(0,212,255,0.1)', text:'#00d4ff' }
+                    : t.status === 'submitted' ? { bg:'rgba(245,165,0,0.1)', text:'#f5a500' }
+                    : t.status === 'approved' ? { bg:'rgba(34,197,94,0.1)', text:'#22c55e' }
                     : { bg:'rgba(239,68,68,0.1)', text:'#ef4444' };
+
                 var cp = mcCheckpoints.find(function(c) { return c.id === t.roundId; });
 
-                // Build submission status indicators
-                var submissionStatus = '';
+                // Category emoji mapping
+                var categoryEmoji = '📋';
+                if (t.category === 'creative') categoryEmoji = '🎨';
+                else if (t.category === 'technical') categoryEmoji = '⚙️';
+                else if (t.category === 'research') categoryEmoji = '🔍';
+                else if (t.category === 'presentation') categoryEmoji = '🎤';
+                else if (t.category === 'collaboration') categoryEmoji = '👥';
+
+                // Build submission info panel
+                var submissionPanel = '';
                 if (t.submission) {
-                    submissionStatus = '<div style="font-size:10px;color:rgba(0,240,255,0.6);margin-top:8px;padding:8px;background:rgba(0,240,255,0.05);border-left:2px solid rgba(0,240,255,0.3);border-radius:4px;">';
-                    submissionStatus += '<div>📤 Submitted by ' + escapeHtml(t.submission.submittedBy) + '</div>';
+                    submissionPanel = '<div style="background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.3);border-radius:12px;padding:12px;margin-top:12px;font-size:11px;color:rgba(0,240,255,0.8);">' +
+                        '<div style="margin-bottom:6px;"><strong>📤 Submitted by:</strong> ' + escapeHtml(t.submission.submittedBy) + '</div>';
                     if (t.submission.peerReviews && t.submission.peerReviews.length > 0) {
                         var needed = t.peerReviewCount || 0;
-                        submissionStatus += '<div>' + t.submission.peerReviews.length + '/' + needed + ' peer reviews</div>';
+                        submissionPanel += '<div style="margin-bottom:6px;">👥 Peer Reviews: ' + t.submission.peerReviews.length + '/' + needed + '</div>';
                     }
                     if (t.submission.selfEvaluation) {
-                        submissionStatus += '<div>✓ Self-eval completed</div>';
+                        submissionPanel += '<div>✓ Self-evaluation completed</div>';
                     }
-                    submissionStatus += '</div>';
+                    submissionPanel += '</div>';
                 }
 
-                return '<div class="mc-card">' +
-                    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">' +
+                return '<div style="background:rgba(22,22,31,0.6);border:1px solid rgba(255,255,255,0.06);border-radius:20px;padding:20px;display:flex;flex-direction:column;">' +
+                    // Icon + Title + Status
+                    '<div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:12px;">' +
+                    '<div style="width:60px;height:60px;border-radius:14px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;">' + categoryEmoji + '</div>' +
                     '<div style="flex:1;min-width:0;">' +
-                    '<div style="font-size:15px;font-weight:800;color:#f0f0ff;margin-bottom:4px;">' + escapeHtml(t.title || 'Untitled') + '</div>' +
-                    '<div style="font-size:12px;color:rgba(255,255,255,0.4);line-height:1.4;">' + escapeHtml(t.description || '') + '</div>' +
+                    '<div style="font-size:14px;font-weight:700;color:#f0f0ff;margin-bottom:4px;">' + escapeHtml(t.title || 'Untitled') + '</div>' +
+                    '<div style="display:inline-block;background:' + statusColors.bg + ';color:' + statusColors.text + ';font-size:10px;font-weight:600;padding:4px 10px;border-radius:6px;text-transform:capitalize;">' + (t.status || 'open') + '</div>' +
                     '</div>' +
-                    '<span class="mc-pill" style="background:' + sc.bg + ';color:' + sc.text + ';flex-shrink:0;">' + (t.status || 'open') + '</span>' +
                     '</div>' +
-                    '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">' +
-                    (t.xcReward ? '<span style="font-size:12px;font-weight:800;color:#4f8ef7;">&#x26A1; ' + t.xcReward + ' XC</span>' : '') +
-                    (cp ? '<span style="font-size:11px;color:rgba(255,255,255,0.3);">&#x1F3C1; ' + escapeHtml(cp.name) + '</span>' : '') +
-                    (t.category ? '<span class="mc-pill" style="background:rgba(139,92,246,0.1);color:#a78bfa;font-size:10px;">' + escapeHtml(t.category) + '</span>' : '') +
-                    (t.dueDate ? '<span style="font-size:11px;color:rgba(255,255,255,0.25);">Due: ' + t.dueDate + '</span>' : '') +
+                    // Description
+                    '<div style="font-size:12px;color:rgba(255,255,255,0.5);line-height:1.5;margin-bottom:12px;">' + escapeHtml(t.description || '') + '</div>' +
+                    // Submission panel (if submitted)
+                    submissionPanel +
+                    // Metadata pills
+                    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;margin-bottom:12px;">' +
+                    (t.xcReward ? '<span style="background:rgba(0,240,255,0.08);color:#00d4ff;font-size:10px;font-weight:600;padding:4px 8px;border-radius:6px;">⚡ ' + t.xcReward + ' XC</span>' : '') +
+                    (cp ? '<span style="background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.5);font-size:10px;padding:4px 8px;border-radius:6px;">🏁 ' + escapeHtml(cp.name) + '</span>' : '') +
+                    (t.dueDate ? '<span style="background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.5);font-size:10px;padding:4px 8px;border-radius:6px;">📅 ' + t.dueDate + '</span>' : '') +
+                    (t.category ? '<span style="background:rgba(139,92,246,0.08);color:#a78bfa;font-size:10px;padding:4px 8px;border-radius:6px;">🏷️ ' + escapeHtml(t.category) + '</span>' : '') +
                     '</div>' +
-                    submissionStatus +
-                    '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">' +
-                    (t.status === 'open' ? '<button class="mc-btn" style="padding:4px 12px;font-size:10px;background:rgba(0,240,255,0.1);color:var(--cyan);border-color:rgba(0,240,255,0.3);" onclick="mcOpenSubmitModal(' + realIndex + ')">📤 Submit</button>' : '') +
-                    '<button class="mc-btn" style="padding:4px 12px;font-size:10px;" onclick="mcEditTask(' + realIndex + ')">Edit</button>' +
-                    (t.status === 'submitted' ? '<button class="mc-btn mc-btn-green" style="padding:4px 12px;font-size:10px;" onclick="mcApproveTask(' + realIndex + ')">Approve</button>' : '') +
-                    (mcCanPushToDarkcampus() ? '<button class="mc-btn" style="padding:4px 12px;font-size:10px;background:rgba(88,167,255,0.12);color:#58a7ff;border-color:rgba(88,167,255,0.35);" onclick="mcOpenPushDC(\'task\',' + realIndex + ')" title="Broadcast to DarkCampus">📡 Push to DarkCampus</button>' : '') +
-                    '<button class="mc-btn mc-btn-red" style="padding:4px 12px;font-size:10px;" onclick="mcDeleteTask(' + realIndex + ')">Delete</button>' +
-                    '</div></div>';
+                    // Action buttons
+                    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:auto;padding-top:12px;border-top:1px solid rgba(255,255,255,0.04);">' +
+                    '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:70px;" onclick="mcEditTask(' + realIndex + ')">Edit</button>' +
+                    (t.status === 'submitted' ? '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(34,197,94,0.1);color:#22c55e;border:1px solid rgba(34,197,94,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:70px;" onclick="mcApproveTask(' + realIndex + ')">✓ Approve</button>' : '') +
+                    '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:70px;" onclick="mcDeleteTask(' + realIndex + ')">Delete</button>' +
+                    '</div>' +
+                    '</div>';
             }).join('');
         }
 
@@ -11388,55 +11416,78 @@
             if (!list) return;
 
             if (mcProjects.length === 0) {
-                list.innerHTML = '<div class="mc-card" style="grid-column:1/-1;text-align:center;color:rgba(255,255,255,0.3);padding:40px;">No projects yet. Click <strong>+ New Project</strong> to create one.</div>';
+                list.innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.3);padding:40px;">No projects yet. Click <strong>+ New Project</strong> to create one.</div>';
                 return;
             }
 
+            // Apply grid layout to container
+            list.style.display = 'grid';
+            list.style.gridTemplateColumns = 'repeat(auto-fill, minmax(380px, 1fr))';
+            list.style.gap = '20px';
+
             list.innerHTML = mcProjects.map(function(p, i) {
-                var sc = p.status === 'planning' ? { bg:'rgba(245,200,66,0.1)', text:'#f5c842' }
-                    : p.status === 'in_progress' ? { bg:'rgba(34,197,94,0.1)', text:'#22c55e' }
-                    : p.status === 'completed' ? { bg:'rgba(79,142,247,0.1)', text:'#4f8ef7' }
+                // Status badge colors
+                var statusColors = p.status === 'planning' ? { bg:'rgba(245,165,0,0.1)', text:'#f5a500' }
+                    : p.status === 'in_progress' ? { bg:'rgba(0,212,255,0.1)', text:'#00d4ff' }
+                    : p.status === 'completed' ? { bg:'rgba(34,197,94,0.1)', text:'#22c55e' }
                     : { bg:'rgba(255,255,255,0.05)', text:'rgba(255,255,255,0.4)' };
+
                 var cp = mcCheckpoints.find(function(c) { return c.id === p.checkpointId; });
-                var bannerHtml = p.bannerImage
-                    ? '<div style="width:100%;height:100px;overflow:hidden;border-radius:10px 10px 0 0;margin:-16px -16px 12px -16px;width:calc(100% + 32px);">' +
-                      '<img src="' + p.bannerImage + '" style="width:100%;height:100%;object-fit:cover;" />' +
-                      '</div>'
-                    : '';
+
                 // Compute task completion progress
                 var assignedTasks = (p.taskIds || []).map(function(tid) { return mcTasks.find(function(t) { return t.id === tid; }); }).filter(Boolean);
                 var completedTasks = assignedTasks.filter(function(t) { return t.status === 'approved'; }).length;
                 var totalTasks = assignedTasks.length;
                 var pct = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
-                var progressColor = pct >= 100 ? '#22c55e' : pct > 50 ? '#f5c842' : '#4f8ef7';
-                var progressHtml = totalTasks > 0
-                    ? '<div style="margin-bottom:10px;">' +
-                      '<div style="display:flex;justify-content:space-between;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px;">' +
-                      '<span>Task Progress</span><span style="color:' + progressColor + ';">' + completedTasks + '/' + totalTasks + ' (' + pct + '%)</span></div>' +
-                      '<div style="width:100%;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden;">' +
-                      '<div style="width:' + pct + '%;height:100%;background:' + progressColor + ';border-radius:3px;transition:width 0.4s ease;"></div></div></div>'
-                    : '';
-                return '<div class="mc-card" style="overflow:hidden;">' +
-                    bannerHtml +
-                    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">' +
+                var progressColor = pct >= 100 ? '#22c55e' : pct > 50 ? '#f5c842' : '#00d4ff';
+
+                // Build task progress info panel
+                var progressPanel = '';
+                if (totalTasks > 0) {
+                    progressPanel = '<div style="background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.3);border-radius:12px;padding:12px;margin-top:12px;">' +
+                        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+                        '<span style="font-size:11px;color:rgba(0,240,255,0.8);font-weight:600;">📊 Task Progress</span>' +
+                        '<span style="font-size:11px;color:' + progressColor + ';font-weight:600;">' + completedTasks + '/' + totalTasks + ' (' + pct + '%)</span>' +
+                        '</div>' +
+                        '<div style="width:100%;height:8px;background:rgba(0,212,255,0.1);border-radius:4px;overflow:hidden;">' +
+                        '<div style="width:' + pct + '%;height:100%;background:' + progressColor + ';border-radius:4px;transition:width 0.3s ease;"></div>' +
+                        '</div></div>';
+                }
+
+                // Icon or banner
+                var iconBox = '';
+                if (p.bannerImage) {
+                    iconBox = '<img src="' + p.bannerImage + '" style="width:100%;height:100%;object-fit:cover;border-radius:14px;" />';
+                } else {
+                    iconBox = '<div style="font-size:28px;">🎬</div>';
+                }
+
+                return '<div style="background:rgba(22,22,31,0.6);border:1px solid rgba(255,255,255,0.06);border-radius:20px;padding:20px;display:flex;flex-direction:column;">' +
+                    // Icon + Title + Status
+                    '<div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:12px;">' +
+                    '<div style="width:60px;height:60px;border-radius:14px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden;">' + iconBox + '</div>' +
                     '<div style="flex:1;min-width:0;">' +
-                    '<div style="font-size:16px;font-weight:900;color:#f0f0ff;margin-bottom:4px;">' + escapeHtml(p.name || 'Untitled') + '</div>' +
-                    '<div style="font-size:12px;color:rgba(255,255,255,0.4);line-height:1.4;margin-bottom:8px;">' + escapeHtml(p.description || '') + '</div>' +
+                    '<div style="font-size:14px;font-weight:700;color:#f0f0ff;margin-bottom:4px;">' + escapeHtml(p.name || 'Untitled') + '</div>' +
+                    '<div style="display:inline-block;background:' + statusColors.bg + ';color:' + statusColors.text + ';font-size:10px;font-weight:600;padding:4px 10px;border-radius:6px;text-transform:capitalize;">' + (p.status || 'planning') + '</div>' +
                     '</div>' +
-                    '<span class="mc-pill" style="background:' + sc.bg + ';color:' + sc.text + ';flex-shrink:0;">' + (p.status || 'planning') + '</span>' +
                     '</div>' +
-                    progressHtml +
-                    '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">' +
-                    (p.budget ? '<span style="font-size:12px;font-weight:800;color:#4f8ef7;">&#x26A1; ' + p.budget + ' XC Budget</span>' : '') +
-                    (cp ? '<span style="font-size:11px;color:rgba(255,255,255,0.3);">&#x1F3C1; ' + escapeHtml(cp.name) + '</span>' : '') +
-                    (p.team && p.team.length ? '<span style="font-size:11px;color:rgba(255,255,255,0.3);">&#x1F465; ' + p.team.length + ' members</span>' : '') +
-                    (p.createdAt ? '<span style="font-size:11px;color:rgba(255,255,255,0.2);">Created: ' + p.createdAt + '</span>' : '') +
+                    // Description
+                    '<div style="font-size:12px;color:rgba(255,255,255,0.5);line-height:1.5;margin-bottom:12px;">' + escapeHtml(p.description || '') + '</div>' +
+                    // Progress panel
+                    progressPanel +
+                    // Metadata pills
+                    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;margin-bottom:12px;">' +
+                    (p.budget ? '<span style="background:rgba(0,240,255,0.08);color:#00d4ff;font-size:10px;font-weight:600;padding:4px 8px;border-radius:6px;">💰 ' + p.budget + ' XC</span>' : '') +
+                    (cp ? '<span style="background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.5);font-size:10px;padding:4px 8px;border-radius:6px;">🏁 ' + escapeHtml(cp.name) + '</span>' : '') +
+                    (p.team && p.team.length ? '<span style="background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.5);font-size:10px;padding:4px 8px;border-radius:6px;">👥 ' + p.team.length + ' member' + (p.team.length !== 1 ? 's' : '') + '</span>' : '') +
+                    (p.createdAt ? '<span style="background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.5);font-size:10px;padding:4px 8px;border-radius:6px;">📅 ' + p.createdAt + '</span>' : '') +
                     '</div>' +
-                    '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
-                    '<button class="mc-btn" style="padding:4px 12px;font-size:10px;" onclick="mcEditProject(' + i + ')">Edit</button>' +
-                    (mcCanPushToDarkcampus() ? '<button class="mc-btn" style="padding:4px 12px;font-size:10px;background:rgba(88,167,255,0.12);color:#58a7ff;border-color:rgba(88,167,255,0.35);" onclick="mcOpenPushDC(\'project\',' + i + ')" title="Broadcast to DarkCampus">📡 Push to DarkCampus</button>' : '') +
-                    '<button class="mc-btn mc-btn-red" style="padding:4px 12px;font-size:10px;" onclick="mcDeleteProject(' + i + ')">Delete</button>' +
-                    '</div></div>';
+                    // Action buttons
+                    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:auto;padding-top:12px;border-top:1px solid rgba(255,255,255,0.04);">' +
+                    '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:70px;" onclick="mcEditProject(' + i + ')">Edit</button>' +
+                    '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:70px;" onclick="mcDeleteProject(' + i + ')">Delete</button>' +
+                    '</div>' +
+                    '</div>';
             }).join('');
         }
 
@@ -12018,45 +12069,72 @@
                 return true;
             });
 
-            list.innerHTML = filtered.length === 0 ? '<div style="color:rgba(255,255,255,0.25);font-size:13px;">No jobs found. Click "+ Post Job" to create one.</div>' :
-                filtered.map(function(j, i) {
-                    var ri = mcJobs.indexOf(j);
-                    var applicants = j.applicants || [];
-                    var hired = j.hired || [];
-                    var sc = j.status === 'open' ? { text:'#22c55e', label:'OPEN' }
-                        : j.status === 'claimed' ? { text:'#f5c842', label:'IN PROGRESS' }
-                        : j.status === 'completed' ? { text:'#a78bfa', label:'COMPLETED' }
-                        : { text:'rgba(255,255,255,0.4)', label: j.status || 'open' };
-                    return '<div class="mc-card">' +
-                        '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">' +
-                        '<div style="flex:1;min-width:0;"><div style="font-weight:900;color:#f0f0ff;">' + escapeHtml(j.title) + '</div>' +
-                        '<div style="font-size:12px;color:rgba(255,255,255,0.5);margin-top:4px;line-height:1.4;">' + escapeHtml(j.description || '') + '</div></div>' +
-                        '<span class="mc-pill" style="color:' + sc.text + ';border-color:' + sc.text + ';">' + sc.label + '</span></div>' +
-                        '<div style="display:flex;gap:12px;font-size:11px;flex-wrap:wrap;margin-bottom:8px;">' +
-                        '<span style="color:var(--cyan);font-weight:800;">&#x26A1; ' + (j.xcReward || 0) + ' XC</span>' +
-                        '<span style="color:rgba(255,255,255,0.3);">&#x1F465; ' + (j.slots || 1) + ' slots</span>' +
-                        (applicants.length ? '<span style="color:#f5c842;">&#x1F4CB; ' + applicants.length + ' applicants</span>' : '') +
-                        (hired.length ? '<span style="color:#22c55e;">&#x2705; ' + hired.length + ' hired</span>' : '') +
-                        '</div>' +
-                        // Applicant list (host view)
-                        (applicants.length > 0 ? '<div style="margin-bottom:10px;padding:8px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.04);border-radius:6px;">' +
-                            '<div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;margin-bottom:6px;">APPLICANTS</div>' +
-                            applicants.map(function(a, ai) {
-                                var isHired = hired.indexOf(a.playerId) >= 0;
-                                return '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.03);">' +
-                                    '<span style="font-size:12px;color:#e0e6ff;">' + escapeHtml(a.playerName || a.playerId) + '</span>' +
-                                    '<div style="display:flex;gap:4px;">' +
-                                    (isHired ? '<span class="mc-pill" style="color:#22c55e;font-size:9px;">HIRED</span>' :
-                                        '<button class="mc-btn mc-btn-green" style="padding:2px 8px;font-size:9px;" onclick="mcHireApplicant(' + ri + ',' + ai + ')">Hire</button>') +
-                                    '</div></div>';
-                            }).join('') + '</div>' : '') +
-                        '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
-                        (j.status === 'open' ? '<button class="mc-btn" style="font-size:10px;padding:4px 10px;background:rgba(0,240,255,0.1);color:var(--cyan);border-color:rgba(0,240,255,0.3);" onclick="mcApplyForJob(' + ri + ')">&#x1F4CB; Apply</button>' : '') +
-                        '<button class="mc-btn" style="font-size:10px;padding:4px 10px;" onclick="mcShowJobForm(' + ri + ')">Edit</button>' +
-                        (hired.length > 0 && j.status !== 'completed' ? '<button class="mc-btn" style="font-size:10px;padding:4px 10px;background:rgba(139,92,246,0.1);color:#a78bfa;border-color:rgba(139,92,246,0.3);" onclick="mcConvertJobToProject(' + ri + ')">&#x1F4E6; Convert to Project</button>' : '') +
-                        (mcCanPushToDarkcampus() ? '<button class="mc-btn" style="font-size:10px;padding:4px 10px;background:rgba(88,167,255,0.12);color:#58a7ff;border-color:rgba(88,167,255,0.35);" onclick="mcOpenPushDC(\'job\',' + ri + ')" title="Broadcast to DarkCampus">📡 Push to DarkCampus</button>' : '') +
-                        '<button class="mc-btn" style="font-size:10px;padding:4px 10px;color:#ef4444;border-color:rgba(239,68,68,0.3);" onclick="mcDeleteJob(' + ri + ')">Delete</button></div></div>';
-                }).join('');
+            if (filtered.length === 0) {
+                list.innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.3);padding:40px;">No jobs found. Click <strong>+ Post Job</strong> to create one.</div>';
+                return;
+            }
+
+            // Apply grid layout to container
+            list.style.display = 'grid';
+            list.style.gridTemplateColumns = 'repeat(auto-fill, minmax(380px, 1fr))';
+            list.style.gap = '20px';
+
+            list.innerHTML = filtered.map(function(j, i) {
+                var ri = mcJobs.indexOf(j);
+                var applicants = j.applicants || [];
+                var hired = j.hired || [];
+
+                // Status badge colors
+                var statusColors = j.status === 'open' ? { bg:'rgba(0,212,255,0.1)', text:'#00d4ff' }
+                    : j.status === 'claimed' ? { bg:'rgba(245,165,0,0.1)', text:'#f5a500' }
+                    : j.status === 'completed' ? { bg:'rgba(34,197,94,0.1)', text:'#22c55e' }
+                    : { bg:'rgba(255,255,255,0.05)', text:'rgba(255,255,255,0.4)' };
+
+                // Build applicants info panel
+                var applicantsPanel = '';
+                if (applicants.length > 0) {
+                    applicantsPanel = '<div style="background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.3);border-radius:12px;padding:12px;margin-top:12px;">' +
+                        '<div style="font-size:11px;color:rgba(0,240,255,0.8);font-weight:600;margin-bottom:8px;">👥 APPLICANTS</div>';
+                    applicants.forEach(function(a, ai) {
+                        var isHired = hired.indexOf(a.playerId) >= 0;
+                        applicantsPanel += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(0,212,255,0.1);font-size:11px;">' +
+                            '<span style="color:#e0e6ff;">' + escapeHtml(a.playerName || a.playerId) + '</span>' +
+                            '<div style="display:flex;gap:6px;">' +
+                            (isHired ? '<span style="background:rgba(34,197,94,0.2);color:#22c55e;font-size:9px;padding:2px 6px;border-radius:4px;">✓ HIRED</span>' :
+                                '<button class="mc-btn" style="padding:2px 8px;font-size:9px;background:rgba(34,197,94,0.1);color:#22c55e;border:1px solid rgba(34,197,94,0.3);border-radius:6px;cursor:pointer;" onclick="mcHireApplicant(' + ri + ',' + ai + ')">Hire</button>') +
+                            '</div></div>';
+                    });
+                    applicantsPanel += '</div>';
+                }
+
+                return '<div style="background:rgba(22,22,31,0.6);border:1px solid rgba(255,255,255,0.06);border-radius:20px;padding:20px;display:flex;flex-direction:column;">' +
+                    // Icon + Title + Status
+                    '<div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:12px;">' +
+                    '<div style="width:60px;height:60px;border-radius:14px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;">💼</div>' +
+                    '<div style="flex:1;min-width:0;">' +
+                    '<div style="font-size:14px;font-weight:700;color:#f0f0ff;margin-bottom:4px;">' + escapeHtml(j.title) + '</div>' +
+                    '<div style="display:inline-block;background:' + statusColors.bg + ';color:' + statusColors.text + ';font-size:10px;font-weight:600;padding:4px 10px;border-radius:6px;text-transform:uppercase;">' + (j.status || 'open') + '</div>' +
+                    '</div>' +
+                    '</div>' +
+                    // Description
+                    '<div style="font-size:12px;color:rgba(255,255,255,0.5);line-height:1.5;margin-bottom:12px;">' + escapeHtml(j.description || '') + '</div>' +
+                    // Applicants panel (if applicable)
+                    applicantsPanel +
+                    // Metadata pills
+                    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;margin-bottom:12px;">' +
+                    '<span style="background:rgba(0,240,255,0.08);color:#00d4ff;font-size:10px;font-weight:600;padding:4px 8px;border-radius:6px;">⚡ ' + (j.xcReward || 0) + ' XC</span>' +
+                    '<span style="background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.5);font-size:10px;padding:4px 8px;border-radius:6px;">👥 ' + (j.slots || 1) + ' slot' + (j.slots !== 1 ? 's' : '') + '</span>' +
+                    (applicants.length ? '<span style="background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.5);font-size:10px;padding:4px 8px;border-radius:6px;">📨 ' + applicants.length + ' applicant' + (applicants.length !== 1 ? 's' : '') + '</span>' : '') +
+                    (hired.length ? '<span style="background:rgba(34,197,94,0.08);color:#22c55e;font-size:10px;padding:4px 8px;border-radius:6px;">✅ ' + hired.length + ' hired</span>' : '') +
+                    '</div>' +
+                    // Action buttons
+                    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:auto;padding-top:12px;border-top:1px solid rgba(255,255,255,0.04);">' +
+                    '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:70px;" onclick="mcShowJobForm(' + ri + ')">Edit</button>' +
+                    (hired.length > 0 && j.status !== 'completed' ? '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(139,92,246,0.1);color:#a78bfa;border:1px solid rgba(139,92,246,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:100px;" onclick="mcConvertJobToProject(' + ri + ')">📦 Convert</button>' : '') +
+                    '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:70px;" onclick="mcDeleteJob(' + ri + ')">Delete</button>' +
+                    '</div>' +
+                    '</div>';
+            }).join('');
         }
 
         function mcDeleteJob(i) {
