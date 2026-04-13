@@ -9218,6 +9218,14 @@
                 seStopLoginMusic();
                 seInit();
 
+                // ── Clear stale SSO flag so X-Coin's RoleGuard can do initial redirects ──
+                try { localStorage.removeItem('pflx_sso_active'); } catch(e) {}
+
+                // ── Broadcast correct role to all already-loaded iframes ──
+                if (typeof window.pflxSetRole === 'function') {
+                    window.pflxSetRole(window.pflxRole || 'host');
+                }
+
                 // Pre-load X-Coin iframe in background so Mission Control can sync data from Supabase
                 if (typeof preloadIframe === 'function') preloadIframe('xcoin');
 
@@ -17314,7 +17322,23 @@ RESPONSE RULES:
             });
 
             // ── Host↔Player toggle: persisted + broadcast to every sub-app ──
-            try { window.pflxRole = localStorage.getItem('pflx_active_role') || 'player'; } catch(e) { window.pflxRole = 'player'; }
+            // If no pflx_active_role saved yet, derive from pflx_user's actual role
+            // so host users default to 'host' instead of 'player'
+            try {
+                var _savedRole = localStorage.getItem('pflx_active_role');
+                if (!_savedRole) {
+                    try {
+                        var _pu = JSON.parse(localStorage.getItem('pflx_user') || '{}');
+                        var _ur = (_pu.role || '').toLowerCase();
+                        if (_ur === 'admin' || _ur === 'host' || _ur === 'teacher' || _ur === 'instructor') {
+                            _savedRole = 'host';
+                        } else {
+                            _savedRole = 'player';
+                        }
+                    } catch(e2) { _savedRole = 'player'; }
+                }
+                window.pflxRole = _savedRole;
+            } catch(e) { window.pflxRole = 'player'; }
 
             window.pflxSetRole = function(role) {
                 if (role !== 'host' && role !== 'player') return;
