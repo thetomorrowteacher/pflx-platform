@@ -3716,31 +3716,76 @@
                                 <h1 class="mc-page-title">Player Management</h1>
                                 <p class="mc-page-desc">View, manage, and organize all players across cohorts.</p>
                                 <div class="mc-stat-grid" id="mc-player-stats"></div>
-                                <!-- Action Bar -->
-                                <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:center;">
+
+                                <!-- Action Bar (Row 1: Primary actions + search) -->
+                                <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">
                                     <button class="mc-btn mc-btn-green" onclick="mcAddPlayer()" style="white-space:nowrap;">+ Add Player</button>
                                     <button class="mc-btn mc-btn-purple" onclick="mcShowImportCSV()" style="white-space:nowrap;">&#x1F4E5; Import CSV</button>
-                                    <input type="text" class="mc-search" id="mc-player-search" placeholder="Search players by name or brand..." style="flex:1;min-width:200px;margin-bottom:0;" oninput="mcRenderPlayers()">
-                                    <select id="mc-player-cohort-filter" class="mc-search" style="width:180px;flex:none;margin-bottom:0;" onchange="mcRenderPlayers()">
+                                    <input type="text" class="mc-search" id="mc-player-search" placeholder="Search by name, brand, or email..." style="flex:1;min-width:220px;margin-bottom:0;" oninput="mcRenderPlayers()">
+                                    <button id="mc-player-fav-toggle" class="mc-btn" onclick="mcTogglePlayerFavFilter()" style="white-space:nowrap;">&#x2606; Favorites</button>
+                                </div>
+
+                                <!-- Action Bar (Row 2: Column filters) -->
+                                <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">
+                                    <select id="mc-player-cohort-filter" class="mc-search" style="width:160px;flex:none;margin-bottom:0;" onchange="mcRenderPlayers()">
                                         <option value="all">All Cohorts</option>
                                     </select>
-                                    <select id="mc-player-role-filter" class="mc-search" style="width:140px;flex:none;margin-bottom:0;" onchange="mcRenderPlayers()">
+                                    <select id="mc-player-studio-filter" class="mc-search" style="width:180px;flex:none;margin-bottom:0;" onchange="mcRenderPlayers()">
+                                        <option value="all">All Studios</option>
+                                        <option value="none">Unassigned</option>
+                                    </select>
+                                    <select id="mc-player-evo-filter" class="mc-search" style="width:150px;flex:none;margin-bottom:0;" onchange="mcRenderPlayers()">
+                                        <option value="all">All Evo Ranks</option>
+                                        <option value="Mythic">Mythic</option>
+                                        <option value="Legend">Legend</option>
+                                        <option value="Master">Master</option>
+                                        <option value="Expert">Expert</option>
+                                        <option value="Specialist">Specialist</option>
+                                        <option value="Player">Player</option>
+                                    </select>
+                                    <select id="mc-player-role-filter" class="mc-search" style="width:130px;flex:none;margin-bottom:0;" onchange="mcRenderPlayers()">
                                         <option value="all">All Roles</option>
                                         <option value="player">Players</option>
                                         <option value="admin">Hosts</option>
                                     </select>
+                                    <div style="display:flex;align-items:center;gap:4px;font-size:11px;color:rgba(255,255,255,0.5);">
+                                        <span>XC:</span>
+                                        <input type="number" id="mc-player-xc-min" placeholder="min" oninput="mcRenderPlayers()" style="width:70px;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px 8px;border-radius:6px;font-size:11px;">
+                                        <span>&mdash;</span>
+                                        <input type="number" id="mc-player-xc-max" placeholder="max" oninput="mcRenderPlayers()" style="width:70px;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px 8px;border-radius:6px;font-size:11px;">
+                                    </div>
+                                    <button class="mc-btn" onclick="mcClearPlayerFilters()" style="font-size:11px;padding:6px 10px;white-space:nowrap;">&#x2715; Clear</button>
                                 </div>
+
+                                <!-- Cohort Quick-Toggle Chips -->
+                                <div id="mc-player-cohort-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"></div>
+
+                                <!-- Bulk Action Bar (visible when multi-select is active) -->
+                                <div id="mc-player-bulk-bar" style="display:none;background:linear-gradient(135deg,rgba(0,212,255,0.08),rgba(167,139,250,0.06));border:1px solid rgba(0,212,255,0.25);border-radius:10px;padding:10px 14px;margin-bottom:10px;align-items:center;gap:10px;flex-wrap:wrap;">
+                                    <span id="mc-player-bulk-count" style="font-size:12px;font-weight:700;color:var(--cyan);"></span>
+                                    <div style="flex:1;"></div>
+                                    <button class="mc-btn" style="font-size:11px;padding:5px 10px;" onclick="mcBulkAssignCohort()">&#x1F3F7; Change Cohort</button>
+                                    <button class="mc-btn" style="font-size:11px;padding:5px 10px;" onclick="mcBulkAssignStudio()">&#x1F3EC; Change Studio</button>
+                                    <button class="mc-btn" style="font-size:11px;padding:5px 10px;" onclick="mcBulkAdjustXC()">&#x26A1; Adjust XC</button>
+                                    <button class="mc-btn" style="font-size:11px;padding:5px 10px;color:#f5c842;border-color:rgba(245,200,66,0.3);" onclick="mcBulkToggleFavorite()">&#x2606; Toggle Fav</button>
+                                    <button class="mc-btn" style="font-size:11px;padding:5px 10px;color:#ef4444;border-color:rgba(239,68,68,0.3);" onclick="mcBulkDeletePlayers()">&#x1F5D1; Delete</button>
+                                    <button class="mc-btn" style="font-size:11px;padding:5px 10px;" onclick="mcClearSelection()">&#x2715; Clear</button>
+                                </div>
+
                                 <div class="mc-card" style="padding:0;overflow:hidden;">
                                     <table class="mc-table">
                                         <thead>
                                             <tr>
+                                                <th style="width:28px;padding:0 8px;"><input type="checkbox" id="mc-player-select-all" onchange="mcToggleSelectAllPlayers(this)"></th>
+                                                <th style="width:28px;text-align:center;cursor:pointer;" onclick="mcSortPlayers('favorite')" title="Sort by favorite">&#x2605;</th>
                                                 <th style="cursor:pointer;" onclick="mcSortPlayers('name')">PLAYER &#x21C5;</th>
                                                 <th style="cursor:pointer;" onclick="mcSortPlayers('brand')">BRAND &#x21C5;</th>
-                                                <th>COHORT</th>
-                                                <th>PATHWAY</th>
-                                                <th>ROLE</th>
+                                                <th style="cursor:pointer;" onclick="mcSortPlayers('email')">EMAIL &#x21C5;</th>
+                                                <th style="cursor:pointer;" onclick="mcSortPlayers('cohort')">COHORT &#x21C5;</th>
+                                                <th style="cursor:pointer;" onclick="mcSortPlayers('studio')">STUDIO &#x21C5;</th>
                                                 <th style="cursor:pointer;" onclick="mcSortPlayers('xc')">XC &#x21C5;</th>
-                                                <th style="cursor:pointer;" onclick="mcSortPlayers('badges')">BADGES &#x21C5;</th>
+                                                <th style="cursor:pointer;" onclick="mcSortPlayers('evo')">EVO RANK &#x21C5;</th>
+                                                <th>ROLE</th>
                                                 <th>ACTIONS</th>
                                             </tr>
                                         </thead>
@@ -3814,6 +3859,18 @@
                                                 <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">Joined Date</label>
                                                 <input type="date" id="mc-player-form-joined" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:10px;border-radius:8px;font-size:13px;box-sizing:border-box;">
                                             </div>
+                                        </div>
+
+                                        <!-- Row 3b: Startup Studio -->
+                                        <div style="margin-bottom:12px;">
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">Startup Studio</label>
+                                            <select id="mc-player-form-studio" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:10px;border-radius:8px;font-size:13px;box-sizing:border-box;">
+                                                <option value="">Unassigned</option>
+                                                <option value="studio-mindforge">MindForge</option>
+                                                <option value="studio-emagination">eMagination</option>
+                                                <option value="studio-gentech">Gentech</option>
+                                                <option value="studio-innov8">Innov8</option>
+                                            </select>
                                         </div>
 
                                         <!-- Economy Section -->
@@ -11648,6 +11705,16 @@
         let mcPlayerSortAsc = true;
         let mcPendingDeleteId = null;
         let mcCSVParsedPlayers = [];
+        let mcPlayerFavFilter = false;
+        let mcPlayerCohortToggleSet = null; // null = all, Set = active selection
+        let mcSelectedPlayerIds = new Set();
+
+        const MC_STUDIO_LABELS = {
+            'studio-mindforge': 'MindForge',
+            'studio-emagination': 'eMagination',
+            'studio-gentech': 'Gentech',
+            'studio-innov8': 'Innov8'
+        };
 
         function mcGeneratePin() {
             return String(Math.floor(1000 + Math.random() * 9000));
@@ -11659,43 +11726,256 @@
             mcRenderPlayers();
         }
 
+        function mcGetEvoRank(xc) {
+            xc = xc || 0;
+            if (xc >= 25000) return 'Mythic';
+            if (xc >= 10000) return 'Legend';
+            if (xc >= 5000) return 'Master';
+            if (xc >= 2000) return 'Expert';
+            if (xc >= 500) return 'Specialist';
+            return 'Player';
+        }
+
+        function mcGetEvoRankColor(rank) {
+            return { Mythic: '#ef4444', Legend: '#f5c842', Master: '#a78bfa', Expert: '#22c55e', Specialist: '#4f8ef7', Player: 'rgba(255,255,255,0.5)' }[rank] || '#4f8ef7';
+        }
+
+        function mcTogglePlayerFavFilter() {
+            mcPlayerFavFilter = !mcPlayerFavFilter;
+            var btn = document.getElementById('mc-player-fav-toggle');
+            if (btn) {
+                btn.innerHTML = (mcPlayerFavFilter ? '&#x2605;' : '&#x2606;') + ' Favorites';
+                btn.style.background = mcPlayerFavFilter ? 'rgba(245,200,66,0.15)' : '';
+                btn.style.borderColor = mcPlayerFavFilter ? 'rgba(245,200,66,0.4)' : '';
+                btn.style.color = mcPlayerFavFilter ? '#f5c842' : '';
+            }
+            mcRenderPlayers();
+        }
+
+        function mcToggleCohortChip(cohort) {
+            if (mcPlayerCohortToggleSet === null) mcPlayerCohortToggleSet = new Set();
+            if (mcPlayerCohortToggleSet.has(cohort)) mcPlayerCohortToggleSet.delete(cohort);
+            else mcPlayerCohortToggleSet.add(cohort);
+            if (mcPlayerCohortToggleSet.size === 0) mcPlayerCohortToggleSet = null;
+            mcRenderPlayers();
+        }
+
+        function mcClearCohortChips() {
+            mcPlayerCohortToggleSet = null;
+            mcRenderPlayers();
+        }
+
+        function mcClearPlayerFilters() {
+            var ids = ['mc-player-search','mc-player-xc-min','mc-player-xc-max'];
+            ids.forEach(function(id) { var el = document.getElementById(id); if (el) el.value = ''; });
+            ['mc-player-cohort-filter','mc-player-studio-filter','mc-player-evo-filter','mc-player-role-filter'].forEach(function(id) {
+                var el = document.getElementById(id); if (el) el.value = 'all';
+            });
+            mcPlayerFavFilter = false;
+            mcPlayerCohortToggleSet = null;
+            var btn = document.getElementById('mc-player-fav-toggle');
+            if (btn) { btn.innerHTML = '&#x2606; Favorites'; btn.style.background = ''; btn.style.borderColor = ''; btn.style.color = ''; }
+            mcRenderPlayers();
+        }
+
+        function mcToggleFavorite(id) {
+            var p = mcPlayers.find(function(pl) { return pl.id === id; });
+            if (!p) return;
+            p.favorite = !p.favorite;
+            mcSaveData('players');
+            mcRenderPlayers();
+            if (typeof mcBroadcastToApps === 'function') mcBroadcastToApps('pflx_players_updated', { players: mcPlayers });
+        }
+
+        function mcTogglePlayerSelection(id) {
+            if (mcSelectedPlayerIds.has(id)) mcSelectedPlayerIds.delete(id);
+            else mcSelectedPlayerIds.add(id);
+            mcUpdateBulkBar();
+            // Update select-all checkbox
+            var sa = document.getElementById('mc-player-select-all');
+            if (sa) {
+                var total = document.querySelectorAll('.mc-player-row-cb').length;
+                sa.checked = total > 0 && mcSelectedPlayerIds.size >= total;
+                sa.indeterminate = mcSelectedPlayerIds.size > 0 && mcSelectedPlayerIds.size < total;
+            }
+        }
+
+        function mcToggleSelectAllPlayers(cb) {
+            var rows = document.querySelectorAll('.mc-player-row-cb');
+            if (cb.checked) {
+                rows.forEach(function(r) { r.checked = true; mcSelectedPlayerIds.add(r.dataset.playerId); });
+            } else {
+                mcSelectedPlayerIds.clear();
+                rows.forEach(function(r) { r.checked = false; });
+            }
+            mcUpdateBulkBar();
+        }
+
+        function mcClearSelection() {
+            mcSelectedPlayerIds.clear();
+            document.querySelectorAll('.mc-player-row-cb').forEach(function(r) { r.checked = false; });
+            var sa = document.getElementById('mc-player-select-all'); if (sa) { sa.checked = false; sa.indeterminate = false; }
+            mcUpdateBulkBar();
+        }
+
+        function mcUpdateBulkBar() {
+            var bar = document.getElementById('mc-player-bulk-bar');
+            var count = document.getElementById('mc-player-bulk-count');
+            if (!bar) return;
+            if (mcSelectedPlayerIds.size > 0) {
+                bar.style.display = 'flex';
+                if (count) count.textContent = mcSelectedPlayerIds.size + ' selected';
+            } else {
+                bar.style.display = 'none';
+            }
+        }
+
+        function mcBulkAssignCohort() {
+            if (mcSelectedPlayerIds.size === 0) return;
+            var c = prompt('Assign ' + mcSelectedPlayerIds.size + ' player(s) to cohort:');
+            if (c === null) return;
+            c = c.trim();
+            if (!c) return;
+            mcPlayers.forEach(function(p) { if (mcSelectedPlayerIds.has(p.id)) p.cohort = c; });
+            mcSaveData('players');
+            mcClearSelection();
+            mcRenderPlayers();
+            if (typeof mcBroadcastToApps === 'function') mcBroadcastToApps('pflx_players_updated', { players: mcPlayers });
+        }
+
+        function mcBulkAssignStudio() {
+            if (mcSelectedPlayerIds.size === 0) return;
+            var s = prompt('Studio ID (mindforge, emagination, gentech, innov8, or blank to unassign):');
+            if (s === null) return;
+            var map = { mindforge: 'studio-mindforge', emagination: 'studio-emagination', gentech: 'studio-gentech', innov8: 'studio-innov8' };
+            var sid = map[s.trim().toLowerCase()] || (s.trim() === '' ? '' : s.trim());
+            mcPlayers.forEach(function(p) { if (mcSelectedPlayerIds.has(p.id)) p.studioId = sid; });
+            mcSaveData('players');
+            mcClearSelection();
+            mcRenderPlayers();
+            if (typeof mcBroadcastToApps === 'function') mcBroadcastToApps('pflx_players_updated', { players: mcPlayers });
+        }
+
+        function mcBulkAdjustXC() {
+            if (mcSelectedPlayerIds.size === 0) return;
+            var delta = parseInt(prompt('Adjust XC by (e.g. 100 or -50):'), 10);
+            if (isNaN(delta)) return;
+            mcPlayers.forEach(function(p) {
+                if (mcSelectedPlayerIds.has(p.id)) {
+                    p.xc = Math.max(0, (p.xc || 0) + delta);
+                    if (delta > 0) p.totalXc = (p.totalXc || 0) + delta;
+                }
+            });
+            mcSaveData('players');
+            mcClearSelection();
+            mcRenderPlayers();
+            if (typeof mcBroadcastToApps === 'function') mcBroadcastToApps('pflx_players_updated', { players: mcPlayers });
+        }
+
+        function mcBulkToggleFavorite() {
+            if (mcSelectedPlayerIds.size === 0) return;
+            mcPlayers.forEach(function(p) { if (mcSelectedPlayerIds.has(p.id)) p.favorite = !p.favorite; });
+            mcSaveData('players');
+            mcClearSelection();
+            mcRenderPlayers();
+        }
+
+        function mcBulkDeletePlayers() {
+            if (mcSelectedPlayerIds.size === 0) return;
+            if (!confirm('Delete ' + mcSelectedPlayerIds.size + ' player(s)? This cannot be undone.')) return;
+            mcPlayers = mcPlayers.filter(function(p) { return !mcSelectedPlayerIds.has(p.id); });
+            mcSaveData('players');
+            mcClearSelection();
+            mcRenderPlayers();
+            if (typeof mcBroadcastToApps === 'function') mcBroadcastToApps('pflx_players_updated', { players: mcPlayers });
+        }
+
         function mcRenderPlayers() {
             mcLoadData();
             const tbody = document.getElementById('mc-player-tbody');
             if (!tbody) return;
 
-            // Populate cohort filter
+            // All cohorts/studios for filter dropdowns and chips
+            const allCohorts = [...new Set(mcPlayers.map(function(p) { return p.cohort; }).filter(Boolean))].sort();
+            const allStudios = [...new Set(mcPlayers.map(function(p) { return p.studioId; }).filter(Boolean))].sort();
+
+            // Populate cohort filter dropdown
             const cohortFilter = document.getElementById('mc-player-cohort-filter');
-            if (cohortFilter && cohortFilter.options.length <= 1) {
-                const cohorts = [...new Set(mcPlayers.map(function(p) { return p.cohort; }).filter(Boolean))].sort();
-                cohorts.forEach(function(c) {
-                    const opt = document.createElement('option');
-                    opt.value = c;
-                    opt.textContent = c;
-                    cohortFilter.appendChild(opt);
-                });
+            if (cohortFilter) {
+                var currentCohortVal = cohortFilter.value;
+                cohortFilter.innerHTML = '<option value="all">All Cohorts</option>' + allCohorts.map(function(c) { return '<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + '</option>'; }).join('');
+                if (currentCohortVal) cohortFilter.value = currentCohortVal;
+            }
+
+            // Populate studio filter dropdown
+            const studioFilter = document.getElementById('mc-player-studio-filter');
+            if (studioFilter) {
+                var currentStudioVal = studioFilter.value;
+                studioFilter.innerHTML = '<option value="all">All Studios</option><option value="none">Unassigned</option>' +
+                    Object.keys(MC_STUDIO_LABELS).map(function(sid) { return '<option value="' + sid + '">' + MC_STUDIO_LABELS[sid] + '</option>'; }).join('');
+                if (currentStudioVal) studioFilter.value = currentStudioVal;
+            }
+
+            // Render cohort quick-toggle chips
+            const chipsEl = document.getElementById('mc-player-cohort-chips');
+            if (chipsEl) {
+                if (allCohorts.length === 0) {
+                    chipsEl.innerHTML = '';
+                } else {
+                    chipsEl.innerHTML = '<span style="font-size:11px;color:rgba(255,255,255,0.4);margin-right:4px;align-self:center;">QUICK TOGGLE:</span>' +
+                        allCohorts.map(function(c) {
+                            var active = mcPlayerCohortToggleSet && mcPlayerCohortToggleSet.has(c);
+                            return '<button class="mc-btn" onclick="mcToggleCohortChip(\'' + escapeHtml(c).replace(/'/g,"&#39;") + '\')" style="font-size:11px;padding:4px 10px;' + (active ? 'background:rgba(0,212,255,0.15);border-color:rgba(0,212,255,0.4);color:var(--cyan);' : '') + '">' + escapeHtml(c) + '</button>';
+                        }).join('') +
+                        (mcPlayerCohortToggleSet ? '<button class="mc-btn" onclick="mcClearCohortChips()" style="font-size:11px;padding:4px 10px;color:rgba(255,255,255,0.4);">&#x2715; Clear chips</button>' : '');
+                }
             }
 
             const search = (document.getElementById('mc-player-search')?.value || '').toLowerCase();
             const cohortVal = document.getElementById('mc-player-cohort-filter')?.value || 'all';
+            const studioVal = document.getElementById('mc-player-studio-filter')?.value || 'all';
+            const evoVal = document.getElementById('mc-player-evo-filter')?.value || 'all';
             const roleVal = document.getElementById('mc-player-role-filter')?.value || 'all';
+            const xcMin = parseInt(document.getElementById('mc-player-xc-min')?.value || '', 10);
+            const xcMax = parseInt(document.getElementById('mc-player-xc-max')?.value || '', 10);
 
             let filtered = mcPlayers.filter(function(p) {
-                if (search && !(p.name || '').toLowerCase().includes(search) && !(p.brand || '').toLowerCase().includes(search)) return false;
+                if (search) {
+                    var s = search;
+                    if (!(p.name||'').toLowerCase().includes(s) && !(p.brand||'').toLowerCase().includes(s) && !(p.email||'').toLowerCase().includes(s)) return false;
+                }
                 if (cohortVal !== 'all' && p.cohort !== cohortVal) return false;
+                if (mcPlayerCohortToggleSet && mcPlayerCohortToggleSet.size > 0 && !mcPlayerCohortToggleSet.has(p.cohort)) return false;
+                if (studioVal !== 'all') {
+                    if (studioVal === 'none') { if (p.studioId) return false; }
+                    else if (p.studioId !== studioVal) return false;
+                }
+                if (evoVal !== 'all' && mcGetEvoRank(p.xc) !== evoVal) return false;
                 if (roleVal !== 'all' && p.role !== roleVal) return false;
+                if (!isNaN(xcMin) && (p.xc || 0) < xcMin) return false;
+                if (!isNaN(xcMax) && (p.xc || 0) > xcMax) return false;
+                if (mcPlayerFavFilter && !p.favorite) return false;
                 return true;
             });
 
             // Sort
+            const EVO_ORDER = { Mythic: 5, Legend: 4, Master: 3, Expert: 2, Specialist: 1, Player: 0 };
             filtered.sort(function(a, b) {
+                // Favorites always float to top when active
+                if (mcPlayerSortField !== 'favorite') {
+                    if ((a.favorite ? 1 : 0) !== (b.favorite ? 1 : 0)) return a.favorite ? -1 : 1;
+                }
                 var va, vb;
-                if (mcPlayerSortField === 'xc') { va = a.xc || 0; vb = b.xc || 0; }
-                else if (mcPlayerSortField === 'badges') {
-                    var ba = a.badgeCounts || {}; va = (ba.primary||0)+(ba.premium||0)+(ba.executive||0)+(ba.signature||0);
-                    var bb = b.badgeCounts || {}; vb = (bb.primary||0)+(bb.premium||0)+(bb.executive||0)+(bb.signature||0);
-                } else if (mcPlayerSortField === 'brand') { va = (a.brand||'').toLowerCase(); vb = (b.brand||'').toLowerCase(); }
-                else { va = (a.name||'').toLowerCase(); vb = (b.name||'').toLowerCase(); }
+                switch (mcPlayerSortField) {
+                    case 'favorite': va = a.favorite ? 1 : 0; vb = b.favorite ? 1 : 0; break;
+                    case 'xc': va = a.xc || 0; vb = b.xc || 0; break;
+                    case 'evo': va = EVO_ORDER[mcGetEvoRank(a.xc)] || 0; vb = EVO_ORDER[mcGetEvoRank(b.xc)] || 0; break;
+                    case 'brand': va = (a.brand||'').toLowerCase(); vb = (b.brand||'').toLowerCase(); break;
+                    case 'email': va = (a.email||'').toLowerCase(); vb = (b.email||'').toLowerCase(); break;
+                    case 'cohort': va = (a.cohort||'').toLowerCase(); vb = (b.cohort||'').toLowerCase(); break;
+                    case 'studio': va = (MC_STUDIO_LABELS[a.studioId] || '').toLowerCase(); vb = (MC_STUDIO_LABELS[b.studioId] || '').toLowerCase(); break;
+                    default: va = (a.name||'').toLowerCase(); vb = (b.name||'').toLowerCase();
+                }
                 if (va < vb) return mcPlayerSortAsc ? -1 : 1;
                 if (va > vb) return mcPlayerSortAsc ? 1 : -1;
                 return 0;
@@ -11705,12 +11985,12 @@
             const statsEl = document.getElementById('mc-player-stats');
             if (statsEl) {
                 const total = mcPlayers.filter(function(p) { return p.role !== 'admin'; }).length;
-                const claimed = mcPlayers.filter(function(p) { return p.claimed; }).length;
+                const favs = mcPlayers.filter(function(p) { return p.favorite; }).length;
                 const totalXC = mcPlayers.reduce(function(s, p) { return s + (p.xc || 0); }, 0);
                 const cohortCount = new Set(mcPlayers.map(function(p) { return p.cohort; })).size;
                 statsEl.innerHTML = [
                     { label: 'PLAYERS', value: total, color: '#4f8ef7' },
-                    { label: 'CLAIMED', value: claimed, color: '#22c55e' },
+                    { label: 'FAVORITES', value: favs, color: '#f5c842' },
                     { label: 'TOTAL XC', value: totalXC.toLocaleString(), color: 'var(--cyan)' },
                     { label: 'COHORTS', value: cohortCount, color: '#a78bfa' },
                 ].map(function(s) {
@@ -11722,34 +12002,37 @@
             var dl = document.getElementById('mc-cohort-datalist');
             if (dl) {
                 dl.innerHTML = '';
-                var allCohorts = [...new Set(mcPlayers.map(function(p) { return p.cohort; }).filter(Boolean))].sort();
                 allCohorts.forEach(function(c) { var o = document.createElement('option'); o.value = c; dl.appendChild(o); });
             }
 
             tbody.innerHTML = filtered.map(function(p) {
-                const bc = p.badgeCounts || {};
-                const totalBadges = (bc.primary||0) + (bc.premium||0) + (bc.executive||0) + (bc.signature||0);
                 const roleColor = p.role === 'admin' ? '#f5c842' : '#4f8ef7';
                 const roleName = p.role === 'admin' ? 'Host' : 'Player';
-                const pathwayKey = p.pathway || '';
-                const pw = typeof CAD_PATHWAYS !== 'undefined' && CAD_PATHWAYS[pathwayKey] ? CAD_PATHWAYS[pathwayKey] : null;
-                const pathwayLabel = pw ? pw.icon + ' ' + pw.name : (pathwayKey || '—');
+                const studioLabel = p.studioId ? (MC_STUDIO_LABELS[p.studioId] || p.studioId) : '—';
+                const evo = mcGetEvoRank(p.xc);
+                const evoColor = mcGetEvoRankColor(evo);
+                const isSelected = mcSelectedPlayerIds.has(p.id);
                 const img = p.image
                     ? '<img src="' + p.image + '" style="width:28px;height:28px;border-radius:50%;object-fit:cover;border:1px solid rgba(255,255,255,0.1);">'
                     : '<div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#4f8ef7,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:white;">' + (p.brand || p.name || '?').charAt(0).toUpperCase() + '</div>';
-                return '<tr>' +
+                const rowBg = isSelected ? 'background:rgba(0,212,255,0.04);' : '';
+                return '<tr style="' + rowBg + '">' +
+                    '<td style="padding:0 8px;"><input type="checkbox" class="mc-player-row-cb" data-player-id="' + p.id + '"' + (isSelected ? ' checked' : '') + ' onchange="mcTogglePlayerSelection(\'' + p.id + '\')"></td>' +
+                    '<td style="text-align:center;"><button onclick="mcToggleFavorite(\'' + p.id + '\')" style="background:none;border:none;color:' + (p.favorite ? '#f5c842' : 'rgba(255,255,255,0.2)') + ';font-size:16px;cursor:pointer;padding:0;" title="' + (p.favorite ? 'Unfavorite' : 'Favorite') + '">' + (p.favorite ? '&#x2605;' : '&#x2606;') + '</button></td>' +
                     '<td><div style="display:flex;align-items:center;gap:10px;">' + img + '<span style="font-weight:700;">' + escapeHtml(p.name || '') + '</span></div></td>' +
                     '<td style="font-weight:800;color:var(--cyan);">' + escapeHtml(p.brand || '') + '</td>' +
+                    '<td style="font-size:11px;color:rgba(255,255,255,0.7);">' + escapeHtml(p.email || '—') + '</td>' +
                     '<td>' + escapeHtml(p.cohort || 'N/A') + '</td>' +
-                    '<td style="font-size:11px;">' + escapeHtml(pathwayLabel) + '</td>' +
-                    '<td><span class="mc-pill" style="background:' + roleColor + '15;border:1px solid ' + roleColor + '30;color:' + roleColor + ';">' + roleName + '</span></td>' +
+                    '<td style="font-size:11px;color:' + (p.studioId ? '#a78bfa' : 'rgba(255,255,255,0.3)') + ';">' + escapeHtml(studioLabel) + '</td>' +
                     '<td style="font-weight:800;color:#4f8ef7;">' + (p.xc || 0).toLocaleString() + '</td>' +
-                    '<td style="font-weight:700;color:#f5c842;">' + totalBadges + '</td>' +
+                    '<td><span class="mc-pill" style="background:' + evoColor + '15;border:1px solid ' + evoColor + '50;color:' + evoColor + ';font-weight:700;">' + evo + '</span></td>' +
+                    '<td><span class="mc-pill" style="background:' + roleColor + '15;border:1px solid ' + roleColor + '30;color:' + roleColor + ';">' + roleName + '</span></td>' +
                     '<td>' +
                         '<div style="position:relative;display:inline-block;">' +
                             '<button class="mc-btn" style="padding:4px 10px;font-size:12px;" onclick="mcTogglePlayerActions(this)">&#x22EF;</button>' +
-                            '<div class="mc-player-action-menu" style="display:none;position:absolute;right:0;top:100%;background:#0d1117;border:1px solid rgba(0,212,255,0.2);border-radius:10px;padding:6px;z-index:50;min-width:140px;box-shadow:0 8px 24px rgba(0,0,0,0.5);">' +
+                            '<div class="mc-player-action-menu" style="display:none;position:absolute;right:0;top:100%;background:#0d1117;border:1px solid rgba(0,212,255,0.2);border-radius:10px;padding:6px;z-index:50;min-width:160px;box-shadow:0 8px 24px rgba(0,0,0,0.5);">' +
                                 '<button onclick="mcEditPlayer(\'' + p.id + '\');mcCloseAllPlayerMenus();" style="display:block;width:100%;text-align:left;background:none;border:none;color:#e0e6ff;padding:8px 12px;font-size:12px;cursor:pointer;border-radius:6px;font-family:\'Jura\',sans-serif;" onmouseover="this.style.background=\'rgba(0,212,255,0.1)\'" onmouseout="this.style.background=\'none\'">&#x270F;&#xFE0F; Edit</button>' +
+                                '<button onclick="mcToggleFavorite(\'' + p.id + '\');mcCloseAllPlayerMenus();" style="display:block;width:100%;text-align:left;background:none;border:none;color:#f5c842;padding:8px 12px;font-size:12px;cursor:pointer;border-radius:6px;font-family:\'Jura\',sans-serif;" onmouseover="this.style.background=\'rgba(245,200,66,0.1)\'" onmouseout="this.style.background=\'none\'">' + (p.favorite ? '&#x2606; Unfavorite' : '&#x2605; Favorite') + '</button>' +
                                 '<button onclick="mcToggleHost(\'' + p.id + '\');mcCloseAllPlayerMenus();" style="display:block;width:100%;text-align:left;background:none;border:none;color:#f5c842;padding:8px 12px;font-size:12px;cursor:pointer;border-radius:6px;font-family:\'Jura\',sans-serif;" onmouseover="this.style.background=\'rgba(245,200,66,0.1)\'" onmouseout="this.style.background=\'none\'">' + (p.role === 'admin' ? '&#x1F464; Make Player' : '&#x1F451; Make Host') + '</button>' +
                                 '<button onclick="mcShowDeletePlayer(\'' + p.id + '\');mcCloseAllPlayerMenus();" style="display:block;width:100%;text-align:left;background:none;border:none;color:#ef4444;padding:8px 12px;font-size:12px;cursor:pointer;border-radius:6px;font-family:\'Jura\',sans-serif;" onmouseover="this.style.background=\'rgba(239,68,68,0.1)\'" onmouseout="this.style.background=\'none\'">&#x1F5D1;&#xFE0F; Delete</button>' +
                             '</div>' +
@@ -11759,13 +12042,31 @@
             }).join('');
 
             if (filtered.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:rgba(255,255,255,0.3);padding:30px;">No players found.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:rgba(255,255,255,0.3);padding:30px;">No players match filters.</td></tr>';
             }
+
+            mcUpdateBulkBar();
 
             // Update sidebar badge
             const badge = document.getElementById('mc-player-count');
             if (badge) badge.textContent = mcPlayers.filter(function(p){ return p.role !== 'admin'; }).length;
         }
+
+        // Expose new helpers
+        window.mcTogglePlayerFavFilter = mcTogglePlayerFavFilter;
+        window.mcToggleCohortChip = mcToggleCohortChip;
+        window.mcClearCohortChips = mcClearCohortChips;
+        window.mcClearPlayerFilters = mcClearPlayerFilters;
+        window.mcToggleFavorite = mcToggleFavorite;
+        window.mcTogglePlayerSelection = mcTogglePlayerSelection;
+        window.mcToggleSelectAllPlayers = mcToggleSelectAllPlayers;
+        window.mcClearSelection = mcClearSelection;
+        window.mcBulkAssignCohort = mcBulkAssignCohort;
+        window.mcBulkAssignStudio = mcBulkAssignStudio;
+        window.mcBulkAdjustXC = mcBulkAdjustXC;
+        window.mcBulkToggleFavorite = mcBulkToggleFavorite;
+        window.mcBulkDeletePlayers = mcBulkDeletePlayers;
+        window.mcGetEvoRank = mcGetEvoRank;
 
         function mcTogglePlayerActions(btn) {
             mcCloseAllPlayerMenus();
@@ -11798,6 +12099,7 @@
             document.getElementById('mc-pin-toggle-btn').textContent = 'Show';
             document.getElementById('mc-player-form-image').value = '';
             document.getElementById('mc-player-avatar-preview').innerHTML = '<span style="font-size:24px;">?</span>';
+            var studioEl = document.getElementById('mc-player-form-studio'); if (studioEl) studioEl.value = '';
             var modal = document.getElementById('mc-player-edit-modal');
             modal.style.display = 'flex';
         }
@@ -11814,6 +12116,7 @@
             document.getElementById('mc-player-form-pathway').value = p.pathway || '';
             document.getElementById('mc-player-form-email').value = p.email || '';
             document.getElementById('mc-player-form-joined').value = p.joinedAt || '';
+            var studioEl = document.getElementById('mc-player-form-studio'); if (studioEl) studioEl.value = p.studioId || '';
             document.getElementById('mc-player-form-xc').value = p.xc || 0;
             document.getElementById('mc-player-form-level').value = p.level || 1;
             document.getElementById('mc-player-form-pin').value = p.pin || '';
@@ -11848,6 +12151,7 @@
             var level = parseInt(document.getElementById('mc-player-form-level').value, 10) || 1;
             var pin = document.getElementById('mc-player-form-pin').value;
             var image = document.getElementById('mc-player-form-image').value;
+            var studioId = (document.getElementById('mc-player-form-studio')?.value) || '';
 
             if (id) {
                 // Update existing
@@ -11863,6 +12167,7 @@
                     mcPlayers[idx].level = level;
                     mcPlayers[idx].pin = pin;
                     mcPlayers[idx].image = image;
+                    mcPlayers[idx].studioId = studioId;
                 }
             } else {
                 // New player
@@ -11884,7 +12189,9 @@
                     badgeCounts: { signature: 0, executive: 0, premium: 0, primary: 0 },
                     pin: pin || mcGeneratePin(),
                     image: image,
-                    email: email
+                    email: email,
+                    studioId: studioId,
+                    favorite: false
                 };
                 mcPlayers.push(newPlayer);
             }
