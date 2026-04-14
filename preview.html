@@ -3734,14 +3734,9 @@
                                         <option value="all">All Studios</option>
                                         <option value="none">Unassigned</option>
                                     </select>
-                                    <select id="mc-player-evo-filter" class="mc-search" style="width:150px;flex:none;margin-bottom:0;" onchange="mcRenderPlayers()">
+                                    <select id="mc-player-evo-filter" class="mc-search" style="width:170px;flex:none;margin-bottom:0;" onchange="mcRenderPlayers()">
                                         <option value="all">All Evo Ranks</option>
-                                        <option value="Mythic">Mythic</option>
-                                        <option value="Legend">Legend</option>
-                                        <option value="Master">Master</option>
-                                        <option value="Expert">Expert</option>
-                                        <option value="Specialist">Specialist</option>
-                                        <option value="Player">Player</option>
+                                        <!-- Options populated dynamically from mcPflxRanks -->
                                     </select>
                                     <select id="mc-player-role-filter" class="mc-search" style="width:130px;flex:none;margin-bottom:0;" onchange="mcRenderPlayers()">
                                         <option value="all">All Roles</option>
@@ -11726,18 +11721,95 @@
             mcRenderPlayers();
         }
 
-        function mcGetEvoRank(xc) {
-            xc = xc || 0;
-            if (xc >= 25000) return 'Mythic';
-            if (xc >= 10000) return 'Legend';
-            if (xc >= 5000) return 'Master';
-            if (xc >= 2000) return 'Expert';
-            if (xc >= 500) return 'Specialist';
-            return 'Player';
+        // ═══ Canonical EVO Rank lookup — uses 10-tier mcPflxRanks data (matches X-Coin) ═══
+        // Returns the highest rank the player qualifies for based on XC threshold.
+        // Respects per-rank cohort scoping + hostControls + player overrides.
+        function mcGetEvoRankObj(player) {
+            if (!mcPflxRanks || mcPflxRanks.length === 0) return null;
+            var p = (typeof player === 'object' && player) ? player : null;
+            var xc = p ? (p.totalXc || p.xc || 0) : (typeof player === 'number' ? player : 0);
+
+            // Manual override pinned by host?
+            if (p && p.rankOverride) {
+                var o = mcPflxRanks.find(function(r) { return r.id === p.rankOverride || r.level === p.rankOverride; });
+                if (o) return o;
+            }
+
+            // Filter ranks available to this player's cohort
+            var eligible = mcPflxRanks.filter(function(r) {
+                if (r.allCohorts !== false) return true;
+                if (!p || !p.cohort) return false;
+                if (!r.cohorts || r.cohorts.length === 0) return false;
+                // Match by cohort group id OR cohort name via mcCohortGroups
+                return r.cohorts.some(function(cid) {
+                    var cg = (typeof mcCohortGroups !== 'undefined' ? mcCohortGroups : []).find(function(g) { return g.id === cid; });
+                    return cg && (cg.name === p.cohort || (cg.members || []).indexOf(p.id) >= 0);
+                });
+            });
+            if (eligible.length === 0) eligible = mcPflxRanks.slice();
+
+            // Sort descending by level and find highest xcoinUnlock <= xc
+            var sorted = eligible.slice().sort(function(a, b) { return (b.level || 0) - (a.level || 0); });
+            for (var i = 0; i < sorted.length; i++) {
+                if (xc >= (sorted[i].xcoinUnlock || 0)) return sorted[i];
+            }
+            return sorted[sorted.length - 1] || mcPflxRanks[0];
         }
 
-        function mcGetEvoRankColor(rank) {
-            return { Mythic: '#ef4444', Legend: '#f5c842', Master: '#a78bfa', Expert: '#22c55e', Specialist: '#4f8ef7', Player: 'rgba(255,255,255,0.5)' }[rank] || '#4f8ef7';
+        function mcGetEvoRank(xcOrPlayer) {
+            var r = mcGetEvoRankObj(xcOrPlayer);
+            return r ? r.name : 'Player';
+        }
+
+        function mcGetEvoRankColor(rankName) {
+            if (!mcPflxRanks) return '#4f8ef7';
+            var r = mcPflxRanks.find(function(x) { return x.name === rankName; });
+            return (r && r.color) ? r.color : '#4f8ef7';
+        }
+
+        function mcGetEvoRankLevel(rankName) {
+            if (!mcPflxRanks) return 0;
+            var r = mcPflxRanks.find(function(x) { return x.name === rankName; });
+            return r ? (r.level || 0) : 0;
+        }
+
+        // ─ Privileges derived from X-Coin tax/share/stake tables, keyed by level ─
+        function mcGetRankTaxRate(level) {
+            var rates = { 1:0.03, 2:0.05, 3:0.07, 4:0.10, 5:0.12, 6:0.14, 7:0.16, 8:0.18, 9:0.20, 10:0.22 };
+            return rates[level] || 0.05;
+        }
+        function mcGetRankSharePercent(level) {
+            var shares = { 1:2, 2:5, 3:8, 4:12, 5:18, 6:25, 7:32, 8:40, 9:48, 10:55 };
+            return shares[level] || 2;
+        }
+        function mcGetRankMaxStakePercent(level) {
+            if (level <= 2) return 5;
+            if (level <= 4) return 10;
+            if (level <= 6) return 20;
+            if (level <= 8) return 35;
+            return 50;
+        }
+        function mcGetRankAbilities(level) {
+            var abilities = ['View studio pool', 'Stake XC (up to 5%)'];
+            if (level >= 3) abilities.push('Stake up to 10%', 'Vote on Studio project adoption');
+            if (level >= 5) abilities.push('Stake up to 20%', 'Nominate players for Studio roles');
+            if (level >= 7) abilities.push('Stake up to 35%', 'Propose corporate tax adjustments');
+            if (level >= 9) abilities.push('Stake up to 50%', 'Studio co-ownership privileges', 'Override Studio project assignments');
+            return abilities;
+        }
+
+        // Populate the EVO filter dropdown from canonical ranks
+        function mcPopulateEvoFilterDropdown() {
+            var sel = document.getElementById('mc-player-evo-filter');
+            if (!sel || !mcPflxRanks) return;
+            var currentVal = sel.value || 'all';
+            var html = '<option value="all">All Evo Ranks</option>';
+            var ranks = mcPflxRanks.slice().sort(function(a, b) { return (a.level || 0) - (b.level || 0); });
+            ranks.forEach(function(r) {
+                html += '<option value="' + escapeHtml(r.name) + '">T' + (r.level || 0) + ' · ' + escapeHtml(r.name) + '</option>';
+            });
+            sel.innerHTML = html;
+            sel.value = currentVal;
         }
 
         function mcTogglePlayerFavFilter() {
@@ -11958,8 +12030,12 @@
                 return true;
             });
 
-            // Sort
-            const EVO_ORDER = { Mythic: 5, Legend: 4, Master: 3, Expert: 2, Specialist: 1, Player: 0 };
+            // Populate EVO filter dropdown from canonical ranks
+            mcPopulateEvoFilterDropdown();
+
+            // Sort — derive order from canonical rank levels
+            const EVO_ORDER = {};
+            (mcPflxRanks || []).forEach(function(r) { EVO_ORDER[r.name] = r.level || 0; });
             filtered.sort(function(a, b) {
                 // Favorites always float to top when active
                 if (mcPlayerSortField !== 'favorite') {
@@ -12009,8 +12085,11 @@
                 const roleColor = p.role === 'admin' ? '#f5c842' : '#4f8ef7';
                 const roleName = p.role === 'admin' ? 'Host' : 'Player';
                 const studioLabel = p.studioId ? (MC_STUDIO_LABELS[p.studioId] || p.studioId) : '—';
-                const evo = mcGetEvoRank(p.xc);
-                const evoColor = mcGetEvoRankColor(evo);
+                const evoObj = mcGetEvoRankObj(p);
+                const evo = evoObj ? evoObj.name : 'Player';
+                const evoColor = evoObj && evoObj.color ? evoObj.color : mcGetEvoRankColor(evo);
+                const evoIcon = evoObj && evoObj.icon ? evoObj.icon : '';
+                const evoLevel = evoObj ? (evoObj.level || 0) : 0;
                 const isSelected = mcSelectedPlayerIds.has(p.id);
                 const img = p.image
                     ? '<img src="' + p.image + '" style="width:28px;height:28px;border-radius:50%;object-fit:cover;border:1px solid rgba(255,255,255,0.1);">'
@@ -12025,7 +12104,7 @@
                     '<td>' + escapeHtml(p.cohort || 'N/A') + '</td>' +
                     '<td style="font-size:11px;color:' + (p.studioId ? '#a78bfa' : 'rgba(255,255,255,0.3)') + ';">' + escapeHtml(studioLabel) + '</td>' +
                     '<td style="font-weight:800;color:#4f8ef7;">' + (p.xc || 0).toLocaleString() + '</td>' +
-                    '<td><span class="mc-pill" style="background:' + evoColor + '15;border:1px solid ' + evoColor + '50;color:' + evoColor + ';font-weight:700;">' + evo + '</span></td>' +
+                    '<td><span class="mc-pill" title="Tier ' + evoLevel + '" style="background:' + evoColor + '15;border:1px solid ' + evoColor + '50;color:' + evoColor + ';font-weight:700;display:inline-flex;align-items:center;gap:4px;">' + (evoIcon ? '<span>' + evoIcon + '</span>' : '') + '<span style="font-size:9px;opacity:0.7;">T' + evoLevel + '</span> ' + escapeHtml(evo) + '</span></td>' +
                     '<td><span class="mc-pill" style="background:' + roleColor + '15;border:1px solid ' + roleColor + '30;color:' + roleColor + ';">' + roleName + '</span></td>' +
                     '<td>' +
                         '<div style="position:relative;display:inline-block;">' +
@@ -12067,6 +12146,14 @@
         window.mcBulkToggleFavorite = mcBulkToggleFavorite;
         window.mcBulkDeletePlayers = mcBulkDeletePlayers;
         window.mcGetEvoRank = mcGetEvoRank;
+        window.mcGetEvoRankObj = mcGetEvoRankObj;
+        window.mcGetEvoRankColor = mcGetEvoRankColor;
+        window.mcGetEvoRankLevel = mcGetEvoRankLevel;
+        window.mcGetRankTaxRate = mcGetRankTaxRate;
+        window.mcGetRankSharePercent = mcGetRankSharePercent;
+        window.mcGetRankMaxStakePercent = mcGetRankMaxStakePercent;
+        window.mcGetRankAbilities = mcGetRankAbilities;
+        window.mcPopulateEvoFilterDropdown = mcPopulateEvoFilterDropdown;
 
         function mcTogglePlayerActions(btn) {
             mcCloseAllPlayerMenus();
@@ -14428,6 +14515,22 @@
 
                 var specificLine = t.specificBadgeRequirements ? '<div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:4px;">Req: ' + escapeHtml(t.specificBadgeRequirements) + '</div>' : '';
 
+                // ── Rank privileges (tax / stake / share / abilities) ──
+                var lvl = t.level || 0;
+                var taxRate = mcGetRankTaxRate(lvl);
+                var sharePct = mcGetRankSharePercent(lvl);
+                var maxStake = mcGetRankMaxStakePercent(lvl);
+                var abilities = mcGetRankAbilities(lvl);
+                var privPanel = '<div style="background:rgba(245,200,66,0.03);border:1px solid rgba(245,200,66,0.1);border-radius:8px;padding:8px 10px;margin-top:8px;">' +
+                    '<div style="font-size:9px;color:rgba(245,200,66,0.6);font-weight:900;letter-spacing:0.1em;margin-bottom:6px;">&#x1F3C6; PRIVILEGES & ECONOMY</div>' +
+                    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px;">' +
+                    '<div><span style="font-size:9px;color:rgba(255,255,255,0.25);display:block;">STUDIO TAX</span><span style="font-size:11px;color:#f87171;font-weight:700;">' + Math.round(taxRate * 100) + '%</span></div>' +
+                    '<div><span style="font-size:9px;color:rgba(255,255,255,0.25);display:block;">SHARE CEILING</span><span style="font-size:11px;color:#60a5fa;font-weight:700;">' + sharePct + '%</span></div>' +
+                    '<div><span style="font-size:9px;color:rgba(255,255,255,0.25);display:block;">MAX STAKE</span><span style="font-size:11px;color:#a78bfa;font-weight:700;">' + maxStake + '%</span></div>' +
+                    '</div>' +
+                    '<div style="font-size:9px;color:rgba(255,255,255,0.3);line-height:1.4;">' + abilities.map(function(a) { return '&#x2022; ' + escapeHtml(a); }).join('<br>') + '</div>' +
+                    '</div>';
+
                 html += '<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:20px;padding:18px;border-left:3px solid ' + (t.color || '#4f8ef7') + ';display:flex;flex-direction:column;gap:10px;">' +
                     '<div style="display:flex;align-items:flex-start;gap:14px;">' +
                     imgBlock +
@@ -14445,6 +14548,7 @@
                     '<div style="text-align:right;min-width:60px;"><div style="font-size:16px;font-weight:900;color:#e0e6ff;">' + count + '</div><div style="font-size:10px;color:rgba(255,255,255,0.3);">players</div></div>' +
                     '</div>' +
                     autoPanel +
+                    privPanel +
                     '<div style="display:flex;gap:8px;margin-top:4px;">' +
                     '<button class="mc-btn" style="font-size:10px;padding:4px 10px;" onclick="mcShowRankForm(' + idx + ')">&#x270F; Edit</button>' +
                     '<button class="mc-btn" style="font-size:10px;padding:4px 10px;" onclick="mcDuplicateRank(' + idx + ')">&#x1F4CB; Duplicate</button>' +
