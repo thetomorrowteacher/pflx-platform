@@ -3685,6 +3685,16 @@
                             <div class="mc-panel active" id="mc-panel-dashboard">
                                 <h1 class="mc-page-title">Mission Dashboard</h1>
                                 <p class="mc-page-desc">Platform overview — players, tasks, progress, and activity.</p>
+                                <!-- ═══ PLATFORM NOTIFICATION BANNER ═══ -->
+                                <div id="pflx-home-notifications" style="display:none;margin-bottom:14px;"></div>
+                                <!-- ═══ DARKCAMPUS MESSAGE BOARD ═══ -->
+                                <div class="mc-card" id="pflx-dc-board-card" style="display:none;background:linear-gradient(135deg,rgba(0,240,255,0.06),rgba(79,142,247,0.04));border:1px solid rgba(0,240,255,0.2);">
+                                    <div class="mc-card-title" style="display:flex;align-items:center;justify-content:space-between;">
+                                        <span>&#x1F4E1; DARKCAMPUS BOARD</span>
+                                        <span style="font-size:10px;color:rgba(255,255,255,0.35);font-weight:400;">Tagged broadcasts</span>
+                                    </div>
+                                    <div id="pflx-dc-board-body" style="padding:6px;display:flex;flex-direction:column;gap:6px;max-height:240px;overflow-y:auto;"></div>
+                                </div>
                                 <div class="mc-stat-grid" id="mc-dashboard-stats"></div>
                                 <div class="mc-card">
                                     <div class="mc-card-title">RECENT ACTIVITY</div>
@@ -3708,6 +3718,14 @@
                                         <button class="mc-btn mc-btn-purple" onclick="mcNav('checkpoints')">&#x1F3C1; New Checkpoint</button>
                                         <button class="mc-btn" onclick="mcNav('media')">&#x1F3AC; Embed Media</button>
                                     </div>
+                                </div>
+                                <!-- ═══ DAILY LOOT BOX WIDGET ═══ -->
+                                <div class="mc-card" id="mc-loot-widget-card" style="background:linear-gradient(135deg,rgba(245,200,66,0.08),rgba(167,139,250,0.06));border:1px solid rgba(245,200,66,0.25);">
+                                    <div class="mc-card-title" style="display:flex;align-items:center;justify-content:space-between;">
+                                        <span>&#x1F381; DAILY REWARDS</span>
+                                        <span id="mc-loot-countdown" style="font-size:11px;color:rgba(255,255,255,0.45);font-weight:400;"></span>
+                                    </div>
+                                    <div id="mc-loot-widget-body" style="padding:8px;"></div>
                                 </div>
                             </div>
 
@@ -4527,6 +4545,130 @@
                                             </select>
                                         </div>
                                     </div>
+                                    <!-- ═══ Cohort Access ═══ -->
+                                    <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.1em;margin:16px 0 8px;text-transform:uppercase;">&#x1F465; Cohort Access</div>
+                                    <div style="background:rgba(79,142,247,0.03);border:1px solid rgba(79,142,247,0.12);border-radius:8px;padding:12px;margin-bottom:12px;">
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;margin-bottom:8px;">
+                                            <input type="checkbox" id="mc-season-all-cohorts" checked onchange="mcSeasonToggleAllCohorts(this)"> Open to all cohorts
+                                        </label>
+                                        <div id="mc-season-cohorts" style="display:none;flex-wrap:wrap;gap:6px;"></div>
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#fbbf24;cursor:pointer;margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.05);">
+                                            <input type="checkbox" id="mc-season-pass-enabled"> &#x1F39F; Enable Season Pass tier (daily bonus rewards for premium access)
+                                        </label>
+                                        <div id="mc-season-pass-config" style="display:none;margin-top:8px;padding:10px;background:rgba(245,200,66,0.04);border:1px solid rgba(245,200,66,0.15);border-radius:6px;">
+                                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                                                <div>
+                                                    <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px;">Pass Cost (XC)</label>
+                                                    <input type="number" id="mc-season-pass-cost" value="2000" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:5px;font-size:11px;box-sizing:border-box;">
+                                                </div>
+                                                <div>
+                                                    <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px;">Daily Bonus Multiplier</label>
+                                                    <input type="number" step="0.1" id="mc-season-pass-mult" value="2" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:5px;font-size:11px;box-sizing:border-box;">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- ═══ Rewards (Badges + XC + Upgrades) ═══ -->
+                                    <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.1em;margin:16px 0 8px;text-transform:uppercase;">&#x1F381; Season Rewards</div>
+                                    <div style="background:rgba(34,197,94,0.03);border:1px solid rgba(34,197,94,0.12);border-radius:8px;padding:12px;margin-bottom:12px;">
+                                        <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:6px;">&#x1F396; Digital Badges awarded on season completion</label>
+                                        <div id="mc-season-badges-pills" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;"></div>
+                                        <select id="mc-season-badge-picker" onchange="mcSeasonAddBadge(this)" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(34,197,94,0.2);color:#e0e6ff;padding:7px;border-radius:6px;font-size:11px;">
+                                            <option value="">+ Add a badge reward…</option>
+                                        </select>
+                                        <input type="hidden" id="mc-season-badges">
+
+                                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">
+                                            <div>
+                                                <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px;">Completion XC Bonus</label>
+                                                <input type="number" id="mc-season-xc-bonus" value="500" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:5px;font-size:11px;box-sizing:border-box;">
+                                            </div>
+                                            <div>
+                                                <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px;">Leaderboard Top-3 Bonus (XC)</label>
+                                                <input type="number" id="mc-season-top3-bonus" value="1000" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:5px;font-size:11px;box-sizing:border-box;">
+                                            </div>
+                                        </div>
+
+                                        <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin:10px 0 4px;">&#x26A1; Granted Upgrades</label>
+                                        <div id="mc-season-upgrades-pills" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;"></div>
+                                        <select id="mc-season-upgrade-picker" onchange="mcSeasonAddModifier(this,'upgrade')" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(79,142,247,0.2);color:#e0e6ff;padding:7px;border-radius:6px;font-size:11px;">
+                                            <option value="">+ Add an upgrade reward…</option>
+                                        </select>
+                                        <input type="hidden" id="mc-season-upgrades">
+                                    </div>
+
+                                    <!-- ═══ Fines / Taxes ═══ -->
+                                    <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.1em;margin:16px 0 8px;text-transform:uppercase;">&#x1F4B8; Fines &amp; Taxes (active this season)</div>
+                                    <div style="background:rgba(239,68,68,0.03);border:1px solid rgba(239,68,68,0.12);border-radius:8px;padding:12px;margin-bottom:12px;">
+                                        <div id="mc-season-fines-pills" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;"></div>
+                                        <select id="mc-season-fine-picker" onchange="mcSeasonAddModifier(this,'tax')" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(239,68,68,0.2);color:#e0e6ff;padding:7px;border-radius:6px;font-size:11px;">
+                                            <option value="">+ Add a fine/tax…</option>
+                                        </select>
+                                        <input type="hidden" id="mc-season-fines">
+                                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">
+                                            <div>
+                                                <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px;">Investment Tax Rate (% of XC per login)</label>
+                                                <input type="number" step="0.5" id="mc-season-invest-tax" value="0" placeholder="0-10" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:5px;font-size:11px;box-sizing:border-box;">
+                                            </div>
+                                            <div>
+                                                <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px;">Tax Destination</label>
+                                                <select id="mc-season-invest-tax-dest" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:5px;font-size:11px;">
+                                                    <option value="studio">Startup Studio Fund</option>
+                                                    <option value="treasury">Platform Treasury</option>
+                                                    <option value="leaderboard">Top Leaderboard Pool</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- ═══ Special Completion Rewards ═══ -->
+                                    <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.1em;margin:16px 0 8px;text-transform:uppercase;">&#x2B50; Special Completion Rewards</div>
+                                    <div style="background:rgba(167,139,250,0.03);border:1px solid rgba(167,139,250,0.12);border-radius:8px;padding:12px;margin-bottom:12px;">
+                                        <p style="margin:0 0 8px;font-size:10px;color:rgba(255,255,255,0.35);">Define bonus rewards for completing specific Tasks or Projects during this season. Players get these on top of the base XC.</p>
+                                        <div id="mc-season-special-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;"></div>
+                                        <button class="mc-btn" type="button" onclick="mcSeasonAddSpecialReward()" style="font-size:11px;padding:6px 12px;">+ Add Special Reward</button>
+                                    </div>
+
+                                    <!-- ═══ Automatic Logic Rules ═══ -->
+                                    <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.1em;margin:16px 0 8px;text-transform:uppercase;">&#x1F916; Automatic Logic Rules</div>
+                                    <div style="background:rgba(0,212,255,0.03);border:1px solid rgba(0,212,255,0.12);border-radius:8px;padding:12px;margin-bottom:12px;">
+                                        <p style="margin:0 0 8px;font-size:10px;color:rgba(255,255,255,0.35);">WHEN &lt;trigger&gt; THEN &lt;effect&gt; — automatic happenings run by the X-Bot engine during this season.</p>
+                                        <div id="mc-season-logic-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;"></div>
+                                        <button class="mc-btn" type="button" onclick="mcSeasonAddLogicRule()" style="font-size:11px;padding:6px 12px;">+ Add Logic Rule</button>
+                                    </div>
+
+                                    <!-- ═══ Loot Box Packages ═══ -->
+                                    <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.1em;margin:16px 0 8px;text-transform:uppercase;">&#x1F381; Loot Box Packages (Daily Login Rewards)</div>
+                                    <div style="background:rgba(245,200,66,0.03);border:1px solid rgba(245,200,66,0.15);border-radius:8px;padding:12px;margin-bottom:12px;">
+                                        <p style="margin:0 0 8px;font-size:10px;color:rgba(255,255,255,0.35);">Loot boxes offer random rewards (Multiplier x2, Time Shifter, Investment Tax, XC, Badges, Upgrades). Players claim once per reset interval.</p>
+                                        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;">
+                                            <div>
+                                                <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px;">Reset Interval</label>
+                                                <select id="mc-season-loot-reset" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:5px;font-size:11px;">
+                                                    <option value="daily">Daily (24h)</option>
+                                                    <option value="weekly">Weekly</option>
+                                                    <option value="checkpoint">Per Checkpoint</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px;">Rewards Per Box</label>
+                                                <input type="number" id="mc-season-loot-count" value="1" min="1" max="5" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:5px;font-size:11px;box-sizing:border-box;">
+                                            </div>
+                                            <div>
+                                                <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px;">Box Style</label>
+                                                <select id="mc-season-loot-style" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:5px;font-size:11px;">
+                                                    <option value="standard">Standard (1 pick)</option>
+                                                    <option value="pick3">Pick 1 of 3</option>
+                                                    <option value="bundle">Bundle (all items)</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px;">Drop Pool (click to toggle; weights default to 1)</label>
+                                        <div id="mc-season-loot-pool" style="display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto;padding:6px;background:rgba(10,18,40,0.4);border-radius:6px;"></div>
+                                        <input type="hidden" id="mc-season-loot-config">
+                                    </div>
+
                                     <div style="display:flex;gap:8px;justify-content:flex-end;">
                                         <button class="mc-btn" onclick="mcCancelSeasonForm()" style="padding:8px 16px;">Cancel</button>
                                         <button class="mc-btn mc-btn-green" onclick="mcSaveSeasonForm()" style="padding:8px 16px;">Save</button>
@@ -13669,6 +13811,14 @@
 
         var mcSeasonBannerData = '';
 
+        // Live working copies for season form arrays
+        var mcSeasonBadges = [];
+        var mcSeasonUpgrades = [];
+        var mcSeasonFines = [];
+        var mcSeasonSpecials = [];
+        var mcSeasonLogic = [];
+        var mcSeasonLootPool = [];
+
         function mcShowSeasonForm(index) {
             mcSeasonEditIndex = index;
             var form = document.getElementById('mc-season-form');
@@ -13676,37 +13826,315 @@
             form.style.display = 'block';
             mcSeasonBannerData = '';
 
-            if (index >= 0 && mcSeasons[index]) {
-                var s = mcSeasons[index];
-                var el;
-                el = document.getElementById('mc-season-name'); if (el) el.value = s.name || '';
-                el = document.getElementById('mc-season-start'); if (el) el.value = s.startDate || '';
-                el = document.getElementById('mc-season-end'); if (el) el.value = s.endDate || '';
-                el = document.getElementById('mc-season-semester'); if (el) el.value = s.semester || '';
-                el = document.getElementById('mc-season-status'); if (el) el.value = s.status || 'active';
-                // Banner
-                if (s.bannerImage) {
-                    mcSeasonBannerData = s.bannerImage;
-                    var img = document.getElementById('mc-season-banner-img');
-                    var ph = document.getElementById('mc-season-banner-placeholder');
-                    if (img) { img.src = s.bannerImage; img.style.display = 'block'; }
-                    if (ph) ph.style.display = 'none';
-                } else {
-                    mcResetSeasonBannerPreview();
-                }
+            var s = (index >= 0 && mcSeasons[index]) ? mcSeasons[index] : null;
+
+            // Basic fields
+            var el;
+            el = document.getElementById('mc-season-name'); if (el) el.value = s ? (s.name || '') : '';
+            el = document.getElementById('mc-season-start'); if (el) el.value = s ? (s.startDate || '') : '';
+            el = document.getElementById('mc-season-end'); if (el) el.value = s ? (s.endDate || '') : '';
+            el = document.getElementById('mc-season-semester'); if (el) el.value = s ? (s.semester || '') : '';
+            el = document.getElementById('mc-season-status'); if (el) el.value = s ? (s.status || 'active') : 'active';
+
+            // Banner
+            if (s && s.bannerImage) {
+                mcSeasonBannerData = s.bannerImage;
+                var img = document.getElementById('mc-season-banner-img');
+                var ph = document.getElementById('mc-season-banner-placeholder');
+                if (img) { img.src = s.bannerImage; img.style.display = 'block'; }
+                if (ph) ph.style.display = 'none';
             } else {
-                ['mc-season-name'].forEach(function(id) {
-                    var el = document.getElementById(id); if (el) el.value = '';
-                });
-                var el;
-                el = document.getElementById('mc-season-start'); if (el) el.value = '';
-                el = document.getElementById('mc-season-end'); if (el) el.value = '';
-                el = document.getElementById('mc-season-semester'); if (el) el.value = '';
-                el = document.getElementById('mc-season-status'); if (el) el.value = 'active';
                 mcResetSeasonBannerPreview();
             }
+
+            // Cohort access
+            var allCohorts = s ? (s.allCohorts !== false) : true;
+            var allCb = document.getElementById('mc-season-all-cohorts');
+            if (allCb) allCb.checked = allCohorts;
+            mcSeasonRenderCohortsList(s ? (s.cohorts || []) : [], allCohorts);
+
+            // Season Pass
+            var sp = (s && s.seasonPass) ? s.seasonPass : { enabled: false, cost: 2000, multiplier: 2 };
+            var spCb = document.getElementById('mc-season-pass-enabled');
+            if (spCb) {
+                spCb.checked = !!sp.enabled;
+                spCb.onchange = function() { var cfg = document.getElementById('mc-season-pass-config'); if (cfg) cfg.style.display = this.checked ? 'block' : 'none'; };
+            }
+            var spCfg = document.getElementById('mc-season-pass-config');
+            if (spCfg) spCfg.style.display = sp.enabled ? 'block' : 'none';
+            el = document.getElementById('mc-season-pass-cost'); if (el) el.value = sp.cost || 2000;
+            el = document.getElementById('mc-season-pass-mult'); if (el) el.value = sp.multiplier || 2;
+
+            // Rewards arrays
+            mcSeasonBadges = s && s.rewards && s.rewards.badges ? s.rewards.badges.slice() : [];
+            mcSeasonUpgrades = s && s.rewards && s.rewards.upgrades ? s.rewards.upgrades.slice() : [];
+            mcSeasonFines = s && s.fines ? s.fines.slice() : [];
+            mcSeasonSpecials = s && s.specialRewards ? JSON.parse(JSON.stringify(s.specialRewards)) : [];
+            mcSeasonLogic = s && s.logicRules ? JSON.parse(JSON.stringify(s.logicRules)) : [];
+            mcSeasonLootPool = s && s.lootBox && s.lootBox.pool ? JSON.parse(JSON.stringify(s.lootBox.pool)) : [];
+
+            el = document.getElementById('mc-season-xc-bonus'); if (el) el.value = (s && s.rewards && s.rewards.xcBonus != null) ? s.rewards.xcBonus : 500;
+            el = document.getElementById('mc-season-top3-bonus'); if (el) el.value = (s && s.rewards && s.rewards.top3Bonus != null) ? s.rewards.top3Bonus : 1000;
+
+            // Fines & Tax
+            var it = (s && s.investTax) ? s.investTax : { rate: 0, dest: 'studio' };
+            el = document.getElementById('mc-season-invest-tax'); if (el) el.value = it.rate || 0;
+            el = document.getElementById('mc-season-invest-tax-dest'); if (el) el.value = it.dest || 'studio';
+
+            // Loot Box
+            var lb = (s && s.lootBox) ? s.lootBox : { reset: 'daily', count: 1, style: 'standard' };
+            el = document.getElementById('mc-season-loot-reset'); if (el) el.value = lb.reset || 'daily';
+            el = document.getElementById('mc-season-loot-count'); if (el) el.value = lb.count || 1;
+            el = document.getElementById('mc-season-loot-style'); if (el) el.value = lb.style || 'standard';
+
+            // Populate pickers (badges/upgrades/fines) and render live sections
+            mcSeasonPopulatePickers();
+            mcSeasonRenderBadges();
+            mcSeasonRenderUpgrades();
+            mcSeasonRenderFines();
+            mcSeasonRenderSpecials();
+            mcSeasonRenderLogic();
+            mcSeasonRenderLootPool();
+
             form.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
+
+        // ── Season form helpers ─────────────────────────────────────
+        function mcSeasonToggleAllCohorts(cb) {
+            var wrap = document.getElementById('mc-season-cohorts');
+            if (wrap) wrap.style.display = cb.checked ? 'none' : 'flex';
+        }
+        function mcSeasonRenderCohortsList(selected, allCohorts) {
+            var wrap = document.getElementById('mc-season-cohorts');
+            if (!wrap) return;
+            wrap.style.display = allCohorts ? 'none' : 'flex';
+            var groups = (typeof mcCohortGroups !== 'undefined' && mcCohortGroups.length) ? mcCohortGroups : [];
+            if (!groups.length) { wrap.innerHTML = '<div style="font-size:11px;color:rgba(255,255,255,0.35);">No cohorts defined yet.</div>'; return; }
+            wrap.innerHTML = groups.map(function(g) {
+                var id = g.id || g.name;
+                var checked = selected.indexOf(id) >= 0 ? 'checked' : '';
+                return '<label style="display:inline-flex;align-items:center;gap:4px;background:rgba(79,142,247,0.08);padding:4px 8px;border-radius:12px;font-size:11px;color:#e0e6ff;cursor:pointer;">' +
+                       '<input type="checkbox" class="mc-season-cohort-cb" value="' + id + '" ' + checked + '> ' + (g.name || id) + '</label>';
+            }).join('');
+        }
+        function mcSeasonCollectCohorts() {
+            return Array.prototype.map.call(document.querySelectorAll('.mc-season-cohort-cb:checked'), function(cb) { return cb.value; });
+        }
+
+        function mcSeasonPopulatePickers() {
+            // Badges grouped by tier
+            var badgeSel = document.getElementById('mc-season-badge-picker');
+            if (badgeSel) {
+                var html = '<option value="">+ Add a badge reward…</option>';
+                var tiers = ['primary', 'premium', 'executive', 'signature'];
+                tiers.forEach(function(tier) {
+                    var items = (mcBadges || []).filter(function(b) { return (b.tier || 'primary') === tier; });
+                    if (items.length) {
+                        html += '<optgroup label="' + tier.toUpperCase() + '">';
+                        items.forEach(function(b) {
+                            html += '<option value="' + (b.id || b.name) + '">' + (b.icon || '🎖') + ' ' + (b.name || b.id) + '</option>';
+                        });
+                        html += '</optgroup>';
+                    }
+                });
+                badgeSel.innerHTML = html;
+            }
+            // Upgrades
+            var upSel = document.getElementById('mc-season-upgrade-picker');
+            if (upSel) {
+                var h = '<option value="">+ Add an upgrade reward…</option>';
+                (mcModifiers || []).filter(function(m) { return (m.type || 'upgrade') === 'upgrade'; }).forEach(function(m) {
+                    h += '<option value="' + (m.id || m.name) + '">⚡ ' + (m.name || m.id) + '</option>';
+                });
+                upSel.innerHTML = h;
+            }
+            // Fines/Taxes
+            var fSel = document.getElementById('mc-season-fine-picker');
+            if (fSel) {
+                var h2 = '<option value="">+ Add a fine/tax…</option>';
+                (mcModifiers || []).filter(function(m) { return (m.type || '') === 'tax' || (m.type || '') === 'fine'; }).forEach(function(m) {
+                    h2 += '<option value="' + (m.id || m.name) + '">💸 ' + (m.name || m.id) + '</option>';
+                });
+                fSel.innerHTML = h2;
+            }
+        }
+
+        function mcSeasonRenderPills(listId, arr, lookup, removeFn) {
+            var host = document.getElementById(listId);
+            if (!host) return;
+            if (!arr.length) { host.innerHTML = '<span style="font-size:10px;color:rgba(255,255,255,0.25);">None yet</span>'; return; }
+            host.innerHTML = arr.map(function(id, i) {
+                var item = lookup(id);
+                var label = item ? ((item.icon || '') + ' ' + (item.name || id)) : id;
+                return '<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,0.06);padding:4px 8px;border-radius:10px;font-size:11px;color:#e0e6ff;">' +
+                       label + '<button type="button" onclick="' + removeFn + '(' + i + ')" style="background:none;border:none;color:#ef4444;cursor:pointer;padding:0 0 0 4px;font-size:12px;">×</button></span>';
+            }).join('');
+        }
+        function mcSeasonRenderBadges() { mcSeasonRenderPills('mc-season-badges-pills', mcSeasonBadges, function(id) { return (mcBadges || []).find(function(b) { return (b.id || b.name) === id; }); }, 'mcSeasonRemoveBadge'); }
+        function mcSeasonRenderUpgrades() { mcSeasonRenderPills('mc-season-upgrades-pills', mcSeasonUpgrades, function(id) { return (mcModifiers || []).find(function(m) { return (m.id || m.name) === id; }); }, 'mcSeasonRemoveUpgrade'); }
+        function mcSeasonRenderFines() { mcSeasonRenderPills('mc-season-fines-pills', mcSeasonFines, function(id) { return (mcModifiers || []).find(function(m) { return (m.id || m.name) === id; }); }, 'mcSeasonRemoveFine'); }
+
+        function mcSeasonAddBadge(sel) {
+            var v = sel.value; if (!v) return;
+            if (mcSeasonBadges.indexOf(v) < 0) mcSeasonBadges.push(v);
+            sel.value = '';
+            mcSeasonRenderBadges();
+            mcSeasonRenderLootPool();
+        }
+        function mcSeasonRemoveBadge(i) { mcSeasonBadges.splice(i, 1); mcSeasonRenderBadges(); mcSeasonRenderLootPool(); }
+
+        function mcSeasonAddModifier(sel, type) {
+            var v = sel.value; if (!v) return;
+            var arr = type === 'upgrade' ? mcSeasonUpgrades : mcSeasonFines;
+            if (arr.indexOf(v) < 0) arr.push(v);
+            sel.value = '';
+            if (type === 'upgrade') mcSeasonRenderUpgrades(); else mcSeasonRenderFines();
+            mcSeasonRenderLootPool();
+        }
+        function mcSeasonRemoveUpgrade(i) { mcSeasonUpgrades.splice(i, 1); mcSeasonRenderUpgrades(); mcSeasonRenderLootPool(); }
+        function mcSeasonRemoveFine(i) { mcSeasonFines.splice(i, 1); mcSeasonRenderFines(); mcSeasonRenderLootPool(); }
+
+        // Special rewards (task/project-triggered bonuses)
+        function mcSeasonAddSpecialReward() {
+            mcSeasonSpecials.push({ triggerType: 'task', triggerId: '', rewardType: 'xc', rewardValue: 100 });
+            mcSeasonRenderSpecials();
+        }
+        function mcSeasonRemoveSpecial(i) { mcSeasonSpecials.splice(i, 1); mcSeasonRenderSpecials(); }
+        function mcSeasonUpdateSpecial(i, field, v) { if (mcSeasonSpecials[i]) { mcSeasonSpecials[i][field] = v; if (field === 'triggerType') mcSeasonRenderSpecials(); } }
+        function mcSeasonRenderSpecials() {
+            var host = document.getElementById('mc-season-special-list');
+            if (!host) return;
+            if (!mcSeasonSpecials.length) { host.innerHTML = '<span style="font-size:10px;color:rgba(255,255,255,0.25);">No special rewards yet. Click + Add.</span>'; return; }
+            host.innerHTML = mcSeasonSpecials.map(function(r, i) {
+                var pool = r.triggerType === 'project' ? (typeof mcProjects !== 'undefined' ? mcProjects : []) : (typeof mcTasks !== 'undefined' ? mcTasks : []);
+                var opts = '<option value="">— pick ' + r.triggerType + ' —</option>' + pool.map(function(p) {
+                    var pid = p.id || p.name;
+                    return '<option value="' + pid + '" ' + (r.triggerId === pid ? 'selected' : '') + '>' + (p.title || p.name || pid) + '</option>';
+                }).join('');
+                return '<div style="display:grid;grid-template-columns:auto 1fr auto auto auto;gap:6px;align-items:center;background:rgba(167,139,250,0.06);padding:6px;border-radius:6px;">' +
+                    '<select onchange="mcSeasonUpdateSpecial(' + i + ',\'triggerType\',this.value)" style="background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:4px;border-radius:4px;font-size:11px;">' +
+                        '<option value="task" ' + (r.triggerType === 'task' ? 'selected' : '') + '>Task</option>' +
+                        '<option value="project" ' + (r.triggerType === 'project' ? 'selected' : '') + '>Project</option>' +
+                    '</select>' +
+                    '<select onchange="mcSeasonUpdateSpecial(' + i + ',\'triggerId\',this.value)" style="background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:4px;border-radius:4px;font-size:11px;">' + opts + '</select>' +
+                    '<select onchange="mcSeasonUpdateSpecial(' + i + ',\'rewardType\',this.value)" style="background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:4px;border-radius:4px;font-size:11px;">' +
+                        '<option value="xc" ' + (r.rewardType === 'xc' ? 'selected' : '') + '>XC</option>' +
+                        '<option value="badge" ' + (r.rewardType === 'badge' ? 'selected' : '') + '>Badge</option>' +
+                        '<option value="upgrade" ' + (r.rewardType === 'upgrade' ? 'selected' : '') + '>Upgrade</option>' +
+                        '<option value="loot" ' + (r.rewardType === 'loot' ? 'selected' : '') + '>Loot Box</option>' +
+                    '</select>' +
+                    '<input type="text" value="' + (r.rewardValue || '') + '" onchange="mcSeasonUpdateSpecial(' + i + ',\'rewardValue\',this.value)" placeholder="value" style="width:90px;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:4px;border-radius:4px;font-size:11px;">' +
+                    '<button type="button" onclick="mcSeasonRemoveSpecial(' + i + ')" style="background:rgba(239,68,68,0.2);border:none;color:#ef4444;padding:3px 8px;border-radius:4px;cursor:pointer;font-size:11px;">×</button>' +
+                '</div>';
+            }).join('');
+        }
+
+        // Logic rules (WHEN trigger THEN effect)
+        function mcSeasonAddLogicRule() {
+            mcSeasonLogic.push({ trigger: 'onLogin', condition: '', effect: 'grantXc', amount: 50 });
+            mcSeasonRenderLogic();
+        }
+        function mcSeasonRemoveLogic(i) { mcSeasonLogic.splice(i, 1); mcSeasonRenderLogic(); }
+        function mcSeasonUpdateLogic(i, field, v) { if (mcSeasonLogic[i]) mcSeasonLogic[i][field] = v; }
+        function mcSeasonRenderLogic() {
+            var host = document.getElementById('mc-season-logic-list');
+            if (!host) return;
+            if (!mcSeasonLogic.length) { host.innerHTML = '<span style="font-size:10px;color:rgba(255,255,255,0.25);">No logic rules yet.</span>'; return; }
+            host.innerHTML = mcSeasonLogic.map(function(r, i) {
+                return '<div style="display:grid;grid-template-columns:auto 1fr auto auto auto;gap:6px;align-items:center;background:rgba(0,212,255,0.06);padding:6px;border-radius:6px;">' +
+                    '<select onchange="mcSeasonUpdateLogic(' + i + ',\'trigger\',this.value)" style="background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:4px;border-radius:4px;font-size:11px;">' +
+                        '<option value="onLogin" ' + (r.trigger === 'onLogin' ? 'selected' : '') + '>On Login</option>' +
+                        '<option value="onCheckpoint" ' + (r.trigger === 'onCheckpoint' ? 'selected' : '') + '>On Checkpoint Complete</option>' +
+                        '<option value="onTaskComplete" ' + (r.trigger === 'onTaskComplete' ? 'selected' : '') + '>On Task Complete</option>' +
+                        '<option value="onRankUp" ' + (r.trigger === 'onRankUp' ? 'selected' : '') + '>On Rank Up</option>' +
+                        '<option value="onIdle" ' + (r.trigger === 'onIdle' ? 'selected' : '') + '>On Idle (no activity)</option>' +
+                    '</select>' +
+                    '<input type="text" value="' + (r.condition || '') + '" placeholder="condition (e.g. xc > 500)" onchange="mcSeasonUpdateLogic(' + i + ',\'condition\',this.value)" style="background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:4px;border-radius:4px;font-size:11px;">' +
+                    '<select onchange="mcSeasonUpdateLogic(' + i + ',\'effect\',this.value)" style="background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:4px;border-radius:4px;font-size:11px;">' +
+                        '<option value="grantXc" ' + (r.effect === 'grantXc' ? 'selected' : '') + '>Grant XC</option>' +
+                        '<option value="deductXc" ' + (r.effect === 'deductXc' ? 'selected' : '') + '>Deduct XC</option>' +
+                        '<option value="grantLoot" ' + (r.effect === 'grantLoot' ? 'selected' : '') + '>Grant Loot Box</option>' +
+                        '<option value="grantBadge" ' + (r.effect === 'grantBadge' ? 'selected' : '') + '>Grant Badge</option>' +
+                        '<option value="applyUpgrade" ' + (r.effect === 'applyUpgrade' ? 'selected' : '') + '>Apply Upgrade</option>' +
+                        '<option value="notify" ' + (r.effect === 'notify' ? 'selected' : '') + '>Send Notification</option>' +
+                    '</select>' +
+                    '<input type="text" value="' + (r.amount || '') + '" placeholder="amt/id" onchange="mcSeasonUpdateLogic(' + i + ',\'amount\',this.value)" style="width:90px;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:4px;border-radius:4px;font-size:11px;">' +
+                    '<button type="button" onclick="mcSeasonRemoveLogic(' + i + ')" style="background:rgba(239,68,68,0.2);border:none;color:#ef4444;padding:3px 8px;border-radius:4px;cursor:pointer;font-size:11px;">×</button>' +
+                '</div>';
+            }).join('');
+        }
+
+        // Loot pool - aggregate selected rewards (upgrades, taxes, badges) + preset XC packs
+        function mcSeasonRenderLootPool() {
+            var host = document.getElementById('mc-season-loot-pool');
+            if (!host) return;
+            // Build available items from current selections + XC preset packs
+            var available = [];
+            mcSeasonUpgrades.forEach(function(id) {
+                var m = (mcModifiers || []).find(function(x) { return (x.id || x.name) === id; });
+                available.push({ key: 'upgrade:' + id, icon: '⚡', label: m ? m.name : id, type: 'upgrade' });
+            });
+            mcSeasonFines.forEach(function(id) {
+                var m = (mcModifiers || []).find(function(x) { return (x.id || x.name) === id; });
+                available.push({ key: 'tax:' + id, icon: '💸', label: m ? m.name : id, type: 'tax' });
+            });
+            mcSeasonBadges.forEach(function(id) {
+                var b = (mcBadges || []).find(function(x) { return (x.id || x.name) === id; });
+                available.push({ key: 'badge:' + id, icon: b && b.icon ? b.icon : '🎖', label: b ? b.name : id, type: 'badge' });
+            });
+            // XC preset packs
+            [50, 100, 300, 500, 1000].forEach(function(n) {
+                available.push({ key: 'xc:' + n, icon: '🪙', label: n + ' XC', type: 'xc' });
+            });
+            // Special Time Shifter / Multiplier presets
+            [{ key: 'mult:2x', icon: '✨', label: 'Multiplier x2 (next task)' },
+             { key: 'mult:3x', icon: '✨', label: 'Multiplier x3 (next task)' },
+             { key: 'time:shift', icon: '⏳', label: 'Time Shifter (freeze fines 24h)' },
+             { key: 'time:skip', icon: '⏭', label: 'Time Skip (auto-complete 1 task)' }].forEach(function(p) {
+                available.push({ key: p.key, icon: p.icon, label: p.label, type: 'special' });
+            });
+
+            host.innerHTML = available.map(function(it) {
+                var existing = mcSeasonLootPool.find(function(p) { return p.key === it.key; });
+                var checked = existing ? 'checked' : '';
+                var weight = existing ? existing.weight : 1;
+                return '<label style="display:flex;align-items:center;gap:8px;padding:4px 6px;font-size:11px;color:#e0e6ff;">' +
+                       '<input type="checkbox" data-key="' + it.key + '" data-label="' + it.label.replace(/"/g,'&quot;') + '" data-type="' + it.type + '" data-icon="' + it.icon + '" class="mc-season-loot-cb" onchange="mcSeasonToggleLoot(this)" ' + checked + '> ' +
+                       '<span style="flex:1;">' + it.icon + ' ' + it.label + '</span>' +
+                       '<span style="font-size:10px;color:rgba(255,255,255,0.3);">weight</span>' +
+                       '<input type="number" min="1" value="' + weight + '" data-key="' + it.key + '" onchange="mcSeasonUpdateLootWeight(this)" style="width:52px;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:3px;border-radius:4px;font-size:11px;">' +
+                       '</label>';
+            }).join('');
+        }
+        function mcSeasonToggleLoot(cb) {
+            var k = cb.dataset.key;
+            var idx = mcSeasonLootPool.findIndex(function(p) { return p.key === k; });
+            if (cb.checked && idx < 0) {
+                mcSeasonLootPool.push({ key: k, label: cb.dataset.label, type: cb.dataset.type, icon: cb.dataset.icon, weight: 1 });
+            } else if (!cb.checked && idx >= 0) {
+                mcSeasonLootPool.splice(idx, 1);
+            }
+        }
+        function mcSeasonUpdateLootWeight(input) {
+            var k = input.dataset.key;
+            var p = mcSeasonLootPool.find(function(x) { return x.key === k; });
+            if (p) p.weight = Math.max(1, parseInt(input.value, 10) || 1);
+        }
+
+        window.mcSeasonToggleAllCohorts = mcSeasonToggleAllCohorts;
+        window.mcSeasonAddBadge = mcSeasonAddBadge;
+        window.mcSeasonRemoveBadge = mcSeasonRemoveBadge;
+        window.mcSeasonAddModifier = mcSeasonAddModifier;
+        window.mcSeasonRemoveUpgrade = mcSeasonRemoveUpgrade;
+        window.mcSeasonRemoveFine = mcSeasonRemoveFine;
+        window.mcSeasonAddSpecialReward = mcSeasonAddSpecialReward;
+        window.mcSeasonRemoveSpecial = mcSeasonRemoveSpecial;
+        window.mcSeasonUpdateSpecial = mcSeasonUpdateSpecial;
+        window.mcSeasonAddLogicRule = mcSeasonAddLogicRule;
+        window.mcSeasonRemoveLogic = mcSeasonRemoveLogic;
+        window.mcSeasonUpdateLogic = mcSeasonUpdateLogic;
+        window.mcSeasonToggleLoot = mcSeasonToggleLoot;
+        window.mcSeasonUpdateLootWeight = mcSeasonUpdateLootWeight;
 
         function mcResetSeasonBannerPreview() {
             var img = document.getElementById('mc-season-banner-img');
@@ -13745,6 +14173,9 @@
             var name = (document.getElementById('mc-season-name')?.value || '').trim();
             if (!name) { alert('Season name is required.'); return; }
 
+            var allCohortsCb = document.getElementById('mc-season-all-cohorts');
+            var allCohorts = allCohortsCb ? !!allCohortsCb.checked : true;
+
             var obj = {
                 id: mcSeasonEditIndex >= 0 ? mcSeasons[mcSeasonEditIndex].id : 'season-' + Date.now(),
                 name: name,
@@ -13752,7 +14183,33 @@
                 endDate: document.getElementById('mc-season-end')?.value || '',
                 semester: document.getElementById('mc-season-semester')?.value || '',
                 status: document.getElementById('mc-season-status')?.value || 'active',
-                bannerImage: mcSeasonBannerData || (mcSeasonEditIndex >= 0 ? (mcSeasons[mcSeasonEditIndex].bannerImage || '') : '')
+                bannerImage: mcSeasonBannerData || (mcSeasonEditIndex >= 0 ? (mcSeasons[mcSeasonEditIndex].bannerImage || '') : ''),
+                allCohorts: allCohorts,
+                cohorts: allCohorts ? [] : mcSeasonCollectCohorts(),
+                seasonPass: {
+                    enabled: !!document.getElementById('mc-season-pass-enabled')?.checked,
+                    cost: parseInt(document.getElementById('mc-season-pass-cost')?.value, 10) || 2000,
+                    multiplier: parseFloat(document.getElementById('mc-season-pass-mult')?.value) || 2
+                },
+                rewards: {
+                    badges: mcSeasonBadges.slice(),
+                    upgrades: mcSeasonUpgrades.slice(),
+                    xcBonus: parseInt(document.getElementById('mc-season-xc-bonus')?.value, 10) || 0,
+                    top3Bonus: parseInt(document.getElementById('mc-season-top3-bonus')?.value, 10) || 0
+                },
+                fines: mcSeasonFines.slice(),
+                investTax: {
+                    rate: parseFloat(document.getElementById('mc-season-invest-tax')?.value) || 0,
+                    dest: document.getElementById('mc-season-invest-tax-dest')?.value || 'studio'
+                },
+                specialRewards: JSON.parse(JSON.stringify(mcSeasonSpecials)),
+                logicRules: JSON.parse(JSON.stringify(mcSeasonLogic)),
+                lootBox: {
+                    reset: document.getElementById('mc-season-loot-reset')?.value || 'daily',
+                    count: parseInt(document.getElementById('mc-season-loot-count')?.value, 10) || 1,
+                    style: document.getElementById('mc-season-loot-style')?.value || 'standard',
+                    pool: JSON.parse(JSON.stringify(mcSeasonLootPool))
+                }
             };
 
             if (mcSeasonEditIndex >= 0) { mcSeasons[mcSeasonEditIndex] = obj; }
@@ -13761,6 +14218,294 @@
             mcCancelSeasonForm();
             mcRenderSeasons();
             mcRenderSettingsSeasons();
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // LOOT BOX ENGINE
+        // ═══════════════════════════════════════════════════════════
+        function pflxGetActiveSeason() {
+            if (typeof mcSeasons === 'undefined' || !mcSeasons.length) return null;
+            var s = mcSeasons.find(function(x) { return x.status === 'active'; });
+            return s || mcSeasons[0];
+        }
+        function pflxSeasonAppliesToPlayer(season, player) {
+            if (!season) return false;
+            if (season.allCohorts !== false) return true;
+            if (!player) return false;
+            var pc = player.cohort || player.cohortId;
+            return (season.cohorts || []).indexOf(pc) >= 0;
+        }
+        function pflxLootResetWindowMs(reset) {
+            if (reset === 'weekly') return 7 * 24 * 3600 * 1000;
+            if (reset === 'checkpoint') return 14 * 24 * 3600 * 1000;
+            return 24 * 3600 * 1000;
+        }
+        function pflxLootAvailable(player, season) {
+            if (!season || !season.lootBox || !(season.lootBox.pool || []).length) return false;
+            var last = (player && player.lastLootClaim) || 0;
+            var win = pflxLootResetWindowMs(season.lootBox.reset);
+            return (Date.now() - last) >= win;
+        }
+        function pflxLootNextResetMs(player, season) {
+            if (!season) return 0;
+            var last = (player && player.lastLootClaim) || 0;
+            return Math.max(0, last + pflxLootResetWindowMs(season.lootBox.reset) - Date.now());
+        }
+        function pflxWeightedPick(pool) {
+            if (!pool || !pool.length) return null;
+            var total = pool.reduce(function(s, p) { return s + (p.weight || 1); }, 0);
+            var r = Math.random() * total;
+            for (var i = 0; i < pool.length; i++) {
+                r -= (pool[i].weight || 1);
+                if (r <= 0) return pool[i];
+            }
+            return pool[pool.length - 1];
+        }
+        function pflxRollLootBox(season, player) {
+            if (!season || !season.lootBox) return [];
+            var pool = (season.lootBox.pool || []).slice();
+            if (!pool.length) return [];
+            var style = season.lootBox.style || 'standard';
+            var count = season.lootBox.count || 1;
+            var results = [];
+            if (style === 'bundle') {
+                results = pool.slice();
+            } else if (style === 'pick3') {
+                // offer 3 random choices, player picks one — here auto-pick weighted
+                var picks = [];
+                var p = pool.slice();
+                for (var i = 0; i < Math.min(3, p.length); i++) {
+                    var c = pflxWeightedPick(p);
+                    picks.push(c);
+                    p = p.filter(function(x) { return x.key !== c.key; });
+                }
+                results = [pflxWeightedPick(picks)];
+            } else {
+                for (var j = 0; j < count; j++) {
+                    var pick = pflxWeightedPick(pool);
+                    if (pick) results.push(pick);
+                }
+            }
+            // Season Pass multiplier hook
+            if (season.seasonPass && season.seasonPass.enabled && player && player.seasonPassActive) {
+                var mult = season.seasonPass.multiplier || 1;
+                results = results.map(function(r) {
+                    var clone = Object.assign({}, r);
+                    if (r.type === 'xc') {
+                        var m = r.key.split(':')[1];
+                        clone.key = 'xc:' + Math.round(parseInt(m, 10) * mult);
+                        clone.label = Math.round(parseInt(m, 10) * mult) + ' XC (Pass ×' + mult + ')';
+                    }
+                    return clone;
+                });
+            }
+            return results;
+        }
+        function pflxGrantLootReward(player, reward) {
+            if (!player || !reward) return;
+            var parts = (reward.key || '').split(':');
+            var type = parts[0];
+            var val = parts[1];
+            if (type === 'xc') {
+                var amt = parseInt(val, 10) || 0;
+                player.totalXc = (player.totalXc || player.xc || 0) + amt;
+                player.xc = player.totalXc;
+            } else if (type === 'badge') {
+                player.badges = player.badges || [];
+                if (player.badges.indexOf(val) < 0) player.badges.push(val);
+            } else if (type === 'upgrade') {
+                player.upgrades = player.upgrades || [];
+                player.upgrades.push({ id: val, grantedAt: Date.now() });
+            } else if (type === 'tax') {
+                player.activeFines = player.activeFines || [];
+                player.activeFines.push({ id: val, appliedAt: Date.now() });
+            } else if (type === 'mult') {
+                player.multipliers = player.multipliers || [];
+                player.multipliers.push({ amount: parseFloat(val) || 2, remaining: 1, grantedAt: Date.now() });
+            } else if (type === 'time') {
+                player.timeShifts = player.timeShifts || [];
+                player.timeShifts.push({ mode: val, grantedAt: Date.now() });
+            }
+        }
+        function pflxClaimDailyLootBox() {
+            var player = mcGetCurrentPlayer ? mcGetCurrentPlayer() : null;
+            if (!player) { alert('No active player.'); return; }
+            var season = pflxGetActiveSeason();
+            if (!pflxSeasonAppliesToPlayer(season, player)) { alert('No active season for your cohort.'); return; }
+            if (!pflxLootAvailable(player, season)) { alert('Loot box already claimed. Check back later!'); return; }
+            var rewards = pflxRollLootBox(season, player);
+            if (!rewards.length) { alert('No rewards configured.'); return; }
+            rewards.forEach(function(r) { pflxGrantLootReward(player, r); });
+
+            // Investment tax deduction on claim/login
+            if (season.investTax && season.investTax.rate > 0) {
+                var tax = Math.round(((player.totalXc || 0) * season.investTax.rate) / 100);
+                if (tax > 0) {
+                    player.totalXc = (player.totalXc || 0) - tax;
+                    player.xc = player.totalXc;
+                    player.investedXc = (player.investedXc || 0) + tax;
+                    player.investTaxDest = season.investTax.dest;
+                }
+            }
+
+            player.lastLootClaim = Date.now();
+            try { mcSaveData('players'); } catch (e) {}
+            try { mcBroadcastToApps('pflx_loot_claim', { playerId: player.id, rewards: rewards }); } catch (e) {}
+            mcRenderLootWidget();
+            alert('🎁 You received:\n\n' + rewards.map(function(r) { return '• ' + (r.icon || '') + ' ' + r.label; }).join('\n'));
+        }
+        function mcGetCurrentPlayer() {
+            // Preferred: explicit current user lookup
+            if (typeof activeSession !== 'undefined' && activeSession && activeSession.playerId) {
+                return (mcPlayers || []).find(function(p) { return p.id === activeSession.playerId; });
+            }
+            // Fallback: first player (demo context)
+            return (mcPlayers || [])[0] || null;
+        }
+        function mcRenderLootWidget() {
+            var body = document.getElementById('mc-loot-widget-body');
+            var cd = document.getElementById('mc-loot-countdown');
+            if (!body) return;
+            var player = mcGetCurrentPlayer();
+            var season = pflxGetActiveSeason();
+            if (!season || !season.lootBox || !(season.lootBox.pool || []).length) {
+                body.innerHTML = '<div style="padding:10px;font-size:12px;color:rgba(255,255,255,0.35);">No active season loot box configured.</div>';
+                if (cd) cd.textContent = '';
+                return;
+            }
+            if (!pflxSeasonAppliesToPlayer(season, player)) {
+                body.innerHTML = '<div style="padding:10px;font-size:12px;color:rgba(255,255,255,0.35);">Current season does not apply to your cohort.</div>';
+                if (cd) cd.textContent = '';
+                return;
+            }
+            var available = pflxLootAvailable(player, season);
+            if (available) {
+                if (cd) cd.textContent = 'Ready to claim';
+                body.innerHTML =
+                    '<div style="display:flex;align-items:center;gap:12px;padding:8px;">' +
+                    '<div style="font-size:42px;animation:pulse 1.6s infinite ease-in-out;">&#x1F381;</div>' +
+                    '<div style="flex:1;">' +
+                    '<div style="font-size:13px;color:#fbbf24;font-weight:700;">A loot box is waiting for you!</div>' +
+                    '<div style="font-size:11px;color:rgba(255,255,255,0.5);">Season: ' + (season.name || 'Active') + ' · ' + (season.lootBox.style || 'standard') + ' · ' + (season.lootBox.count || 1) + ' reward' + ((season.lootBox.count || 1) > 1 ? 's' : '') + '</div>' +
+                    '</div>' +
+                    '<button class="mc-btn mc-btn-green" onclick="pflxClaimDailyLootBox()" style="padding:10px 18px;font-weight:700;">CLAIM</button>' +
+                    '</div>';
+            } else {
+                var ms = pflxLootNextResetMs(player, season);
+                var h = Math.floor(ms / 3600000);
+                var m = Math.floor((ms % 3600000) / 60000);
+                if (cd) cd.textContent = 'Next reset in ' + h + 'h ' + m + 'm';
+                body.innerHTML =
+                    '<div style="display:flex;align-items:center;gap:12px;padding:8px;opacity:0.6;">' +
+                    '<div style="font-size:42px;">&#x1F4E6;</div>' +
+                    '<div style="flex:1;">' +
+                    '<div style="font-size:13px;color:#94a3b8;">Already claimed — come back later!</div>' +
+                    '<div style="font-size:11px;color:rgba(255,255,255,0.35);">Resets in ' + h + 'h ' + m + 'm</div>' +
+                    '</div>' +
+                    '</div>';
+            }
+        }
+        window.pflxClaimDailyLootBox = pflxClaimDailyLootBox;
+        window.mcRenderLootWidget = mcRenderLootWidget;
+        window.pflxGetActiveSeason = pflxGetActiveSeason;
+        window.pflxLootAvailable = pflxLootAvailable;
+
+        // Refresh widget every 60s so countdown updates
+        setInterval(function() { try { mcRenderLootWidget(); } catch (e) {} }, 60000);
+
+        // ═══════════════════════════════════════════════════════════
+        // PLATFORM HOME NOTIFICATIONS + DARKCAMPUS BOARD
+        // ═══════════════════════════════════════════════════════════
+        function pflxRenderHomeNotifications() {
+            var host = document.getElementById('pflx-home-notifications');
+            if (!host) return;
+            var notes = [];
+            var player = mcGetCurrentPlayer();
+            var season = pflxGetActiveSeason();
+            if (season && pflxSeasonAppliesToPlayer(season, player) && pflxLootAvailable(player, season)) {
+                notes.push({
+                    icon: '🎁', tone: 'gold',
+                    title: 'Rewards available!',
+                    msg: 'Your daily loot box is ready in Mission Dashboard.',
+                    action: { label: 'CLAIM', fn: 'pflxClaimDailyLootBox()' }
+                });
+            }
+            if (season && season.seasonPass && season.seasonPass.enabled && player && !player.seasonPassActive) {
+                notes.push({
+                    icon: '🎟', tone: 'purple',
+                    title: 'Season Pass available',
+                    msg: (season.name || 'Season') + ' Pass unlocks daily bonus ×' + (season.seasonPass.multiplier || 2) + ' — ' + (season.seasonPass.cost || 2000) + ' XC.',
+                    action: null
+                });
+            }
+            if (!notes.length) { host.style.display = 'none'; return; }
+            host.style.display = 'flex';
+            host.style.flexDirection = 'column';
+            host.style.gap = '8px';
+            host.innerHTML = notes.map(function(n) {
+                var border = n.tone === 'gold' ? 'rgba(245,200,66,0.35)' : 'rgba(167,139,250,0.35)';
+                var bg = n.tone === 'gold' ? 'rgba(245,200,66,0.08)' : 'rgba(167,139,250,0.08)';
+                var color = n.tone === 'gold' ? '#fbbf24' : '#c4b5fd';
+                return '<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid ' + border + ';background:' + bg + ';border-radius:10px;">' +
+                       '<div style="font-size:24px;">' + n.icon + '</div>' +
+                       '<div style="flex:1;"><div style="font-size:13px;font-weight:700;color:' + color + ';">' + n.title + '</div>' +
+                       '<div style="font-size:11px;color:rgba(255,255,255,0.55);">' + n.msg + '</div></div>' +
+                       (n.action ? '<button class="mc-btn" onclick="' + n.action.fn + '" style="padding:6px 14px;font-weight:700;">' + n.action.label + '</button>' : '') +
+                       '</div>';
+            }).join('');
+        }
+        function pflxRenderDarkCampusBoard() {
+            var card = document.getElementById('pflx-dc-board-card');
+            var body = document.getElementById('pflx-dc-board-body');
+            if (!body || !card) return;
+            var raw = [];
+            try { raw = JSON.parse(localStorage.getItem('pflx_dc_broadcasts') || '[]'); } catch (e) {}
+            // Keep only tagged messages (contain @tag or hashtag) within last 14 days
+            var cutoff = Date.now() - 14 * 24 * 3600 * 1000;
+            var tagged = raw.filter(function(m) {
+                var t = m.text || m.message || '';
+                if (!t) return false;
+                if ((m.timestamp || m.time || 0) < cutoff) return false;
+                return /[@#][\w-]+/.test(t) || (m.tags && m.tags.length);
+            }).sort(function(a, b) { return (b.timestamp || 0) - (a.timestamp || 0); }).slice(0, 10);
+
+            if (!tagged.length) { card.style.display = 'none'; return; }
+            card.style.display = 'block';
+            body.innerHTML = tagged.map(function(m) {
+                var t = (m.text || m.message || '').replace(/</g, '&lt;');
+                var highlighted = t.replace(/([@#][\w-]+)/g, '<span style="color:#00f0ff;font-weight:700;">$1</span>');
+                var who = (m.author || m.user || m.sender || 'DarkCampus');
+                var when = m.timestamp ? new Date(m.timestamp).toLocaleString() : '';
+                var channel = m.channel ? ('#' + m.channel + ' · ') : '';
+                return '<div style="padding:8px 10px;background:rgba(10,18,40,0.4);border-left:2px solid #00f0ff;border-radius:4px;">' +
+                       '<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:3px;">' + channel + who + (when ? ' · ' + when : '') + '</div>' +
+                       '<div style="font-size:12px;color:#e0e6ff;line-height:1.4;">' + highlighted + '</div>' +
+                       '</div>';
+            }).join('');
+        }
+        window.pflxRenderHomeNotifications = pflxRenderHomeNotifications;
+        window.pflxRenderDarkCampusBoard = pflxRenderDarkCampusBoard;
+
+        // Listen for DarkCampus broadcasts
+        window.addEventListener('storage', function(e) {
+            if (e.key === 'pflx_dc_broadcasts') { try { pflxRenderDarkCampusBoard(); } catch (err) {} }
+        });
+        window.addEventListener('message', function(e) {
+            if (e && e.data && e.data.type === 'pflx_dc_broadcast') { try { pflxRenderDarkCampusBoard(); } catch (err) {} }
+        });
+
+        setInterval(function() {
+            try { pflxRenderHomeNotifications(); } catch (e) {}
+            try { pflxRenderDarkCampusBoard(); } catch (e) {}
+        }, 30000);
+
+        // Initial render on load
+        if (typeof window !== 'undefined') {
+            window.addEventListener('load', function() {
+                try { mcRenderLootWidget(); } catch (e) {}
+                try { pflxRenderHomeNotifications(); } catch (e) {}
+                try { pflxRenderDarkCampusBoard(); } catch (e) {}
+            });
         }
 
         function mcDeleteSeason(index) {
