@@ -11656,6 +11656,85 @@
             return cat.coins.map(function(c) { return { name: c.name, xc: c.xc, category: cat.name, color: cat.color, icon: cat.icon }; });
         });
 
+        // ── Unified badge catalog ───────────────────────────────────────────
+        // Merges the hardcoded MC_ALL_BADGES (defaults) with mcBadges (synced
+        // live from X-Coin via pflx_cloud_data). Any new badge created in
+        // X-Coin admin/badges automatically surfaces in the MC dropdowns.
+        function mcBadgeIdFromName(name) {
+            return 'badge-' + String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        }
+        function mcGetAllBadges() {
+            var hardcoded = MC_ALL_BADGES.map(function(b) {
+                return {
+                    id: mcBadgeIdFromName(b.name),
+                    name: b.name,
+                    xc: b.xc || 0,
+                    tier: b.category || '',
+                    category: b.category || '',
+                    color: b.color || '#4f8ef7',
+                    icon: b.icon || '🎖'
+                };
+            });
+            var dynamic = (typeof mcBadges !== 'undefined' && Array.isArray(mcBadges) ? mcBadges : []).map(function(b) {
+                var tier = b.tier || b.category || '';
+                var category = b.category || (tier ? (tier.charAt(0).toUpperCase() + tier.slice(1) + ' Badges') : 'Custom Badges');
+                return {
+                    id: b.id || mcBadgeIdFromName(b.name),
+                    name: b.name || b.id,
+                    xc: b.xc || b.xcReward || b.xcValue || 0,
+                    tier: tier,
+                    category: category,
+                    color: b.color || '#00d4ff',
+                    icon: b.icon || '🎖'
+                };
+            });
+            // Dedupe — dynamic (X-Coin) wins over hardcoded for same name
+            var seen = {};
+            var out = [];
+            dynamic.concat(hardcoded).forEach(function(b) {
+                var k = (b.name || '').toLowerCase();
+                if (!k || seen[k]) return;
+                seen[k] = true;
+                out.push(b);
+            });
+            return out;
+        }
+        // Look up a single badge by id OR name (supports mixed legacy storage)
+        function mcFindBadge(ref) {
+            if (!ref) return null;
+            var all = mcGetAllBadges();
+            var key = typeof ref === 'object' ? (ref.id || ref.name) : ref;
+            if (!key) return null;
+            var lower = String(key).toLowerCase();
+            return all.find(function(b) {
+                return b.id === key || (b.name || '').toLowerCase() === lower;
+            }) || null;
+        }
+        // Grant a badge (with its XC) to a player — idempotent. Returns xc granted.
+        function mcGrantBadgeToPlayer(player, badgeRef, source) {
+            if (!player) return 0;
+            var badge = mcFindBadge(badgeRef);
+            if (!badge) return 0;
+            if (!Array.isArray(player.digitalBadges)) player.digitalBadges = [];
+            var already = player.digitalBadges.some(function(pb) {
+                return pb && (pb.id === badge.id || (pb.name || '').toLowerCase() === badge.name.toLowerCase());
+            });
+            if (already) return 0;
+            player.digitalBadges.push({
+                id: badge.id,
+                name: badge.name,
+                tier: badge.tier,
+                xc: badge.xc,
+                awardedAt: new Date().toISOString().split('T')[0],
+                source: source || 'manual'
+            });
+            // Stack badge XC on top of any other rewards
+            var xc = badge.xc || 0;
+            player.xc = (player.xc || 0) + xc;
+            player.totalXcoin = (player.totalXcoin || 0) + xc;
+            return xc;
+        }
+
         // Selected badges for checkpoint form
         let mcCPSelectedBadges = []; // Array of { name, xc }
 
@@ -11674,11 +11753,11 @@
             var dd = document.getElementById('mc-cp-badge-dropdown');
             var search = (document.getElementById('mc-cp-badge-search')?.value || '').toLowerCase();
             if (!dd) return;
-            var selectedNames = mcCPSelectedBadges.map(function(b) { return b.name; });
-            var filtered = MC_ALL_BADGES.filter(function(b) {
-                if (selectedNames.includes(b.name)) return false;
+            var selectedNames = mcCPSelectedBadges.map(function(b) { return (b.name || '').toLowerCase(); });
+            var filtered = mcGetAllBadges().filter(function(b) {
+                if (selectedNames.includes((b.name || '').toLowerCase())) return false;
                 if (!search) return true;
-                return b.name.toLowerCase().includes(search) || b.category.toLowerCase().includes(search);
+                return (b.name || '').toLowerCase().includes(search) || (b.category || '').toLowerCase().includes(search);
             });
             if (filtered.length === 0) {
                 dd.innerHTML = '<div style="padding:12px;color:rgba(255,255,255,0.3);font-size:12px;text-align:center;">No matching badges</div>';
@@ -11718,7 +11797,7 @@
             var cont = document.getElementById('mc-cp-badge-selected');
             if (!cont) return;
             cont.innerHTML = mcCPSelectedBadges.map(function(b) {
-                var badge = MC_ALL_BADGES.find(function(a) { return a.name === b.name; });
+                var badge = mcFindBadge(b.name) || mcFindBadge(b.id);
                 var color = badge ? badge.color : '#4f8ef7';
                 return '<div style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:20px;background:' + color + '15;border:1px solid ' + color + '30;font-size:11px;">'
                     + '<span style="color:' + color + ';font-weight:700;">' + escapeHtml(b.name) + '</span>'
@@ -13292,10 +13371,11 @@
             mcCPSelectedBadges = (cp && cp.rewardBadges && Array.isArray(cp.rewardBadges))
                 ? cp.rewardBadges.map(function(b) {
                     if (typeof b === 'string') {
-                        var found = MC_ALL_BADGES.find(function(a) { return a.name === b; });
-                        return { name: b, xc: found ? found.xc : 0 };
+                        var found = mcFindBadge(b);
+                        return { id: found ? found.id : mcBadgeIdFromName(b), name: found ? found.name : b, xc: found ? found.xc : 0 };
                     }
-                    return { name: b.name, xc: b.xc || 0 };
+                    var found2 = mcFindBadge(b.id || b.name);
+                    return { id: (found2 && found2.id) || b.id || mcBadgeIdFromName(b.name), name: b.name, xc: b.xc || (found2 ? found2.xc : 0) };
                 }) : [];
             mcRenderSelectedBadges();
             document.getElementById('mc-cp-badge-search').value = '';
@@ -13841,13 +13921,17 @@
             if (!form) return;
             form.style.display = 'block';
 
-            // Populate badge checkboxes
+            // Populate badge checkboxes — unified catalog (defaults + X-Coin live badges)
             var badgesDiv = document.getElementById('mc-task-badges');
             if (badgesDiv) {
-                badgesDiv.innerHTML = mcBadges.length === 0 ? '<span style="font-size:11px;color:rgba(255,255,255,0.25);">No badges defined</span>' :
-                    mcBadges.map(function(b) {
-                        return '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;">' +
-                            '<input type="checkbox" class="mc-task-badge-cb" value="' + b.id + '"> ' + escapeHtml(b.name) + '</label>';
+                var allBadges = mcGetAllBadges();
+                badgesDiv.innerHTML = allBadges.length === 0 ? '<span style="font-size:11px;color:rgba(255,255,255,0.25);">No badges defined</span>' :
+                    allBadges.map(function(b) {
+                        return '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;padding:3px 0;">' +
+                            '<input type="checkbox" class="mc-task-badge-cb" value="' + b.id + '"> ' +
+                            '<span style="flex:1;">' + escapeHtml(b.name) + '</span>' +
+                            '<span style="color:#f5c842;font-weight:700;font-size:11px;">' + (b.xc || 0) + ' XC</span>' +
+                            '</label>';
                     }).join('');
             }
 
@@ -14044,20 +14128,10 @@
                         player.xc = (player.xc || 0) + task.xcReward;
                         player.totalXcoin = (player.totalXcoin || 0) + task.xcReward;
                     }
-                    // Award badges
+                    // Award badges — grant badge AND stack its XC on top of task XC
                     if (task.rewardBadges && task.rewardBadges.length > 0) {
-                        if (!player.digitalBadges) player.digitalBadges = [];
-                        task.rewardBadges.forEach(function(badgeId) {
-                            var badge = mcBadges.find(function(b) { return b.id === badgeId; });
-                            if (badge && !player.digitalBadges.some(function(pb) { return pb.id === badgeId; })) {
-                                player.digitalBadges.push({
-                                    id: badgeId,
-                                    name: badge.name,
-                                    tier: badge.tier,
-                                    awardedAt: new Date().toISOString().split('T')[0],
-                                    source: 'task:' + task.id
-                                });
-                            }
+                        task.rewardBadges.forEach(function(badgeRef) {
+                            mcGrantBadgeToPlayer(player, badgeRef, 'task:' + task.id);
                         });
                     }
                     // Update evolution rank based on XC thresholds
@@ -14243,13 +14317,17 @@
                     }).join('');
             }
 
-            // Populate badge checkboxes
+            // Populate badge checkboxes — unified catalog
             var badgesDiv = document.getElementById('mc-project-badges');
             if (badgesDiv) {
-                badgesDiv.innerHTML = mcBadges.length === 0 ? '<span style="font-size:11px;color:rgba(255,255,255,0.25);">No badges defined</span>' :
-                    mcBadges.map(function(b) {
-                        return '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;">' +
-                            '<input type="checkbox" class="mc-project-badge-cb" value="' + b.id + '"> ' + escapeHtml(b.name) + '</label>';
+                var allBadges = mcGetAllBadges();
+                badgesDiv.innerHTML = allBadges.length === 0 ? '<span style="font-size:11px;color:rgba(255,255,255,0.25);">No badges defined</span>' :
+                    allBadges.map(function(b) {
+                        return '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;padding:3px 0;">' +
+                            '<input type="checkbox" class="mc-project-badge-cb" value="' + b.id + '"> ' +
+                            '<span style="flex:1;">' + escapeHtml(b.name) + '</span>' +
+                            '<span style="color:#f5c842;font-weight:700;font-size:11px;">' + (b.xc || 0) + ' XC</span>' +
+                            '</label>';
                     }).join('');
             }
 
@@ -14555,20 +14633,23 @@
         }
 
         function mcSeasonPopulatePickers() {
-            // Badges grouped by tier
+            // Badges grouped by category/tier — unified catalog (defaults + X-Coin live)
             var badgeSel = document.getElementById('mc-season-badge-picker');
             if (badgeSel) {
                 var html = '<option value="">+ Add a badge reward…</option>';
-                var tiers = ['primary', 'premium', 'executive', 'signature'];
-                tiers.forEach(function(tier) {
-                    var items = (mcBadges || []).filter(function(b) { return (b.tier || 'primary') === tier; });
-                    if (items.length) {
-                        html += '<optgroup label="' + tier.toUpperCase() + '">';
-                        items.forEach(function(b) {
-                            html += '<option value="' + (b.id || b.name) + '">' + (b.icon || '🎖') + ' ' + (b.name || b.id) + '</option>';
-                        });
-                        html += '</optgroup>';
-                    }
+                var all = mcGetAllBadges();
+                var byCat = {};
+                all.forEach(function(b) {
+                    var cat = b.category || 'Other';
+                    if (!byCat[cat]) byCat[cat] = [];
+                    byCat[cat].push(b);
+                });
+                Object.keys(byCat).forEach(function(cat) {
+                    html += '<optgroup label="' + escapeHtml(cat).toUpperCase() + '">';
+                    byCat[cat].forEach(function(b) {
+                        html += '<option value="' + b.id + '">' + (b.icon || '🎖') + ' ' + escapeHtml(b.name) + ' (' + (b.xc || 0) + ' XC)</option>';
+                    });
+                    html += '</optgroup>';
                 });
                 badgeSel.innerHTML = html;
             }
@@ -14603,7 +14684,7 @@
                        label + '<button type="button" onclick="' + removeFn + '(' + i + ')" style="background:none;border:none;color:#ef4444;cursor:pointer;padding:0 0 0 4px;font-size:12px;">×</button></span>';
             }).join('');
         }
-        function mcSeasonRenderBadges() { mcSeasonRenderPills('mc-season-badges-pills', mcSeasonBadges, function(id) { return (mcBadges || []).find(function(b) { return (b.id || b.name) === id; }); }, 'mcSeasonRemoveBadge'); }
+        function mcSeasonRenderBadges() { mcSeasonRenderPills('mc-season-badges-pills', mcSeasonBadges, function(id) { return mcFindBadge(id); }, 'mcSeasonRemoveBadge'); }
         function mcSeasonRenderUpgrades() { mcSeasonRenderPills('mc-season-upgrades-pills', mcSeasonUpgrades, function(id) { return (mcModifiers || []).find(function(m) { return (m.id || m.name) === id; }); }, 'mcSeasonRemoveUpgrade'); }
         function mcSeasonRenderFines() { mcSeasonRenderPills('mc-season-fines-pills', mcSeasonFines, function(id) { return (mcModifiers || []).find(function(m) { return (m.id || m.name) === id; }); }, 'mcSeasonRemoveFine'); }
 
