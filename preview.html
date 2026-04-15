@@ -22841,5 +22841,443 @@ RESPONSE RULES:
             </div>
         </div>
     </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         DARKCAMPUS QUICKCHAT — right-edge sidebar drawer, platform-wide
+         Limited feature-set; full feature-set lives in DarkCampus portal.
+         ═══════════════════════════════════════════════════════════════ -->
+    <style>
+        #dc-qc-toggle {
+            position: fixed; right: 14px; bottom: 14px; z-index: 9998;
+            width: 52px; height: 52px; border-radius: 50%;
+            background: linear-gradient(135deg, #00d4ff 0%, #0077a8 100%);
+            border: 1px solid rgba(0,240,255,0.4); color: #001a2a; cursor: pointer;
+            box-shadow: 0 6px 22px rgba(0,212,255,0.35); font-size: 22px;
+            display: flex; align-items: center; justify-content: center;
+            transition: transform .15s ease, box-shadow .15s ease;
+        }
+        #dc-qc-toggle:hover { transform: scale(1.07); box-shadow: 0 8px 30px rgba(0,212,255,0.55); }
+        #dc-qc-toggle .dc-qc-badge {
+            position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px;
+            background: #ff3b6c; color: #fff; border-radius: 9px; font-size: 10px;
+            display: none; align-items: center; justify-content: center; padding: 0 5px;
+            font-family: 'Share Tech Mono', monospace; font-weight: 700;
+        }
+        #dc-qc-drawer {
+            position: fixed; right: -380px; top: 0; bottom: 0; width: 360px; z-index: 9999;
+            background: linear-gradient(180deg, rgba(6,10,22,0.97) 0%, rgba(10,18,40,0.97) 100%);
+            border-left: 1px solid rgba(0,240,255,0.25); display: flex; flex-direction: column;
+            transition: right .25s ease; box-shadow: -10px 0 30px rgba(0,0,0,0.5);
+            font-family: 'Rajdhani', sans-serif;
+        }
+        #dc-qc-drawer.open { right: 0; }
+        .dc-qc-head {
+            padding: 10px 12px; border-bottom: 1px solid rgba(0,240,255,0.15);
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .dc-qc-title {
+            color: #00d4ff; font-family: 'Orbitron', sans-serif; font-size: 11px;
+            letter-spacing: 1.5px;
+        }
+        .dc-qc-tabs {
+            display: flex; gap: 4px; padding: 6px 8px; border-bottom: 1px solid rgba(0,240,255,0.08);
+            background: rgba(0,0,0,0.25);
+        }
+        .dc-qc-tab {
+            flex: 1; padding: 7px 4px; font-size: 10px; font-family: 'Share Tech Mono', monospace;
+            background: rgba(10,18,40,0.4); border: 1px solid rgba(0,240,255,0.1);
+            color: #8ba4c7; border-radius: 5px; cursor: pointer; letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+        .dc-qc-tab.active { color: #001a2a; background: #00d4ff; border-color: #00d4ff; font-weight: 700; }
+        .dc-qc-feed {
+            flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px;
+        }
+        .dc-qc-msg {
+            background: rgba(0,240,255,0.04); border-left: 2px solid rgba(0,240,255,0.3);
+            padding: 6px 9px; border-radius: 0 6px 6px 0;
+        }
+        .dc-qc-msg.mine { background: rgba(255,110,199,0.07); border-left-color: #ff6ec7; }
+        .dc-qc-msg.bot { background: rgba(245,200,66,0.07); border-left-color: #f5c842; }
+        .dc-qc-msg.sys { background: rgba(130,130,160,0.08); border-left-color: #6a7290; font-style: italic; color: #8ba4c7; font-size: 12px; }
+        .dc-qc-author { font-size: 11px; color: #00d4ff; font-weight: 700; font-family: 'Share Tech Mono', monospace; }
+        .dc-qc-msg.mine .dc-qc-author { color: #ff6ec7; }
+        .dc-qc-msg.bot .dc-qc-author { color: #f5c842; }
+        .dc-qc-body { color: #c9d1ff; font-size: 13px; line-height: 1.4; margin-top: 2px; }
+        .dc-qc-meta { font-size: 9px; color: #6a7290; margin-top: 2px; font-family: 'Share Tech Mono', monospace; }
+        .dc-qc-src { display: inline-block; padding: 1px 4px; border-radius: 3px; margin-left: 4px; font-size: 8px; }
+        .dc-qc-src.slack { background: #4a154b; color: #ecb22e; }
+        .dc-qc-src.discord { background: #5865f2; color: #fff; }
+        .dc-qc-src.pflx { background: rgba(0,240,255,0.15); color: #00d4ff; }
+        .dc-qc-input {
+            border-top: 1px solid rgba(0,240,255,0.15); padding: 10px;
+            display: flex; gap: 6px; background: rgba(0,0,0,0.35);
+        }
+        .dc-qc-input textarea {
+            flex: 1; background: rgba(10,18,40,0.6); border: 1px solid rgba(0,240,255,0.2);
+            color: #e0e6ff; padding: 7px 10px; border-radius: 6px; resize: none;
+            font-family: 'Rajdhani', sans-serif; font-size: 13px; min-height: 36px; max-height: 80px;
+        }
+        .dc-qc-send {
+            background: linear-gradient(135deg, #00d4ff 0%, #0077a8 100%); color: #001a2a;
+            border: 0; border-radius: 6px; padding: 0 12px; cursor: pointer; font-weight: 700;
+            font-family: 'Orbitron', sans-serif; font-size: 11px; letter-spacing: 1px;
+        }
+        .dc-qc-send:disabled { opacity: 0.5; cursor: not-allowed; }
+        .dc-qc-subheader {
+            padding: 6px 10px; background: rgba(0,240,255,0.04); border-bottom: 1px solid rgba(0,240,255,0.08);
+            font-size: 10px; color: #6a7290; font-family: 'Share Tech Mono', monospace; letter-spacing: 1px;
+        }
+        .dc-qc-dmlist, .dc-qc-grouplist { padding: 8px; overflow-y: auto; }
+        .dc-qc-dm-item {
+            padding: 8px 10px; border: 1px solid rgba(0,240,255,0.08); border-radius: 6px;
+            margin-bottom: 4px; cursor: pointer; background: rgba(10,18,40,0.4);
+            color: #c9d1ff; font-size: 13px; display: flex; justify-content: space-between; align-items: center;
+        }
+        .dc-qc-dm-item:hover { background: rgba(0,240,255,0.08); }
+        .dc-qc-dm-item .unread { color: #ff3b6c; font-size: 10px; font-weight: 700; }
+        .dc-qc-mini-btn {
+            background: rgba(0,240,255,0.1); color: #00d4ff; border: 1px solid rgba(0,240,255,0.25);
+            padding: 5px 10px; border-radius: 5px; font-size: 10px; cursor: pointer;
+            font-family: 'Share Tech Mono', monospace; letter-spacing: 0.5px;
+        }
+        .dc-qc-mini-btn:hover { background: rgba(0,240,255,0.2); }
+    </style>
+
+    <button id="dc-qc-toggle" onclick="dcQcToggle()" title="DarkCampus QuickChat">
+        💬<span class="dc-qc-badge" id="dc-qc-badge">0</span>
+    </button>
+
+    <div id="dc-qc-drawer" aria-hidden="true">
+        <div class="dc-qc-head">
+            <div class="dc-qc-title">⚫ DARKCAMPUS · QUICK CHAT</div>
+            <div style="display:flex;gap:6px;">
+                <button class="dc-qc-mini-btn" onclick="dcQcOpenFullPortal()" title="Open full DarkCampus portal">↗ PORTAL</button>
+                <button class="dc-qc-mini-btn" onclick="dcQcToggle()" title="Close">✕</button>
+            </div>
+        </div>
+        <div class="dc-qc-tabs">
+            <button class="dc-qc-tab active" data-dc-tab="terminal" onclick="dcQcSwitchTab('terminal')">#Terminal</button>
+            <button class="dc-qc-tab" data-dc-tab="missioncontrol" onclick="dcQcSwitchTab('missioncontrol')">#MC</button>
+            <button class="dc-qc-tab" data-dc-tab="dm" onclick="dcQcSwitchTab('dm')">DMs</button>
+            <button class="dc-qc-tab" data-dc-tab="group" onclick="dcQcSwitchTab('group')">Groups</button>
+        </div>
+        <div class="dc-qc-subheader" id="dc-qc-subheader">Public · Slack + Discord + PFLX relay · X-Bot monitoring ON</div>
+        <div class="dc-qc-feed" id="dc-qc-feed">
+            <div class="dc-qc-msg sys"><div class="dc-qc-body">Welcome to QuickChat. Connecting…</div></div>
+        </div>
+        <div class="dc-qc-input">
+            <textarea id="dc-qc-textarea" placeholder="Say something to the terminal…" onkeydown="dcQcKey(event)"></textarea>
+            <button class="dc-qc-send" onclick="dcQcSend()">SEND</button>
+        </div>
+    </div>
+
+    <script>
+    (function(){
+        const DC_QC_KEY = 'pflx_darkcampus_qc';
+        const DC_QC_LOCAL_KEY = 'pflx_darkcampus_qc_local';
+        const DC_POLL_MS = 8000;
+        let dcState = {
+            open: false,
+            tab: 'terminal',
+            target: null,
+            lastPoll: 0,
+            unread: 0,
+            messages: { terminal: [], missioncontrol: [], dm: {}, group: {} }
+        };
+        // ── Local fallback storage for offline/no-secret dev ──
+        function dcLocalLoad() {
+            try { return JSON.parse(localStorage.getItem(DC_QC_LOCAL_KEY) || '{"terminal":[],"missioncontrol":[],"dm":{},"group":{}}'); }
+            catch(e) { return { terminal:[], missioncontrol:[], dm:{}, group:{} }; }
+        }
+        function dcLocalSave(data) { try { localStorage.setItem(DC_QC_LOCAL_KEY, JSON.stringify(data)); } catch(e){} }
+
+        window.dcQcToggle = function() {
+            dcState.open = !dcState.open;
+            const d = document.getElementById('dc-qc-drawer');
+            if (!d) return;
+            d.classList.toggle('open', dcState.open);
+            if (dcState.open) { dcState.unread = 0; dcQcUpdateBadge(); dcQcFetch(); dcQcRender(); }
+        };
+        window.dcQcOpenFullPortal = function() {
+            try { window.open('https://pflx-darkcampus.vercel.app/', '_blank'); } catch(e) {}
+        };
+        window.dcQcSwitchTab = function(tab) {
+            dcState.tab = tab;
+            document.querySelectorAll('.dc-qc-tab').forEach(t =>
+                t.classList.toggle('active', t.getAttribute('data-dc-tab') === tab));
+            const sub = document.getElementById('dc-qc-subheader');
+            const ta = document.getElementById('dc-qc-textarea');
+            if (tab === 'terminal') {
+                if (sub) sub.textContent = '#Terminal · Slack + Discord + PFLX · X-Bot ON';
+                if (ta) ta.placeholder = 'Say something to the terminal…';
+            } else if (tab === 'missioncontrol') {
+                if (sub) sub.textContent = '#MissionControl · Host-tier channel · X-Bot ON';
+                if (ta) ta.placeholder = 'Post to Mission Control…';
+            } else if (tab === 'dm') {
+                if (sub) sub.textContent = 'Direct Messages · player-to-player · X-Bot ON';
+                if (ta) ta.placeholder = 'Message a player (select one first)…';
+            } else if (tab === 'group') {
+                if (sub) sub.textContent = 'Group / Team channels · private cohorts';
+                if (ta) ta.placeholder = 'Say something to the group…';
+            }
+            dcQcRender();
+        };
+        window.dcQcKey = function(ev) {
+            if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); dcQcSend(); }
+        };
+
+        function dcQcAuthor() {
+            const a = (typeof activeSession !== 'undefined' && activeSession) ? activeSession : null;
+            return a ? {
+                id: a.id, brand: a.brand || a.name || 'Player', name: a.name || '',
+                role: a.role || 'player'
+            } : { id: 'guest-' + Date.now(), brand: 'Guest', name: 'Guest', role: 'guest' };
+        }
+
+        // X-Bot moderation hook — uses existing XBOT_MOD if present
+        function dcQcModerate(text, author) {
+            if (typeof XBOT_MOD === 'undefined' || !XBOT_MOD.patterns) return { ok: true };
+            const p = XBOT_MOD.patterns;
+            const hits = [];
+            for (const [k, re] of Object.entries(p)) {
+                try { if (re instanceof RegExp && re.test(text)) hits.push(k); } catch(e) {}
+            }
+            if (hits.length) {
+                XBOT_MOD.warnings = XBOT_MOD.warnings || {};
+                XBOT_MOD.warnings[author.id] = (XBOT_MOD.warnings[author.id] || 0) + 1;
+                const count = XBOT_MOD.warnings[author.id];
+                const threshold = XBOT_MOD.warningThreshold || 2;
+                return { ok: false, reason: hits.join(','), count, threshold, fine: count >= threshold };
+            }
+            return { ok: true };
+        }
+
+        // Reward keyword detection: @brand gj / good job / great work / thanks
+        const REWARD_RE = /\b(?:gj|good\s*job|great\s*work|thanks|thank\s*you|amazing|brilliant|well\s*done|mvp|legend)\b/i;
+        function dcQcRewardScan(text, author) {
+            if (!REWARD_RE.test(text)) return;
+            const mentionMatch = text.match(/@([\w_-]+)/);
+            if (!mentionMatch) return;
+            const target = mentionMatch[1].toLowerCase();
+            // Find matching player in PLAYERS
+            if (typeof PLAYERS === 'undefined') return;
+            const p = PLAYERS.find(x => (x.brand||'').toLowerCase() === target || (x.name||'').toLowerCase().replace(/\s+/g,'') === target);
+            if (p && p.id !== author.id) {
+                const amt = 10;
+                p.xc = (p.xc || 0) + amt;
+                try { if (typeof savePLAYERS === 'function') savePLAYERS(); } catch(e) {}
+                dcQcAddBotMsg(`⚡ +${amt} XC → ${p.brand || p.name} (peer reward from ${author.brand})`);
+            }
+        }
+
+        // FAQ auto-reply (simple)
+        function dcQcFaqCheck(text) {
+            const q = text.toLowerCase();
+            if (/\b(how\s+much|balance|xc)\b.*\b(i|me|my)\b/.test(q) || /\bmy\s*(xc|balance)\b/.test(q)) {
+                const a = dcQcAuthor();
+                const p = (typeof PLAYERS !== 'undefined') ? PLAYERS.find(x => x.id === a.id) : null;
+                if (p) return `@${a.brand}, you have ${(p.xc||0).toLocaleString()} XC.`;
+            }
+            if (/\b(when|what).*\b(checkpoint|deadline|due)\b/.test(q)) {
+                return 'Next checkpoint cycle runs every 2 weeks. Check the Core Pathways portal for your current checkpoint due-date.';
+            }
+            if (/\b(how|what).*\b(earn|make|get)\s+xc\b/.test(q)) {
+                return 'Earn XC by: completing tasks, peer rewards (@brand good job), winning Battle Arena matches, and Design Dojo showdowns.';
+            }
+            if (/\b(help|commands?|how\s+to)\b/.test(q) && q.length < 40) {
+                return 'QuickChat commands: /balance, /leaderboard, /rank. Prefix @brand to mention. Use /portal to jump into DarkCampus full view.';
+            }
+            return null;
+        }
+
+        function dcQcAddBotMsg(text) {
+            const msg = { id: 'b-' + Date.now(), author: { brand: 'X-Bot', name: 'X-Bot', role: 'bot' },
+                           text, channel: dcState.tab, platform: 'pflx', createdAt: new Date().toISOString(), isBot: true };
+            const local = dcLocalLoad();
+            if (dcState.tab === 'terminal' || dcState.tab === 'missioncontrol') {
+                local[dcState.tab] = local[dcState.tab] || []; local[dcState.tab].unshift(msg);
+            }
+            dcLocalSave(local);
+            dcQcRender();
+        }
+
+        window.dcQcSend = async function() {
+            const ta = document.getElementById('dc-qc-textarea');
+            const text = (ta?.value || '').trim();
+            if (!text) return;
+            const author = dcQcAuthor();
+
+            // Slash commands
+            if (text === '/portal') { dcQcOpenFullPortal(); ta.value = ''; return; }
+            if (text === '/balance') {
+                const p = (typeof PLAYERS !== 'undefined') ? PLAYERS.find(x => x.id === author.id) : null;
+                dcQcAddBotMsg(p ? `@${author.brand} balance: ${(p.xc||0).toLocaleString()} XC` : 'Not logged in.');
+                ta.value = ''; return;
+            }
+            if (text === '/leaderboard') {
+                if (typeof PLAYERS !== 'undefined') {
+                    const top = PLAYERS.filter(p => p.role==='player').sort((a,b)=>(b.xc||0)-(a.xc||0)).slice(0,5);
+                    dcQcAddBotMsg('🏆 Top 5: ' + top.map((p,i) => `${i+1}. ${p.brand||p.name} (${(p.xc||0).toLocaleString()})`).join(' · '));
+                }
+                ta.value = ''; return;
+            }
+
+            // Moderation check
+            const mod = dcQcModerate(text, author);
+            if (!mod.ok) {
+                const msg = mod.fine
+                    ? `🛑 Blocked: repeated violation (${mod.reason}). Fine: -${XBOT_MOD.fineAmount||50} XC.`
+                    : `⚠️ Warning ${mod.count}/${mod.threshold}: content flagged as "${mod.reason}".`;
+                dcQcAddBotMsg(msg);
+                if (mod.fine && typeof PLAYERS !== 'undefined') {
+                    const p = PLAYERS.find(x => x.id === author.id);
+                    if (p) { p.xc = Math.max(0, (p.xc||0) - (XBOT_MOD.fineAmount||50)); try{savePLAYERS();}catch(e){} }
+                }
+                ta.value = ''; return;
+            }
+
+            // Reward keyword scan
+            dcQcRewardScan(text, author);
+
+            // Save locally first for instant echo
+            const local = dcLocalLoad();
+            const entry = { id: Date.now()+'-'+Math.random().toString(36).slice(2,6), author, text,
+                            channel: dcState.tab, target: dcState.target, platform: 'pflx',
+                            createdAt: new Date().toISOString(), mine: true };
+            if (dcState.tab === 'terminal' || dcState.tab === 'missioncontrol') {
+                local[dcState.tab] = local[dcState.tab] || []; local[dcState.tab].unshift(entry);
+            } else if (dcState.tab === 'dm' && dcState.target) {
+                local.dm[dcState.target] = local.dm[dcState.target] || []; local.dm[dcState.target].unshift(entry);
+            } else if (dcState.tab === 'group' && dcState.target) {
+                local.group[dcState.target] = local.group[dcState.target] || []; local.group[dcState.target].unshift(entry);
+            }
+            dcLocalSave(local);
+            ta.value = '';
+            dcQcRender();
+
+            // Relay to bridge (may 401 if EMAIL_INTERNAL_SECRET / SLACK/DISCORD not set yet — that's ok)
+            try {
+                const secret = window.PFLX_EMAIL_SECRET || '';
+                const r = await fetch('https://pflx-xcoin-app.vercel.app/api/chat-bridge', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-pflx-email-secret': secret },
+                    body: JSON.stringify({
+                        channel: dcState.tab, target: dcState.target,
+                        text, author, platform: 'pflx'
+                    })
+                });
+                if (!r.ok) console.warn('[dc-qc] bridge', r.status);
+            } catch(e) { console.warn('[dc-qc] bridge error', e); }
+
+            // FAQ auto-reply
+            const faq = dcQcFaqCheck(text);
+            if (faq) setTimeout(() => dcQcAddBotMsg(faq), 400);
+        };
+
+        async function dcQcFetch() {
+            if (!dcState.open) return;
+            if (dcState.tab !== 'terminal' && dcState.tab !== 'missioncontrol') return;
+            try {
+                const secret = window.PFLX_EMAIL_SECRET || '';
+                const r = await fetch(`https://pflx-xcoin-app.vercel.app/api/chat-bridge?channel=${dcState.tab}&limit=80`, {
+                    headers: secret ? { 'x-pflx-email-secret': secret } : {}
+                });
+                if (!r.ok) return;
+                const data = await r.json();
+                const remote = (data.events || []).slice().reverse();
+                const local = dcLocalLoad();
+                // Merge remote with local (remote wins on id collision)
+                const ids = new Set(remote.map(m => m.id));
+                const localCh = (local[dcState.tab] || []).filter(m => !ids.has(m.id));
+                local[dcState.tab] = remote.concat(localCh);
+                dcLocalSave(local);
+                dcQcRender();
+            } catch(e) { /* silent */ }
+        }
+        setInterval(dcQcFetch, DC_POLL_MS);
+
+        function dcQcRender() {
+            const feed = document.getElementById('dc-qc-feed');
+            if (!feed) return;
+            const local = dcLocalLoad();
+            const me = dcQcAuthor();
+            let list = [];
+            if (dcState.tab === 'terminal' || dcState.tab === 'missioncontrol') {
+                list = local[dcState.tab] || [];
+            } else if (dcState.tab === 'dm') {
+                // Render DM list view if no target selected
+                if (!dcState.target) { renderDmList(feed, local); return; }
+                list = local.dm[dcState.target] || [];
+            } else if (dcState.tab === 'group') {
+                if (!dcState.target) { renderGroupList(feed, local); return; }
+                list = local.group[dcState.target] || [];
+            }
+            if (!list.length) {
+                feed.innerHTML = '<div class="dc-qc-msg sys"><div class="dc-qc-body">No messages yet. Say hi!</div></div>';
+                return;
+            }
+            // Render newest at bottom
+            feed.innerHTML = list.slice().reverse().map(m => {
+                const cls = m.isBot || m.author?.role === 'bot' ? 'bot' : (m.author?.id === me.id ? 'mine' : '');
+                const src = m.platform || 'pflx';
+                const time = m.createdAt ? new Date(m.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
+                return `<div class="dc-qc-msg ${cls}">
+                    <div class="dc-qc-author">${escapeHtml(m.author?.brand || m.author?.name || '?')}<span class="dc-qc-src ${src}">${src}</span></div>
+                    <div class="dc-qc-body">${escapeHtml(m.text || '')}</div>
+                    <div class="dc-qc-meta">${time}</div>
+                </div>`;
+            }).join('');
+            feed.scrollTop = feed.scrollHeight;
+        }
+
+        function renderDmList(feed, local) {
+            const players = (typeof PLAYERS !== 'undefined' ? PLAYERS : []).filter(p => p.role === 'player');
+            const me = dcQcAuthor();
+            feed.innerHTML = '<div class="dc-qc-subheader" style="margin:-10px -10px 10px;">SELECT A PLAYER</div>' +
+                '<div class="dc-qc-dmlist">' +
+                players.filter(p => p.id !== me.id).map(p => {
+                    const unread = (local.dm[p.id] || []).filter(m => !m.read && m.author?.id !== me.id).length;
+                    return `<div class="dc-qc-dm-item" onclick="dcQcOpenDm('${p.id}')">
+                        <span>${escapeHtml(p.brand || p.name)}</span>
+                        ${unread ? `<span class="unread">● ${unread}</span>` : ''}
+                    </div>`;
+                }).join('') + '</div>';
+        }
+        function renderGroupList(feed, local) {
+            const groups = Object.keys(local.group || {});
+            feed.innerHTML = '<div class="dc-qc-subheader" style="margin:-10px -10px 10px;">YOUR GROUPS</div>' +
+                '<div class="dc-qc-grouplist">' +
+                (groups.length ? groups.map(g => `<div class="dc-qc-dm-item" onclick="dcQcOpenGroup('${g}')">${escapeHtml(g)}</div>`).join('') :
+                 '<div style="color:#6a7290;padding:10px;font-size:12px;">No groups yet.</div>') +
+                '<button class="dc-qc-mini-btn" style="margin-top:10px;width:100%;" onclick="dcQcNewGroup()">+ NEW GROUP</button></div>';
+        }
+        window.dcQcOpenDm = function(pid) { dcState.target = pid; dcQcRender(); };
+        window.dcQcOpenGroup = function(g) { dcState.target = g; dcQcRender(); };
+        window.dcQcNewGroup = function() {
+            const name = prompt('Group name:');
+            if (!name) return;
+            const local = dcLocalLoad(); local.group[name] = local.group[name] || []; dcLocalSave(local);
+            dcState.target = name; dcQcRender();
+        };
+
+        function dcQcUpdateBadge() {
+            const b = document.getElementById('dc-qc-badge');
+            if (!b) return;
+            b.style.display = dcState.unread > 0 ? 'flex' : 'none';
+            b.textContent = dcState.unread;
+        }
+
+        function escapeHtml(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+                ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
+        }
+
+        // Initial render
+        document.addEventListener('DOMContentLoaded', function() { dcQcRender(); });
+        // Fallback immediate
+        setTimeout(dcQcRender, 100);
+    })();
+    </script>
 </body>
 </html>
