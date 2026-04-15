@@ -6061,6 +6061,7 @@
                             <!-- HOST SUB-TABS -->
                             <div class="host-subtabs" style="display: flex; gap: 4px; margin-bottom: 20px; flex-wrap: wrap;">
                                 <button class="host-subtab active" data-host-tab="dashboard" onclick="switchHostTab('dashboard')">Dashboard</button>
+                                <button class="host-subtab" data-host-tab="analytics" onclick="switchHostTab('analytics')">📊 Analytics</button>
                                 <button class="host-subtab" data-host-tab="players" onclick="switchHostTab('players')">Players</button>
                                 <button class="host-subtab" data-host-tab="session" onclick="switchHostTab('session')">Live Session</button>
                                 <button class="host-subtab" data-host-tab="apps" onclick="switchHostTab('apps')">App Manager</button>
@@ -6196,6 +6197,98 @@
                                     <button class="hmc-btn hmc-btn-cyan" onclick="hmcBroadcast()">📡 Broadcast Message</button>
                                     <button class="hmc-btn hmc-btn-green" onclick="hmcXCDrop()">💰 XC Drop</button>
                                     <button class="hmc-btn hmc-btn-purple" onclick="hmcLockdownToggle()">🔒 Lockdown Mode</button>
+                                </div>
+                            </div>
+
+                            <!-- ═══ TAB: ANALYTICS ═══ -->
+                            <div class="host-panel" id="host-analytics">
+                                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+                                    <h3 style="color: var(--cyan); font-family: 'Orbitron', sans-serif; font-size: 13px; margin: 0; letter-spacing: 1.5px;">PLAYER ANALYTICS</h3>
+                                    <div style="display:flex;gap:8px;align-items:center;">
+                                        <select id="pa-active-window" onchange="pflxAnalyticsRender()" style="background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.15);color:#e0e6ff;padding:6px 10px;border-radius:6px;font-family:'Rajdhani',sans-serif;font-size:13px;">
+                                            <option value="7">Active: Last 7 days</option>
+                                            <option value="14">Active: Last 14 days</option>
+                                            <option value="30">Active: Last 30 days</option>
+                                        </select>
+                                        <button class="hmc-btn hmc-btn-cyan" onclick="pflxAnalyticsRender()">↻ Refresh</button>
+                                    </div>
+                                </div>
+
+                                <!-- KPI Cards -->
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px;">
+                                    <div class="hmc-stat-card">
+                                        <div class="hmc-stat-icon" style="color:#00d4ff;">👥</div>
+                                        <div class="hmc-stat-num" id="pa-total-subs">0</div>
+                                        <div class="hmc-stat-label">Total Subscribers</div>
+                                    </div>
+                                    <div class="hmc-stat-card" style="border-color: rgba(16,185,129,0.3);">
+                                        <div class="hmc-stat-icon" style="color:#10b981;">✓</div>
+                                        <div class="hmc-stat-num" id="pa-active-subs" style="color:#10b981;">0</div>
+                                        <div class="hmc-stat-label"><span id="pa-active-label">Active (7d)</span></div>
+                                    </div>
+                                    <div class="hmc-stat-card" style="border-color: rgba(245,200,66,0.3);">
+                                        <div class="hmc-stat-icon" style="color:#f5c842;">●</div>
+                                        <div class="hmc-stat-num" id="pa-online-now" style="color:#f5c842;">0</div>
+                                        <div class="hmc-stat-label">Signed In Now</div>
+                                    </div>
+                                    <div class="hmc-stat-card" style="border-color: rgba(192,132,252,0.3);">
+                                        <div class="hmc-stat-icon" style="color:#c084fc;">🏆</div>
+                                        <div class="hmc-stat-num" id="pa-most-active" style="color:#c084fc;font-size:14px;line-height:1.2;">—</div>
+                                        <div class="hmc-stat-label">Most Active Player</div>
+                                    </div>
+                                    <div class="hmc-stat-card" style="border-color: rgba(255,110,199,0.3);">
+                                        <div class="hmc-stat-icon" style="color:#ff6ec7;">🆕</div>
+                                        <div class="hmc-stat-num" id="pa-new-signups">0</div>
+                                        <div class="hmc-stat-label">New Signups (7d)</div>
+                                    </div>
+                                </div>
+
+                                <!-- Recent Signups + Host Email Recipients -->
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+                                    <div style="background:rgba(255,110,199,0.04);border:1px solid rgba(255,110,199,0.2);border-radius:10px;padding:14px;">
+                                        <h4 style="color:#ff6ec7;font-family:'Orbitron',sans-serif;font-size:11px;margin:0 0 10px;letter-spacing:1.2px;">RECENT SIGNUPS</h4>
+                                        <div id="pa-signups-feed" style="max-height:180px;overflow-y:auto;font-family:'Share Tech Mono',monospace;font-size:12px;color:#c9d1ff;">
+                                            <div style="color:#6a7290;padding:6px;">No signups recorded yet.</div>
+                                        </div>
+                                    </div>
+                                    <div style="background:rgba(0,212,255,0.04);border:1px solid rgba(0,212,255,0.2);border-radius:10px;padding:14px;">
+                                        <h4 style="color:#00d4ff;font-family:'Orbitron',sans-serif;font-size:11px;margin:0 0 10px;letter-spacing:1.2px;">HOST EMAIL RECIPIENTS</h4>
+                                        <p style="margin:0 0 8px;font-size:11px;color:#6a7290;">Comma-separated list. Receive signup alerts + weekly reports.</p>
+                                        <textarea id="pa-host-emails" rows="2" placeholder="host@prototypeflx.com, principal@school.edu" style="width:100%;background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.15);color:#e0e6ff;padding:8px 10px;border-radius:6px;font-family:'Share Tech Mono',monospace;font-size:12px;resize:vertical;"></textarea>
+                                        <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap;">
+                                            <button class="hmc-btn hmc-btn-cyan" onclick="pflxAnalyticsSaveHostEmails()">💾 Save</button>
+                                            <label style="display:flex;gap:6px;align-items:center;color:#c9d1ff;font-size:12px;cursor:pointer;">
+                                                <input type="checkbox" id="pa-alert-signups"> New signup alerts
+                                            </label>
+                                            <label style="display:flex;gap:6px;align-items:center;color:#c9d1ff;font-size:12px;cursor:pointer;">
+                                                <input type="checkbox" id="pa-alert-weekly"> Weekly reports
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Player Analytics Table -->
+                                <h3 style="color: var(--cyan); font-family: 'Orbitron', sans-serif; font-size: 13px; margin-bottom: 12px; letter-spacing: 1.5px;">PLAYER USAGE & REPORTS</h3>
+                                <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">
+                                    <input type="text" id="pa-search" placeholder="Search players..." oninput="pflxAnalyticsRender()" style="flex:1;min-width:200px;background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.15);color:#e0e6ff;padding:7px 12px;border-radius:6px;font-family:'Rajdhani',sans-serif;font-size:14px;">
+                                    <button class="hmc-btn hmc-btn-cyan" onclick="pflxAnalyticsExportCSV()">⬇ Export CSV</button>
+                                    <button class="hmc-btn hmc-btn-gold" onclick="pflxAnalyticsEmailAllHosts()">✉ Email Weekly Report to Hosts</button>
+                                </div>
+                                <div style="border:1px solid rgba(0,240,255,0.08);border-radius:10px;overflow:hidden;">
+                                    <table style="width:100%;border-collapse:collapse;">
+                                        <thead>
+                                            <tr style="background:rgba(0,240,255,0.05);">
+                                                <th style="text-align:left;padding:10px 12px;font-size:10px;color:#6a7290;text-transform:uppercase;letter-spacing:1px;font-family:'Share Tech Mono',monospace;">Player</th>
+                                                <th style="text-align:center;padding:10px 8px;font-size:10px;color:#6a7290;text-transform:uppercase;letter-spacing:1px;font-family:'Share Tech Mono',monospace;">Sessions</th>
+                                                <th style="text-align:center;padding:10px 8px;font-size:10px;color:#6a7290;text-transform:uppercase;letter-spacing:1px;font-family:'Share Tech Mono',monospace;">Minutes</th>
+                                                <th style="text-align:center;padding:10px 8px;font-size:10px;color:#6a7290;text-transform:uppercase;letter-spacing:1px;font-family:'Share Tech Mono',monospace;">XC</th>
+                                                <th style="text-align:center;padding:10px 8px;font-size:10px;color:#6a7290;text-transform:uppercase;letter-spacing:1px;font-family:'Share Tech Mono',monospace;">Checkpoint</th>
+                                                <th style="text-align:center;padding:10px 8px;font-size:10px;color:#6a7290;text-transform:uppercase;letter-spacing:1px;font-family:'Share Tech Mono',monospace;">Last Seen</th>
+                                                <th style="text-align:right;padding:10px 12px;font-size:10px;color:#6a7290;text-transform:uppercase;letter-spacing:1px;font-family:'Share Tech Mono',monospace;">Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="pa-player-tbody"></tbody>
+                                    </table>
                                 </div>
                             </div>
 
@@ -8079,6 +8172,7 @@
             if (tab === 'orgs') hmcRenderOrgs();
             if (tab === 'portfolio') hmcPortfolioLoad();
             if (tab === 'sound') seHostLoad();
+            if (tab === 'analytics' && typeof pflxAnalyticsRender === 'function') pflxAnalyticsRender();
         }
 
         // ═══ HOST CONTROL: MODERATION SETTINGS ═══
@@ -8337,6 +8431,418 @@
         }
         // Heartbeat every 60s while logged in
         setInterval(function() { pflxHeartbeat(); }, 60000);
+
+        // ═══════════════════════════════════════════════════════════════
+        //  PFLX ANALYTICS — Host Dashboard data layer
+        // ═══════════════════════════════════════════════════════════════
+        const PA_KEY = 'pflx_analytics';
+        const PA_HOST_EMAIL_KEY = 'pflx_analytics_host_emails';
+        const PA_ONLINE_MS = 5 * 60 * 1000;   // "online" if seen in last 5 min
+        const PA_SESSION_GAP_MS = 20 * 60 * 1000; // 20 min gap => new session
+
+        function pflxAnalyticsLoad() {
+            try { return JSON.parse(localStorage.getItem(PA_KEY) || '{}'); } catch(e) { return {}; }
+        }
+        function pflxAnalyticsSave(d) {
+            try { localStorage.setItem(PA_KEY, JSON.stringify(d)); } catch(e) {}
+        }
+        function pflxAnalyticsInit() {
+            const d = pflxAnalyticsLoad();
+            if (!d.signups) d.signups = {};      // { playerId: { firstSeen, brand, name, email, cohort } }
+            if (!d.sessions) d.sessions = {};    // { playerId: [ {start, end} ] }
+            if (!d.totals) d.totals = {};        // { playerId: { minutes, sessions } }
+            pflxAnalyticsSave(d);
+            return d;
+        }
+
+        // Record signup (first-seen) for the active session user
+        function pflxAnalyticsRecordSignup(player) {
+            if (!player || !player.id) return;
+            const d = pflxAnalyticsInit();
+            if (!d.signups[player.id]) {
+                d.signups[player.id] = {
+                    firstSeen: Date.now(),
+                    brand: player.brand || '',
+                    name: player.name || '',
+                    email: player.email || '',
+                    cohort: player.cohort || ''
+                };
+                pflxAnalyticsSave(d);
+                // Fire host alert if opted-in
+                try { pflxAnalyticsNotifyHostsOnSignup(player); } catch(e) {}
+            }
+        }
+
+        // Start or extend a session for the active player
+        function pflxAnalyticsTouchSession() {
+            if (!activeSession || !activeSession.id) return;
+            const pid = activeSession.id;
+            const d = pflxAnalyticsInit();
+            pflxAnalyticsRecordSignup(activeSession);
+            const list = d.sessions[pid] = d.sessions[pid] || [];
+            const now = Date.now();
+            const last = list[list.length - 1];
+            if (last && (now - last.end) < PA_SESSION_GAP_MS) {
+                last.end = now;
+            } else {
+                list.push({ start: now, end: now });
+            }
+            // Cap stored sessions per player to last 500
+            if (list.length > 500) d.sessions[pid] = list.slice(-500);
+            // Recompute totals
+            const mins = list.reduce((s, x) => s + Math.max(0, (x.end - x.start)), 0) / 60000;
+            d.totals[pid] = { minutes: Math.round(mins), sessions: list.length };
+            pflxAnalyticsSave(d);
+        }
+        // Hook into existing heartbeat so every 60s we also log session activity
+        setInterval(function() { try { pflxAnalyticsTouchSession(); } catch(e) {} }, 60000);
+
+        function pflxAnalyticsAggregate(windowDays) {
+            const d = pflxAnalyticsInit();
+            const act = pflxGetActivity();
+            const now = Date.now();
+            const winMs = (windowDays || 7) * 86400000;
+            const players = (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS))
+                ? PLAYERS.filter(p => p.role === 'player') : [];
+            let online = 0, active = 0, newSignups = 0;
+            const rows = players.map(p => {
+                const totals = d.totals[p.id] || { minutes: 0, sessions: 0 };
+                const lastSeen = act[p.id] || 0;
+                const firstSeen = d.signups[p.id]?.firstSeen || 0;
+                if (lastSeen && (now - lastSeen) < PA_ONLINE_MS) online++;
+                if (lastSeen && (now - lastSeen) < winMs) active++;
+                if (firstSeen && (now - firstSeen) < 7 * 86400000) newSignups++;
+                return {
+                    id: p.id, brand: p.brand || '', name: p.name || '', email: p.email || '',
+                    cohort: p.cohort || '', xc: p.xc || 0, checkpoint: p.checkpoint || p.currentCheckpoint || '—',
+                    minutes: totals.minutes, sessions: totals.sessions,
+                    lastSeen, firstSeen
+                };
+            });
+            const mostActive = rows.slice().sort((a,b) => b.minutes - a.minutes)[0];
+            return {
+                total: players.length, online, active, newSignups,
+                mostActive, rows,
+                recentSignups: Object.entries(d.signups)
+                    .map(([id, s]) => ({ id, ...s }))
+                    .sort((a,b) => b.firstSeen - a.firstSeen).slice(0, 15)
+            };
+        }
+
+        function pflxFormatAgo(ts) {
+            if (!ts) return 'never';
+            const m = (Date.now() - ts) / 60000;
+            if (m < 1) return 'just now';
+            if (m < 60) return Math.floor(m) + 'm ago';
+            if (m < 1440) return Math.floor(m/60) + 'h ago';
+            return Math.floor(m/1440) + 'd ago';
+        }
+
+        function pflxAnalyticsRender() {
+            pflxAnalyticsInit();
+            const win = parseInt(document.getElementById('pa-active-window')?.value || '7', 10);
+            const agg = pflxAnalyticsAggregate(win);
+            const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+            set('pa-total-subs', agg.total);
+            set('pa-active-subs', agg.active);
+            set('pa-active-label', `Active (${win}d)`);
+            set('pa-online-now', agg.online);
+            set('pa-most-active', agg.mostActive && agg.mostActive.minutes > 0
+                ? `${agg.mostActive.brand || agg.mostActive.name} · ${agg.mostActive.minutes}m` : '—');
+            set('pa-new-signups', agg.newSignups);
+
+            // Signups feed
+            const feed = document.getElementById('pa-signups-feed');
+            if (feed) {
+                feed.innerHTML = agg.recentSignups.length
+                    ? agg.recentSignups.map(s => `<div style="padding:5px 6px;border-bottom:1px dashed rgba(255,110,199,0.12);">
+                        <span style="color:#ff6ec7;">●</span> <b>${s.brand || s.name || s.id}</b>
+                        <span style="color:#6a7290;">· ${s.cohort || 'no cohort'} · ${pflxFormatAgo(s.firstSeen)}</span>
+                      </div>`).join('')
+                    : '<div style="color:#6a7290;padding:6px;">No signups recorded yet.</div>';
+            }
+
+            // Host emails
+            try {
+                const cfg = JSON.parse(localStorage.getItem(PA_HOST_EMAIL_KEY) || '{}');
+                const ta = document.getElementById('pa-host-emails');
+                if (ta) ta.value = cfg.emails || '';
+                const a1 = document.getElementById('pa-alert-signups'); if (a1) a1.checked = !!cfg.alertSignups;
+                const a2 = document.getElementById('pa-alert-weekly'); if (a2) a2.checked = !!cfg.alertWeekly;
+            } catch(e) {}
+
+            // Player table
+            const search = (document.getElementById('pa-search')?.value || '').toLowerCase();
+            let rows = agg.rows;
+            if (search) rows = rows.filter(r =>
+                (r.brand + ' ' + r.name + ' ' + r.email + ' ' + r.cohort).toLowerCase().includes(search));
+            rows.sort((a,b) => b.minutes - a.minutes);
+            const tbody = document.getElementById('pa-player-tbody');
+            if (tbody) {
+                tbody.innerHTML = rows.length ? rows.map(r => `
+                    <tr style="border-top:1px solid rgba(0,240,255,0.06);">
+                        <td style="padding:9px 12px;">
+                            <div style="color:#e0e6ff;font-family:'Rajdhani',sans-serif;font-weight:600;">${r.brand || r.name || '—'}</div>
+                            <div style="color:#6a7290;font-size:11px;">${r.email || r.cohort || ''}</div>
+                        </td>
+                        <td style="text-align:center;padding:9px 8px;color:#c9d1ff;font-family:'Share Tech Mono',monospace;">${r.sessions}</td>
+                        <td style="text-align:center;padding:9px 8px;color:#c9d1ff;font-family:'Share Tech Mono',monospace;">${r.minutes}</td>
+                        <td style="text-align:center;padding:9px 8px;color:#f5c842;font-family:'Share Tech Mono',monospace;">${r.xc.toLocaleString()}</td>
+                        <td style="text-align:center;padding:9px 8px;color:#c9d1ff;font-size:12px;">${r.checkpoint}</td>
+                        <td style="text-align:center;padding:9px 8px;color:#6a7290;font-size:12px;">${pflxFormatAgo(r.lastSeen)}</td>
+                        <td style="text-align:right;padding:9px 12px;">
+                            <button class="hmc-btn-sm hmc-btn-cyan" onclick="pflxAnalyticsOpenPlayerReport('${r.id}')">📄 Report</button>
+                        </td>
+                    </tr>`).join('') : `<tr><td colspan="7" style="padding:18px;text-align:center;color:#6a7290;">No players match.</td></tr>`;
+            }
+        }
+
+        function pflxAnalyticsSaveHostEmails() {
+            const ta = document.getElementById('pa-host-emails');
+            const a1 = document.getElementById('pa-alert-signups');
+            const a2 = document.getElementById('pa-alert-weekly');
+            const cfg = {
+                emails: (ta?.value || '').trim(),
+                alertSignups: !!(a1 && a1.checked),
+                alertWeekly: !!(a2 && a2.checked)
+            };
+            try { localStorage.setItem(PA_HOST_EMAIL_KEY, JSON.stringify(cfg)); } catch(e) {}
+            try { if (typeof showToast === 'function') showToast('Host email settings saved ✓'); } catch(e) { alert('Saved.'); }
+        }
+
+        function pflxAnalyticsGetHostEmails() {
+            try {
+                const cfg = JSON.parse(localStorage.getItem(PA_HOST_EMAIL_KEY) || '{}');
+                return { list: (cfg.emails || '').split(/[,\s;]+/).map(s => s.trim()).filter(Boolean),
+                         alertSignups: !!cfg.alertSignups, alertWeekly: !!cfg.alertWeekly };
+            } catch(e) { return { list: [], alertSignups: false, alertWeekly: false }; }
+        }
+
+        // Build a detailed per-player report object
+        function pflxAnalyticsGetPlayerReport(playerId) {
+            const d = pflxAnalyticsInit();
+            const act = pflxGetActivity();
+            const p = (typeof PLAYERS !== 'undefined' ? PLAYERS : []).find(x => x.id === playerId) || {};
+            const totals = d.totals[playerId] || { minutes: 0, sessions: 0 };
+            const lastSeen = act[playerId] || 0;
+            const firstSeen = d.signups[playerId]?.firstSeen || 0;
+            const sessions = d.sessions[playerId] || [];
+            const now = Date.now();
+            const last7 = sessions.filter(s => (now - s.end) < 7*86400000);
+            const mins7 = Math.round(last7.reduce((a,x) => a + (x.end - x.start), 0) / 60000);
+            // Pull rewards/penalties/projects from any known bucket the platform writes
+            let rewards = [], penalties = [], projects = [];
+            try {
+                const xc = JSON.parse(localStorage.getItem('pflx_xc_ledger_' + playerId) || '[]');
+                rewards = xc.filter(e => (e.amount || 0) > 0).slice(-10);
+                penalties = xc.filter(e => (e.amount || 0) < 0).slice(-10);
+            } catch(e) {}
+            try {
+                const proj = JSON.parse(localStorage.getItem('pflx_projects_' + playerId) || '[]');
+                projects = proj;
+            } catch(e) {}
+            return {
+                player: {
+                    id: playerId, brand: p.brand || '', name: p.name || '',
+                    email: p.email || '', cohort: p.cohort || '', xc: p.xc || 0,
+                    checkpoint: p.checkpoint || p.currentCheckpoint || '—',
+                    rank: (typeof getRankForXC === 'function' ? getRankForXC(p.xc || 0).name : '—')
+                },
+                firstSeen, lastSeen,
+                totalMinutes: totals.minutes, totalSessions: totals.sessions,
+                minutes7d: mins7, sessions7d: last7.length,
+                rewards, penalties, projects,
+                generatedAt: new Date().toISOString()
+            };
+        }
+
+        // Simple rule-based comment (X-Bot voice); async hook for real X-Bot later
+        function pflxAnalyticsGenerateComment(r) {
+            const lines = [];
+            const daysSinceSeen = r.lastSeen ? Math.floor((Date.now() - r.lastSeen) / 86400000) : 999;
+            const name = r.player.brand || r.player.name || 'This player';
+            if (!r.lastSeen) lines.push(`${name} has not signed in yet. Recommend a welcome nudge.`);
+            else if (daysSinceSeen >= 7) lines.push(`${name} has been quiet for ${daysSinceSeen} days — flag for check-in.`);
+            else if (r.minutes7d >= 120) lines.push(`${name} is highly engaged this week (${r.minutes7d} min across ${r.sessions7d} sessions). Strong momentum.`);
+            else if (r.minutes7d >= 30) lines.push(`${name} is steady this week — ${r.minutes7d} min, ${r.sessions7d} sessions.`);
+            else lines.push(`${name} has light activity (${r.minutes7d} min this week). Consider a motivating prompt.`);
+            if ((r.rewards || []).length > (r.penalties || []).length) lines.push(`Positive XC balance trending — rewards outnumber penalties.`);
+            if ((r.penalties || []).length >= 3) lines.push(`Multiple penalties logged — may benefit from a 1:1.`);
+            if (r.player.xc >= 1000) lines.push(`XC total (${r.player.xc.toLocaleString()}) puts them at ${r.player.rank} rank.`);
+            return lines.join(' ');
+        }
+
+        function pflxAnalyticsReportHTML(r) {
+            const comment = pflxAnalyticsGenerateComment(r);
+            const p = r.player;
+            const fmt = ts => ts ? new Date(ts).toLocaleString() : '—';
+            const list = (arr, fn) => arr && arr.length
+                ? '<ul style="margin:6px 0 10px 18px;padding:0;">' + arr.map(fn).join('') + '</ul>'
+                : '<div style="color:#888;font-size:12px;">None recorded.</div>';
+            return `
+<div style="font-family:system-ui,-apple-system,sans-serif;color:#111;max-width:720px;padding:24px;background:#fff;">
+  <div style="border-bottom:2px solid #00a0cc;padding-bottom:10px;margin-bottom:14px;">
+    <h1 style="margin:0;font-size:22px;color:#002a3a;">PFLX Player Report</h1>
+    <div style="color:#556;font-size:12px;">${p.brand || p.name} · ${p.email || ''} · Generated ${new Date(r.generatedAt).toLocaleString()}</div>
+  </div>
+  <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:12px;">
+    <tr><td style="padding:4px 6px;color:#666;">Player</td><td style="padding:4px 6px;"><b>${p.brand || ''}</b> ${p.name ? '('+p.name+')' : ''}</td></tr>
+    <tr><td style="padding:4px 6px;color:#666;">Cohort</td><td style="padding:4px 6px;">${p.cohort || '—'}</td></tr>
+    <tr><td style="padding:4px 6px;color:#666;">Rank / XC</td><td style="padding:4px 6px;">${p.rank} · <b>${p.xc.toLocaleString()} XC</b></td></tr>
+    <tr><td style="padding:4px 6px;color:#666;">Current Checkpoint</td><td style="padding:4px 6px;">${p.checkpoint}</td></tr>
+    <tr><td style="padding:4px 6px;color:#666;">First Seen</td><td style="padding:4px 6px;">${fmt(r.firstSeen)}</td></tr>
+    <tr><td style="padding:4px 6px;color:#666;">Last Active</td><td style="padding:4px 6px;">${fmt(r.lastSeen)}</td></tr>
+    <tr><td style="padding:4px 6px;color:#666;">Total Sessions / Minutes</td><td style="padding:4px 6px;"><b>${r.totalSessions}</b> sessions · <b>${r.totalMinutes}</b> min</td></tr>
+    <tr><td style="padding:4px 6px;color:#666;">Last 7 Days</td><td style="padding:4px 6px;">${r.sessions7d} sessions · ${r.minutes7d} min</td></tr>
+  </table>
+  <div style="background:#eef7fb;border-left:4px solid #00a0cc;padding:10px 14px;margin-bottom:14px;">
+    <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#007aa0;margin-bottom:4px;">X-Bot Summary</div>
+    <div style="font-size:13px;line-height:1.5;">${comment}</div>
+  </div>
+  <h3 style="font-size:14px;color:#002a3a;margin:14px 0 4px;">Projects</h3>
+  ${list(r.projects, x => `<li>${x.title || x.name || 'Project'} — <i>${x.status || 'in progress'}</i> ${x.dueAt ? '(due '+fmt(x.dueAt)+')' : ''}</li>`)}
+  <h3 style="font-size:14px;color:#002a3a;margin:14px 0 4px;">Recent Rewards</h3>
+  ${list(r.rewards, x => `<li>+${x.amount} XC — ${x.reason || x.label || ''} ${x.at ? '('+fmt(x.at)+')' : ''}</li>`)}
+  <h3 style="font-size:14px;color:#002a3a;margin:14px 0 4px;">Recent Penalties</h3>
+  ${list(r.penalties, x => `<li>${x.amount} XC — ${x.reason || x.label || ''} ${x.at ? '('+fmt(x.at)+')' : ''}</li>`)}
+  <div style="margin-top:20px;color:#888;font-size:10px;text-align:center;">PFLX Host Analytics · prototypeflx.com</div>
+</div>`;
+        }
+
+        function pflxAnalyticsOpenPlayerReport(playerId) {
+            const r = pflxAnalyticsGetPlayerReport(playerId);
+            const html = pflxAnalyticsReportHTML(r);
+            // Build a modal
+            let modal = document.getElementById('pa-report-modal');
+            if (modal) modal.remove();
+            modal = document.createElement('div');
+            modal.id = 'pa-report-modal';
+            modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,5,20,0.85);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
+            modal.innerHTML = `
+              <div style="background:#0a1330;border:1px solid rgba(0,240,255,0.3);border-radius:12px;max-width:820px;width:100%;max-height:92vh;display:flex;flex-direction:column;">
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(0,240,255,0.15);">
+                  <div style="color:#00d4ff;font-family:'Orbitron',sans-serif;font-size:12px;letter-spacing:1.5px;">PLAYER REPORT · ${r.player.brand || r.player.name}</div>
+                  <div style="display:flex;gap:8px;">
+                    <button class="hmc-btn hmc-btn-cyan" onclick="pflxAnalyticsDownloadPDF('${playerId}')">⬇ PDF</button>
+                    <button class="hmc-btn hmc-btn-gold" onclick="pflxAnalyticsEmailReport('${playerId}')">✉ Email Hosts</button>
+                    <button class="hmc-btn hmc-btn-gold" onclick="pflxAnalyticsEmailReport('${playerId}','player')">✉ Email Player</button>
+                    <button class="hmc-btn hmc-btn-ghost" onclick="document.getElementById('pa-report-modal').remove()">✕</button>
+                  </div>
+                </div>
+                <iframe id="pa-report-iframe" style="flex:1;width:100%;border:0;background:#fff;border-radius:0 0 12px 12px;"></iframe>
+              </div>`;
+            document.body.appendChild(modal);
+            const iframe = document.getElementById('pa-report-iframe');
+            iframe.srcdoc = '<!doctype html><html><head><meta charset="utf-8"><title>Report</title></head><body style="margin:0;">' + html + '</body></html>';
+        }
+
+        function pflxAnalyticsDownloadPDF(playerId) {
+            const r = pflxAnalyticsGetPlayerReport(playerId);
+            const html = pflxAnalyticsReportHTML(r);
+            const w = window.open('', '_blank');
+            if (!w) { alert('Popup blocked — allow popups to download the PDF.'); return; }
+            w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>PFLX Report — ' +
+                (r.player.brand || r.player.name || playerId) + '</title></head><body style="margin:0;">' + html +
+                '<script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script></body></html>');
+            w.document.close();
+        }
+
+        // POST a rendered report to /api/send-email (same origin, uses Platform's /api)
+        async function pflxAnalyticsSendEmail(payload) {
+            try {
+                const r = await fetch('/api/send-email', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-pflx-email-secret': (window.PFLX_EMAIL_SECRET || '') },
+                    body: JSON.stringify(payload)
+                });
+                return await r.json();
+            } catch(e) { return { error: String(e) }; }
+        }
+
+        async function pflxAnalyticsEmailReport(playerId, audience) {
+            const r = pflxAnalyticsGetPlayerReport(playerId);
+            const html = pflxAnalyticsReportHTML(r);
+            const name = r.player.brand || r.player.name || 'player';
+            let recipients = [];
+            if (audience === 'player') {
+                if (!r.player.email) { alert('No email on file for this player.'); return; }
+                recipients = [r.player.email];
+            } else {
+                recipients = pflxAnalyticsGetHostEmails().list;
+                if (!recipients.length) { alert('No host emails configured. Add some in the Analytics tab.'); return; }
+            }
+            const subject = `PFLX Report: ${name}`;
+            const res = await pflxAnalyticsSendEmail({
+                to: recipients, subject, html,
+                type: 'player_report', playerId
+            });
+            if (res && res.ok) {
+                try { showToast('Email sent ✓'); } catch(e) { alert('Email sent ✓'); }
+            } else {
+                alert('Email failed: ' + (res?.error || 'unknown error'));
+            }
+        }
+
+        async function pflxAnalyticsNotifyHostsOnSignup(player) {
+            const cfg = pflxAnalyticsGetHostEmails();
+            if (!cfg.alertSignups || !cfg.list.length) return;
+            const html = `<div style="font-family:system-ui;padding:16px;">
+                <h2 style="color:#002a3a;margin:0 0 8px;">New PFLX Signup</h2>
+                <p><b>${player.brand || player.name || player.id}</b> (${player.email || 'no email'}) · Cohort: ${player.cohort || '—'}</p>
+                <p style="color:#666;font-size:12px;">${new Date().toLocaleString()}</p></div>`;
+            await pflxAnalyticsSendEmail({
+                to: cfg.list, subject: `New PFLX signup: ${player.brand || player.name || player.id}`,
+                html, type: 'signup_alert', playerId: player.id
+            });
+        }
+
+        function pflxAnalyticsExportCSV() {
+            const agg = pflxAnalyticsAggregate(parseInt(document.getElementById('pa-active-window')?.value || '7', 10));
+            const header = ['id','brand','name','email','cohort','xc','checkpoint','sessions','minutes','firstSeen','lastSeen'];
+            const esc = v => '"' + String(v == null ? '' : v).replace(/"/g,'""') + '"';
+            const lines = [header.join(',')];
+            agg.rows.forEach(r => lines.push([r.id, r.brand, r.name, r.email, r.cohort, r.xc, r.checkpoint, r.sessions, r.minutes,
+                r.firstSeen ? new Date(r.firstSeen).toISOString() : '',
+                r.lastSeen ? new Date(r.lastSeen).toISOString() : ''].map(esc).join(',')));
+            const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = `pflx-analytics-${new Date().toISOString().slice(0,10)}.csv`;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+
+        async function pflxAnalyticsEmailAllHosts() {
+            const cfg = pflxAnalyticsGetHostEmails();
+            if (!cfg.list.length) { alert('Add host email recipients first.'); return; }
+            const agg = pflxAnalyticsAggregate(7);
+            const top = agg.rows.slice().sort((a,b) => b.minutes - a.minutes).slice(0, 10);
+            const html = `<div style="font-family:system-ui;padding:20px;color:#111;">
+                <h1 style="color:#002a3a;margin:0 0 6px;">PFLX Weekly Report</h1>
+                <div style="color:#666;font-size:12px;margin-bottom:12px;">${new Date().toLocaleDateString()}</div>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+                    <div style="flex:1;min-width:140px;background:#eef7fb;padding:10px;border-radius:6px;"><div style="font-size:11px;color:#557;">Total</div><div style="font-size:22px;font-weight:700;">${agg.total}</div></div>
+                    <div style="flex:1;min-width:140px;background:#eefbf2;padding:10px;border-radius:6px;"><div style="font-size:11px;color:#557;">Active (7d)</div><div style="font-size:22px;font-weight:700;">${agg.active}</div></div>
+                    <div style="flex:1;min-width:140px;background:#fdf3e4;padding:10px;border-radius:6px;"><div style="font-size:11px;color:#557;">New signups</div><div style="font-size:22px;font-weight:700;">${agg.newSignups}</div></div>
+                </div>
+                <h3 style="font-size:14px;color:#002a3a;">Top 10 by minutes this week</h3>
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead><tr style="background:#f5f7fb;"><th style="text-align:left;padding:6px;">Player</th><th style="text-align:right;padding:6px;">Sessions</th><th style="text-align:right;padding:6px;">Minutes</th><th style="text-align:right;padding:6px;">XC</th></tr></thead>
+                    <tbody>${top.map(r => `<tr style="border-top:1px solid #eee;"><td style="padding:6px;">${r.brand||r.name||r.id}</td><td style="text-align:right;padding:6px;">${r.sessions}</td><td style="text-align:right;padding:6px;">${r.minutes}</td><td style="text-align:right;padding:6px;">${r.xc.toLocaleString()}</td></tr>`).join('')}</tbody>
+                </table>
+                <div style="margin-top:18px;color:#888;font-size:10px;">PFLX Host Analytics · prototypeflx.com</div>
+            </div>`;
+            const res = await pflxAnalyticsSendEmail({
+                to: cfg.list, subject: `PFLX Weekly Report — ${new Date().toLocaleDateString()}`,
+                html, type: 'host_weekly_report'
+            });
+            if (res && res.ok) { try { showToast('Weekly report sent ✓'); } catch(e) { alert('Sent ✓'); } }
+            else alert('Send failed: ' + (res?.error || 'unknown'));
+        }
+
+        // Initialize bucket on load
+        try { pflxAnalyticsInit(); } catch(e) {}
+        // ═══════════════════════════════════════════════════════════════
 
         function hmcRefreshActivityRoster(players) {
             const act = pflxGetActivity();
@@ -10264,7 +10770,7 @@
                 loginView.classList.remove('active');
                 loginView.style.opacity = '';
                 loginView.style.filter = '';
-                document.querySelector('.toolbar').style.display = 'flex'; window.activeSession = activeSession; if (typeof pflxHeartbeat === 'function') pflxHeartbeat(); if (typeof pflxInjectRolePill === 'function') pflxInjectRolePill();
+                document.querySelector('.toolbar').style.display = 'flex'; window.activeSession = activeSession; if (typeof pflxHeartbeat === 'function') pflxHeartbeat(); if (typeof pflxAnalyticsRecordSignup === 'function') pflxAnalyticsRecordSignup(activeSession); if (typeof pflxAnalyticsTouchSession === 'function') pflxAnalyticsTouchSession(); if (typeof pflxInjectRolePill === 'function') pflxInjectRolePill();
                 updateToolbarStatus();
                 initPlatform(displayName);
                 // Sound: stop login music, reinit with player prefs, start home music
