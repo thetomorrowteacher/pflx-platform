@@ -2213,15 +2213,24 @@
             padding: 0 12px;
             font-family: 'Share Tech Mono', monospace;
             font-size: 10px;
-            color: var(--red);
+            color: rgba(255,255,255,0.35);
             letter-spacing: 1px;
             flex-shrink: 0;
             border-right: 1px solid rgba(0, 240, 255, 0.15);
+            cursor: default;
+            transition: color 0.3s;
+        }
+        .ticker-live[data-stream-live="true"] {
+            color: var(--red);
+            cursor: pointer;
         }
         .ticker-live-dot {
             width: 6px; height: 6px;
-            background: var(--red);
+            background: rgba(255,255,255,0.35);
             border-radius: 50%;
+        }
+        .ticker-live[data-stream-live="true"] .ticker-live-dot {
+            background: var(--red);
             animation: livePulse 1.5s infinite;
         }
         @keyframes livePulse {
@@ -3604,6 +3613,15 @@
 
                 <!-- HOME VIEW -->
                 <div class="view home-view">
+                    <!-- Platform Home live-stream message (shows when stream is live in MC) -->
+                    <div id="pflx-platform-live-banner" style="display:none;margin:12px 16px 0;padding:12px 16px;background:linear-gradient(135deg,rgba(239,68,68,0.15),rgba(239,68,68,0.05));border:1px solid rgba(239,68,68,0.4);border-radius:10px;display:none;align-items:center;gap:12px;cursor:pointer;" onclick="navigateTo('mission-control')">
+                        <div style="width:10px;height:10px;border-radius:50%;background:var(--red);animation:livePulse 1.5s infinite;flex-shrink:0;"></div>
+                        <div style="flex:1;">
+                            <div style="font-size:13px;font-weight:800;color:#ef4444;letter-spacing:1px;">🔴 LIVE STREAM ON AIR</div>
+                            <div style="font-size:11px;color:rgba(255,255,255,0.65);margin-top:2px;">A live stream is broadcasting in Mission Control. Click to watch.</div>
+                        </div>
+                        <button class="mc-btn" style="font-size:11px;padding:6px 14px;font-weight:700;" onclick="event.stopPropagation();navigateTo('mission-control')">OPEN MC →</button>
+                    </div>
                     <div class="dashboard-grid" id="dashboard">
                         <!-- Player header will be inserted here -->
                     </div>
@@ -3687,6 +3705,29 @@
                                 <p class="mc-page-desc">Platform overview — players, tasks, progress, and activity.</p>
                                 <!-- ═══ PLATFORM NOTIFICATION BANNER ═══ -->
                                 <div id="pflx-home-notifications" style="display:none;margin-bottom:14px;"></div>
+                                <!-- ═══ LIVE STREAM PANEL (MC Home only) ═══ -->
+                                <div class="mc-card" id="mc-live-stream-card" style="background:linear-gradient(135deg,rgba(239,68,68,0.06),rgba(10,18,40,0.4));border:1px solid rgba(239,68,68,0.25);margin-bottom:14px;">
+                                    <div class="mc-card-title" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+                                        <span style="display:flex;align-items:center;gap:10px;">
+                                            <span id="mc-live-dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#555;"></span>
+                                            <span id="mc-live-status-label">LIVE STREAM · OFFLINE</span>
+                                        </span>
+                                        <div style="display:flex;gap:6px;">
+                                            <button class="mc-btn" id="mc-live-toggle-btn" onclick="pflxToggleLiveStream()" style="font-size:11px;padding:6px 12px;">Go Live</button>
+                                            <button class="mc-btn" onclick="pflxEditLiveStream()" style="font-size:11px;padding:6px 12px;">⚙ Configure</button>
+                                        </div>
+                                    </div>
+                                    <div id="mc-live-stream-body" style="padding:8px;">
+                                        <div id="mc-live-stream-offline" style="aspect-ratio:16/9;width:100%;background:linear-gradient(135deg,#0a1228,#1a1f3a);border:1px dashed rgba(255,255,255,0.15);border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:rgba(255,255,255,0.4);">
+                                            <div style="font-size:40px;">📺</div>
+                                            <div style="font-size:13px;font-weight:700;letter-spacing:1px;color:rgba(255,255,255,0.55);">STREAM OFFLINE</div>
+                                            <div style="font-size:11px;color:rgba(255,255,255,0.35);">Click <strong>⚙ Configure</strong> to set your YouTube / stream URL, then hit <strong>Go Live</strong>.</div>
+                                        </div>
+                                        <div id="mc-live-stream-embed" style="display:none;aspect-ratio:16/9;width:100%;border-radius:8px;overflow:hidden;background:#000;">
+                                            <iframe id="mc-live-stream-iframe" src="" style="width:100%;height:100%;border:0;" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+                                        </div>
+                                    </div>
+                                </div>
                                 <!-- ═══ DARKCAMPUS MESSAGE BOARD ═══ -->
                                 <div class="mc-card" id="pflx-dc-board-card" style="display:none;background:linear-gradient(135deg,rgba(0,240,255,0.06),rgba(79,142,247,0.04));border:1px solid rgba(0,240,255,0.2);">
                                     <div class="mc-card-title" style="display:flex;align-items:center;justify-content:space-between;">
@@ -7248,7 +7289,7 @@
 
     <!-- PERSISTENT BOTTOM TICKER BAR (always visible, matches X-Coin style) -->
     <div class="message-ticker-bar" id="persistentTicker">
-      <div class="ticker-live"><div class="ticker-live-dot"></div> LIVE</div>
+      <div class="ticker-live" id="ticker-live-indicator" data-stream-live="false" title="No live stream" onclick="pflxTickerLiveClick()"><div class="ticker-live-dot"></div> <span id="ticker-live-label">OFFLINE</span></div>
       <div class="ticker-scroll-area">
         <div class="ticker-scroll-content">
           <span class="ticker-msg">Welcome to PFLX — Season 1 Checkpoint 3</span>
@@ -14423,6 +14464,119 @@
 
         // Refresh widget every 60s so countdown updates
         setInterval(function() { try { mcRenderLootWidget(); } catch (e) {} }, 60000);
+
+        // ═══════════════════════════════════════════════════════════
+        // LIVE STREAM PANEL (MC Home) + ticker/Platform-home indicators
+        // ═══════════════════════════════════════════════════════════
+        function pflxGetLiveStream() {
+            try {
+                var raw = localStorage.getItem('pflx_live_stream');
+                if (raw) return JSON.parse(raw);
+            } catch (e) {}
+            return { url: '', active: false, title: '' };
+        }
+        function pflxSetLiveStream(state) {
+            try { localStorage.setItem('pflx_live_stream', JSON.stringify(state)); } catch (e) {}
+            try { pflxRenderLiveStream(); } catch (e) {}
+        }
+        function pflxToYouTubeEmbed(url) {
+            if (!url) return '';
+            url = url.trim();
+            // Handle youtu.be short links
+            var m = url.match(/youtu\.be\/([\w-]+)/);
+            if (m) return 'https://www.youtube.com/embed/' + m[1] + '?autoplay=1';
+            // Handle watch?v=...
+            m = url.match(/[?&]v=([\w-]+)/);
+            if (m) return 'https://www.youtube.com/embed/' + m[1] + '?autoplay=1';
+            // Handle /live/... links
+            m = url.match(/youtube\.com\/live\/([\w-]+)/);
+            if (m) return 'https://www.youtube.com/embed/' + m[1] + '?autoplay=1';
+            // Handle channel live: @handle/live -> convert to channel live embed
+            m = url.match(/youtube\.com\/(@[\w.-]+)\/live/);
+            if (m) return 'https://www.youtube.com/embed/live_stream?channel=' + m[1];
+            // If already an embed URL, pass through
+            if (/youtube\.com\/embed\//.test(url)) return url;
+            // Twitch?
+            m = url.match(/twitch\.tv\/([\w-]+)/);
+            if (m) return 'https://player.twitch.tv/?channel=' + m[1] + '&parent=' + location.hostname;
+            // Otherwise use URL as-is (allows direct iframe-able pages)
+            return url;
+        }
+        function pflxEditLiveStream() {
+            var cur = pflxGetLiveStream();
+            var url = prompt('Enter live stream URL (YouTube, Twitch, or embed URL):', cur.url || '');
+            if (url === null) return;
+            var title = prompt('Stream title (optional):', cur.title || '');
+            cur.url = (url || '').trim();
+            cur.title = (title || '').trim();
+            pflxSetLiveStream(cur);
+        }
+        function pflxToggleLiveStream() {
+            var cur = pflxGetLiveStream();
+            if (!cur.url && !cur.active) {
+                alert('Configure a stream URL first (⚙ Configure).');
+                return;
+            }
+            cur.active = !cur.active;
+            pflxSetLiveStream(cur);
+        }
+        function pflxTickerLiveClick() {
+            var s = pflxGetLiveStream();
+            if (s.active) {
+                try { navigateTo('mission-control'); } catch (e) {}
+                try { mcNav('dashboard'); } catch (e) {}
+            }
+        }
+        function pflxRenderLiveStream() {
+            var s = pflxGetLiveStream();
+            // MC Home card
+            var offline = document.getElementById('mc-live-stream-offline');
+            var embedWrap = document.getElementById('mc-live-stream-embed');
+            var iframe = document.getElementById('mc-live-stream-iframe');
+            var dot = document.getElementById('mc-live-dot');
+            var label = document.getElementById('mc-live-status-label');
+            var toggleBtn = document.getElementById('mc-live-toggle-btn');
+            if (offline && embedWrap && iframe) {
+                if (s.active && s.url) {
+                    var embedUrl = pflxToYouTubeEmbed(s.url);
+                    if (iframe.src !== embedUrl) iframe.src = embedUrl;
+                    offline.style.display = 'none';
+                    embedWrap.style.display = 'block';
+                    if (dot) { dot.style.background = '#ef4444'; dot.style.animation = 'livePulse 1.5s infinite'; dot.style.boxShadow = '0 0 6px #ef4444'; }
+                    if (label) label.textContent = 'LIVE STREAM · ON AIR' + (s.title ? ' — ' + s.title : '');
+                    if (toggleBtn) { toggleBtn.textContent = 'End Stream'; toggleBtn.style.background = 'rgba(239,68,68,0.2)'; }
+                } else {
+                    if (iframe.src) iframe.src = '';
+                    offline.style.display = 'flex';
+                    embedWrap.style.display = 'none';
+                    if (dot) { dot.style.background = '#555'; dot.style.animation = 'none'; dot.style.boxShadow = 'none'; }
+                    if (label) label.textContent = 'LIVE STREAM · OFFLINE';
+                    if (toggleBtn) { toggleBtn.textContent = 'Go Live'; toggleBtn.style.background = ''; }
+                }
+            }
+            // Ticker indicator
+            var tk = document.getElementById('ticker-live-indicator');
+            var tkLabel = document.getElementById('ticker-live-label');
+            if (tk) {
+                tk.setAttribute('data-stream-live', s.active ? 'true' : 'false');
+                tk.title = s.active ? 'Live stream on air — click to watch in Mission Control' : 'No live stream';
+                if (tkLabel) tkLabel.textContent = s.active ? 'LIVE' : 'OFFLINE';
+            }
+            // Platform Home banner
+            var banner = document.getElementById('pflx-platform-live-banner');
+            if (banner) banner.style.display = s.active ? 'flex' : 'none';
+        }
+        window.pflxEditLiveStream = pflxEditLiveStream;
+        window.pflxToggleLiveStream = pflxToggleLiveStream;
+        window.pflxTickerLiveClick = pflxTickerLiveClick;
+        window.pflxRenderLiveStream = pflxRenderLiveStream;
+        // Cross-tab sync
+        window.addEventListener('storage', function(e) {
+            if (e.key === 'pflx_live_stream') { try { pflxRenderLiveStream(); } catch (err) {} }
+        });
+        if (typeof window !== 'undefined') {
+            window.addEventListener('load', function() { try { pflxRenderLiveStream(); } catch (e) {} });
+        }
 
         // ═══════════════════════════════════════════════════════════
         // PLATFORM HOME NOTIFICATIONS + DARKCAMPUS BOARD
