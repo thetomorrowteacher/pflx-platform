@@ -3600,6 +3600,43 @@
             <button class="fullscreen-btn" id="toolbar-fs-btn" title="Fullscreen">&#x26F6;</button>
         </div>
 
+        <!-- ═══ LIVE STREAM PIP — floating picture-in-picture overlay ═══ -->
+        <div id="pip-container" style="display:none;">
+            <!-- Drag handle / title bar -->
+            <div id="pip-titlebar">
+                <span id="pip-title">LIVE STREAM</span>
+                <div id="pip-titlebar-controls">
+                    <button class="pip-preset-btn" data-pip-preset="small" title="Small">S</button>
+                    <button class="pip-preset-btn pip-preset-active" data-pip-preset="medium" title="Medium">M</button>
+                    <button class="pip-preset-btn" data-pip-preset="large" title="Large">L</button>
+                    <button class="pip-preset-btn" data-pip-preset="tl" title="Top Left">&#x2196;</button>
+                    <button class="pip-preset-btn" data-pip-preset="tr" title="Top Right">&#x2197;</button>
+                    <button class="pip-preset-btn" data-pip-preset="bl" title="Bottom Left">&#x2199;</button>
+                    <button class="pip-preset-btn" data-pip-preset="br" title="Bottom Right">&#x2198;</button>
+                    <button id="pip-close-btn" title="Return to Mission Control">&#x2715;</button>
+                </div>
+            </div>
+            <!-- Video area -->
+            <div id="pip-video-area">
+                <iframe id="pip-iframe" src="" style="width:100%;height:100%;border:0;border-radius:0 0 10px 10px;" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+            </div>
+            <!-- Volume bar — appears on hover -->
+            <div id="pip-volume-bar">
+                <button id="pip-mute-btn" title="Mute / Unmute">&#x1F50A;</button>
+                <input type="range" id="pip-vol-slider" min="0" max="100" value="100" title="Volume">
+                <span id="pip-vol-label">100%</span>
+            </div>
+            <!-- Resize handles -->
+            <div class="pip-resize pip-resize-n" data-pip-dir="n"></div>
+            <div class="pip-resize pip-resize-s" data-pip-dir="s"></div>
+            <div class="pip-resize pip-resize-e" data-pip-dir="e"></div>
+            <div class="pip-resize pip-resize-w" data-pip-dir="w"></div>
+            <div class="pip-resize pip-resize-ne" data-pip-dir="ne"></div>
+            <div class="pip-resize pip-resize-nw" data-pip-dir="nw"></div>
+            <div class="pip-resize pip-resize-se" data-pip-dir="se"></div>
+            <div class="pip-resize pip-resize-sw" data-pip-dir="sw"></div>
+        </div>
+
         <div class="content-area">
             <div class="content-wrapper">
                 <!-- LOGIN VIEW — full screen overlay with multi-step flow -->
@@ -12227,6 +12264,11 @@
             if (typeof seApplyLiveStreamAutoMute === 'function') {
                 // Give the iframe a moment to accept postMessage commands
                 setTimeout(function(){ try { seApplyLiveStreamAutoMute(); } catch(e){} }, 150);
+            }
+
+            // PIP auto-activation: show floating live stream when leaving MC
+            if (typeof pipCheckAutoActivate === 'function') {
+                setTimeout(function(){ try { pipCheckAutoActivate(viewName); } catch(e){} }, 200);
             }
 
             // Auto-load iframes with SSO params from active session
@@ -24020,6 +24062,187 @@ RESPONSE RULES:
          DARKCAMPUS QUICKCHAT — right-edge sidebar drawer, platform-wide
          Limited feature-set; full feature-set lives in DarkCampus portal.
          ═══════════════════════════════════════════════════════════════ -->
+    <!-- ═══ LIVE STREAM PIP STYLES ═══ -->
+    <style>
+        /* ── PIP Container ── */
+        #pip-container {
+            position: fixed;
+            z-index: 8000;
+            width: 360px;
+            min-width: 240px;
+            min-height: 180px;
+            bottom: 24px;
+            right: 24px;
+            border-radius: 12px;
+            background: rgba(6, 10, 22, 0.92);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            /* Subtle cyan glow perimeter — kept minimal */
+            box-shadow:
+                0 0 8px 1px rgba(0, 240, 255, 0.18),
+                0 0 24px 2px rgba(0, 240, 255, 0.08),
+                0 8px 32px rgba(0, 0, 0, 0.55);
+            border: 1px solid rgba(0, 240, 255, 0.22);
+            overflow: visible;
+            user-select: none;
+            transition: box-shadow 0.3s ease;
+        }
+        #pip-container:hover {
+            box-shadow:
+                0 0 12px 2px rgba(0, 240, 255, 0.24),
+                0 0 32px 4px rgba(0, 240, 255, 0.10),
+                0 8px 40px rgba(0, 0, 0, 0.6);
+        }
+
+        /* ── Title / Drag bar ── */
+        #pip-titlebar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 10px;
+            cursor: grab;
+            background: linear-gradient(90deg, rgba(0, 240, 255, 0.06), transparent);
+            border-radius: 12px 12px 0 0;
+            border-bottom: 1px solid rgba(0, 240, 255, 0.1);
+        }
+        #pip-titlebar:active { cursor: grabbing; }
+        #pip-title {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 9px;
+            font-weight: 800;
+            letter-spacing: 1.5px;
+            color: rgba(0, 240, 255, 0.7);
+        }
+        #pip-titlebar-controls {
+            display: flex;
+            gap: 3px;
+            align-items: center;
+        }
+        .pip-preset-btn {
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: rgba(255,255,255,0.45);
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 9px;
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            transition: all 0.15s ease;
+        }
+        .pip-preset-btn:hover {
+            background: rgba(0, 240, 255, 0.12);
+            border-color: rgba(0, 240, 255, 0.35);
+            color: var(--cyan);
+        }
+        .pip-preset-btn.pip-preset-active {
+            background: rgba(0, 240, 255, 0.15);
+            border-color: rgba(0, 240, 255, 0.4);
+            color: var(--cyan);
+        }
+        #pip-close-btn {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #ef4444;
+            font-size: 11px;
+            width: 22px;
+            height: 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            margin-left: 4px;
+            transition: all 0.15s ease;
+        }
+        #pip-close-btn:hover {
+            background: rgba(239, 68, 68, 0.3);
+            border-color: #ef4444;
+        }
+
+        /* ── Video Area ── */
+        #pip-video-area {
+            aspect-ratio: 16 / 9;
+            width: 100%;
+            background: #000;
+            border-radius: 0 0 10px 10px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* ── Volume bar — slides up on hover ── */
+        #pip-volume-bar {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
+            border-radius: 0 0 10px 10px;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            pointer-events: none;
+            z-index: 2;
+        }
+        #pip-container:hover #pip-volume-bar {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        #pip-mute-btn {
+            background: none;
+            border: none;
+            color: #fff;
+            font-size: 14px;
+            cursor: pointer;
+            padding: 2px;
+            line-height: 1;
+        }
+        #pip-vol-slider {
+            flex: 1;
+            accent-color: var(--cyan);
+            height: 4px;
+            cursor: pointer;
+        }
+        #pip-vol-label {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 10px;
+            color: rgba(255,255,255,0.6);
+            min-width: 30px;
+            text-align: right;
+        }
+
+        /* ── Resize handles ── */
+        .pip-resize {
+            position: absolute;
+            z-index: 3;
+        }
+        .pip-resize-n { top: -4px; left: 12px; right: 12px; height: 8px; cursor: n-resize; }
+        .pip-resize-s { bottom: -4px; left: 12px; right: 12px; height: 8px; cursor: s-resize; }
+        .pip-resize-e { right: -4px; top: 12px; bottom: 12px; width: 8px; cursor: e-resize; }
+        .pip-resize-w { left: -4px; top: 12px; bottom: 12px; width: 8px; cursor: w-resize; }
+        .pip-resize-ne { top: -4px; right: -4px; width: 14px; height: 14px; cursor: ne-resize; }
+        .pip-resize-nw { top: -4px; left: -4px; width: 14px; height: 14px; cursor: nw-resize; }
+        .pip-resize-se { bottom: -4px; right: -4px; width: 14px; height: 14px; cursor: se-resize; }
+        .pip-resize-sw { bottom: -4px; left: -4px; width: 14px; height: 14px; cursor: sw-resize; }
+
+        /* ── PIP entry animation ── */
+        @keyframes pipSlideIn {
+            from { opacity: 0; transform: scale(0.85) translateY(20px); }
+            to   { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        #pip-container.pip-entering {
+            animation: pipSlideIn 0.3s ease forwards;
+        }
+    </style>
+
     <style>
         /* Bottom-right floating QuickChat button is replaced by the toolbar Chat button.
            Kept in the DOM so legacy code paths that reference it don't error, but hidden. */
@@ -24446,6 +24669,354 @@ RESPONSE RULES:
         document.addEventListener('DOMContentLoaded', function() { dcQcRender(); });
         // Fallback immediate
         setTimeout(dcQcRender, 100);
+    })();
+
+    // ═══════════════════════════════════════════════════════════════════
+    // ██  LIVE STREAM PIP — Picture-in-Picture floating overlay
+    // ═══════════════════════════════════════════════════════════════════
+    (function() {
+        'use strict';
+
+        var pip = {
+            active: false,
+            el: null,
+            iframe: null,
+            muted: false,
+            volume: 100,           // 0-100
+            _dragState: null,
+            _resizeState: null,
+            MIN_W: 240,
+            MIN_H: 180,
+            PRESETS: {
+                small:  { w: 280 },
+                medium: { w: 360 },
+                large:  { w: 520 }
+            }
+        };
+
+        // ── Helpers ──────────────────────────────────────────────
+
+        function pflxToYouTubeEmbedPip(url) {
+            // Same logic as the MC live-stream renderer
+            if (!url) return '';
+            var m;
+            if ((m = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^\s&]+)/))) {
+                return 'https://www.youtube.com/embed/' + m[1] + '?autoplay=1&enablejsapi=1&rel=0&modestbranding=1';
+            }
+            if ((m = url.match(/youtube\.com\/embed\/([^\s?]+)/))) {
+                var base = 'https://www.youtube.com/embed/' + m[1];
+                return base + (url.indexOf('enablejsapi') < 0 ? '?enablejsapi=1&autoplay=1' : '');
+            }
+            if ((m = url.match(/youtube\.com\/live\/([^\s?]+)/))) {
+                return 'https://www.youtube.com/embed/' + m[1] + '?autoplay=1&enablejsapi=1&rel=0';
+            }
+            return url;
+        }
+
+        function pipPostMessage(cmd) {
+            try { pip.iframe && pip.iframe.contentWindow && pip.iframe.contentWindow.postMessage(cmd, '*'); } catch(e) {}
+        }
+
+        function pipSetVolume(v) {
+            pip.volume = v;
+            pipPostMessage(JSON.stringify({ event: 'command', func: 'setVolume', args: [v] }));
+            if (v === 0) pipPostMessage('{"event":"command","func":"mute","args":""}');
+            else pipPostMessage('{"event":"command","func":"unMute","args":""}');
+        }
+
+        // ── Show / Hide ─────────────────────────────────────────
+
+        function pipShow(youtubeUrl) {
+            if (!pip.el) return;
+            if (!youtubeUrl) {
+                // Try to get the current live stream URL
+                try {
+                    var s = typeof pflxGetLiveStream === 'function' ? pflxGetLiveStream() : null;
+                    if (s && s.active && s.url) youtubeUrl = s.url;
+                } catch(e) {}
+            }
+            if (!youtubeUrl) return;
+
+            var embedUrl = pflxToYouTubeEmbedPip(youtubeUrl);
+            if (pip.iframe.src !== embedUrl) pip.iframe.src = embedUrl;
+
+            pip.el.style.display = 'block';
+            pip.el.classList.add('pip-entering');
+            setTimeout(function() { pip.el.classList.remove('pip-entering'); }, 350);
+            pip.active = true;
+
+            // Restore saved volume
+            setTimeout(function() { pipSetVolume(pip.volume); }, 800);
+        }
+
+        function pipHide() {
+            if (!pip.el) return;
+            pip.el.style.display = 'none';
+            pip.iframe.src = '';
+            pip.active = false;
+        }
+
+        // ── Drag System ─────────────────────────────────────────
+
+        function pipDragStart(e) {
+            if (e.target.closest('#pip-titlebar-controls')) return; // clicking buttons, not dragging
+            e.preventDefault();
+            var touch = e.touches ? e.touches[0] : e;
+            var rect = pip.el.getBoundingClientRect();
+            pip._dragState = {
+                startX: touch.clientX,
+                startY: touch.clientY,
+                origLeft: rect.left,
+                origTop: rect.top
+            };
+            // Switch from bottom/right positioning to top/left for free-float
+            pip.el.style.left = rect.left + 'px';
+            pip.el.style.top = rect.top + 'px';
+            pip.el.style.right = 'auto';
+            pip.el.style.bottom = 'auto';
+
+            document.addEventListener('mousemove', pipDragMove);
+            document.addEventListener('mouseup', pipDragEnd);
+            document.addEventListener('touchmove', pipDragMove, { passive: false });
+            document.addEventListener('touchend', pipDragEnd);
+        }
+
+        function pipDragMove(e) {
+            if (!pip._dragState) return;
+            e.preventDefault();
+            var touch = e.touches ? e.touches[0] : e;
+            var dx = touch.clientX - pip._dragState.startX;
+            var dy = touch.clientY - pip._dragState.startY;
+            var newLeft = pip._dragState.origLeft + dx;
+            var newTop = pip._dragState.origTop + dy;
+            // Clamp to viewport
+            var maxLeft = window.innerWidth - pip.el.offsetWidth;
+            var maxTop = window.innerHeight - pip.el.offsetHeight;
+            newLeft = Math.max(0, Math.min(newLeft, maxLeft));
+            newTop = Math.max(0, Math.min(newTop, maxTop));
+            pip.el.style.left = newLeft + 'px';
+            pip.el.style.top = newTop + 'px';
+        }
+
+        function pipDragEnd() {
+            pip._dragState = null;
+            document.removeEventListener('mousemove', pipDragMove);
+            document.removeEventListener('mouseup', pipDragEnd);
+            document.removeEventListener('touchmove', pipDragMove);
+            document.removeEventListener('touchend', pipDragEnd);
+        }
+
+        // ── Resize System ───────────────────────────────────────
+
+        function pipResizeStart(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            var touch = e.touches ? e.touches[0] : e;
+            var rect = pip.el.getBoundingClientRect();
+            var dir = e.target.dataset.pipDir;
+            pip._resizeState = {
+                dir: dir,
+                startX: touch.clientX,
+                startY: touch.clientY,
+                origW: rect.width,
+                origH: rect.height,
+                origLeft: rect.left,
+                origTop: rect.top
+            };
+            // Ensure we're in left/top mode
+            pip.el.style.left = rect.left + 'px';
+            pip.el.style.top = rect.top + 'px';
+            pip.el.style.right = 'auto';
+            pip.el.style.bottom = 'auto';
+
+            document.addEventListener('mousemove', pipResizeMove);
+            document.addEventListener('mouseup', pipResizeEnd);
+            document.addEventListener('touchmove', pipResizeMove, { passive: false });
+            document.addEventListener('touchend', pipResizeEnd);
+        }
+
+        function pipResizeMove(e) {
+            if (!pip._resizeState) return;
+            e.preventDefault();
+            var s = pip._resizeState;
+            var touch = e.touches ? e.touches[0] : e;
+            var dx = touch.clientX - s.startX;
+            var dy = touch.clientY - s.startY;
+            var dir = s.dir;
+            var newW = s.origW, newH = s.origH, newLeft = s.origLeft, newTop = s.origTop;
+
+            if (dir.indexOf('e') >= 0) newW = s.origW + dx;
+            if (dir.indexOf('w') >= 0) { newW = s.origW - dx; newLeft = s.origLeft + dx; }
+            if (dir.indexOf('s') >= 0) newH = s.origH + dy;
+            if (dir.indexOf('n') >= 0) { newH = s.origH - dy; newTop = s.origTop + dy; }
+
+            // Enforce minimum
+            if (newW < pip.MIN_W) { if (dir.indexOf('w') >= 0) newLeft -= (pip.MIN_W - newW); newW = pip.MIN_W; }
+            if (newH < pip.MIN_H) { if (dir.indexOf('n') >= 0) newTop -= (pip.MIN_H - newH); newH = pip.MIN_H; }
+
+            // Clamp to viewport
+            newLeft = Math.max(0, newLeft);
+            newTop = Math.max(0, newTop);
+            if (newLeft + newW > window.innerWidth) newW = window.innerWidth - newLeft;
+            if (newTop + newH > window.innerHeight) newH = window.innerHeight - newTop;
+
+            pip.el.style.width = newW + 'px';
+            pip.el.style.height = newH + 'px';
+            pip.el.style.left = newLeft + 'px';
+            pip.el.style.top = newTop + 'px';
+            // Clear active preset indicator
+            pipClearPresetActive();
+        }
+
+        function pipResizeEnd() {
+            pip._resizeState = null;
+            document.removeEventListener('mousemove', pipResizeMove);
+            document.removeEventListener('mouseup', pipResizeEnd);
+            document.removeEventListener('touchmove', pipResizeMove);
+            document.removeEventListener('touchend', pipResizeEnd);
+        }
+
+        // ── Size / Corner Presets ───────────────────────────────
+
+        function pipClearPresetActive() {
+            var btns = pip.el.querySelectorAll('.pip-preset-btn');
+            for (var i = 0; i < btns.length; i++) btns[i].classList.remove('pip-preset-active');
+        }
+
+        function pipApplyPreset(name) {
+            var pad = 24;
+            if (pip.PRESETS[name]) {
+                var w = pip.PRESETS[name].w;
+                pip.el.style.width = w + 'px';
+                pip.el.style.height = 'auto';  // let aspect-ratio drive it
+            }
+            // Corner snaps
+            if (name === 'tl') { pip.el.style.left = pad + 'px'; pip.el.style.top = '64px'; pip.el.style.right = 'auto'; pip.el.style.bottom = 'auto'; }
+            else if (name === 'tr') { pip.el.style.left = 'auto'; pip.el.style.top = '64px'; pip.el.style.right = pad + 'px'; pip.el.style.bottom = 'auto'; }
+            else if (name === 'bl') { pip.el.style.left = pad + 'px'; pip.el.style.top = 'auto'; pip.el.style.right = 'auto'; pip.el.style.bottom = pad + 'px'; }
+            else if (name === 'br') { pip.el.style.left = 'auto'; pip.el.style.top = 'auto'; pip.el.style.right = pad + 'px'; pip.el.style.bottom = pad + 'px'; }
+
+            pipClearPresetActive();
+            var btn = pip.el.querySelector('[data-pip-preset="' + name + '"]');
+            if (btn) btn.classList.add('pip-preset-active');
+        }
+
+        // ── Volume / Mute ───────────────────────────────────────
+
+        function pipUpdateMuteIcon() {
+            var btn = document.getElementById('pip-mute-btn');
+            if (!btn) return;
+            btn.textContent = pip.muted ? '\uD83D\uDD07' : (pip.volume < 40 ? '\uD83D\uDD09' : '\uD83D\uDD0A');
+        }
+
+        function pipOnVolSlider() {
+            var slider = document.getElementById('pip-vol-slider');
+            var label = document.getElementById('pip-vol-label');
+            if (!slider) return;
+            pip.volume = parseInt(slider.value, 10);
+            pip.muted = pip.volume === 0;
+            if (label) label.textContent = pip.volume + '%';
+            pipSetVolume(pip.volume);
+            pipUpdateMuteIcon();
+        }
+
+        function pipOnMuteToggle() {
+            pip.muted = !pip.muted;
+            if (pip.muted) {
+                pipPostMessage('{"event":"command","func":"mute","args":""}');
+            } else {
+                pipSetVolume(pip.volume || 100);
+            }
+            pipUpdateMuteIcon();
+        }
+
+        // ── Auto-Activation Hook ────────────────────────────────
+        // Called from navigateTo() — if the live stream is on-air and the player
+        // leaves Mission Control, the PIP auto-appears.  Returning to MC hides it.
+
+        window.pipCheckAutoActivate = function(viewName) {
+            try {
+                var s = typeof pflxGetLiveStream === 'function' ? pflxGetLiveStream() : null;
+                if (!s || !s.active || !s.url) { pipHide(); return; }
+
+                if (viewName === 'mission-control') {
+                    // Returning to MC — close PIP (stream is visible in the MC card)
+                    if (pip.active) pipHide();
+                } else if (viewName !== 'login') {
+                    // Navigated away from MC — show PIP
+                    if (!pip.active) pipShow(s.url);
+                }
+            } catch(e) { console.warn('[PIP] auto-activate error:', e); }
+        };
+
+        // Close button returns user to MC
+        function pipOnClose() {
+            pipHide();
+            // Navigate back to Mission Control
+            try { if (typeof navigateTo === 'function') navigateTo('mission-control'); } catch(e) {}
+        }
+
+        // ── Init ────────────────────────────────────────────────
+
+        function pipInit() {
+            pip.el = document.getElementById('pip-container');
+            pip.iframe = document.getElementById('pip-iframe');
+            if (!pip.el || !pip.iframe) return;
+
+            // Titlebar drag
+            var titlebar = document.getElementById('pip-titlebar');
+            if (titlebar) {
+                titlebar.addEventListener('mousedown', pipDragStart);
+                titlebar.addEventListener('touchstart', pipDragStart, { passive: false });
+            }
+
+            // Resize handles
+            var handles = pip.el.querySelectorAll('.pip-resize');
+            for (var i = 0; i < handles.length; i++) {
+                handles[i].addEventListener('mousedown', pipResizeStart);
+                handles[i].addEventListener('touchstart', pipResizeStart, { passive: false });
+            }
+
+            // Preset buttons
+            var presetBtns = pip.el.querySelectorAll('.pip-preset-btn');
+            for (var j = 0; j < presetBtns.length; j++) {
+                presetBtns[j].addEventListener('click', function(e) {
+                    var name = this.dataset.pipPreset;
+                    if (name) pipApplyPreset(name);
+                });
+            }
+
+            // Close button
+            var closeBtn = document.getElementById('pip-close-btn');
+            if (closeBtn) closeBtn.addEventListener('click', pipOnClose);
+
+            // Volume slider
+            var volSlider = document.getElementById('pip-vol-slider');
+            if (volSlider) volSlider.addEventListener('input', pipOnVolSlider);
+
+            // Mute button
+            var muteBtn = document.getElementById('pip-mute-btn');
+            if (muteBtn) muteBtn.addEventListener('click', pipOnMuteToggle);
+
+            // Position the volume-bar absolutely within the pip-container
+            // (it needs to overlay the bottom of the video area)
+            var volBar = document.getElementById('pip-volume-bar');
+            if (volBar) {
+                // Move it inside pip-video-area for correct overlay positioning
+                var videoArea = document.getElementById('pip-video-area');
+                if (videoArea && volBar.parentNode !== videoArea) {
+                    videoArea.appendChild(volBar);
+                    videoArea.style.position = 'relative';
+                }
+            }
+        }
+
+        // Run init
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', pipInit);
+        } else {
+            pipInit();
+        }
     })();
     </script>
 </body>
