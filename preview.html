@@ -3479,6 +3479,66 @@
             padding-left: 4px;
         }
 
+    /* ── Ken Burns keyframes (Loading Screen Enhancements) ── */
+    @keyframes pflxKenBurns1 {
+      0%   { transform: scale(1)    translate(0, 0); }
+      50%  { transform: scale(1.15) translate(-2%, -1%); }
+      100% { transform: scale(1.08) translate(1%, 2%); }
+    }
+    @keyframes pflxKenBurns2 {
+      0%   { transform: scale(1.1)  translate(1%, 0); }
+      50%  { transform: scale(1.2)  translate(-1%, 2%); }
+      100% { transform: scale(1.05) translate(0, -1%); }
+    }
+    @keyframes pflxKenBurns3 {
+      0%   { transform: scale(1.05) translate(-1%, 1%); }
+      50%  { transform: scale(1.18) translate(2%, -1%); }
+      100% { transform: scale(1.1)  translate(-1%, 0); }
+    }
+    .pflx-loading-img-kb {
+      animation-duration: 8s;
+      animation-timing-function: ease-in-out;
+      animation-iteration-count: infinite;
+      animation-direction: alternate;
+      will-change: transform;
+    }
+    /* ── Glitch transition overlay ── */
+    .pflx-glitch-overlay {
+      position: fixed; inset: 0; z-index: 100000;
+      pointer-events: none; opacity: 0;
+      background: #000;
+      transition: opacity 0.05s;
+    }
+    .pflx-glitch-overlay.active {
+      opacity: 1;
+      animation: pflxGlitchOut 300ms steps(4) forwards;
+    }
+    @keyframes pflxGlitchOut {
+      0%   { clip-path: inset(0 0 0 0); background: rgba(10,18,40,0.95); filter: none; }
+      15%  { clip-path: inset(20% 0 30% 0); background: rgba(10,18,40,0.9); filter: hue-rotate(90deg) saturate(3); }
+      30%  { clip-path: inset(50% 0 10% 0); background: rgba(0,255,255,0.15); filter: hue-rotate(-60deg); }
+      50%  { clip-path: inset(5% 0 60% 0); background: rgba(255,0,100,0.1); filter: hue-rotate(180deg) saturate(2); }
+      70%  { clip-path: inset(30% 0 20% 0); filter: brightness(2) contrast(2); }
+      85%  { clip-path: inset(10% 0 5% 0); opacity: 0.5; }
+      100% { clip-path: inset(0 0 100% 0); opacity: 0; }
+    }
+    .pflx-glitch-overlay.active::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: repeating-linear-gradient(0deg, transparent 0px, rgba(0,255,255,0.03) 1px, transparent 2px, transparent 4px);
+      animation: pflxScanDrift 300ms linear;
+    }
+    @keyframes pflxScanDrift {
+      0%   { transform: translateY(0); }
+      100% { transform: translateY(-20px); }
+    }
+    .pflx-glitch-overlay.active::after {
+      content: '';
+      position: absolute; inset: 0;
+      background: linear-gradient(90deg, rgba(255,0,0,0.08) 0%, transparent 33%, rgba(0,255,0,0.05) 50%, transparent 66%, rgba(0,0,255,0.08) 100%);
+      mix-blend-mode: screen;
+    }
+
     </style>
 </head>
 <body>
@@ -11592,7 +11652,8 @@
 
             // ── Reset role to match user's actual role on login ──
             // Prevents stale pflx_active_role="player" from overriding a host login
-            if (activeSession.role && activeSession.role.toLowerCase() === 'admin') {
+            var _loginRole = (activeSession.role || '').toLowerCase();
+            if (_loginRole === 'admin' || _loginRole === 'host' || _loginRole === 'teacher' || _loginRole === 'instructor') {
                 window.pflxRole = 'host';
                 try { localStorage.setItem('pflx_active_role', 'host'); } catch(e) {}
             } else {
@@ -12421,6 +12482,7 @@
 
         function doNavigate(viewName) {
             pflxPlaySfx('click');
+            if (typeof pflxXBotBrief === 'function') pflxXBotBrief(viewName);
             document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
             document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
 
@@ -19112,6 +19174,359 @@
             else init();
         })();
 
+        /* ═══════════════════════════════════════════════════════════════════
+           FEATURE: Rank-Based Host Control Tiers
+           ═══════════════════════════════════════════════════════════════════ */
+        (function () {
+          'use strict';
+          var GOD_IDS = ['admin-0', 'admin-1'];
+          window.PFLX_RANK_TIERS = {
+            task:    { minRank: 4, maxRank: 5, label: 'Task Lead',    ranks: ['Manager', 'Head'] },
+            project: { minRank: 6, maxRank: 7, label: 'Project Lead', ranks: ['Director', 'Producer'] },
+            cohort:  { minRank: 8, maxRank: 8, label: 'Associate / Cohort Lead', ranks: ['Mentor'] },
+            faction: { minRank: 9, maxRank: 10, label: 'Faction Lead', ranks: ['Senior', 'Chief'] },
+          };
+          var RANK_NAMES = {
+            1: 'Rookie', 2: 'Apprentice', 3: 'Specialist', 4: 'Manager', 5: 'Head',
+            6: 'Director', 7: 'Producer', 8: 'Mentor', 9: 'Senior', 10: 'Chief'
+          };
+          window.pflxIsGodTier = function (player) {
+            if (!player) return false;
+            return GOD_IDS.includes(player.id);
+          };
+          window.pflxGetPlayerPermissionScope = function (player) {
+            if (!player) return { scope: 'none', canManage: [], rankName: 'Unknown' };
+            if (window.pflxIsGodTier(player)) {
+              return { scope: 'god', canManage: ['task', 'project', 'cohort', 'faction', 'all'], rankName: 'GOD' };
+            }
+            var rank = player.rank || player.evoRank || 1;
+            var rankName = RANK_NAMES[rank] || 'Rookie';
+            var canManage = [];
+            var scope = 'none';
+            if (rank >= 9)  { scope = 'faction'; canManage = ['task', 'project', 'cohort', 'faction']; }
+            else if (rank >= 8) { scope = 'cohort'; canManage = ['task', 'project', 'cohort']; }
+            else if (rank >= 6) { scope = 'project'; canManage = ['task', 'project']; }
+            else if (rank >= 4) { scope = 'task'; canManage = ['task']; }
+            return { scope: scope, canManage: canManage, rankName: rankName, rank: rank };
+          };
+          window.pflxCanPlayerManage = function (player, entityType, entityId) {
+            if (!player) return false;
+            if (window.pflxIsGodTier(player)) return true;
+            if (window.pflxRole === 'host') return true;
+            var perms = window.pflxGetPlayerPermissionScope(player);
+            if (perms.scope === 'none') return false;
+            var hierarchy = ['task', 'project', 'cohort', 'faction'];
+            var playerLevel = hierarchy.indexOf(perms.scope);
+            var entityLevel = hierarchy.indexOf(entityType);
+            if (entityLevel === -1 || playerLevel === -1) return false;
+            return playerLevel >= entityLevel;
+          };
+          console.log('[PFLX] Rank-Based Host Control Tiers loaded');
+        })();
+
+        /* ═══════════════════════════════════════════════════════════════════
+           FEATURE: Live Stream Audio Priority
+           ═══════════════════════════════════════════════════════════════════ */
+        (function () {
+          'use strict';
+          var savedLevels = null;
+          var musicWasPlaying = false;
+          var YT_PLAYING = 1, YT_PAUSED = 2, YT_ENDED = 0, YT_BUFFERING = 3;
+
+          function duckAllAudio() {
+            if (savedLevels) return;
+            savedLevels = {};
+            if (window.PFLX_AUDIO) {
+              savedLevels.audioDuck = true;
+              window.PFLX_AUDIO.setDuck('livestream', 0);
+              window.PFLX_AUDIO.refresh();
+            }
+            if (window.pflxMusic) {
+              musicWasPlaying = !!(window.pflxMusic.playing || window.pflxMusic.isPlaying);
+              try { window.pflxMusic.pause && window.pflxMusic.pause(); } catch (e) {}
+              try { window.pflxMusic.stop && window.pflxMusic.stop(); } catch (e) {}
+            }
+            ['loginAudio', 'ambientAudio'].forEach(function (name) {
+              var el = window[name];
+              if (el && el instanceof HTMLAudioElement) {
+                savedLevels[name] = { volume: el.volume, paused: el.paused };
+                el.volume = 0;
+              }
+            });
+            document.querySelectorAll('audio[data-pflx-managed]').forEach(function (el) {
+              savedLevels['managed_' + el.id] = el.volume;
+              el.volume = 0;
+            });
+            console.log('[PFLX] Live stream playing — all other audio ducked');
+          }
+
+          function restoreAllAudio() {
+            if (!savedLevels) return;
+            if (savedLevels.audioDuck && window.PFLX_AUDIO) {
+              window.PFLX_AUDIO.setDuck('livestream', 1);
+              window.PFLX_AUDIO.refresh();
+            }
+            if (musicWasPlaying && window.pflxMusic) {
+              try { window.pflxMusic.play && window.pflxMusic.play(); } catch (e) {}
+              try { window.pflxMusic.resume && window.pflxMusic.resume(); } catch (e) {}
+            }
+            ['loginAudio', 'ambientAudio'].forEach(function (name) {
+              var el = window[name];
+              if (el && el instanceof HTMLAudioElement && savedLevels[name]) {
+                el.volume = savedLevels[name].volume;
+              }
+            });
+            document.querySelectorAll('audio[data-pflx-managed]').forEach(function (el) {
+              var key = 'managed_' + el.id;
+              if (savedLevels[key] !== undefined) el.volume = savedLevels[key];
+            });
+            savedLevels = null;
+            musicWasPlaying = false;
+            console.log('[PFLX] Live stream stopped — audio restored');
+          }
+
+          window.addEventListener('message', function (e) {
+            var data = e.data;
+            if (typeof data === 'string') {
+              try { data = JSON.parse(data); } catch (_) { return; }
+            }
+            if (data && data.event === 'onStateChange') {
+              var state = data.info;
+              if (state === YT_PLAYING || state === YT_BUFFERING) { duckAllAudio(); }
+              else if (state === YT_PAUSED || state === YT_ENDED) { restoreAllAudio(); }
+              return;
+            }
+            if (data && data.type === 'pflx-livestream') {
+              if (data.action === 'play')  duckAllAudio();
+              if (data.action === 'pause' || data.action === 'stop') restoreAllAudio();
+            }
+          });
+          window.pflxLiveStreamDuck = duckAllAudio;
+          window.pflxLiveStreamRestore = restoreAllAudio;
+          console.log('[PFLX] Live Stream Audio Priority loaded');
+        })();
+
+        /* ═══════════════════════════════════════════════════════════════════
+           FEATURE: Loading Screen Enhancements (Ken Burns + Playlist + Glitch)
+           ═══════════════════════════════════════════════════════════════════ */
+        (function () {
+          'use strict';
+          var kbAnimations = ['pflxKenBurns1', 'pflxKenBurns2', 'pflxKenBurns3'];
+          var kbIndex = 0;
+          function applyKenBurns(imgEl) {
+            if (!imgEl) return;
+            imgEl.classList.add('pflx-loading-img-kb');
+            imgEl.style.animationName = kbAnimations[kbIndex % kbAnimations.length];
+            kbIndex++;
+          }
+          var loadingObserver = null;
+          function watchLoadingImages() {
+            var container = document.querySelector('.pflx-loading-screen, #pflx-loading-screen, [data-loading-screen]');
+            if (!container) return;
+            container.querySelectorAll('img').forEach(applyKenBurns);
+            loadingObserver = new MutationObserver(function (muts) {
+              muts.forEach(function (m) {
+                m.addedNodes.forEach(function (n) {
+                  if (n.tagName === 'IMG') applyKenBurns(n);
+                  if (n.querySelectorAll) n.querySelectorAll('img').forEach(applyKenBurns);
+                });
+              });
+            });
+            loadingObserver.observe(container, { childList: true, subtree: true });
+          }
+          window.pflxLoadingPlaylist = window.pflxLoadingPlaylist || [];
+          var loadingAudio = null;
+          var loadingTrackIdx = 0;
+          function startLoadingMusic() {
+            var playlist = window.pflxLoadingPlaylist;
+            if (!playlist.length) return;
+            if (loadingAudio) stopLoadingMusic(true);
+            loadingTrackIdx = Math.floor(Math.random() * playlist.length);
+            loadingAudio = new Audio(playlist[loadingTrackIdx]);
+            loadingAudio.volume = 0.5;
+            loadingAudio.loop = false;
+            loadingAudio.addEventListener('ended', function () {
+              loadingTrackIdx = (loadingTrackIdx + 1) % playlist.length;
+              if (loadingAudio) {
+                loadingAudio.src = playlist[loadingTrackIdx];
+                loadingAudio.play().catch(function () {});
+              }
+            });
+            loadingAudio.play().catch(function () {});
+          }
+          function stopLoadingMusic(immediate) {
+            if (!loadingAudio) return;
+            if (immediate) { loadingAudio.pause(); loadingAudio = null; return; }
+            var audio = loadingAudio;
+            var startVol = audio.volume;
+            var steps = 10;
+            var step = 0;
+            var fade = setInterval(function () {
+              step++;
+              audio.volume = Math.max(0, startVol * (1 - step / steps));
+              if (step >= steps) {
+                clearInterval(fade);
+                audio.pause();
+                audio.volume = startVol;
+                if (loadingAudio === audio) loadingAudio = null;
+              }
+            }, 50);
+          }
+          var glitchEl = null;
+          function ensureGlitchEl() {
+            if (glitchEl) return glitchEl;
+            glitchEl = document.createElement('div');
+            glitchEl.className = 'pflx-glitch-overlay';
+            document.body.appendChild(glitchEl);
+            return glitchEl;
+          }
+          function playGlitchTransition(callback) {
+            var el = ensureGlitchEl();
+            el.classList.remove('active');
+            void el.offsetWidth;
+            el.classList.add('active');
+            if (window.pflxPlaySfx) { try { window.pflxPlaySfx('glitch'); } catch (e) {} }
+            setTimeout(function () {
+              el.classList.remove('active');
+              if (callback) callback();
+            }, 320);
+          }
+          function patchLoading() {
+            if (!window.PFLX_LOADING) return;
+            var origShow = window.PFLX_LOADING.show;
+            var origShowUntil = window.PFLX_LOADING.showUntilReady;
+            var origHide = window.PFLX_LOADING.hide;
+            window.PFLX_LOADING.show = function (viewName, duration) {
+              watchLoadingImages();
+              startLoadingMusic();
+              return origShow.call(window.PFLX_LOADING, viewName, duration);
+            };
+            if (origShowUntil) {
+              window.PFLX_LOADING.showUntilReady = function () {
+                watchLoadingImages();
+                startLoadingMusic();
+                return origShowUntil.call(window.PFLX_LOADING);
+              };
+            }
+            window.PFLX_LOADING.hide = function () {
+              stopLoadingMusic(false);
+              if (loadingObserver) { loadingObserver.disconnect(); loadingObserver = null; }
+              playGlitchTransition(function () {
+                origHide.call(window.PFLX_LOADING);
+              });
+            };
+          }
+          patchLoading();
+          if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', patchLoading); }
+          setTimeout(patchLoading, 2000);
+          window.pflxLoadingKenBurns = applyKenBurns;
+          window.pflxGlitchTransition = playGlitchTransition;
+          console.log('[PFLX] Loading Screen Enhancements loaded');
+        })();
+
+        /* ═══════════════════════════════════════════════════════════════════
+           FEATURE: X-Bot Contextual Briefing on Tab Navigation
+           ═══════════════════════════════════════════════════════════════════ */
+        (function () {
+          'use strict';
+          window.PFLX_XBOT_BRIEFINGS = {
+            home:              "Welcome back. Check the live feed for announcements, or head to Mission Control to find your next opportunity.",
+            'mission-control': "This is your command center. Review tasks, join sessions, and track your progress toward the next checkpoint.",
+            xcoin:             "Manage your experience currency here. Spend wisely — upgrades can boost your earning potential, but fines add up.",
+            pathways:          "The Core Pathways are where real growth happens. Choose a discipline, complete courses, and level up your skills.",
+            arena:             "Battle Arena — test your skills, earn quick XC, and compete in design challenges. Great for practicing under pressure.",
+            darkcampus:        "Your global network. Collaborate, find project partners, and build your professional reputation.",
+            'ai-center':       "I'm X-Bot, your guide. Ask me anything — task help, strategy, or just what to do next.",
+            portfolio:         "Your portfolio is your legacy. Everything you build leads here. Keep it sharp — this is what the world sees.",
+            settings:          "Customize your Console experience — audio, display, and notification preferences.",
+          };
+          var visitedTabs = {};
+          var activeBriefing = null;
+          window.pflxXBotBrief = function (viewName) {
+            if (!viewName) return;
+            var key = viewName.toLowerCase().replace(/\s+/g, '-');
+            if (visitedTabs[key]) return;
+            visitedTabs[key] = true;
+            var msg = window.PFLX_XBOT_BRIEFINGS[key];
+            if (!msg) return;
+            if (activeBriefing && activeBriefing.parentNode) {
+              activeBriefing.parentNode.removeChild(activeBriefing);
+            }
+            var el = document.createElement('div');
+            el.setAttribute('data-xbot-briefing', '');
+            el.style.cssText = [
+              'position:fixed', 'bottom:24px', 'left:24px', 'z-index:10000',
+              'display:flex', 'align-items:flex-start', 'gap:12px',
+              'max-width:380px', 'padding:14px 18px', 'border-radius:14px',
+              "background:rgba(10,18,40,0.92)", "border:1px solid rgba(0,255,255,0.25)",
+              "backdrop-filter:blur(12px)", "box-shadow:0 4px 30px rgba(0,255,255,0.1)",
+              "font-family:'Jura',sans-serif",
+              'opacity:0', 'transform:translateY(12px)',
+              'transition:opacity 0.3s ease, transform 0.3s ease',
+              'pointer-events:auto', 'cursor:default',
+            ].join(';');
+            var avatar = document.createElement('div');
+            avatar.style.cssText = [
+              'width:36px', 'height:36px', 'border-radius:10px', 'flex-shrink:0',
+              'background:linear-gradient(135deg, rgba(0,255,255,0.2), rgba(0,255,255,0.05))',
+              'border:1px solid rgba(0,255,255,0.3)',
+              'display:flex', 'align-items:center', 'justify-content:center',
+              "font-family:'Orbitron',sans-serif", 'font-size:11px', 'font-weight:800',
+              'color:var(--cyan, #00e5ff)', 'letter-spacing:0.05em',
+            ].join(';');
+            avatar.textContent = 'X';
+            var textWrap = document.createElement('div');
+            textWrap.style.cssText = 'display:flex;flex-direction:column;gap:4px;min-width:0';
+            var label = document.createElement('div');
+            label.style.cssText = [
+              "font-family:'Orbitron',sans-serif", 'font-size:9px', 'font-weight:700',
+              'color:var(--cyan, #00e5ff)', 'text-transform:uppercase',
+              'letter-spacing:0.1em', 'opacity:0.8',
+            ].join(';');
+            label.textContent = 'X-Bot';
+            var body = document.createElement('div');
+            body.style.cssText = [
+              "font-family:'Rajdhani','Jura',sans-serif",
+              'font-size:13px', 'font-weight:500', 'line-height:1.45',
+              'color:rgba(255,255,255,0.8)',
+            ].join(';');
+            body.textContent = msg;
+            textWrap.appendChild(label);
+            textWrap.appendChild(body);
+            el.appendChild(avatar);
+            el.appendChild(textWrap);
+            document.body.appendChild(el);
+            activeBriefing = el;
+            requestAnimationFrame(function () {
+              requestAnimationFrame(function () {
+                el.style.opacity = '1';
+                el.style.transform = 'translateY(0)';
+              });
+            });
+            if (window.pflxPlaySfx) {
+              try { window.pflxPlaySfx('xbot-brief'); } catch (e) {
+                try { window.pflxPlaySfx('notify'); } catch (e2) {}
+              }
+            }
+            var timer = setTimeout(function () { dismiss(); }, 6000);
+            el.addEventListener('click', function () {
+              clearTimeout(timer);
+              dismiss();
+            });
+            function dismiss() {
+              if (!el.parentNode) return;
+              el.style.opacity = '0';
+              el.style.transform = 'translateY(8px)';
+              setTimeout(function () {
+                if (el.parentNode) el.parentNode.removeChild(el);
+                if (activeBriefing === el) activeBriefing = null;
+              }, 300);
+            }
+          };
+          window.pflxXBotBriefReset = function () { visitedTabs = {}; };
+          console.log('[PFLX] X-Bot Contextual Briefings loaded');
+        })();
+
         function mcRenderModifiers() {
             var list = document.getElementById('mc-modifiers-list');
             if (!list) return;
@@ -24569,16 +24984,18 @@ RESPONSE RULES:
             window.pflxBroadcastIdentity = pflxBroadcastIdentity;
 
             // ── Reveal toolbar Host/Player toggle for admins + sync initial state ──
-            function pflxInjectRolePill() {
+            window.pflxInjectRolePill = function() {
                 var sess = window.activeSession;
-                var isAdmin = !!(sess && (sess.role || '').toLowerCase() === 'admin');
+                var role = (sess && sess.role || '').toLowerCase();
+                var isAdmin = !!(sess && (role === 'admin' || role === 'host' || role === 'teacher' || role === 'instructor'));
                 var tbBtn = document.getElementById('toolbar-role-toggle');
                 if (tbBtn) tbBtn.style.display = isAdmin ? 'inline-flex' : 'none';
                 var tbLbl = document.getElementById('tr-label-text');
                 if (tbLbl) tbLbl.textContent = window.pflxRole === 'host' ? 'HOST VIEW' : 'PLAYER VIEW';
                 // Apply initial body gating class
                 document.body.classList.toggle('pflx-as-player', window.pflxRole === 'player' && isAdmin);
-            }
+                console.log('[PFLX] RolePill injected — isAdmin:', isAdmin, 'role:', role, 'pflxRole:', window.pflxRole);
+            };
 
             // ── Init hook: runs after DOMContentLoaded ──
             window.pflxBridgeInit = function() {
