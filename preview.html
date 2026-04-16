@@ -332,6 +332,98 @@
             transition: var(--transition);
         }
 
+        /* ── Toolbar Host Tools (Host/Player toggle + Chat) ── */
+        .toolbar-host-tools {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding-right: 10px;
+            margin-right: 8px;
+            border-right: 1px solid rgba(0,240,255,0.12);
+        }
+        .toolbar-role-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px 6px 10px;
+            border-radius: 999px;
+            background: linear-gradient(135deg, rgba(245,200,66,0.14), rgba(245,158,11,0.14));
+            border: 1px solid rgba(245,200,66,0.45);
+            color: #f5c842;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 10px;
+            letter-spacing: 1.5px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .toolbar-role-toggle .tr-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: #f5c842;
+            box-shadow: 0 0 8px rgba(245,200,66,0.7);
+        }
+        .toolbar-role-toggle:hover {
+            background: linear-gradient(135deg, rgba(245,200,66,0.22), rgba(245,158,11,0.22));
+            box-shadow: 0 0 14px rgba(245,200,66,0.3);
+        }
+        body.pflx-as-player .toolbar-role-toggle {
+            background: linear-gradient(135deg, rgba(0,212,255,0.14), rgba(124,58,237,0.14));
+            border-color: rgba(0,212,255,0.45);
+            color: #00d4ff;
+        }
+        body.pflx-as-player .toolbar-role-toggle .tr-dot {
+            background: #00d4ff;
+            box-shadow: 0 0 8px rgba(0,212,255,0.7);
+        }
+        body.pflx-as-player .toolbar-role-toggle:hover {
+            background: linear-gradient(135deg, rgba(0,212,255,0.22), rgba(124,58,237,0.22));
+            box-shadow: 0 0 14px rgba(0,212,255,0.3);
+        }
+
+        .toolbar-chat-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px 6px 10px;
+            border-radius: 999px;
+            background: rgba(0,240,255,0.08);
+            border: 1px solid rgba(0,240,255,0.28);
+            color: #00f0ff;
+            cursor: pointer;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 10px;
+            letter-spacing: 1.5px;
+            font-weight: 700;
+            transition: all 0.2s;
+        }
+        .toolbar-chat-btn:hover {
+            background: rgba(0,240,255,0.18);
+            box-shadow: 0 0 14px rgba(0,240,255,0.3);
+        }
+        .toolbar-chat-btn .tcb-label { display: inline; }
+        @media (max-width: 1200px) {
+            .toolbar-chat-btn .tcb-label,
+            .toolbar-role-toggle .tr-label { display: none; }
+            .toolbar-host-tools { gap: 4px; padding-right: 6px; margin-right: 4px; }
+            .toolbar-role-toggle { padding: 6px 8px; }
+            .toolbar-chat-btn { padding: 6px 8px; }
+        }
+
+        /* ── Player-view gating — hide host-only UI when host is acting as player ── */
+        body.pflx-as-player [data-view="mission-control"],
+        body.pflx-as-player [data-host-only],
+        body.pflx-as-player .host-only,
+        body.pflx-as-player .hmc-only,
+        body.pflx-as-player #xbot-mod-section,
+        body.pflx-as-player .mc-host-only {
+            display: none !important;
+        }
+        /* Dim/hide the HMC floating Host tab inside settings tabs when in player view */
+        body.pflx-as-player .settings-tab[data-settings-tab="host"] {
+            display: none !important;
+        }
+
         .fullscreen-btn:hover {
             background: rgba(0, 240, 255, 0.1);
             box-shadow: 0 0 15px rgba(0, 240, 255, 0.2);
@@ -3437,6 +3529,18 @@
                     <div class="status-bar"><div class="status-bar-fill" id="toolbar-level-bar" style="width:10%"></div></div>
                 </div>
             </div>
+            <!-- Host/Player toggle + Chat button — surfaced for admins -->
+            <div class="toolbar-host-tools">
+                <button class="toolbar-role-toggle" id="toolbar-role-toggle" type="button" title="Toggle Host View ↔ Player View" onclick="pflxToggleRole()" style="display:none;">
+                    <span class="tr-dot"></span>
+                    <span class="tr-label" id="tr-label-text">HOST VIEW</span>
+                </button>
+                <button class="toolbar-chat-btn" id="toolbar-chat-btn" type="button" title="Open Chat / X-Bot" onclick="toggleXBotPanel()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    <span class="tcb-label">CHAT</span>
+                </button>
+            </div>
+
             <div class="toolbar-profile">
                 <div class="profile-avatar" id="toolbar-profile-avatar">
                   <img id="toolbar-profile-avatar-img" src="public/PFLX Core Flat 6.png" alt="PFLX" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">
@@ -11653,6 +11757,14 @@
         const iframeLoadResolvers = {};
 
         function navigateTo(viewName) {
+            // Player-view gating: Mission Control is host-only. If an admin is currently
+            // in Player View, block Mission Control and route them home instead.
+            if (viewName === 'mission-control' && window.pflxRole === 'player') {
+                if (typeof pflxToast === 'function') {
+                    pflxToast('Mission Control is hidden while in Player View. Switch to Host View to access admin tools.', 'info');
+                }
+                viewName = 'home';
+            }
             pflxPlaySfx('nav');
             const isIframeApp = !!APP_BASE_URLS[viewName];
             const needsLoading = !loadedViews.has(viewName);
@@ -11778,12 +11890,14 @@
             // Role-based settings: show Host or Player settings container
             if (viewName === 'settings') {
                 const role = activeSession ? (activeSession.role || 'Student') : 'Student';
-                const isHost = role.toLowerCase() === 'admin' || role.toLowerCase() === 'host';
+                const isAdmin = role.toLowerCase() === 'admin' || role.toLowerCase() === 'host';
+                // Respect the Host/Player view toggle — admins in Player View get the player settings
+                const isHostView = isAdmin && (window.pflxRole !== 'player');
                 const hostC = document.getElementById('host-settings-container');
                 const playerC = document.getElementById('player-settings-container');
-                if (hostC) hostC.style.display = isHost ? 'block' : 'none';
-                if (playerC) playerC.style.display = isHost ? 'none' : 'block';
-                if (!isHost) populatePlayerSettings();
+                if (hostC) hostC.style.display = isHostView ? 'block' : 'none';
+                if (playerC) playerC.style.display = isHostView ? 'none' : 'block';
+                if (!isHostView) populatePlayerSettings();
             }
 
             // Refresh briefing when returning to home
@@ -23222,14 +23336,31 @@ RESPONSE RULES:
 
             window.pflxSetRole = function(role) {
                 if (role !== 'host' && role !== 'player') return;
+                var prev = window.pflxRole;
                 window.pflxRole = role;
                 try { localStorage.setItem('pflx_active_role', role); } catch(e) {}
-                // Update any on-screen indicator
+                // Body class gates host-only UI across the shell
+                document.body.classList.toggle('pflx-as-player', role === 'player');
+                // If host switches to player while sitting in Mission Control, bounce them home
+                try {
+                    if (role === 'player') {
+                        var activeView = document.querySelector('.view.active');
+                        if (activeView && activeView.classList.contains('mission-control-view')) {
+                            if (typeof navigateTo === 'function') navigateTo('home');
+                        }
+                    }
+                } catch(e) {}
+                // Update legacy floating pill (kept for backwards compat)
                 var pill = document.getElementById('pflx-role-pill');
                 if (pill) {
                     pill.textContent = role === 'host' ? '⚙ HOST MODE' : '👤 PLAYER MODE';
                     pill.style.background = role === 'host' ? 'linear-gradient(135deg,#f5c842,#f59e0b)' : 'linear-gradient(135deg,#00d4ff,#7c3aed)';
                 }
+                // Update new toolbar Host/Player toggle
+                var tbBtn = document.getElementById('toolbar-role-toggle');
+                var tbLbl = document.getElementById('tr-label-text');
+                if (tbLbl) tbLbl.textContent = role === 'host' ? 'HOST VIEW' : 'PLAYER VIEW';
+                if (tbBtn) tbBtn.title = role === 'host' ? 'Switch to Player View' : 'Switch back to Host View';
                 // Broadcast to all sub-app iframes
                 if (typeof mcBroadcastToApps === 'function') {
                     mcBroadcastToApps('pflx_role_changed', { role: role });
@@ -23240,9 +23371,12 @@ RESPONSE RULES:
                         f.contentWindow.postMessage(JSON.stringify({ type: 'pflx_role_changed', role: role }), '*');
                     }
                 });
-                window.pflxShowSaveToast(role === 'host' ? 'Switched to Host Mode' : 'Switched to Player Mode');
+                if (prev && prev !== role) {
+                    if (typeof pflxPlaySfx === 'function') pflxPlaySfx(role === 'host' ? 'success' : 'nav');
+                    window.pflxShowSaveToast(role === 'host' ? 'Switched to Host View — all admin tools restored' : 'Switched to Player View — experiencing as a player');
+                }
                 // Persist to cloud
-                window.pflxCloudSave('active_role', { role: role }, 'Mode saved to Cloud ✓');
+                window.pflxCloudSave('active_role', { role: role }, null);
             };
 
             window.pflxToggleRole = function() {
@@ -23265,26 +23399,16 @@ RESPONSE RULES:
             }
             window.pflxBroadcastIdentity = pflxBroadcastIdentity;
 
-            // ── Inject a small Host/Player toggle pill into the header ──
+            // ── Reveal toolbar Host/Player toggle for admins + sync initial state ──
             function pflxInjectRolePill() {
-                if (document.getElementById('pflx-role-pill')) return;
-                // Only hosts (admin role) get the toggle pill
                 var sess = window.activeSession;
-                if (!sess || (sess.role || '').toLowerCase() !== 'admin') return;
-                var pill = document.createElement('button');
-                pill.id = 'pflx-role-pill';
-                pill.type = 'button';
-                pill.title = 'Click to toggle Host ↔ Player mode';
-                pill.textContent = window.pflxRole === 'host' ? '⚙ HOST MODE' : '👤 PLAYER MODE';
-                pill.style.cssText = 'padding:6px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.18);color:#fff;font-family:Share Tech Mono,monospace;font-size:10px;font-weight:800;letter-spacing:0.1em;cursor:pointer;margin-left:12px;margin-right:8px;white-space:nowrap;background:' + (window.pflxRole === 'host' ? 'linear-gradient(135deg,#f5c842,#f59e0b)' : 'linear-gradient(135deg,#00d4ff,#7c3aed)') + ';box-shadow:0 2px 12px rgba(0,0,0,0.35);';
-                pill.onclick = function(){ window.pflxToggleRole(); };
-                // Insert into toolbar, right before the profile section
-                var profile = document.querySelector('.toolbar-profile');
-                if (profile && profile.parentNode) {
-                    profile.parentNode.insertBefore(pill, profile);
-                } else {
-                    document.body.appendChild(pill);
-                }
+                var isAdmin = !!(sess && (sess.role || '').toLowerCase() === 'admin');
+                var tbBtn = document.getElementById('toolbar-role-toggle');
+                if (tbBtn) tbBtn.style.display = isAdmin ? 'inline-flex' : 'none';
+                var tbLbl = document.getElementById('tr-label-text');
+                if (tbLbl) tbLbl.textContent = window.pflxRole === 'host' ? 'HOST VIEW' : 'PLAYER VIEW';
+                // Apply initial body gating class
+                document.body.classList.toggle('pflx-as-player', window.pflxRole === 'player' && isAdmin);
             }
 
             // ── Init hook: runs after DOMContentLoaded ──
