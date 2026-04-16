@@ -3535,9 +3535,10 @@
                     <span class="tr-dot"></span>
                     <span class="tr-label" id="tr-label-text">HOST VIEW</span>
                 </button>
-                <button class="toolbar-chat-btn" id="toolbar-chat-btn" type="button" title="Open Chat / X-Bot" onclick="toggleXBotPanel()">
+                <button class="toolbar-chat-btn" id="toolbar-chat-btn" type="button" title="Open DarkCampus Quick Chat" onclick="dcQcToggle()">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                     <span class="tcb-label">CHAT</span>
+                    <span class="dc-qc-badge" id="toolbar-chat-badge" style="position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;background:#ff3b6c;color:#fff;border-radius:9px;font-size:10px;display:none;align-items:center;justify-content:center;padding:0 5px;font-family:'Share Tech Mono',monospace;font-weight:700;"></span>
                 </button>
             </div>
 
@@ -11394,11 +11395,18 @@
                 video.currentTime = 0;
                 video.muted = false;
                 video.volume = 1.0;
+                // Intro takes leading audio — mute Live Feed
+                try { window.PFLX_AUDIO && window.PFLX_AUDIO.start('intro'); } catch(e) {}
                 video.play().catch(() => {
                     // Autoplay with sound may be blocked — try muted fallback
                     video.muted = true;
                     video.play().catch(() => {});
                 });
+
+                const finish = () => {
+                    // Release intro audio priority — Live Feed returns to primary
+                    try { window.PFLX_AUDIO && window.PFLX_AUDIO.stop('intro'); } catch(e) {}
+                };
 
                 // When the full video ends, fade out over 1.2s then resolve
                 video.onended = function() {
@@ -11408,6 +11416,7 @@
                         container.style.display = 'none';
                         video.pause();
                         video.onended = null;
+                        finish();
                         resolve();
                     }, 1200);
                 };
@@ -11421,6 +11430,7 @@
                             container.style.display = 'none';
                             video.pause();
                             video.onended = null;
+                            finish();
                             resolve();
                         }, 1200);
                     }
@@ -11652,6 +11662,67 @@
             return container;
         }
 
+        // ══════════════════════════════════════════════════════════════════
+        //  PFLX_AUDIO — Central audio priority/ducking manager
+        //  Default: Live Feed is the primary audio source (100% volume).
+        //  When a higher-priority source is active, Live Feed ducks or mutes.
+        //    • 'intro'    → Live Feed fully muted (intro video has its own audio)
+        //    • 'briefing' → Live Feed ducks to 20% (X-Bot TTS becomes leading)
+        //    • 'loading'  → Live Feed ducks to host-configured level while loading music plays
+        //  Uses YouTube IFrame API via postMessage (requires enablejsapi=1).
+        // ══════════════════════════════════════════════════════════════════
+        window.PFLX_AUDIO = {
+            stack: [],              // active priority sources (top = leading)
+            liveFeedBase: 100,      // normal level when Live Feed is leading
+            duckLevels: {
+                intro: 0,
+                briefing: 20,
+                loading: 15
+            },
+            _lastApplied: -1,
+
+            start: function(source) {
+                // Remove duplicates, push to top
+                this.stack = this.stack.filter(function(s){ return s !== source; });
+                this.stack.push(source);
+                this.apply();
+            },
+            stop: function(source) {
+                this.stack = this.stack.filter(function(s){ return s !== source; });
+                this.apply();
+            },
+            apply: function() {
+                var leading = this.stack[this.stack.length - 1]; // undefined => liveFeed
+                var iframe = document.getElementById('mc-live-stream-iframe');
+                if (!iframe || !iframe.contentWindow) return;
+                // If player has explicitly muted the live stream, honor that.
+                if (SE && SE.playerPrefs && SE.playerPrefs.liveStreamMuted) {
+                    try { iframe.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*'); } catch(e) {}
+                    return;
+                }
+                var targetVol;
+                if (!leading) {
+                    targetVol = this.liveFeedBase;
+                } else if (this.duckLevels[leading] !== undefined) {
+                    targetVol = this.duckLevels[leading];
+                } else {
+                    targetVol = this.liveFeedBase;
+                }
+                if (targetVol === this._lastApplied) return;
+                this._lastApplied = targetVol;
+                try {
+                    iframe.contentWindow.postMessage(JSON.stringify({event:'command',func:'setVolume',args:[targetVol]}), '*');
+                    if (targetVol === 0) {
+                        iframe.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*');
+                    } else {
+                        iframe.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*');
+                    }
+                } catch(e) {}
+            },
+            // Re-apply (useful after iframe reload or view change)
+            refresh: function() { this._lastApplied = -1; this.apply(); }
+        };
+
         // ── PFLX Loading Screen Engine ──
         const PFLX_LOADING = {
             screen: null,
@@ -11871,63 +11942,8 @@
                 } catch(e) { return null; }
             },
 
-            _muteMcLiveStream(shouldMute) {
+            _playAmbientPad() {
                 try {
-                    var iframe = document.getElementById('mc-live-stream-iframe');
-                    if (!iframe) return;
-                    if (shouldMute) {
-                        // Remember current state so we don't unmute a stream the player muted themselves
-                        this._liveStreamWasMuted = !!iframe.dataset.userMuted;
-                        if (this._liveStreamWasMuted) return; // already muted by user — nothing to do
-                        try { iframe.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*'); } catch(e) {}
-                        iframe.dataset.autoMuted = '1';
-                        this._liveStreamAutoMuted = true;
-                    } else if (this._liveStreamAutoMuted) {
-                        try { iframe.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*'); } catch(e) {}
-                        iframe.dataset.autoMuted = '';
-                        this._liveStreamAutoMuted = false;
-                    }
-                } catch(e) {}
-            },
-
-            playLoadingSfx() {
-                try {
-                    if (SE && (SE.playerPrefs && SE.playerPrefs.muteAll)) return;
-
-                    // ── Host-uploaded loading music gallery (preferred, non-login) ──
-                    var track = this._pickLoadingMusicTrack();
-                    if (track && (track.dataUrl || track.url)) {
-                        // Stop anything previously playing
-                        if (this._loadingMusicAudio) { try { this._loadingMusicAudio.pause(); } catch(e){} this._loadingMusicAudio = null; }
-                        var aud = new Audio(track.dataUrl || track.url);
-                        var lmVol = (SE.config.loadingMusic && SE.config.loadingMusic.volume !== undefined) ? SE.config.loadingMusic.volume : 0.55;
-                        var master = (SE.config.masterVolume !== undefined ? SE.config.masterVolume : 0.7);
-                        var player = (SE.playerPrefs && SE.playerPrefs.volume !== undefined ? SE.playerPrefs.volume : 0.7);
-                        aud.volume = Math.min(1, lmVol * master * player);
-                        aud.loop = true;
-                        aud.play().catch(function(){});
-                        this._loadingMusicAudio = aud;
-                        // Mute MC live stream while loading music plays
-                        if (!SE.config.loadingMusic || SE.config.loadingMusic.muteLiveStreamWhilePlaying !== false) {
-                            this._muteMcLiveStream(true);
-                        }
-                        return;
-                    }
-
-                    // ── Legacy single-track loading SFX ──
-                    if (SE && (SE.config.sfxEnabled === false || SE.playerPrefs.sfxOn === false)) return;
-                    var customSfx = (SE.config.sfx || []).find(function(s) { return s.event === 'loading-screen'; });
-                    if (customSfx && (customSfx.dataUrl || customSfx.url)) {
-                        var aud2 = new Audio(customSfx.dataUrl || customSfx.url);
-                        var bgmMix = SE.config.bgmVolume !== undefined ? SE.config.bgmVolume : 0.4;
-                        aud2.volume = Math.min(1, (SE.config.masterVolume || 0.7) * (SE.playerPrefs.volume || 0.7) * bgmMix);
-                        aud2.loop = true;
-                        aud2.play().catch(function(){});
-                        this._loadingCustomAudio = aud2;
-                        return;
-                    }
-
-                    // ── Synthesized fallback pad ──
                     if (typeof pflxGetAudioCtx !== 'function') return;
                     var ctx = pflxGetAudioCtx();
                     var vol = ((SE ? SE.config.masterVolume : 0.7) || 0.7) * ((SE ? SE.playerPrefs.volume : 0.7) || 0.7);
@@ -11946,8 +11962,11 @@
                     filter.connect(gain);
                     gain.connect(ctx.destination);
                     gain.gain.setValueAtTime(0, ctx.currentTime);
-                    gain.gain.linearRampToValueAtTime(vol * 0.08, ctx.currentTime + 0.5);
-                    gain.gain.linearRampToValueAtTime(vol * 0.05, ctx.currentTime + 4);
+                    // Much softer when running alongside loading music so it acts like an SFX bed
+                    var peakA = this._loadingMusicAudio ? vol * 0.03 : vol * 0.08;
+                    var peakB = this._loadingMusicAudio ? vol * 0.018 : vol * 0.05;
+                    gain.gain.linearRampToValueAtTime(peakA, ctx.currentTime + 0.5);
+                    gain.gain.linearRampToValueAtTime(peakB, ctx.currentTime + 4);
                     gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 10);
                     osc1.start();
                     osc2.start();
@@ -11957,11 +11976,56 @@
                 } catch(e) {}
             },
 
+            playLoadingSfx() {
+                try {
+                    if (SE && (SE.playerPrefs && SE.playerPrefs.muteAll)) return;
+
+                    var musicPlayed = false;
+
+                    // ── Host-uploaded loading music gallery (preferred, non-login) ──
+                    var track = this._pickLoadingMusicTrack();
+                    if (track && (track.dataUrl || track.url)) {
+                        if (this._loadingMusicAudio) { try { this._loadingMusicAudio.pause(); } catch(e){} this._loadingMusicAudio = null; }
+                        var aud = new Audio(track.dataUrl || track.url);
+                        var lmVol = (SE.config.loadingMusic && SE.config.loadingMusic.volume !== undefined) ? SE.config.loadingMusic.volume : 0.55;
+                        var master = (SE.config.masterVolume !== undefined ? SE.config.masterVolume : 0.7);
+                        var player = (SE.playerPrefs && SE.playerPrefs.volume !== undefined ? SE.playerPrefs.volume : 0.7);
+                        aud.volume = Math.min(1, lmVol * master * player);
+                        aud.loop = true;
+                        aud.play().catch(function(){});
+                        this._loadingMusicAudio = aud;
+                        musicPlayed = true;
+                        // Duck the Live Feed via the central audio priority manager
+                        if (!SE.config.loadingMusic || SE.config.loadingMusic.muteLiveStreamWhilePlaying !== false) {
+                            try { window.PFLX_AUDIO && window.PFLX_AUDIO.start('loading'); } catch(e) {}
+                        }
+                    }
+
+                    // ── Always also play the loading SFX bed (legacy upload or synthesized) ──
+                    // This ensures SFX keep firing *alongside* the shuffled music per spec.
+                    if (!(SE && (SE.config.sfxEnabled === false || SE.playerPrefs.sfxOn === false))) {
+                        var customSfx = (SE.config.sfx || []).find(function(s) { return s.event === 'loading-screen'; });
+                        if (customSfx && (customSfx.dataUrl || customSfx.url)) {
+                            var aud2 = new Audio(customSfx.dataUrl || customSfx.url);
+                            var bgmMix = SE.config.bgmVolume !== undefined ? SE.config.bgmVolume : 0.4;
+                            // If music is already playing, keep the SFX well under the music
+                            var sfxMult = musicPlayed ? 0.25 : 1;
+                            aud2.volume = Math.min(1, (SE.config.masterVolume || 0.7) * (SE.playerPrefs.volume || 0.7) * bgmMix * sfxMult);
+                            aud2.loop = true;
+                            aud2.play().catch(function(){});
+                            this._loadingCustomAudio = aud2;
+                        } else {
+                            // Synthesized ambient pad — quieter when music plays on top
+                            this._playAmbientPad();
+                        }
+                    }
+                } catch(e) {}
+            },
+
             stopLoadingSfx() {
-                // Stop gallery music + restore live stream
+                // Stop gallery music + release live stream duck
                 if (this._loadingMusicAudio) {
                     try {
-                        // Quick fade-out to avoid click
                         var a = this._loadingMusicAudio;
                         var startVol = a.volume;
                         var steps = 8;
@@ -11975,8 +12039,8 @@
                     } catch(e) { try { this._loadingMusicAudio.pause(); } catch(e2) {} }
                     this._loadingMusicAudio = null;
                 }
-                // Un-mute live stream if we auto-muted it
-                this._muteMcLiveStream(false);
+                // Release loading priority — Live Feed returns to prior leading level
+                try { window.PFLX_AUDIO && window.PFLX_AUDIO.stop('loading'); } catch(e) {}
 
                 // Stop legacy custom audio
                 if (this._loadingCustomAudio) {
@@ -21869,11 +21933,28 @@ RESPONSE RULES:
             // Pause/resume music based on toggle
             if (!SE.playerPrefs.musicOn || SE.playerPrefs.muteAll) {
                 if (SE.bgAudio) SE.bgAudio.pause();
+                if (SE.loginAudio) SE.loginAudio.pause();
+                if (SE.ambientAudio) SE.ambientAudio.pause();
             } else {
                 sePlayForTab(SE.currentTab);
             }
+            // Also stop/apply the legacy pflxMusic oscillator engine so Music-off
+            // silences *everything*, not just SE.bgAudio.
+            try {
+                if (typeof pflxMusic !== 'undefined' && pflxMusic) {
+                    if (!SE.playerPrefs.musicOn || SE.playerPrefs.muteAll) {
+                        if (pflxMusic.playing) pflxMusic.stop();
+                    }
+                    if (pflxMusic.master) {
+                        var master = SE.playerPrefs.muteAll ? 0 : (SE.playerPrefs.volume || 0.7) * (SE.playerPrefs.musicVolume || 1);
+                        pflxMusic.master.gain.value = master * 0.5;
+                    }
+                }
+            } catch(e) {}
             // Re-evaluate live stream auto-mute based on current view
             try { seApplyLiveStreamAutoMute(); } catch(e) {}
+            // Refresh live-feed ducking so volume/mute changes apply immediately
+            try { window.PFLX_AUDIO && window.PFLX_AUDIO.refresh(); } catch(e) {}
         }
 
         // Explicit "mute live stream now" toggle — survives beyond view changes until untoggled
@@ -21885,16 +21966,20 @@ RESPONSE RULES:
             var brand = activeSession ? activeSession.brand : 'guest';
             try { localStorage.setItem('pflx_se_prefs_' + brand, JSON.stringify(SE.playerPrefs)); } catch(e) {}
             var iframe = document.getElementById('mc-live-stream-iframe');
-            if (!iframe) return;
-            try {
-                if (muted) {
-                    iframe.dataset.userMuted = '1';
-                    iframe.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*');
-                } else {
-                    iframe.dataset.userMuted = '';
-                    iframe.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*');
-                }
-            } catch(e) {}
+            if (iframe) {
+                try {
+                    if (muted) {
+                        iframe.dataset.userMuted = '1';
+                        iframe.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*');
+                    } else {
+                        iframe.dataset.userMuted = '';
+                        iframe.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*');
+                    }
+                } catch(e) {}
+            }
+            // Let the priority manager re-evaluate the current stack (which now
+            // honors SE.playerPrefs.liveStreamMuted and forces mute at apply() time).
+            try { window.PFLX_AUDIO && window.PFLX_AUDIO.refresh(); } catch(e) {}
         }
 
         // Auto-mute live stream when player is outside Mission Control, if pref is on.
@@ -21960,9 +22045,12 @@ RESPONSE RULES:
         document.addEventListener('click', function(e) {
             var panel = document.getElementById('se-player-panel');
             var toggle = document.getElementById('music-toggle');
-            if (panel && panel.style.display !== 'none' && !panel.contains(e.target) && e.target !== toggle) {
-                panel.style.display = 'none';
-            }
+            if (!panel || panel.style.display === 'none') return;
+            // Use .contains() instead of === so clicking on child nodes (text / svg)
+            // inside the toggle button doesn't immediately close the panel.
+            if (panel.contains(e.target)) return;
+            if (toggle && toggle.contains(e.target)) return;
+            panel.style.display = 'none';
         });
 
         // ── Ambient Sound Host Controls ─────────────────────────────
@@ -22803,7 +22891,18 @@ RESPONSE RULES:
                 // Apply voice mixer volume from mastering mixer
                 var voiceMix = SE.config.voiceVolume !== undefined ? SE.config.voiceVolume : 0.9;
                 audio.volume = Math.min(1, (SE.config.masterVolume || 0.7) * (SE.playerPrefs.volume || 0.7) * voiceMix);
-                audio.play().catch(e => console.log('[Briefing TTS] Autoplay blocked:', e.message));
+                // Briefing takes leading audio — duck Live Feed to ~20%
+                try { window.PFLX_AUDIO && window.PFLX_AUDIO.start('briefing'); } catch(e) {}
+                const releaseBriefing = function() {
+                    try { window.PFLX_AUDIO && window.PFLX_AUDIO.stop('briefing'); } catch(e) {}
+                    try { URL.revokeObjectURL(url); } catch(e) {}
+                };
+                audio.onended = releaseBriefing;
+                audio.onerror = releaseBriefing;
+                audio.play().catch(e => {
+                    console.log('[Briefing TTS] Autoplay blocked:', e.message);
+                    releaseBriefing();
+                });
             }).catch(err => {
                 console.log('[Briefing TTS] Error:', err.message);
             });
@@ -23020,11 +23119,11 @@ RESPONSE RULES:
             // Login screen fullscreen button
             var lfb = document.getElementById('login-fs-btn'); if (lfb) lfb.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); toggleFullscreen(); });
 
-            // Music toggle
-            document.getElementById('music-toggle').addEventListener('click', () => {
-                pflxMusic.toggle();
-                document.getElementById('music-toggle').style.color = pflxMusic.playing ? 'var(--green)' : 'var(--cyan)';
-            });
+            // Music toggle — the inline onclick on #music-toggle already opens the
+            // quick audio settings panel (seTogglePlayerPanel). The legacy pflxMusic
+            // oscillator engine is no longer tied to this button because it doesn't
+            // respond to the panel's Music/Master/SFX sliders (those control SE.bgAudio
+            // only), which made the panel feel broken.
 
             // Keyboard shortcuts
             document.addEventListener('keydown', (e) => {
@@ -23922,22 +24021,10 @@ RESPONSE RULES:
          Limited feature-set; full feature-set lives in DarkCampus portal.
          ═══════════════════════════════════════════════════════════════ -->
     <style>
-        #dc-qc-toggle {
-            position: fixed; right: 14px; bottom: 14px; z-index: 9998;
-            width: 52px; height: 52px; border-radius: 50%;
-            background: linear-gradient(135deg, #00d4ff 0%, #0077a8 100%);
-            border: 1px solid rgba(0,240,255,0.4); color: #001a2a; cursor: pointer;
-            box-shadow: 0 6px 22px rgba(0,212,255,0.35); font-size: 22px;
-            display: flex; align-items: center; justify-content: center;
-            transition: transform .15s ease, box-shadow .15s ease;
-        }
-        #dc-qc-toggle:hover { transform: scale(1.07); box-shadow: 0 8px 30px rgba(0,212,255,0.55); }
-        #dc-qc-toggle .dc-qc-badge {
-            position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px;
-            background: #ff3b6c; color: #fff; border-radius: 9px; font-size: 10px;
-            display: none; align-items: center; justify-content: center; padding: 0 5px;
-            font-family: 'Share Tech Mono', monospace; font-weight: 700;
-        }
+        /* Bottom-right floating QuickChat button is replaced by the toolbar Chat button.
+           Kept in the DOM so legacy code paths that reference it don't error, but hidden. */
+        #dc-qc-toggle { display: none !important; }
+        #dc-qc-toggle .dc-qc-badge { display: none !important; }
         #dc-qc-drawer {
             position: fixed; right: -380px; top: 0; bottom: 0; width: 360px; z-index: 9999;
             background: linear-gradient(180deg, rgba(6,10,22,0.97) 0%, rgba(10,18,40,0.97) 100%);
@@ -24338,9 +24425,16 @@ RESPONSE RULES:
 
         function dcQcUpdateBadge() {
             const b = document.getElementById('dc-qc-badge');
-            if (!b) return;
-            b.style.display = dcState.unread > 0 ? 'flex' : 'none';
-            b.textContent = dcState.unread;
+            if (b) {
+                b.style.display = dcState.unread > 0 ? 'flex' : 'none';
+                b.textContent = dcState.unread;
+            }
+            // Mirror to toolbar Chat button badge (the new primary entry point)
+            const tb = document.getElementById('toolbar-chat-badge');
+            if (tb) {
+                tb.style.display = dcState.unread > 0 ? 'flex' : 'none';
+                tb.textContent = dcState.unread;
+            }
         }
 
         function escapeHtml(s) {
