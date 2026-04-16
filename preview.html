@@ -3583,6 +3583,16 @@
                         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:#ef4444;">
                             <input type="checkbox" id="se-player-mute-all" onchange="sePlayerMuteAll()" style="accent-color:#ef4444;"> Mute All
                         </label>
+                        <!-- Divider -->
+                        <div style="border-top:1px solid rgba(255,255,255,0.06);margin:2px 0;"></div>
+                        <!-- Live Stream controls -->
+                        <div style="font-family:'Share Tech Mono',monospace;font-size:9px;color:rgba(255,255,255,0.4);letter-spacing:1px;">LIVE STREAM</div>
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:#e0e6ff;">
+                            <input type="checkbox" id="se-player-mute-livestream" onchange="sePlayerLiveStreamMuteToggle()" style="accent-color:var(--cyan);"> Mute live stream now
+                        </label>
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:11px;color:#8a92b0;">
+                            <input type="checkbox" id="se-player-mute-livestream-outside" onchange="sePlayerPrefSave()" style="accent-color:var(--cyan);"> Auto-mute outside Mission Control
+                        </label>
                     </div>
                 </div>
             </div>
@@ -6832,22 +6842,37 @@
                                 <h3 style="color: var(--cyan); font-family: 'Orbitron', sans-serif; font-size: 13px; margin-bottom: 6px; letter-spacing: 1.5px;">LOADING SCREEN GALLERY</h3>
                                 <p style="color: #6a7290; font-size: 12px; margin-bottom: 12px; font-family: 'Jura', sans-serif;">One image per loading screen. Max <strong style="color:var(--gold);">20</strong> images. <span id="hmc-gallery-count" style="color:var(--cyan);">0</span>/20 loaded.</p>
 
-                                <!-- Loading Screen Music -->
+                                <!-- Loading Screen Music Gallery -->
                                 <div class="dashboard-card" style="margin-bottom:14px;">
-                                    <h4 style="color: var(--gold); margin-bottom: 8px; font-family: 'Orbitron', sans-serif; font-size: 12px; letter-spacing: 1px;">LOADING SCREEN MUSIC</h4>
-                                    <p style="color: #6a7290; font-size: 11px; margin-bottom: 10px;">Upload audio that plays during loading screens. Loops until the loading screen closes.</p>
+                                    <h4 style="color: var(--gold); margin-bottom: 8px; font-family: 'Orbitron', sans-serif; font-size: 12px; letter-spacing: 1px;">LOADING SCREEN MUSIC GALLERY</h4>
+                                    <p style="color: #6a7290; font-size: 11px; margin-bottom: 10px;">Upload one or more tracks. Plays during every loading screen <em>after</em> the initial login video. The MC live stream will auto-mute while loading music plays.</p>
                                     <div class="settings-row" style="border:none;">
                                         <div class="settings-label">Enable Loading Music</div>
-                                        <div class="settings-value"><label class="toggle-switch"><input type="checkbox" checked id="loading-music-enabled" onchange="seHostSave()"><span class="toggle-slider"></span></label></div>
+                                        <div class="settings-value"><label class="toggle-switch"><input type="checkbox" checked id="loading-music-enabled" onchange="loadingMusicSettingSave()"><span class="toggle-slider"></span></label></div>
                                     </div>
-                                    <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
-                                        <span id="loading-music-name" style="font-size:12px;color:#e0e6ff;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">No loading music loaded</span>
+                                    <div class="settings-row" style="border:none;">
+                                        <div class="settings-label">Shuffle Gallery</div>
+                                        <div class="settings-value"><label class="toggle-switch"><input type="checkbox" checked id="loading-music-shuffle" onchange="loadingMusicSettingSave()"><span class="toggle-slider"></span></label></div>
+                                    </div>
+                                    <div class="settings-row" style="border:none;">
+                                        <div class="settings-label">Mute Live Stream while Playing</div>
+                                        <div class="settings-value"><label class="toggle-switch"><input type="checkbox" checked id="loading-music-mute-stream" onchange="loadingMusicSettingSave()"><span class="toggle-slider"></span></label></div>
+                                    </div>
+                                    <div class="settings-row" style="border:none;">
+                                        <div class="settings-label">Music Volume</div>
+                                        <div class="settings-value"><input type="range" min="0" max="100" value="55" id="loading-music-vol" oninput="loadingMusicVolUpdate()" style="width:140px;accent-color:var(--gold);"><span id="loading-music-vol-label" style="color:var(--gold);font-weight:700;margin-left:8px;font-size:12px;">55%</span></div>
+                                    </div>
+
+                                    <div id="loading-music-list" style="display:flex;flex-direction:column;gap:8px;margin-top:12px;margin-bottom:10px;"></div>
+
+                                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                                        <input type="text" placeholder="Track URL (MP3/WAV)..." id="loading-music-url" style="background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.12);color:#e0e6ff;padding:6px 12px;border-radius:6px;font-family:'Jura',sans-serif;width:220px;font-size:12px;">
+                                        <button onclick="addLoadingMusicURL()" class="hmc-btn-sm hmc-btn-cyan">+ URL</button>
                                         <label class="hmc-btn-sm hmc-btn-gold" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;">
-                                            Upload Music
-                                            <input type="file" accept="audio/*" style="display:none;" onchange="uploadLoadingMusic(this)">
+                                            &#x1F3B5; Upload Track
+                                            <input type="file" accept="audio/*" multiple style="display:none;" onchange="uploadLoadingMusic(this)">
                                         </label>
-                                        <button onclick="previewLoadingMusic()" class="hmc-btn-sm hmc-btn-cyan" style="font-size:10px;">&#x25B6; Preview</button>
-                                        <button onclick="removeLoadingMusic()" class="hmc-btn-sm hmc-btn-ghost" style="font-size:10px;color:#ef4444;">&#x2716; Remove</button>
+                                        <button onclick="previewLoadingMusic()" class="hmc-btn-sm hmc-btn-cyan" style="font-size:10px;">&#x25B6; Preview Random</button>
                                     </div>
                                 </div>
 
@@ -9860,57 +9885,171 @@
             pflxToast('Image removed (' + loadingGallery.length + '/20)', 'success');
         }
 
-        // ── Loading Screen Music ──
+        // ── Loading Screen Music Gallery ──
         var _loadingMusicPreview = null;
+
+        function ensureLoadingMusicConfig() {
+            if (!SE.config.loadingMusic) {
+                SE.config.loadingMusic = { enabled: true, shuffle: true, volume: 0.55, muteLiveStreamWhilePlaying: true, tracks: [] };
+            }
+            if (!Array.isArray(SE.config.loadingMusic.tracks)) SE.config.loadingMusic.tracks = [];
+
+            // One-time migration: old single-track loading-screen SFX → first gallery entry
+            var sfxList = (SE.config.sfx || []);
+            var legacy = sfxList.find(function(s){ return s.event === 'loading-screen'; });
+            if (legacy && SE.config.loadingMusic.tracks.length === 0) {
+                SE.config.loadingMusic.tracks.push({
+                    id: 'lm-legacy-' + Date.now(),
+                    name: legacy.name || 'Loading music',
+                    url: legacy.url || '',
+                    dataUrl: legacy.dataUrl || ''
+                });
+            }
+        }
+
+        function loadingMusicSave() {
+            try { localStorage.setItem('pflx_se_config', JSON.stringify(SE.config)); } catch(e) {}
+        }
+
+        function loadingMusicSettingSave() {
+            ensureLoadingMusicConfig();
+            var en = document.getElementById('loading-music-enabled');
+            var sh = document.getElementById('loading-music-shuffle');
+            var mu = document.getElementById('loading-music-mute-stream');
+            if (en) SE.config.loadingMusic.enabled = !!en.checked;
+            if (sh) SE.config.loadingMusic.shuffle = !!sh.checked;
+            if (mu) SE.config.loadingMusic.muteLiveStreamWhilePlaying = !!mu.checked;
+            loadingMusicSave();
+        }
+
+        function loadingMusicVolUpdate() {
+            ensureLoadingMusicConfig();
+            var v = document.getElementById('loading-music-vol');
+            var l = document.getElementById('loading-music-vol-label');
+            if (v) { SE.config.loadingMusic.volume = parseInt(v.value, 10) / 100; if (l) l.textContent = v.value + '%'; }
+            loadingMusicSave();
+        }
+
+        function renderLoadingMusicList() {
+            ensureLoadingMusicConfig();
+            var container = document.getElementById('loading-music-list');
+            if (!container) return;
+            var tracks = SE.config.loadingMusic.tracks;
+            if (!tracks.length) {
+                container.innerHTML = '<div style="color:rgba(255,255,255,0.25);font-size:12px;">No loading music yet. Upload files or add URLs below.</div>';
+                return;
+            }
+            container.innerHTML = tracks.map(function(t, i) {
+                return '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,215,0,0.04);border:1px solid rgba(255,215,0,0.15);border-radius:8px;">' +
+                    '<span style="font-size:14px;">&#x1F3B6;</span>' +
+                    '<span style="font-size:12px;color:#e0e6ff;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(t.name || 'Track ' + (i+1)) + '</span>' +
+                    '<button onclick="previewLoadingMusicTrack(' + i + ')" class="hmc-btn-sm hmc-btn-cyan" style="font-size:10px;">&#x25B6;</button>' +
+                    '<button onclick="removeLoadingMusicTrack(' + i + ')" class="hmc-btn-sm" style="font-size:10px;background:rgba(239,68,68,0.1);border-color:rgba(239,68,68,0.2);color:#ef4444;">&#x2715;</button>' +
+                    '</div>';
+            }).join('');
+        }
+
         function uploadLoadingMusic(input) {
-            if (!input.files || !input.files[0]) return;
-            var file = input.files[0];
-            if (file.size > 10 * 1024 * 1024) { pflxToast('Max 10MB for loading music', 'error'); return; }
-            var reader = new FileReader();
-            reader.onload = function(e) {
-                // Save as a loading-screen SFX in the sound engine config
-                var sfxList = (SE && SE.config && SE.config.sfx) ? SE.config.sfx : [];
-                // Remove existing loading-screen entry
-                sfxList = sfxList.filter(function(s) { return s.event !== 'loading-screen'; });
-                sfxList.push({ event: 'loading-screen', name: file.name, dataUrl: e.target.result });
-                if (SE && SE.config) SE.config.sfx = sfxList;
-                localStorage.setItem('pflx_se_config', JSON.stringify(SE.config));
-                var nameEl = document.getElementById('loading-music-name');
-                if (nameEl) nameEl.textContent = file.name;
-                pflxToast('Loading music uploaded: ' + file.name, 'success');
-            };
-            reader.readAsDataURL(file);
+            if (!input.files || !input.files.length) return;
+            ensureLoadingMusicConfig();
+            var files = Array.from(input.files);
+            var remaining = files.length;
+            files.forEach(function(file) {
+                if (file.size > 10 * 1024 * 1024) { pflxToast('Max 10MB per track: ' + file.name, 'error'); remaining--; return; }
+                var reader = new FileReader();
+                reader.onload = function(e) {
+                    SE.config.loadingMusic.tracks.push({
+                        id: 'lm-' + Date.now() + '-' + Math.floor(Math.random()*1000),
+                        name: file.name,
+                        url: '',
+                        dataUrl: e.target.result
+                    });
+                    remaining--;
+                    if (remaining <= 0) {
+                        loadingMusicSave();
+                        renderLoadingMusicList();
+                        pflxToast('Loading music added (' + SE.config.loadingMusic.tracks.length + ' tracks)', 'success');
+                    }
+                };
+                reader.readAsDataURL(file);
+            });
             input.value = '';
         }
+
+        function addLoadingMusicURL() {
+            ensureLoadingMusicConfig();
+            var el = document.getElementById('loading-music-url');
+            var url = el ? el.value.trim() : '';
+            if (!url) return;
+            var name = url.split('/').pop() || 'Track';
+            SE.config.loadingMusic.tracks.push({
+                id: 'lm-' + Date.now() + '-' + Math.floor(Math.random()*1000),
+                name: name, url: url, dataUrl: ''
+            });
+            loadingMusicSave();
+            renderLoadingMusicList();
+            if (el) el.value = '';
+            pflxToast('Loading music track added from URL', 'success');
+        }
+
         function previewLoadingMusic() {
-            if (_loadingMusicPreview) { _loadingMusicPreview.pause(); _loadingMusicPreview = null; return; }
-            var sfxList = (SE && SE.config && SE.config.sfx) ? SE.config.sfx : [];
-            var entry = sfxList.find(function(s) { return s.event === 'loading-screen'; });
-            if (!entry || !(entry.dataUrl || entry.url)) { pflxToast('No loading music uploaded', 'error'); return; }
-            _loadingMusicPreview = new Audio(entry.dataUrl || entry.url);
-            _loadingMusicPreview.volume = 0.5;
-            _loadingMusicPreview.loop = false;
+            ensureLoadingMusicConfig();
+            if (_loadingMusicPreview) { try { _loadingMusicPreview.pause(); } catch(e){} _loadingMusicPreview = null; return; }
+            var tracks = SE.config.loadingMusic.tracks;
+            if (!tracks.length) { pflxToast('No loading music uploaded yet', 'error'); return; }
+            var t = tracks[Math.floor(Math.random() * tracks.length)];
+            _loadingMusicPreview = new Audio(t.dataUrl || t.url);
+            _loadingMusicPreview.volume = SE.config.loadingMusic.volume || 0.55;
             _loadingMusicPreview.play().catch(function(){});
-            _loadingMusicPreview.onended = function() { _loadingMusicPreview = null; };
-            pflxToast('Previewing loading music...', 'success');
+            _loadingMusicPreview.onended = function(){ _loadingMusicPreview = null; };
+            pflxToast('Previewing: ' + (t.name || 'Track'), 'success');
         }
+
+        function previewLoadingMusicTrack(i) {
+            ensureLoadingMusicConfig();
+            var t = SE.config.loadingMusic.tracks[i];
+            if (!t) return;
+            if (_loadingMusicPreview) { try { _loadingMusicPreview.pause(); } catch(e){} _loadingMusicPreview = null; }
+            _loadingMusicPreview = new Audio(t.dataUrl || t.url);
+            _loadingMusicPreview.volume = SE.config.loadingMusic.volume || 0.55;
+            _loadingMusicPreview.play().catch(function(){});
+            _loadingMusicPreview.onended = function(){ _loadingMusicPreview = null; };
+        }
+
+        function removeLoadingMusicTrack(i) {
+            ensureLoadingMusicConfig();
+            SE.config.loadingMusic.tracks.splice(i, 1);
+            loadingMusicSave();
+            renderLoadingMusicList();
+            pflxToast('Loading music track removed', 'success');
+        }
+
+        // Legacy fallback — some old buttons may still call removeLoadingMusic()
         function removeLoadingMusic() {
-            if (_loadingMusicPreview) { _loadingMusicPreview.pause(); _loadingMusicPreview = null; }
-            var sfxList = (SE && SE.config && SE.config.sfx) ? SE.config.sfx : [];
-            sfxList = sfxList.filter(function(s) { return s.event !== 'loading-screen'; });
-            if (SE && SE.config) SE.config.sfx = sfxList;
-            localStorage.setItem('pflx_se_config', JSON.stringify(SE.config));
-            var nameEl = document.getElementById('loading-music-name');
-            if (nameEl) nameEl.textContent = 'No loading music loaded';
-            pflxToast('Loading music removed', 'success');
+            if (_loadingMusicPreview) { try { _loadingMusicPreview.pause(); } catch(e){} _loadingMusicPreview = null; }
+            ensureLoadingMusicConfig();
+            SE.config.loadingMusic.tracks = [];
+            loadingMusicSave();
+            renderLoadingMusicList();
+            pflxToast('All loading music cleared', 'success');
         }
-        // Init loading music name display
+
+        // Init loading music gallery on load
         (function() {
             setTimeout(function() {
-                var sfxList = (SE && SE.config && SE.config.sfx) ? SE.config.sfx : [];
-                var entry = sfxList.find(function(s) { return s.event === 'loading-screen'; });
-                var nameEl = document.getElementById('loading-music-name');
-                if (nameEl && entry && entry.name) nameEl.textContent = entry.name;
+                ensureLoadingMusicConfig();
+                var en = document.getElementById('loading-music-enabled');
+                var sh = document.getElementById('loading-music-shuffle');
+                var mu = document.getElementById('loading-music-mute-stream');
+                var vo = document.getElementById('loading-music-vol');
+                var voL = document.getElementById('loading-music-vol-label');
+                if (en) en.checked = SE.config.loadingMusic.enabled !== false;
+                if (sh) sh.checked = SE.config.loadingMusic.shuffle !== false;
+                if (mu) mu.checked = SE.config.loadingMusic.muteLiveStreamWhilePlaying !== false;
+                var volPct = Math.round(((SE.config.loadingMusic.volume !== undefined) ? SE.config.loadingMusic.volume : 0.55) * 100);
+                if (vo) vo.value = volPct;
+                if (voL) voL.textContent = volPct + '%';
+                renderLoadingMusicList();
             }, 2000);
         })();
 
@@ -11686,26 +11825,112 @@
                 if (this.bg) this.bg.classList.remove('show');
             },
 
-            // Loading screen SFX — synthesized ambient electronic tone
+            // Loading screen SFX + Music gallery — host-uploaded tracks play during transitions
             _loadingOsc: null,
+            _loadingCustomAudio: null,
+            _loadingMusicAudio: null,
+            _loadingMusicShuffleBag: [],
+            _loadingMusicLastIdx: -1,
+            _liveStreamWasMuted: false,
+            _liveStreamAutoMuted: false,
+
+            _pickLoadingMusicTrack() {
+                try {
+                    if (!SE || !SE.config || !SE.config.loadingMusic) return null;
+                    var cfg = SE.config.loadingMusic;
+                    if (cfg.enabled === false) return null;
+                    var tracks = cfg.tracks || [];
+                    if (!tracks.length) return null;
+                    if (cfg.shuffle !== false) {
+                        // Shuffle-bag: exhaust all tracks before repeating
+                        if (!this._loadingMusicShuffleBag.length) {
+                            this._loadingMusicShuffleBag = tracks.map(function(_, i){ return i; });
+                            // Fisher-Yates
+                            for (var i = this._loadingMusicShuffleBag.length - 1; i > 0; i--) {
+                                var j = Math.floor(Math.random() * (i + 1));
+                                var tmp = this._loadingMusicShuffleBag[i];
+                                this._loadingMusicShuffleBag[i] = this._loadingMusicShuffleBag[j];
+                                this._loadingMusicShuffleBag[j] = tmp;
+                            }
+                            // Avoid immediate repeat
+                            if (tracks.length > 1 && this._loadingMusicShuffleBag[0] === this._loadingMusicLastIdx) {
+                                var swap = this._loadingMusicShuffleBag[0];
+                                this._loadingMusicShuffleBag[0] = this._loadingMusicShuffleBag[1];
+                                this._loadingMusicShuffleBag[1] = swap;
+                            }
+                        }
+                        var idx = this._loadingMusicShuffleBag.shift();
+                        this._loadingMusicLastIdx = idx;
+                        return tracks[idx];
+                    } else {
+                        // Sequential
+                        var next = (this._loadingMusicLastIdx + 1) % tracks.length;
+                        this._loadingMusicLastIdx = next;
+                        return tracks[next];
+                    }
+                } catch(e) { return null; }
+            },
+
+            _muteMcLiveStream(shouldMute) {
+                try {
+                    var iframe = document.getElementById('mc-live-stream-iframe');
+                    if (!iframe) return;
+                    if (shouldMute) {
+                        // Remember current state so we don't unmute a stream the player muted themselves
+                        this._liveStreamWasMuted = !!iframe.dataset.userMuted;
+                        if (this._liveStreamWasMuted) return; // already muted by user — nothing to do
+                        try { iframe.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*'); } catch(e) {}
+                        iframe.dataset.autoMuted = '1';
+                        this._liveStreamAutoMuted = true;
+                    } else if (this._liveStreamAutoMuted) {
+                        try { iframe.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*'); } catch(e) {}
+                        iframe.dataset.autoMuted = '';
+                        this._liveStreamAutoMuted = false;
+                    }
+                } catch(e) {}
+            },
+
             playLoadingSfx() {
                 try {
-                    if (SE && (SE.config.sfxEnabled === false || SE.playerPrefs.sfxOn === false || SE.playerPrefs.muteAll)) return;
-                    // Check for host-uploaded loading screen sound first
-                    var customSfx = (SE.config.sfx || []).find(function(s) { return s.event === 'loading-screen'; });
-                    if (customSfx && (customSfx.dataUrl || customSfx.url)) {
-                        var aud = new Audio(customSfx.dataUrl || customSfx.url);
-                        var bgmMix = SE.config.bgmVolume !== undefined ? SE.config.bgmVolume : 0.4;
-                        aud.volume = Math.min(1, (SE.config.masterVolume || 0.7) * (SE.playerPrefs.volume || 0.7) * bgmMix);
+                    if (SE && (SE.playerPrefs && SE.playerPrefs.muteAll)) return;
+
+                    // ── Host-uploaded loading music gallery (preferred, non-login) ──
+                    var track = this._pickLoadingMusicTrack();
+                    if (track && (track.dataUrl || track.url)) {
+                        // Stop anything previously playing
+                        if (this._loadingMusicAudio) { try { this._loadingMusicAudio.pause(); } catch(e){} this._loadingMusicAudio = null; }
+                        var aud = new Audio(track.dataUrl || track.url);
+                        var lmVol = (SE.config.loadingMusic && SE.config.loadingMusic.volume !== undefined) ? SE.config.loadingMusic.volume : 0.55;
+                        var master = (SE.config.masterVolume !== undefined ? SE.config.masterVolume : 0.7);
+                        var player = (SE.playerPrefs && SE.playerPrefs.volume !== undefined ? SE.playerPrefs.volume : 0.7);
+                        aud.volume = Math.min(1, lmVol * master * player);
                         aud.loop = true;
                         aud.play().catch(function(){});
-                        this._loadingCustomAudio = aud;
+                        this._loadingMusicAudio = aud;
+                        // Mute MC live stream while loading music plays
+                        if (!SE.config.loadingMusic || SE.config.loadingMusic.muteLiveStreamWhilePlaying !== false) {
+                            this._muteMcLiveStream(true);
+                        }
                         return;
                     }
+
+                    // ── Legacy single-track loading SFX ──
+                    if (SE && (SE.config.sfxEnabled === false || SE.playerPrefs.sfxOn === false)) return;
+                    var customSfx = (SE.config.sfx || []).find(function(s) { return s.event === 'loading-screen'; });
+                    if (customSfx && (customSfx.dataUrl || customSfx.url)) {
+                        var aud2 = new Audio(customSfx.dataUrl || customSfx.url);
+                        var bgmMix = SE.config.bgmVolume !== undefined ? SE.config.bgmVolume : 0.4;
+                        aud2.volume = Math.min(1, (SE.config.masterVolume || 0.7) * (SE.playerPrefs.volume || 0.7) * bgmMix);
+                        aud2.loop = true;
+                        aud2.play().catch(function(){});
+                        this._loadingCustomAudio = aud2;
+                        return;
+                    }
+
+                    // ── Synthesized fallback pad ──
                     if (typeof pflxGetAudioCtx !== 'function') return;
                     var ctx = pflxGetAudioCtx();
                     var vol = ((SE ? SE.config.masterVolume : 0.7) || 0.7) * ((SE ? SE.playerPrefs.volume : 0.7) || 0.7);
-                    // Warm ambient pad — two detuned oscillators
                     var osc1 = ctx.createOscillator();
                     var osc2 = ctx.createOscillator();
                     var gain = ctx.createGain();
@@ -11713,7 +11938,7 @@
                     osc1.type = 'sine';
                     osc2.type = 'triangle';
                     osc1.frequency.setValueAtTime(220, ctx.currentTime);
-                    osc2.frequency.setValueAtTime(223, ctx.currentTime); // slight detune for warmth
+                    osc2.frequency.setValueAtTime(223, ctx.currentTime);
                     filter.type = 'lowpass';
                     filter.frequency.setValueAtTime(800, ctx.currentTime);
                     osc1.connect(filter);
@@ -11721,19 +11946,39 @@
                     filter.connect(gain);
                     gain.connect(ctx.destination);
                     gain.gain.setValueAtTime(0, ctx.currentTime);
-                    gain.gain.linearRampToValueAtTime(vol * 0.08, ctx.currentTime + 0.5); // fade in
+                    gain.gain.linearRampToValueAtTime(vol * 0.08, ctx.currentTime + 0.5);
                     gain.gain.linearRampToValueAtTime(vol * 0.05, ctx.currentTime + 4);
-                    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 10); // fade out over 10s
+                    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 10);
                     osc1.start();
                     osc2.start();
                     osc1.stop(ctx.currentTime + 10);
                     osc2.stop(ctx.currentTime + 10);
-                    this._loadingOsc = { osc1, osc2, gain };
+                    this._loadingOsc = { osc1: osc1, osc2: osc2, gain: gain };
                 } catch(e) {}
             },
-            _loadingCustomAudio: null,
+
             stopLoadingSfx() {
-                // Stop custom uploaded audio
+                // Stop gallery music + restore live stream
+                if (this._loadingMusicAudio) {
+                    try {
+                        // Quick fade-out to avoid click
+                        var a = this._loadingMusicAudio;
+                        var startVol = a.volume;
+                        var steps = 8;
+                        var stepDur = 35;
+                        var i = 0;
+                        var fade = setInterval(function() {
+                            i++;
+                            try { a.volume = Math.max(0, startVol * (1 - i / steps)); } catch(e) {}
+                            if (i >= steps) { clearInterval(fade); try { a.pause(); } catch(e) {} }
+                        }, stepDur);
+                    } catch(e) { try { this._loadingMusicAudio.pause(); } catch(e2) {} }
+                    this._loadingMusicAudio = null;
+                }
+                // Un-mute live stream if we auto-muted it
+                this._muteMcLiveStream(false);
+
+                // Stop legacy custom audio
                 if (this._loadingCustomAudio) {
                     try { this._loadingCustomAudio.pause(); this._loadingCustomAudio.currentTime = 0; } catch(e) {}
                     this._loadingCustomAudio = null;
@@ -11914,6 +12159,11 @@
             if (typeof sePlayForTab === 'function') sePlayForTab(viewName);
             if (typeof sePlaySFX === 'function') sePlaySFX('nav');
             if (typeof sePlayAmbient === 'function' && viewName !== 'login') sePlayAmbient();
+            // Live stream auto-mute based on player pref (mute outside Mission Control)
+            if (typeof seApplyLiveStreamAutoMute === 'function') {
+                // Give the iframe a moment to accept postMessage commands
+                setTimeout(function(){ try { seApplyLiveStreamAutoMute(); } catch(e){} }, 150);
+            }
 
             // Auto-load iframes with SSO params from active session
             // (only if not already preloaded by preloadIframe)
@@ -15527,20 +15777,25 @@
         function pflxToYouTubeEmbed(url) {
             if (!url) return '';
             url = url.trim();
+            // enablejsapi=1 is required for postMessage mute/unMute commands to reach the player
+            var yt = '?autoplay=1&enablejsapi=1';
             // Handle youtu.be short links
             var m = url.match(/youtu\.be\/([\w-]+)/);
-            if (m) return 'https://www.youtube.com/embed/' + m[1] + '?autoplay=1';
+            if (m) return 'https://www.youtube.com/embed/' + m[1] + yt;
             // Handle watch?v=...
             m = url.match(/[?&]v=([\w-]+)/);
-            if (m) return 'https://www.youtube.com/embed/' + m[1] + '?autoplay=1';
+            if (m) return 'https://www.youtube.com/embed/' + m[1] + yt;
             // Handle /live/... links
             m = url.match(/youtube\.com\/live\/([\w-]+)/);
-            if (m) return 'https://www.youtube.com/embed/' + m[1] + '?autoplay=1';
+            if (m) return 'https://www.youtube.com/embed/' + m[1] + yt;
             // Handle channel live: @handle/live -> convert to channel live embed
             m = url.match(/youtube\.com\/(@[\w.-]+)\/live/);
-            if (m) return 'https://www.youtube.com/embed/live_stream?channel=' + m[1];
-            // If already an embed URL, pass through
-            if (/youtube\.com\/embed\//.test(url)) return url;
+            if (m) return 'https://www.youtube.com/embed/live_stream?channel=' + m[1] + '&autoplay=1&enablejsapi=1';
+            // If already an embed URL, pass through (append enablejsapi if missing)
+            if (/youtube\.com\/embed\//.test(url)) {
+                if (!/enablejsapi/.test(url)) url += (url.indexOf('?') >= 0 ? '&' : '?') + 'enablejsapi=1';
+                return url;
+            }
             // Twitch?
             m = url.match(/twitch\.tv\/([\w-]+)/);
             if (m) return 'https://player.twitch.tv/?channel=' + m[1] + '&parent=' + location.hostname;
@@ -21058,6 +21313,13 @@ RESPONSE RULES:
                     dataUrl: '',
                     volume: 0.3,
                     name: ''
+                },
+                loadingMusic: {          // Music gallery for loading screens (non-login)
+                    enabled: true,
+                    shuffle: true,
+                    volume: 0.55,
+                    muteLiveStreamWhilePlaying: true,
+                    tracks: []            // { id, name, url, dataUrl }
                 }
             },
 
@@ -21068,7 +21330,8 @@ RESPONSE RULES:
                 muteAll: false,
                 volume: 0.7,
                 musicVolume: 0.5,
-                sfxVolume: 0.8
+                sfxVolume: 0.8,
+                muteLiveStreamOutsideMC: false   // auto-mute MC live stream when browsing other apps
             }
         };
 
@@ -21588,11 +21851,18 @@ RESPONSE RULES:
             if (musicVolLabel) musicVolLabel.textContent = mv + '%';
             if (sfxVol) sfxVol.value = sv;
             if (sfxVolLabel) sfxVolLabel.textContent = sv + '%';
+            // Live stream controls
+            var lsMuteNow = document.getElementById('se-player-mute-livestream');
+            var lsMuteOut = document.getElementById('se-player-mute-livestream-outside');
+            if (lsMuteNow) lsMuteNow.checked = !!SE.playerPrefs.liveStreamMuted;
+            if (lsMuteOut) lsMuteOut.checked = !!SE.playerPrefs.muteLiveStreamOutsideMC;
         }
 
         function sePlayerPrefSave() {
             SE.playerPrefs.musicOn = document.getElementById('se-player-music')?.checked !== false;
             SE.playerPrefs.sfxOn = document.getElementById('se-player-sfx')?.checked !== false;
+            var outsideMuteEl = document.getElementById('se-player-mute-livestream-outside');
+            if (outsideMuteEl) SE.playerPrefs.muteLiveStreamOutsideMC = !!outsideMuteEl.checked;
             var brand = activeSession ? activeSession.brand : 'guest';
             try { localStorage.setItem('pflx_se_prefs_' + brand, JSON.stringify(SE.playerPrefs)); } catch(e) {}
             seApplyVolumes();
@@ -21602,6 +21872,53 @@ RESPONSE RULES:
             } else {
                 sePlayForTab(SE.currentTab);
             }
+            // Re-evaluate live stream auto-mute based on current view
+            try { seApplyLiveStreamAutoMute(); } catch(e) {}
+        }
+
+        // Explicit "mute live stream now" toggle — survives beyond view changes until untoggled
+        function sePlayerLiveStreamMuteToggle() {
+            var el = document.getElementById('se-player-mute-livestream');
+            if (!el) return;
+            var muted = !!el.checked;
+            SE.playerPrefs.liveStreamMuted = muted;
+            var brand = activeSession ? activeSession.brand : 'guest';
+            try { localStorage.setItem('pflx_se_prefs_' + brand, JSON.stringify(SE.playerPrefs)); } catch(e) {}
+            var iframe = document.getElementById('mc-live-stream-iframe');
+            if (!iframe) return;
+            try {
+                if (muted) {
+                    iframe.dataset.userMuted = '1';
+                    iframe.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*');
+                } else {
+                    iframe.dataset.userMuted = '';
+                    iframe.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*');
+                }
+            } catch(e) {}
+        }
+
+        // Auto-mute live stream when player is outside Mission Control, if pref is on.
+        function seApplyLiveStreamAutoMute() {
+            var iframe = document.getElementById('mc-live-stream-iframe');
+            if (!iframe) return;
+            // If loading music is currently muting the stream, defer to that flow
+            if (PFLX_LOADING && PFLX_LOADING._liveStreamAutoMuted) return;
+            // If player has an explicit "mute now", leave it muted
+            if (SE.playerPrefs.liveStreamMuted) {
+                try { iframe.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*'); } catch(e) {}
+                return;
+            }
+            var activeView = document.querySelector('.view.active');
+            var viewName = activeView ? (activeView.dataset.view || activeView.id || '') : '';
+            var inMC = /mission-control/.test(viewName);
+            var shouldMute = !!SE.playerPrefs.muteLiveStreamOutsideMC && !inMC;
+            try {
+                if (shouldMute) {
+                    iframe.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*');
+                } else {
+                    iframe.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*');
+                }
+            } catch(e) {}
         }
 
         function sePlayerMuteAll() {
