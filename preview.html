@@ -3890,7 +3890,7 @@
                         <div class="login-step active" id="step-login">
                             <div class="login-panel">
                                 <div class="login-panel-label">Select Your Brand</div>
-                                <select class="brand-select" id="brand-select"></select>
+                                <select class="brand-select" id="brand-select"><option value="">Select your brand name...</option></select>
                                 <input type="password" class="pin-input" id="pin-input" placeholder="••••" maxlength="4">
                                 <button class="login-btn" id="login-btn">Login</button>
                                 <div class="login-divider">New Player?</div>
@@ -19082,6 +19082,8 @@
             window.pflxRecGetSessionFolder = pflxRecGetSessionFolder; window.pflxRecDownloadAll = pflxRecDownloadAll;
         })();
 
+        try { // Error boundary for Embed Hub + Google Connect + Recording Studio
+
         /* ═══════════════════════════════════════════════════════
            PFLX EMBED HUB — External App Launcher Engine
            ═══════════════════════════════════════════════════════ */
@@ -19343,6 +19345,14 @@
             if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
             else init();
         })();
+
+        } catch (_pflxEmbedErr) { console.error('[PFLX] Embed/Google/Recording block error:', _pflxEmbedErr); }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           FEATURE BLOCK: All feature IIFEs wrapped in error boundary
+           so a single failing feature can never block login initialization
+           ═══════════════════════════════════════════════════════════════════ */
+        try {
 
         /* ═══════════════════════════════════════════════════════════════════
            FEATURE: Rank-Based Host Control Tiers
@@ -21612,6 +21622,10 @@
 
           console.log('[PFLX] Advanced Sound Controls Panel loaded');
         })();
+
+        } catch (_pflxFeatureBlockErr) {
+            console.error('[PFLX] Feature block error — login will still work:', _pflxFeatureBlockErr);
+        }
 
         function mcRenderModifiers() {
             var list = document.getElementById('mc-modifiers-list');
@@ -26880,18 +26894,22 @@ RESPONSE RULES:
             alert('Self-evaluation submitted!');
         }
 
-        // INITIALIZATION
+        // INITIALIZATION — each init wrapped in try/catch so one failure can't block others
         window.addEventListener('DOMContentLoaded', () => {
-            initVideoBackground();
-            initBackgroundCanvas();
-            initLogin();
-            initLoginParticles();
+            try { initVideoBackground(); } catch(e) { console.error('[PFLX] initVideoBackground failed', e); }
+            try { initBackgroundCanvas(); } catch(e) { console.error('[PFLX] initBackgroundCanvas failed', e); }
+            try { initLogin(); } catch(e) { console.error('[PFLX] initLogin failed', e); }
+            try { initLoginParticles(); } catch(e) { console.error('[PFLX] initLoginParticles failed', e); }
             // Sound Engine init + login music auto-play
-            seInit();
-            sePlayLoginMusic();
+            try { seInit(); } catch(e) { console.error('[PFLX] seInit failed', e); }
+            try { sePlayLoginMusic(); } catch(e) { console.error('[PFLX] sePlayLoginMusic failed', e); }
             // PFLX Bridge: universal cloud save toast + SSO + host/player toggle
             try { pflxBridgeInit(); } catch(e) { console.warn('[PflxBridge] init failed', e); }
         });
+        // Fallback: if DOMContentLoaded already fired, run initLogin directly
+        if (document.readyState !== 'loading') {
+            try { if (typeof initLogin === 'function') initLogin(); } catch(e) { console.error('[PFLX] fallback initLogin failed', e); }
+        }
 
         // ═══════════════════════════════════════════════════════════
         // PFLX BRIDGE — universal cloud-save indicator + SSO + Host↔Player toggle
