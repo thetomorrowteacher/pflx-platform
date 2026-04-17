@@ -8665,8 +8665,8 @@
         function populateBrandSelect() {
             const sel = document.getElementById('brand-select');
             sel.innerHTML = '<option value="">Select your brand name...</option>';
-            // Show ALL players with brands — sorted alphabetically, brand name only
-            PLAYERS.filter(p => p.brand).sort((a, b) => a.brand.localeCompare(b.brand)).forEach(p => {
+            // Show only CLAIMED players — unclaimed imports must use Claim flow first
+            PLAYERS.filter(p => p.claimed && p.brand).sort((a, b) => a.brand.localeCompare(b.brand)).forEach(p => {
                 const opt = document.createElement('option');
                 opt.value = p.brand;
                 opt.textContent = p.brand;
@@ -10804,13 +10804,19 @@
                     document.getElementById('imported-temp-pin').textContent = newPlayerData.tempPin;
                     document.getElementById('imported-name').textContent = found.name;
                     document.getElementById('imported-cohort').textContent = found.cohort;
-                    // Populate imported brand select with claimed brands in this cohort for selection
+                    // Populate imported brand select — show player's own brand first, then create-new option
                     const sel = document.getElementById('imported-brand-select');
                     sel.innerHTML = '<option value="">Choose a brand name...</option>';
-                    PLAYERS.filter(p => p.claimed && p.brand && p.cohort === found.cohort).forEach(p => {
-                        const o = document.createElement('option'); o.value = p.brand; o.textContent = p.brand; sel.appendChild(o);
-                    });
-                    // Also add a "create new" option
+                    // Show the player's own assigned brand as the primary option
+                    if (found.brand) {
+                        const ownOpt = document.createElement('option');
+                        ownOpt.value = found.brand;
+                        ownOpt.textContent = found.brand + ' (your assigned brand)';
+                        sel.appendChild(ownOpt);
+                        // Auto-select the player's own brand
+                        sel.value = found.brand;
+                    }
+                    // Also add a "create new" option if they want a different name
                     const newOpt = document.createElement('option'); newOpt.value = '__NEW__'; newOpt.textContent = '+ Create New Brand Name'; sel.appendChild(newOpt);
                     showStep('step-imported-found');
                 } else if (found && found.claimed) {
@@ -11664,8 +11670,11 @@
             document.getElementById('onboard-next-5').addEventListener('click', () => {
                 const brand = document.getElementById('brand-name-input').value.trim();
                 if (!brand || brand.length < 2) { shakeEl(document.getElementById('brand-name-input')); return; }
-                // Check if brand name already taken
-                if (findPlayerByBrand(brand)) { alert('Brand name already taken. Choose another.'); shakeEl(document.getElementById('brand-name-input')); return; }
+                // Check if brand name already taken (allow imported player to reclaim their own brand)
+                const existingBrand = findPlayerByBrand(brand);
+                if (existingBrand && !(newPlayerData.isImported && newPlayerData.importedPlayer && existingBrand.id === newPlayerData.importedPlayer.id)) {
+                    alert('Brand name already taken. Choose another.'); shakeEl(document.getElementById('brand-name-input')); return;
+                }
                 newPlayerData.brandName = brand;
                 if (newPlayerData.isImported) {
                     // Imported players keep their cohort, skip pass selection — but still run studio placement
