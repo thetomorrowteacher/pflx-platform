@@ -19527,6 +19527,146 @@
           console.log('[PFLX] X-Bot Contextual Briefings loaded');
         })();
 
+        /* ═══════════════════════════════════════════════════════════════════
+           FEATURE: Rank-Gated App Access
+           Players must earn rank to unlock Platform apps.
+           Rookie (1) = MC + Arena only.  Apprentice (2) = +Pathways +XCoin.
+           Specialist (3) / Manager (4-5) = +DarkCampus +Portfolio.
+           Director+ (6+) / God = Everything.
+           Host role always has full access.
+           ═══════════════════════════════════════════════════════════════════ */
+        (function () {
+          'use strict';
+
+          // Map XC-string ranks to numeric level (mirrors mcCurrentPlayerRank thresholds)
+          var RANK_LEVEL = {
+            'Player': 1, 'Rookie': 1,
+            'Apprentice': 2,
+            'Specialist': 3,
+            'Manager': 4, 'Head': 5,
+            'Director': 6, 'Producer': 7,
+            'Mentor': 8,
+            'Senior': 9, 'Chief': 10,
+            'Expert': 4, 'Master': 6, 'Legend': 8, 'Mythic': 10
+          };
+
+          // App unlock thresholds: data-view name => minimum numeric rank required
+          var APP_UNLOCK = {
+            'home':             1,
+            'mission-control':  1,
+            'arena':            1,
+            'xcoin':            2,
+            'pathways':         2,
+            'darkcampus':       3,
+            'portfolio':        3,
+            'ai-center':        1,
+            'settings':         1
+          };
+
+          function getPlayerLevel() {
+            // God tier always returns max
+            if (window.pflxIsGodTier && window.activeSession && window.pflxIsGodTier(window.activeSession)) return 99;
+            // Host role = full access
+            if (window.pflxRole === 'host') return 99;
+            // Check numeric evoRank first
+            if (window.activeSession && window.activeSession.evoRank) return window.activeSession.evoRank;
+            // Fall back to string rank name
+            var rankStr = '';
+            if (window.activeSession && window.activeSession.rank) rankStr = window.activeSession.rank;
+            else if (typeof mcCurrentPlayerRank === 'function') rankStr = mcCurrentPlayerRank();
+            return RANK_LEVEL[rankStr] || 1;
+          }
+
+          function getUnlockRankName(level) {
+            if (level <= 1) return 'Rookie';
+            if (level === 2) return 'Apprentice';
+            if (level === 3) return 'Specialist';
+            if (level <= 5) return 'Manager';
+            if (level <= 7) return 'Director';
+            if (level === 8) return 'Mentor';
+            return 'Senior';
+          }
+
+          // Inject lock overlay CSS once
+          var lockStyle = document.createElement('style');
+          lockStyle.textContent = [
+            '.nav-btn.pflx-locked { position:relative; opacity:0.35; pointer-events:auto; filter:grayscale(0.7); }',
+            '.nav-btn.pflx-locked::after { content:"🔒"; position:absolute; bottom:2px; right:2px; font-size:10px; line-height:1; pointer-events:none; }',
+            '.nav-btn.pflx-locked:hover { opacity:0.55; }',
+          ].join('\n');
+          document.head.appendChild(lockStyle);
+
+          window.pflxApplyAppGating = function () {
+            var level = getPlayerLevel();
+            var navBtns = document.querySelectorAll('.nav-btn[data-view]');
+            navBtns.forEach(function (btn) {
+              var view = btn.getAttribute('data-view');
+              var required = APP_UNLOCK[view] || 1;
+              if (level >= required) {
+                btn.classList.remove('pflx-locked');
+                btn.removeAttribute('data-locked');
+              } else {
+                btn.classList.add('pflx-locked');
+                btn.setAttribute('data-locked', 'true');
+                btn.setAttribute('title', 'Unlock at ' + getUnlockRankName(required) + ' rank');
+              }
+            });
+            console.log('[PFLX] App gating applied — player level ' + level);
+          };
+
+          // Intercept doNavigate to block locked apps
+          var _origDoNavigate = window.doNavigate || (typeof doNavigate === 'function' ? doNavigate : null);
+
+          function gatedNavigate(viewName) {
+            var level = getPlayerLevel();
+            var required = APP_UNLOCK[viewName] || 1;
+            if (level < required) {
+              // Show locked toast
+              if (typeof pflxToast === 'function') {
+                pflxToast('Reach ' + getUnlockRankName(required) + ' rank to unlock this app', 'warn');
+              }
+              if (typeof pflxPlaySfx === 'function') pflxPlaySfx('error');
+              return;
+            }
+            if (_origDoNavigate) return _origDoNavigate(viewName);
+          }
+
+          // Patch after a tick so doNavigate is defined
+          setTimeout(function () {
+            if (typeof doNavigate === 'function' && !window._pflxGatedNav) {
+              _origDoNavigate = doNavigate;
+              // Replace the global
+              window.doNavigate = gatedNavigate;
+              // Also re-bind nav button clicks
+              document.querySelectorAll('.nav-btn[data-view]').forEach(function (btn) {
+                var view = btn.getAttribute('data-view');
+                btn.onclick = function () { gatedNavigate(view); };
+              });
+              window._pflxGatedNav = true;
+            }
+          }, 1500);
+
+          // Apply gating after login completes (pflxInjectRolePill is called on login)
+          var _origRolePill = window.pflxInjectRolePill;
+          if (_origRolePill) {
+            window.pflxInjectRolePill = function () {
+              _origRolePill.apply(this, arguments);
+              setTimeout(function () { window.pflxApplyAppGating(); }, 200);
+            };
+          }
+
+          // Also apply on role change
+          var _origSetRole = window.pflxSetRole;
+          if (_origSetRole) {
+            window.pflxSetRole = function (role) {
+              _origSetRole(role);
+              setTimeout(function () { window.pflxApplyAppGating(); }, 200);
+            };
+          }
+
+          console.log('[PFLX] Rank-Gated App Access loaded');
+        })();
+
         function mcRenderModifiers() {
             var list = document.getElementById('mc-modifiers-list');
             if (!list) return;
