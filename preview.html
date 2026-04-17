@@ -26047,6 +26047,15 @@ RESPONSE RULES:
             const nextProject = projects.find(p => p.status === 'in_progress') || projects.find(p => p.status === 'not_started');
             const nextTask = tasks.find(t => t.status === 'pending');
 
+            // Build deadline summary for briefing
+            const urgentDeadlines = DEADLINES.filter(d => {
+                const match = String(d.time).match(/(\d+)/);
+                return match && parseInt(match[1]) <= 3;
+            });
+            const deadlineSummary = urgentDeadlines.length > 0
+                ? `\n\n⏰ UPCOMING DEADLINES: ` + urgentDeadlines.map(d => `${d.name} (${d.time})`).join(', ') + `. Don't miss these!`
+                : '';
+
             if (isHost) {
                 const playerCount = PLAYERS.filter(p => p.role === 'player').length;
                 const claimed = PLAYERS.filter(p => p.role === 'player' && p.claimed).length;
@@ -26054,7 +26063,7 @@ RESPONSE RULES:
                 return `Welcome back, ${name}. You have ${playerCount} players registered (${claimed} claimed). ` +
                     (alerts > 0 ? `There are ${alerts} unread X-Bot moderation alerts that need your attention. ` : '') +
                     `The platform is running smoothly. Head to Host Controls to manage your session, or check the Cohort Manager to review player access. ` +
-                    `DarkCampus is live for global networking between cohorts.`;
+                    `DarkCampus is live for global networking between cohorts.` + deadlineSummary;
             }
 
             let msg = `Welcome back, ${name}! `;
@@ -26087,6 +26096,7 @@ RESPONSE RULES:
             msg += `\n\nReady to make progress? Complete your checkpoint objectives first to earn XC. `;
             msg += `You can also jump into a Battle Arena match for extra XC, or connect with peers globally through DarkCampus. Let's build.`;
 
+            msg += deadlineSummary;
             return msg;
         }
 
@@ -26306,6 +26316,14 @@ RESPONSE RULES:
                 dashboard.appendChild(studioCard);
             }
 
+            // Deadlines card — high priority, placed above activity feed
+            const deadlinesCard = document.createElement('div');
+            deadlinesCard.className = 'dashboard-card';
+            deadlinesCard.style.cssText = 'border-color:rgba(239,68,68,0.25);background:linear-gradient(135deg,rgba(239,68,68,0.04),rgba(10,18,40,0.6));';
+            deadlinesCard.innerHTML = '<h3 style="color: #ef4444; margin-bottom: 15px; display:flex; align-items:center; gap:8px;"><span style="font-size:16px;">⏰</span> Deadlines</h3>';
+            deadlinesCard.appendChild(renderDeadlines());
+            dashboard.appendChild(deadlinesCard);
+
             // Activity feed card
             const activityCard = document.createElement('div');
             activityCard.className = 'dashboard-card';
@@ -26319,13 +26337,6 @@ RESPONSE RULES:
             goalsCard.innerHTML = '<h3 style="color: var(--cyan); margin-bottom: 15px;">Goals</h3>';
             goalsCard.appendChild(renderGoals());
             dashboard.appendChild(goalsCard);
-
-            // Deadlines card
-            const deadlinesCard = document.createElement('div');
-            deadlinesCard.className = 'dashboard-card';
-            deadlinesCard.innerHTML = '<h3 style="color: var(--cyan); margin-bottom: 15px;">Deadlines</h3>';
-            deadlinesCard.appendChild(renderDeadlines());
-            dashboard.appendChild(deadlinesCard);
 
             // Progress graph card
             const graphCard = document.createElement('div');
