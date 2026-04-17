@@ -20492,57 +20492,269 @@
                 canvasCtx: null
             };
 
-            // ─── QR Code Generator (lightweight, no library) ─────────
-            // Minimal QR generator using canvas — generates PIN-based URL QR
-            function generateQRCanvas(text, size) {
-                // Use a simple visual QR-like pattern with the data encoded as a URL
-                // For production, we encode the data into a scannable pattern
-                var canvas = document.createElement('canvas');
-                canvas.width = size;
-                canvas.height = size;
-                var ctx = canvas.getContext('2d');
+            // ─── QR Code Generator (real, scannable) ─────────────────
+            // Embedded QR encoder — Version 2-6 (byte mode), Error Correction L
+            var _qr = (function() {
+                // GF(256) tables for Reed-Solomon
+                var EXP = new Array(256), LOG = new Array(256);
+                (function() { var x = 1; for (var i = 0; i < 255; i++) { EXP[i] = x; LOG[x] = i; x <<= 1; if (x & 256) x ^= 0x11d; } EXP[255] = EXP[0]; })();
+                function gfMul(a, b) { return (a === 0 || b === 0) ? 0 : EXP[(LOG[a] + LOG[b]) % 255]; }
 
-                // Generate a deterministic matrix from the text
-                var modules = 25; // 25x25 grid
-                var cellSize = size / modules;
-                var matrix = [];
-                var hash = 0;
-                for (var i = 0; i < text.length; i++) {
-                    hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+                // Reed-Solomon error correction
+                function rsGenPoly(nsym) {
+                    var g = [1];
+                    for (var i = 0; i < nsym; i++) {
+                        var ng = new Array(g.length + 1);
+                        ng[g.length] = 0;
+                        for (var j = 0; j < g.length; j++) ng[j] = 0;
+                        for (var j = 0; j < g.length; j++) {
+                            ng[j + 1] ^= g[j];
+                            ng[j] ^= gfMul(g[j], EXP[i]);
+                        }
+                        g = ng;
+                    }
+                    return g;
                 }
-
-                // Build QR-like pattern with finder patterns and data
-                for (var row = 0; row < modules; row++) {
-                    matrix[row] = [];
-                    for (var col = 0; col < modules; col++) {
-                        // Finder patterns (top-left, top-right, bottom-left)
-                        var isFinder = false;
-                        var corners = [[0,0],[0,modules-7],[modules-7,0]];
-                        for (var c = 0; c < corners.length; c++) {
-                            var cr = corners[c][0], cc = corners[c][1];
-                            var rr = row - cr, rc = col - cc;
-                            if (rr >= 0 && rr < 7 && rc >= 0 && rc < 7) {
-                                isFinder = true;
-                                matrix[row][col] = (rr === 0 || rr === 6 || rc === 0 || rc === 6 ||
-                                    (rr >= 2 && rr <= 4 && rc >= 2 && rc <= 4)) ? 1 : 0;
+                function rsEncode(data, nsym) {
+                    var gen = rsGenPoly(nsym);
+                    var res = new Array(data.length + nsym);
+                    for (var i = 0; i < res.length; i++) res[i] = 0;
+                    for (var i = 0; i < data.length; i++) res[i] = data[i];
+                    for (var i = 0; i < data.length; i++) {
+                        var coef = res[i];
+                        if (coef !== 0) {
+                            for (var j = 0; j < gen.length; j++) {
+                                res[i + j] ^= gfMul(gen[j], coef);
                             }
                         }
-                        if (!isFinder) {
-                            // Data area — use hash-derived pattern encoding the text
-                            var seed = (hash ^ (row * 37 + col * 13 + text.charCodeAt((row + col) % text.length))) >>> 0;
-                            matrix[row][col] = (seed % 3 === 0) ? 1 : 0;
-                        }
                     }
+                    return res.slice(data.length);
                 }
 
-                // Draw
+                // Version/EC params: [version] = { size, dataCodewords, ecCodewordsPerBlock, numBlocks }
+                var VERSIONS = {
+                    1: { s:21, dc:19, ec:7, b:1 },
+                    2: { s:25, dc:34, ec:10, b:1 },
+                    3: { s:29, dc:55, ec:15, b:1 },
+                    4: { s:33, dc:80, ec:20, b:1 },
+                    5: { s:37, dc:108, ec:26, b:1 },
+                    6: { s:41, dc:136, ec:18, b:2 }
+                };
+
+                function chooseVersion(byteLen) {
+                    for (var v = 1; v <= 6; v++) {
+                        if (byteLen + 3 <= VERSIONS[v].dc) return v; // +3 for mode+length+terminator overhead
+                    }
+                    return 6; // cap at version 6
+                }
+
+                function encode(text) {
+                    // Convert text to bytes (UTF-8)
+                    var bytes = [];
+                    for (var i = 0; i < text.length; i++) {
+                        var c = text.charCodeAt(i);
+                        if (c < 128) bytes.push(c);
+                        else if (c < 2048) { bytes.push(0xc0 | (c >> 6)); bytes.push(0x80 | (c & 0x3f)); }
+                        else { bytes.push(0xe0 | (c >> 12)); bytes.push(0x80 | ((c >> 6) & 0x3f)); bytes.push(0x80 | (c & 0x3f)); }
+                    }
+
+                    var ver = chooseVersion(bytes.length);
+                    var vp = VERSIONS[ver];
+                    var size = vp.s;
+                    var totalDC = vp.dc;
+
+                    // Build data stream: mode=0100 (byte), char count, data, terminator, padding
+                    var bits = [];
+                    function pushBits(val, len) { for (var i = len - 1; i >= 0; i--) bits.push((val >> i) & 1); }
+
+                    pushBits(4, 4); // byte mode indicator
+                    pushBits(bytes.length, ver <= 1 ? 8 : 16); // character count
+                    for (var i = 0; i < bytes.length; i++) pushBits(bytes[i], 8);
+                    pushBits(0, Math.min(4, totalDC * 8 - bits.length)); // terminator
+
+                    // Pad to byte boundary
+                    while (bits.length % 8 !== 0) bits.push(0);
+                    // Pad to fill data capacity
+                    var padBytes = [0xEC, 0x11];
+                    var pi = 0;
+                    while (bits.length < totalDC * 8) {
+                        pushBits(padBytes[pi % 2], 8);
+                        pi++;
+                    }
+
+                    // Convert bits to bytes
+                    var dataBytes = [];
+                    for (var i = 0; i < bits.length; i += 8) {
+                        var b = 0;
+                        for (var j = 0; j < 8; j++) b = (b << 1) | (bits[i + j] || 0);
+                        dataBytes.push(b);
+                    }
+
+                    // Error correction
+                    var ecBytes = rsEncode(dataBytes, vp.ec);
+
+                    // Interleave (single block for v1-5, 2 blocks for v6)
+                    var finalData = [];
+                    if (vp.b === 1) {
+                        finalData = dataBytes.concat(ecBytes);
+                    } else {
+                        var half = Math.floor(totalDC / 2);
+                        var b1d = dataBytes.slice(0, half);
+                        var b2d = dataBytes.slice(half);
+                        var b1e = rsEncode(b1d, vp.ec);
+                        var b2e = rsEncode(b2d, vp.ec);
+                        for (var i = 0; i < Math.max(b1d.length, b2d.length); i++) {
+                            if (i < b1d.length) finalData.push(b1d[i]);
+                            if (i < b2d.length) finalData.push(b2d[i]);
+                        }
+                        for (var i = 0; i < Math.max(b1e.length, b2e.length); i++) {
+                            if (i < b1e.length) finalData.push(b1e[i]);
+                            if (i < b2e.length) finalData.push(b2e[i]);
+                        }
+                    }
+
+                    // Build module matrix
+                    var matrix = [];
+                    var reserved = [];
+                    for (var r = 0; r < size; r++) {
+                        matrix[r] = new Array(size);
+                        reserved[r] = new Array(size);
+                        for (var c = 0; c < size; c++) { matrix[r][c] = 0; reserved[r][c] = false; }
+                    }
+
+                    // Place finder patterns
+                    function placeFinder(row, col) {
+                        for (var r = -1; r <= 7; r++) {
+                            for (var c = -1; c <= 7; c++) {
+                                var rr = row + r, cc = col + c;
+                                if (rr < 0 || rr >= size || cc < 0 || cc >= size) continue;
+                                var isBorder = (r === -1 || r === 7 || c === -1 || c === 7);
+                                var isOuter = (r === 0 || r === 6 || c === 0 || c === 6);
+                                var isInner = (r >= 2 && r <= 4 && c >= 2 && c <= 4);
+                                matrix[rr][cc] = (isOuter || isInner) && !isBorder ? 1 : 0;
+                                reserved[rr][cc] = true;
+                            }
+                        }
+                    }
+                    placeFinder(0, 0);
+                    placeFinder(0, size - 7);
+                    placeFinder(size - 7, 0);
+
+                    // Timing patterns
+                    for (var i = 8; i < size - 8; i++) {
+                        matrix[6][i] = (i % 2 === 0) ? 1 : 0; reserved[6][i] = true;
+                        matrix[i][6] = (i % 2 === 0) ? 1 : 0; reserved[i][6] = true;
+                    }
+
+                    // Dark module
+                    matrix[size - 8][8] = 1; reserved[size - 8][8] = true;
+
+                    // Reserve format info areas
+                    for (var i = 0; i < 9; i++) { if (i < size) { reserved[8][i] = true; reserved[i][8] = true; } }
+                    for (var i = 0; i < 8; i++) { reserved[8][size - 1 - i] = true; reserved[size - 1 - i][8] = true; }
+
+                    // Alignment patterns (version 2+)
+                    if (ver >= 2) {
+                        var alignPos = [6, size - 7];
+                        for (var ai = 0; ai < alignPos.length; ai++) {
+                            for (var aj = 0; aj < alignPos.length; aj++) {
+                                var ar = alignPos[ai], ac = alignPos[aj];
+                                // Skip if overlaps with finder
+                                if (reserved[ar][ac]) continue;
+                                for (var dr = -2; dr <= 2; dr++) {
+                                    for (var dc = -2; dc <= 2; dc++) {
+                                        var rr = ar + dr, cc = ac + dc;
+                                        if (rr >= 0 && rr < size && cc >= 0 && cc < size) {
+                                            matrix[rr][cc] = (Math.abs(dr) === 2 || Math.abs(dc) === 2 || (dr === 0 && dc === 0)) ? 1 : 0;
+                                            reserved[rr][cc] = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Place data bits (upward/downward columns, right to left, skipping col 6)
+                    var bitIdx = 0;
+                    var allBits = [];
+                    for (var i = 0; i < finalData.length; i++) {
+                        for (var b = 7; b >= 0; b--) allBits.push((finalData[i] >> b) & 1);
+                    }
+
+                    var col = size - 1;
+                    var goingUp = true;
+                    while (col >= 0) {
+                        if (col === 6) { col--; continue; } // skip timing column
+                        var rows = goingUp ? [] : [];
+                        for (var r = 0; r < size; r++) {
+                            var rr = goingUp ? (size - 1 - r) : r;
+                            if (!reserved[rr][col]) {
+                                matrix[rr][col] = (bitIdx < allBits.length) ? allBits[bitIdx++] : 0;
+                            }
+                            if (col > 0 && !reserved[rr][col - 1]) {
+                                matrix[rr][col - 1] = (bitIdx < allBits.length) ? allBits[bitIdx++] : 0;
+                            }
+                        }
+                        goingUp = !goingUp;
+                        col -= 2;
+                    }
+
+                    // Apply mask pattern 0 (checkerboard): (row + col) % 2 === 0
+                    for (var r = 0; r < size; r++) {
+                        for (var c = 0; c < size; c++) {
+                            if (!reserved[r][c] && ((r + c) % 2 === 0)) {
+                                matrix[r][c] ^= 1;
+                            }
+                        }
+                    }
+
+                    // Format info for mask 0, EC level L
+                    // Pre-computed: L + mask 0 = format bits 111011111000100
+                    var formatBits = [1,1,1,0,1,1,1,1,1,0,0,0,1,0,0];
+
+                    // Place format bits
+                    // Around top-left finder
+                    var fmtPos1 = [[8,0],[8,1],[8,2],[8,3],[8,4],[8,5],[8,7],[8,8],[7,8],[5,8],[4,8],[3,8],[2,8],[1,8],[0,8]];
+                    for (var i = 0; i < 15; i++) {
+                        matrix[fmtPos1[i][0]][fmtPos1[i][1]] = formatBits[i];
+                    }
+                    // Second copy
+                    var fmtPos2 = [];
+                    for (var i = 0; i < 7; i++) fmtPos2.push([size - 1 - i, 8]);
+                    for (var i = 0; i < 8; i++) fmtPos2.push([8, size - 8 + i]);
+                    for (var i = 0; i < 15; i++) {
+                        matrix[fmtPos2[i][0]][fmtPos2[i][1]] = formatBits[i];
+                    }
+
+                    return { matrix: matrix, size: size, version: ver };
+                }
+
+                return { encode: encode };
+            })();
+
+            function generateQRCanvas(text, size) {
+                var qr = _qr.encode(text);
+                var modules = qr.size;
+                var margin = 2; // quiet zone
+                var totalMods = modules + margin * 2;
+                var cellSize = Math.floor(size / totalMods);
+                var actualSize = cellSize * totalMods;
+
+                var canvas = document.createElement('canvas');
+                canvas.width = actualSize;
+                canvas.height = actualSize;
+                var ctx = canvas.getContext('2d');
+
+                // White background
                 ctx.fillStyle = '#ffffff';
-                ctx.fillRect(0, 0, size, size);
+                ctx.fillRect(0, 0, actualSize, actualSize);
+
+                // Draw modules
                 ctx.fillStyle = '#000000';
                 for (var r = 0; r < modules; r++) {
-                    for (var co = 0; co < modules; co++) {
-                        if (matrix[r][co]) {
-                            ctx.fillRect(co * cellSize, r * cellSize, cellSize, cellSize);
+                    for (var c = 0; c < modules; c++) {
+                        if (qr.matrix[r][c]) {
+                            ctx.fillRect((c + margin) * cellSize, (r + margin) * cellSize, cellSize, cellSize);
                         }
                     }
                 }
