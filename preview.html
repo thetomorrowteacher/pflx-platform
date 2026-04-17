@@ -3623,6 +3623,83 @@
     .pflx-dojo-detail .vote-btn:hover{background:rgba(167,139,250,0.2);}
     .pflx-dojo-detail .vote-btn.voted{background:rgba(167,139,250,0.3);border-color:#a78bfa;}
 
+    /* ═══ PFLX Scene Transitions ═══ */
+    .pflx-scene-transition {
+      position: fixed; inset: 0; z-index: 99999;
+      pointer-events: none; opacity: 0;
+      will-change: transform, opacity;
+    }
+    .pflx-scene-transition.pflx-trans-active { pointer-events: all; }
+
+    /* Swoosh wipe */
+    @keyframes pflxSwooshIn {
+      0%   { transform: translateX(-100%); opacity: 1; }
+      40%  { transform: translateX(0%); opacity: 1; }
+      60%  { transform: translateX(0%); opacity: 1; }
+      100% { transform: translateX(100%); opacity: 0; }
+    }
+    .pflx-scene-transition.pflx-swoosh {
+      background: linear-gradient(90deg, rgba(10,18,40,0.98) 0%, rgba(0,229,255,0.15) 50%, rgba(10,18,40,0.98) 100%);
+    }
+    .pflx-scene-transition.pflx-swoosh.pflx-trans-active {
+      animation: pflxSwooshIn 250ms ease-in-out forwards;
+      opacity: 1;
+    }
+
+    /* Fade through black */
+    @keyframes pflxFadeThrough {
+      0%   { opacity: 0; }
+      30%  { opacity: 1; }
+      70%  { opacity: 1; }
+      100% { opacity: 0; }
+    }
+    .pflx-scene-transition.pflx-fade {
+      background: rgba(10,18,40,0.98);
+    }
+    .pflx-scene-transition.pflx-fade.pflx-trans-active {
+      animation: pflxFadeThrough 300ms ease-in-out forwards;
+    }
+
+    /* Card flip */
+    @keyframes pflxCardFlip {
+      0%   { transform: perspective(800px) rotateY(0deg); opacity: 1; }
+      50%  { transform: perspective(800px) rotateY(90deg); opacity: 1; }
+      51%  { transform: perspective(800px) rotateY(90deg); opacity: 1; }
+      100% { transform: perspective(800px) rotateY(0deg); opacity: 0; }
+    }
+    .pflx-scene-transition.pflx-flip {
+      background: rgba(10,18,40,0.95);
+      transform-origin: center center;
+    }
+    .pflx-scene-transition.pflx-flip.pflx-trans-active {
+      animation: pflxCardFlip 350ms ease-in-out forwards;
+      opacity: 1;
+    }
+
+    /* ═══ Enhanced Parallax on Loading Images ═══ */
+    .pflx-loading-parallax-wrap {
+      position: relative;
+      overflow: hidden;
+      perspective: 600px;
+      transform-style: preserve-3d;
+    }
+    .pflx-loading-img-kb {
+      animation-duration: 8s;
+      animation-timing-function: ease-in-out;
+      animation-iteration-count: infinite;
+      animation-direction: alternate;
+      will-change: transform;
+      transition: transform 0.15s ease-out;
+    }
+    .pflx-loading-img-parallax {
+      transform-style: preserve-3d;
+      transition: transform 0.12s ease-out;
+    }
+
+    /* ═══ Advanced Sound Panel scrollbar ═══ */
+    #host-sound::-webkit-scrollbar { width: 4px; }
+    #host-sound::-webkit-scrollbar-thumb { background: rgba(0,229,255,0.2); border-radius: 4px; }
+
     </style>
 </head>
 <body>
@@ -20690,6 +20767,841 @@
           }, 300);
 
           console.log('[PFLX] Design Dojo loaded');
+        })();
+
+        /* ═══════════════════════════════════════════════════════════════════
+           FEATURE A: Loading Playlist Upload System — localStorage → pflxLoadingPlaylist
+           ═══════════════════════════════════════════════════════════════════ */
+        (function () {
+          'use strict';
+          // On init, load tracks from localStorage into window.pflxLoadingPlaylist
+          function syncPlaylistFromStorage() {
+            try {
+              var raw = localStorage.getItem('pflx_loading_playlist');
+              if (raw) {
+                var arr = JSON.parse(raw);
+                if (Array.isArray(arr) && arr.length) {
+                  window.pflxLoadingPlaylist = arr.map(function(t) { return t.dataUrl || t.url; }).filter(Boolean);
+                }
+              }
+            } catch (e) {}
+            // Also sync from SE.config.loadingMusic.tracks if pflxLoadingPlaylist is empty
+            if ((!window.pflxLoadingPlaylist || !window.pflxLoadingPlaylist.length) && typeof SE !== 'undefined' && SE.config && SE.config.loadingMusic && SE.config.loadingMusic.tracks) {
+              var tracks = SE.config.loadingMusic.tracks;
+              if (tracks.length) {
+                window.pflxLoadingPlaylist = tracks.map(function(t) { return t.dataUrl || t.url; }).filter(Boolean);
+              }
+            }
+          }
+          syncPlaylistFromStorage();
+          // Re-sync after a delay (SE may not be fully loaded yet)
+          setTimeout(syncPlaylistFromStorage, 2000);
+          // Expose for re-sync after uploads
+          window.pflxSyncLoadingPlaylist = syncPlaylistFromStorage;
+          console.log('[PFLX] Loading Playlist Upload System loaded');
+        })();
+
+        /* ═══════════════════════════════════════════════════════════════════
+           FEATURE B: X-Bot Briefing Audio Priority
+           Monkey-patches pflxXBotBrief to duck livestream via PFLX_AUDIO
+           ═══════════════════════════════════════════════════════════════════ */
+        (function () {
+          'use strict';
+          var origBrief = window.pflxXBotBrief;
+          if (!origBrief) { console.warn('[PFLX] X-Bot Briefing patch skipped — pflxXBotBrief not found'); return; }
+
+          window.pflxXBotBrief = function (viewName) {
+            if (!viewName) return;
+            var key = viewName.toLowerCase().replace(/\s+/g, '-');
+            // Check if already visited (mirror the original check)
+            if (window.PFLX_XBOT_BRIEFINGS && !window.PFLX_XBOT_BRIEFINGS[key]) return;
+
+            // Start audio ducking BEFORE showing the briefing
+            try { if (window.PFLX_AUDIO) window.PFLX_AUDIO.start('briefing'); } catch (e) {}
+
+            // Call original
+            origBrief.call(this, viewName);
+
+            // Speak via TTS if available
+            var msg = window.PFLX_XBOT_BRIEFINGS && window.PFLX_XBOT_BRIEFINGS[key];
+            if (msg && window.pflxXBotTTS) {
+              try {
+                var ttsPromise = window.pflxXBotTTS(msg);
+                if (ttsPromise && ttsPromise.then) {
+                  ttsPromise.then(function () {
+                    // TTS finished — stop ducking if briefing is already dismissed
+                  }).catch(function () {});
+                }
+              } catch (e) {}
+            }
+
+            // Patch the dismiss to also stop audio ducking
+            // The briefing element is the last [data-xbot-briefing] in the DOM
+            setTimeout(function () {
+              var el = document.querySelector('[data-xbot-briefing]:last-of-type');
+              if (!el) { try { window.PFLX_AUDIO && window.PFLX_AUDIO.stop('briefing'); } catch (e) {} return; }
+              // Use MutationObserver to detect removal
+              var observer = new MutationObserver(function (muts) {
+                if (!document.body.contains(el)) {
+                  observer.disconnect();
+                  try { window.PFLX_AUDIO && window.PFLX_AUDIO.stop('briefing'); } catch (e) {}
+                }
+              });
+              observer.observe(document.body, { childList: true, subtree: true });
+              // Safety: stop after 10s no matter what
+              setTimeout(function () {
+                observer.disconnect();
+                try { window.PFLX_AUDIO && window.PFLX_AUDIO.stop('briefing'); } catch (e) {}
+              }, 10000);
+            }, 50);
+          };
+          console.log('[PFLX] X-Bot Briefing Audio Priority loaded');
+        })();
+
+        /* ═══════════════════════════════════════════════════════════════════
+           FEATURE C: Live Stream PIP Rework — armed flag system
+           ═══════════════════════════════════════════════════════════════════ */
+        (function () {
+          'use strict';
+          window.pflxPipArmed = false;
+
+          // Override pipCheckAutoActivate
+          var origPipCheck = window.pipCheckAutoActivate;
+          window.pipCheckAutoActivate = function (viewName) {
+            try {
+              var s = typeof pflxGetLiveStream === 'function' ? pflxGetLiveStream() : null;
+              var streamLive = s && s.active && s.url;
+
+              if (viewName === 'mission-control') {
+                // On MC dashboard: arm PIP for when they leave, hide PIP if showing
+                window.pflxPipArmed = true;
+                if (typeof pip !== 'undefined' && pip.active && typeof pipHide === 'function') {
+                  pipHide();
+                }
+              } else if (viewName !== 'login') {
+                // Leaving MC: show PIP only if armed and stream is live
+                if (window.pflxPipArmed && streamLive) {
+                  if (typeof pip !== 'undefined' && !pip.active && typeof pipShow === 'function') {
+                    pipShow(s.url);
+                  }
+                }
+              }
+            } catch (e) { console.warn('[PIP] armed-check error:', e); }
+          };
+
+          // Override pipOnClose to disarm
+          var origPipOnClose = window.pipOnClose || (typeof pipOnClose === 'function' ? pipOnClose : null);
+          // We need to patch the close button handler
+          setTimeout(function () {
+            var closeBtn = document.getElementById('pip-close-btn');
+            if (closeBtn) {
+              // Remove old listeners by cloning
+              var newBtn = closeBtn.cloneNode(true);
+              if (closeBtn.parentNode) closeBtn.parentNode.replaceChild(newBtn, closeBtn);
+              newBtn.addEventListener('click', function () {
+                window.pflxPipArmed = false;
+                if (typeof pipHide === 'function') pipHide();
+                // Do NOT navigate back to MC — just close PIP
+              });
+            }
+          }, 1500);
+
+          console.log('[PFLX] PIP Rework (armed flag) loaded');
+        })();
+
+        /* ═══════════════════════════════════════════════════════════════════
+           FEATURE D: Live Stream Audio Rules — pause BG music, 5s resume delay
+           Monkey-patches the existing Live Stream Audio Priority IIFE
+           ═══════════════════════════════════════════════════════════════════ */
+        (function () {
+          'use strict';
+          var bgMusicWasPaused = true;
+          var loginMusicWasPaused = true;
+          var ambientWasPaused = true;
+          var resumeTimer = null;
+          var liveStreamPlaying = false;
+
+          function pauseAllBGMusic() {
+            if (liveStreamPlaying) return;
+            liveStreamPlaying = true;
+            if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = null; }
+
+            // Fully pause (not just duck) background music
+            if (typeof SE !== 'undefined') {
+              if (SE.bgAudio) {
+                bgMusicWasPaused = SE.bgAudio.paused;
+                if (!bgMusicWasPaused) { try { SE.bgAudio.pause(); } catch (e) {} }
+              }
+              if (SE.loginAudio) {
+                loginMusicWasPaused = SE.loginAudio.paused;
+                if (!loginMusicWasPaused) { try { SE.loginAudio.pause(); } catch (e) {} }
+              }
+              if (SE.ambientAudio) {
+                ambientWasPaused = SE.ambientAudio.paused;
+                if (!ambientWasPaused) { try { SE.ambientAudio.pause(); } catch (e) {} }
+              }
+            }
+            console.log('[PFLX] Livestream playing — BG music paused');
+          }
+
+          function scheduleResumeBGMusic() {
+            if (!liveStreamPlaying) return;
+            liveStreamPlaying = false;
+            // 5-second delay before resuming
+            if (resumeTimer) clearTimeout(resumeTimer);
+            resumeTimer = setTimeout(function () {
+              resumeTimer = null;
+              if (liveStreamPlaying) return; // stream started again during delay
+              if (typeof SE === 'undefined') return;
+              if (SE.playerPrefs && SE.playerPrefs.muteAll) return;
+
+              if (!bgMusicWasPaused && SE.bgAudio) {
+                try { SE.bgAudio.play().catch(function () {}); } catch (e) {}
+              }
+              if (!loginMusicWasPaused && SE.loginAudio) {
+                try { SE.loginAudio.play().catch(function () {}); } catch (e) {}
+              }
+              if (!ambientWasPaused && SE.ambientAudio) {
+                try { SE.ambientAudio.play().catch(function () {}); } catch (e) {}
+              }
+              console.log('[PFLX] BG music resumed after 5s livestream pause');
+            }, 5000);
+          }
+
+          // Patch the existing duck/restore with our enhanced versions
+          var origDuck = window.pflxLiveStreamDuck;
+          var origRestore = window.pflxLiveStreamRestore;
+          window.pflxLiveStreamDuck = function () {
+            pauseAllBGMusic();
+            if (origDuck) origDuck();
+          };
+          window.pflxLiveStreamRestore = function () {
+            scheduleResumeBGMusic();
+            if (origRestore) origRestore();
+          };
+
+          // Also patch the message listener for YouTube state changes
+          window.addEventListener('message', function (e) {
+            var data = e.data;
+            if (typeof data === 'string') {
+              try { data = JSON.parse(data); } catch (_) { return; }
+            }
+            if (data && data.event === 'onStateChange') {
+              var state = data.info;
+              if (state === 1 || state === 3) { pauseAllBGMusic(); }
+              else if (state === 2 || state === 0) { scheduleResumeBGMusic(); }
+            }
+          });
+
+          console.log('[PFLX] Live Stream Audio Rules (pause + 5s delay) loaded');
+        })();
+
+        /* ═══════════════════════════════════════════════════════════════════
+           FEATURE E: PS5-Style Scene Transitions
+           ═══════════════════════════════════════════════════════════════════ */
+        (function () {
+          'use strict';
+          // Ensure SE.config has transition fields
+          setTimeout(function () {
+            if (typeof SE !== 'undefined' && SE.config) {
+              if (SE.config.transitionsEnabled === undefined) SE.config.transitionsEnabled = true;
+              if (!SE.config.transitionStyle) SE.config.transitionStyle = 'swoosh';
+              if (SE.config.transitionSfx === undefined) SE.config.transitionSfx = true;
+            }
+          }, 500);
+
+          var transEl = null;
+          function ensureTransEl() {
+            if (transEl) return transEl;
+            transEl = document.createElement('div');
+            transEl.className = 'pflx-scene-transition';
+            document.body.appendChild(transEl);
+            return transEl;
+          }
+
+          window.pflxSceneTransition = function (callback) {
+            // Check if transitions enabled
+            var enabled = true;
+            var style = 'swoosh';
+            if (typeof SE !== 'undefined' && SE.config) {
+              enabled = SE.config.transitionsEnabled !== false;
+              style = SE.config.transitionStyle || 'swoosh';
+            }
+            if (!enabled) {
+              if (callback) callback();
+              return;
+            }
+
+            var el = ensureTransEl();
+            // Remove all style classes
+            el.classList.remove('pflx-swoosh', 'pflx-fade', 'pflx-flip', 'pflx-trans-active');
+            // Add the selected style
+            el.classList.add('pflx-' + style);
+            void el.offsetWidth; // force reflow
+            el.classList.add('pflx-trans-active');
+
+            // Play SFX
+            if (typeof SE !== 'undefined' && SE.config && SE.config.transitionSfx !== false) {
+              try { if (typeof pflxPlaySfx === 'function') pflxPlaySfx('nav'); } catch (e) {}
+            }
+
+            var durations = { swoosh: 125, fade: 150, flip: 175 };
+            var midpoint = durations[style] || 125;
+            // Call callback at midpoint (when screen is fully covered)
+            setTimeout(function () {
+              if (callback) callback();
+            }, midpoint);
+
+            // Clean up after animation completes
+            var total = midpoint * 2 + 50;
+            setTimeout(function () {
+              el.classList.remove('pflx-trans-active', 'pflx-swoosh', 'pflx-fade', 'pflx-flip');
+            }, total);
+          };
+
+          // Monkey-patch doNavigate to wrap in transition
+          var origDoNavigate = window.doNavigate || (typeof doNavigate === 'function' ? doNavigate : null);
+          if (origDoNavigate) {
+            window.doNavigate = function (viewName) {
+              // If transitions disabled, call directly
+              var enabled = true;
+              if (typeof SE !== 'undefined' && SE.config) {
+                enabled = SE.config.transitionsEnabled !== false;
+              }
+              if (!enabled) {
+                origDoNavigate(viewName);
+                return;
+              }
+              // Wrap in transition — the callback fires at midpoint
+              pflxSceneTransition(function () {
+                origDoNavigate(viewName);
+              });
+            };
+            // Also ensure navigateTo references the patched doNavigate
+          }
+
+          console.log('[PFLX] PS5-Style Scene Transitions loaded');
+        })();
+
+        /* ═══════════════════════════════════════════════════════════════════
+           FEATURE F: Enhanced Parallax on Loading Images
+           ═══════════════════════════════════════════════════════════════════ */
+        (function () {
+          'use strict';
+          var parallaxActive = false;
+          var parallaxImages = [];
+
+          function applyParallax(imgEl) {
+            if (!imgEl || imgEl.dataset.pflxParallax) return;
+            imgEl.dataset.pflxParallax = '1';
+            imgEl.classList.add('pflx-loading-img-parallax');
+          }
+
+          function onMouseMove(e) {
+            if (!parallaxActive || !parallaxImages.length) return;
+            var cx = (e.clientX / window.innerWidth - 0.5) * 2;   // -1 to 1
+            var cy = (e.clientY / window.innerHeight - 0.5) * 2;
+            parallaxImages.forEach(function (img) {
+              var tx = cx * -8;  // shift up to 8px
+              var ty = cy * -6;
+              var rx = cy * 3;   // tilt 3deg
+              var ry = cx * -3;
+              // Combine with existing Ken Burns by adding extra transform
+              img.style.transform = 'translate(' + tx + 'px, ' + ty + 'px) perspective(600px) rotateX(' + rx + 'deg) rotateY(' + ry + 'deg)';
+            });
+          }
+
+          // Auto-animate for touch/mobile
+          var autoAngle = 0;
+          var autoRAF = null;
+          function autoAnimate() {
+            if (!parallaxActive || !parallaxImages.length) { autoRAF = null; return; }
+            autoAngle += 0.008;
+            var cx = Math.sin(autoAngle) * 0.5;
+            var cy = Math.cos(autoAngle * 0.7) * 0.4;
+            parallaxImages.forEach(function (img) {
+              var tx = cx * -8;
+              var ty = cy * -6;
+              var rx = cy * 3;
+              var ry = cx * -3;
+              img.style.transform = 'translate(' + tx + 'px, ' + ty + 'px) perspective(600px) rotateX(' + rx + 'deg) rotateY(' + ry + 'deg)';
+            });
+            autoRAF = requestAnimationFrame(autoAnimate);
+          }
+
+          // Patch PFLX_LOADING.show to activate parallax
+          function patchParallax() {
+            if (!window.PFLX_LOADING) return;
+            var origShow = window.PFLX_LOADING.show;
+            var origHide = window.PFLX_LOADING.hide;
+
+            window.PFLX_LOADING.show = function () {
+              var result = origShow.apply(window.PFLX_LOADING, arguments);
+              // Activate parallax on loading screen images
+              parallaxActive = true;
+              parallaxImages = [];
+              var screen = document.getElementById('pflx-loading-screen');
+              if (screen) {
+                screen.querySelectorAll('img').forEach(function (img) {
+                  applyParallax(img);
+                  parallaxImages.push(img);
+                });
+              }
+              // Start auto-animate for mobile
+              if ('ontouchstart' in window && !autoRAF) {
+                autoRAF = requestAnimationFrame(autoAnimate);
+              }
+              return result;
+            };
+
+            window.PFLX_LOADING.hide = function () {
+              parallaxActive = false;
+              parallaxImages = [];
+              if (autoRAF) { cancelAnimationFrame(autoRAF); autoRAF = null; }
+              return origHide.apply(window.PFLX_LOADING, arguments);
+            };
+          }
+
+          document.addEventListener('mousemove', onMouseMove);
+          patchParallax();
+          if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', patchParallax);
+          setTimeout(patchParallax, 2500);
+
+          console.log('[PFLX] Enhanced Parallax on Loading Images loaded');
+        })();
+
+        /* ═══════════════════════════════════════════════════════════════════
+           FEATURE G: Advanced Sound Controls Panel
+           Replaces host-sound innerHTML with comprehensive controls
+           ═══════════════════════════════════════════════════════════════════ */
+        (function () {
+          'use strict';
+
+          function buildAdvancedSoundPanel() {
+            var panel = document.getElementById('host-sound');
+            if (!panel) return;
+
+            // Load current config
+            try {
+              var raw = localStorage.getItem('pflx_sound_engine');
+              if (raw && typeof SE !== 'undefined') SE.config = Object.assign({}, SE.config, JSON.parse(raw));
+            } catch (e) {}
+
+            var cfg = (typeof SE !== 'undefined') ? SE.config : {};
+            var masterVol = Math.round((cfg.masterVolume !== undefined ? cfg.masterVolume : 0.7) * 100);
+            var bgmVol = Math.round((cfg.bgmVolume !== undefined ? cfg.bgmVolume : 0.4) * 100);
+            var sfxVol = Math.round((cfg.sfxVolume !== undefined ? cfg.sfxVolume : 0.7) * 100);
+            var voiceVol = Math.round((cfg.voiceVolume !== undefined ? cfg.voiceVolume : 0.9) * 100);
+            var ambientVol = Math.round((cfg.ambientVolume !== undefined ? cfg.ambientVolume : 0.25) * 100);
+            var lmVol = Math.round(((cfg.loadingMusic && cfg.loadingMusic.volume !== undefined) ? cfg.loadingMusic.volume : 0.55) * 100);
+            var duckLevel = cfg.livestreamDuckLevel !== undefined ? cfg.livestreamDuckLevel : 20;
+            var transEnabled = cfg.transitionsEnabled !== false;
+            var transStyle = cfg.transitionStyle || 'swoosh';
+            var transSfx = cfg.transitionSfx !== false;
+
+            var html = '';
+            html += '<h3 style="color:var(--cyan);font-family:\'Orbitron\',sans-serif;font-size:13px;margin-bottom:6px;letter-spacing:1.5px;">SOUND ENGINE</h3>';
+            html += '<p style="color:#6a7290;font-size:12px;margin-bottom:16px;font-family:\'Jura\',sans-serif;">Comprehensive audio controls. Changes broadcast to all players.</p>';
+
+            // 1. MASTER
+            html += '<div class="dashboard-card" style="margin-bottom:14px;">';
+            html += '<h4 style="color:var(--cyan);margin-bottom:14px;font-family:\'Orbitron\',sans-serif;font-size:12px;letter-spacing:1px;">1. MASTER</h4>';
+            html += '<div class="settings-row"><div class="settings-label">Master Volume</div><div class="settings-value"><input type="range" min="0" max="100" value="' + masterVol + '" id="se-master-vol" oninput="pflxAdvSoundUpdate(\'master\')" style="width:140px;accent-color:var(--cyan);"><span id="se-master-vol-label" style="color:var(--cyan);font-weight:700;margin-left:8px;font-size:12px;">' + masterVol + '%</span></div></div>';
+            html += '<div class="settings-row" style="border:none;"><div class="settings-label">Master Mute</div><div class="settings-value"><label class="toggle-switch"><input type="checkbox" id="se-master-mute" ' + (cfg.masterMute ? 'checked' : '') + ' onchange="pflxAdvSoundUpdate(\'masterMute\')"><span class="toggle-slider"></span></label></div></div>';
+            html += '</div>';
+
+            // 2. BACKGROUND MUSIC
+            html += '<div class="dashboard-card" style="margin-bottom:14px;">';
+            html += '<h4 style="color:#a78bfa;margin-bottom:14px;font-family:\'Orbitron\',sans-serif;font-size:12px;letter-spacing:1px;">2. BACKGROUND MUSIC</h4>';
+            html += '<div class="settings-row"><div class="settings-label">Enable BGM</div><div class="settings-value"><label class="toggle-switch"><input type="checkbox" id="toggle-bgm" ' + (cfg.bgmEnabled !== false ? 'checked' : '') + ' onchange="pflxAdvSoundUpdate(\'bgm\')"><span class="toggle-slider"></span></label></div></div>';
+            html += '<div class="settings-row"><div class="settings-label">BGM Volume</div><div class="settings-value"><input type="range" min="0" max="100" value="' + bgmVol + '" id="se-bgm-vol" oninput="pflxAdvSoundUpdate(\'bgmVol\')" style="width:140px;accent-color:#a78bfa;"><span id="se-bgm-vol-label" style="color:#a78bfa;font-weight:700;margin-left:8px;font-size:12px;">' + bgmVol + '%</span></div></div>';
+            html += '<div class="settings-row" style="border:none;"><div class="settings-label">Playlist Mode</div><div class="settings-value"><select id="se-playlist-mode" onchange="pflxAdvSoundUpdate(\'playlistMode\')" style="background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.12);color:#e0e6ff;padding:6px 12px;border-radius:6px;font-family:\'Jura\',sans-serif;font-size:12px;">';
+            html += '<option value="shuffle"' + (cfg.playlistMode === 'shuffle' ? ' selected' : '') + '>Shuffle</option>';
+            html += '<option value="sequential"' + (cfg.playlistMode === 'sequential' ? ' selected' : '') + '>Sequential</option>';
+            html += '<option value="loop"' + (cfg.playlistMode === 'loop' ? ' selected' : '') + '>Loop Single</option>';
+            html += '<option value="per-tab"' + (cfg.playlistMode === 'per-tab' ? ' selected' : '') + '>Per-Tab</option>';
+            html += '</select></div></div>';
+            html += '</div>';
+
+            // 3. LOADING MUSIC
+            html += '<div class="dashboard-card" style="margin-bottom:14px;">';
+            html += '<h4 style="color:var(--gold);margin-bottom:14px;font-family:\'Orbitron\',sans-serif;font-size:12px;letter-spacing:1px;">3. LOADING MUSIC</h4>';
+            html += '<div class="settings-row"><div class="settings-label">Enable Loading Music</div><div class="settings-value"><label class="toggle-switch"><input type="checkbox" id="loading-music-enabled" ' + ((cfg.loadingMusic && cfg.loadingMusic.enabled !== false) ? 'checked' : '') + ' onchange="pflxAdvSoundUpdate(\'loadingEnabled\')"><span class="toggle-slider"></span></label></div></div>';
+            html += '<div class="settings-row"><div class="settings-label">Volume</div><div class="settings-value"><input type="range" min="0" max="100" value="' + lmVol + '" id="loading-music-vol" oninput="pflxAdvSoundUpdate(\'loadingVol\')" style="width:140px;accent-color:var(--gold);"><span id="loading-music-vol-label" style="color:var(--gold);font-weight:700;margin-left:8px;font-size:12px;">' + lmVol + '%</span></div></div>';
+            html += '<div class="settings-row" style="border:none;"><div class="settings-label">Shuffle</div><div class="settings-value"><label class="toggle-switch"><input type="checkbox" id="loading-music-shuffle" ' + ((cfg.loadingMusic && cfg.loadingMusic.shuffle !== false) ? 'checked' : '') + ' onchange="pflxAdvSoundUpdate(\'loadingShuffle\')"><span class="toggle-slider"></span></label></div></div>';
+            html += '<div id="pflx-adv-loading-music-list" style="margin-top:10px;margin-bottom:10px;display:flex;flex-direction:column;gap:6px;"></div>';
+            html += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
+            html += '<label class="hmc-btn-sm hmc-btn-gold" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;">&#x1F3B5; Upload<input type="file" accept="audio/mp3,audio/wav,audio/ogg,audio/m4a,audio/mpeg,audio/x-wav" multiple style="display:none;" onchange="pflxAdvUploadLoadingMusic(this)"></label>';
+            html += '<button onclick="pflxAdvPreviewLoadingMusic()" class="hmc-btn-sm hmc-btn-cyan" style="font-size:10px;">&#x25B6; Preview</button>';
+            html += '</div>';
+            html += '</div>';
+
+            // 4. LIVE STREAM
+            html += '<div class="dashboard-card" style="margin-bottom:14px;">';
+            html += '<h4 style="color:var(--green);margin-bottom:14px;font-family:\'Orbitron\',sans-serif;font-size:12px;letter-spacing:1px;">4. LIVE STREAM</h4>';
+            html += '<div class="settings-row"><div class="settings-label">Default Volume</div><div class="settings-value"><input type="range" min="0" max="100" value="' + (cfg.livestreamDefaultVol || 100) + '" id="se-livestream-vol" oninput="pflxAdvSoundUpdate(\'livestreamVol\')" style="width:140px;accent-color:var(--green);"><span id="se-livestream-vol-label" style="color:var(--green);font-weight:700;margin-left:8px;font-size:12px;">' + (cfg.livestreamDefaultVol || 100) + '%</span></div></div>';
+            html += '<div class="settings-row"><div class="settings-label">Duck During Briefing (%)</div><div class="settings-value"><input type="range" min="0" max="100" value="' + duckLevel + '" id="se-duck-level" oninput="pflxAdvSoundUpdate(\'duckLevel\')" style="width:140px;accent-color:var(--green);"><span id="se-duck-level-label" style="color:var(--green);font-weight:700;margin-left:8px;font-size:12px;">' + duckLevel + '%</span></div></div>';
+            html += '<div class="settings-row" style="border:none;"><div class="settings-label">Mute Live Stream While Loading</div><div class="settings-value"><label class="toggle-switch"><input type="checkbox" id="loading-music-mute-stream" ' + ((cfg.loadingMusic && cfg.loadingMusic.muteLiveStreamWhilePlaying !== false) ? 'checked' : '') + ' onchange="pflxAdvSoundUpdate(\'muteStreamLoading\')"><span class="toggle-slider"></span></label></div></div>';
+            html += '</div>';
+
+            // 5. X-BOT VOICE
+            html += '<div class="dashboard-card" style="margin-bottom:14px;">';
+            html += '<h4 style="color:#00e5ff;margin-bottom:14px;font-family:\'Orbitron\',sans-serif;font-size:12px;letter-spacing:1px;">5. X-BOT VOICE</h4>';
+            html += '<div class="settings-row"><div class="settings-label">Enable TTS</div><div class="settings-value"><label class="toggle-switch"><input type="checkbox" id="se-tts-enabled" ' + (cfg.ttsEnabled ? 'checked' : '') + ' onchange="pflxAdvSoundUpdate(\'tts\')"><span class="toggle-slider"></span></label></div></div>';
+            html += '<div class="settings-row"><div class="settings-label">Voice Volume</div><div class="settings-value"><input type="range" min="0" max="100" value="' + voiceVol + '" id="se-voice-vol" oninput="pflxAdvSoundUpdate(\'voiceVol\')" style="width:140px;accent-color:#00e5ff;"><span id="se-voice-vol-label" style="color:#00e5ff;font-weight:700;margin-left:8px;font-size:12px;">' + voiceVol + '%</span></div></div>';
+            html += '<div class="settings-row" style="border:none;"><div class="settings-label">Voice Speed</div><div class="settings-value"><input type="range" min="50" max="200" value="' + (cfg.voiceSpeed || 100) + '" id="se-voice-speed" oninput="pflxAdvSoundUpdate(\'voiceSpeed\')" style="width:140px;accent-color:#00e5ff;"><span id="se-voice-speed-label" style="color:#00e5ff;font-weight:700;margin-left:8px;font-size:12px;">' + (cfg.voiceSpeed || 100) + '%</span></div></div>';
+            html += '</div>';
+
+            // 6. SOUND EFFECTS
+            html += '<div class="dashboard-card" style="margin-bottom:14px;">';
+            html += '<h4 style="color:var(--cyan);margin-bottom:14px;font-family:\'Orbitron\',sans-serif;font-size:12px;letter-spacing:1px;">6. SOUND EFFECTS</h4>';
+            html += '<div class="settings-row"><div class="settings-label">Enable SFX</div><div class="settings-value"><label class="toggle-switch"><input type="checkbox" id="toggle-sfx" ' + (cfg.sfxEnabled !== false ? 'checked' : '') + ' onchange="pflxAdvSoundUpdate(\'sfx\')"><span class="toggle-slider"></span></label></div></div>';
+            html += '<div class="settings-row" style="border:none;"><div class="settings-label">SFX Volume</div><div class="settings-value"><input type="range" min="0" max="100" value="' + sfxVol + '" id="se-sfx-vol" oninput="pflxAdvSoundUpdate(\'sfxVol\')" style="width:140px;accent-color:var(--cyan);"><span id="se-sfx-vol-label" style="color:var(--cyan);font-weight:700;margin-left:8px;font-size:12px;">' + sfxVol + '%</span></div></div>';
+            html += '</div>';
+
+            // 7. TRANSITIONS
+            html += '<div class="dashboard-card" style="margin-bottom:14px;">';
+            html += '<h4 style="color:#f472b6;margin-bottom:14px;font-family:\'Orbitron\',sans-serif;font-size:12px;letter-spacing:1px;">7. TRANSITIONS</h4>';
+            html += '<div class="settings-row"><div class="settings-label">Scene Transitions</div><div class="settings-value"><label class="toggle-switch"><input type="checkbox" id="se-trans-enabled" ' + (transEnabled ? 'checked' : '') + ' onchange="pflxAdvSoundUpdate(\'transEnabled\')"><span class="toggle-slider"></span></label></div></div>';
+            html += '<div class="settings-row"><div class="settings-label">Style</div><div class="settings-value"><select id="se-trans-style" onchange="pflxAdvSoundUpdate(\'transStyle\')" style="background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.12);color:#e0e6ff;padding:6px 12px;border-radius:6px;font-family:\'Jura\',sans-serif;font-size:12px;">';
+            html += '<option value="swoosh"' + (transStyle === 'swoosh' ? ' selected' : '') + '>Swoosh</option>';
+            html += '<option value="fade"' + (transStyle === 'fade' ? ' selected' : '') + '>Fade Through Black</option>';
+            html += '<option value="flip"' + (transStyle === 'flip' ? ' selected' : '') + '>Card Flip</option>';
+            html += '</select></div></div>';
+            html += '<div class="settings-row" style="border:none;"><div class="settings-label">Transition SFX</div><div class="settings-value"><label class="toggle-switch"><input type="checkbox" id="se-trans-sfx" ' + (transSfx ? 'checked' : '') + ' onchange="pflxAdvSoundUpdate(\'transSfx\')"><span class="toggle-slider"></span></label></div></div>';
+            html += '</div>';
+
+            // 8. AMBIENT
+            html += '<div class="dashboard-card" style="margin-bottom:14px;">';
+            html += '<h4 style="color:var(--gold);margin-bottom:14px;font-family:\'Orbitron\',sans-serif;font-size:12px;letter-spacing:1px;">8. AMBIENT</h4>';
+            html += '<div class="settings-row"><div class="settings-label">Enable Ambient</div><div class="settings-value"><label class="toggle-switch"><input type="checkbox" id="se-ambient-enabled" ' + ((cfg.ambient && cfg.ambient.enabled) ? 'checked' : '') + ' onchange="pflxAdvSoundUpdate(\'ambientEnabled\')"><span class="toggle-slider"></span></label></div></div>';
+            html += '<div class="settings-row"><div class="settings-label">Ambient Volume</div><div class="settings-value"><input type="range" min="0" max="100" value="' + ambientVol + '" id="se-ambient-mix-vol" oninput="pflxAdvSoundUpdate(\'ambientVol\')" style="width:140px;accent-color:var(--gold);"><span id="se-ambient-mix-vol-label" style="color:var(--gold);font-weight:700;margin-left:8px;font-size:12px;">' + ambientVol + '%</span></div></div>';
+            html += '<div style="display:flex;align-items:center;gap:10px;margin-top:10px;">';
+            html += '<span id="se-ambient-name" style="font-size:12px;color:#e0e6ff;flex:1;">No ambient sound loaded</span>';
+            html += '<label class="hmc-btn-sm hmc-btn-cyan" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;">&#x1F50A; Upload<input type="file" accept="audio/*" style="display:none;" onchange="seUploadAmbient(this)"></label>';
+            html += '</div>';
+            html += '</div>';
+
+            // Login Music toggle (preserve existing)
+            html += '<div class="dashboard-card" style="margin-bottom:14px;">';
+            html += '<h4 style="color:#6366f1;margin-bottom:14px;font-family:\'Orbitron\',sans-serif;font-size:12px;letter-spacing:1px;">LOGIN MUSIC</h4>';
+            html += '<div class="settings-row" style="border:none;"><div class="settings-label">Login Screen Music</div><div class="settings-value"><label class="toggle-switch"><input type="checkbox" id="toggle-login-music" ' + (cfg.loginMusicEnabled !== false ? 'checked' : '') + ' onchange="pflxAdvSoundUpdate(\'loginMusic\')"><span class="toggle-slider"></span></label></div></div>';
+            html += '</div>';
+
+            // Per-Tab Audio (preserve existing container)
+            html += '<div class="dashboard-card" style="margin-bottom:14px;">';
+            html += '<h4 style="color:var(--cyan);margin-bottom:14px;font-family:\'Orbitron\',sans-serif;font-size:12px;letter-spacing:1px;">PER-TAB AUDIO</h4>';
+            html += '<div id="se-tab-tracks" style="display:flex;flex-direction:column;gap:10px;"></div>';
+            html += '</div>';
+
+            // SFX Library (preserve existing container)
+            html += '<div class="dashboard-card" style="margin-bottom:14px;">';
+            html += '<h4 style="color:var(--cyan);margin-bottom:14px;font-family:\'Orbitron\',sans-serif;font-size:12px;letter-spacing:1px;">SFX LIBRARY</h4>';
+            html += '<div id="se-sfx-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;"></div>';
+            html += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
+            html += '<select id="se-sfx-event" style="background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.12);color:#e0e6ff;padding:6px 12px;border-radius:6px;font-family:\'Jura\',sans-serif;font-size:12px;">';
+            html += '<option value="nav">Navigation</option><option value="task-complete">Task Complete</option><option value="xc-award">XC Award</option><option value="badge-earned">Badge Earned</option><option value="level-up">Level Up</option><option value="error">Error</option><option value="notification">Notification</option><option value="login">Login</option><option value="loading-screen">Loading Screen</option>';
+            html += '</select>';
+            html += '<label class="hmc-btn-sm hmc-btn-cyan" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;">&#x1F3B5; Upload SFX<input type="file" accept="audio/mp3,audio/wav,audio/mpeg,audio/x-wav" style="display:none;" onchange="seUploadSFX(this)"></label>';
+            html += '</div>';
+            html += '</div>';
+
+            // Track Library
+            html += '<div class="dashboard-card" style="margin-bottom:14px;">';
+            html += '<h4 style="color:var(--cyan);margin-bottom:14px;font-family:\'Orbitron\',sans-serif;font-size:12px;letter-spacing:1px;">TRACK LIBRARY</h4>';
+            html += '<div id="se-track-library" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;"></div>';
+            html += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
+            html += '<input type="text" placeholder="Audio URL (MP3/WAV)..." id="se-track-url" style="background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.12);color:#e0e6ff;padding:6px 12px;border-radius:6px;font-family:\'Jura\',sans-serif;width:220px;font-size:12px;">';
+            html += '<button onclick="seAddTrackURL()" class="hmc-btn-sm hmc-btn-cyan">+ URL</button>';
+            html += '<label class="hmc-btn-sm hmc-btn-cyan" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;">&#x1F4C2; Upload File<input type="file" accept="audio/mp3,audio/wav,audio/mpeg,audio/x-wav" style="display:none;" onchange="seUploadTrack(this)"></label>';
+            html += '</div>';
+            html += '</div>';
+
+            // Reset button
+            html += '<div style="text-align:center;margin-top:16px;">';
+            html += '<button onclick="pflxAdvResetAudioDefaults()" class="hmc-btn-sm" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);color:#ef4444;padding:8px 20px;font-size:12px;">Reset Audio Defaults</button>';
+            html += '</div>';
+
+            panel.innerHTML = html;
+
+            // Render loading music list
+            pflxAdvRenderLoadingMusicList();
+          }
+
+          // ── Update handler for all advanced controls ──
+          window.pflxAdvSoundUpdate = function (field) {
+            if (typeof SE === 'undefined') return;
+            var cfg = SE.config;
+            switch (field) {
+              case 'master': {
+                var sl = document.getElementById('se-master-vol');
+                var lb = document.getElementById('se-master-vol-label');
+                if (sl) { cfg.masterVolume = parseInt(sl.value, 10) / 100; if (lb) lb.textContent = sl.value + '%'; }
+                break;
+              }
+              case 'masterMute': {
+                var cb = document.getElementById('se-master-mute');
+                if (cb) cfg.masterMute = cb.checked;
+                break;
+              }
+              case 'bgm': {
+                var cb2 = document.getElementById('toggle-bgm');
+                if (cb2) cfg.bgmEnabled = cb2.checked;
+                break;
+              }
+              case 'bgmVol': {
+                var sl2 = document.getElementById('se-bgm-vol');
+                var lb2 = document.getElementById('se-bgm-vol-label');
+                if (sl2) { cfg.bgmVolume = parseInt(sl2.value, 10) / 100; if (lb2) lb2.textContent = sl2.value + '%'; }
+                break;
+              }
+              case 'playlistMode': {
+                var sel = document.getElementById('se-playlist-mode');
+                if (sel) cfg.playlistMode = sel.value;
+                break;
+              }
+              case 'loadingEnabled': {
+                if (!cfg.loadingMusic) cfg.loadingMusic = {};
+                var cb3 = document.getElementById('loading-music-enabled');
+                if (cb3) cfg.loadingMusic.enabled = cb3.checked;
+                break;
+              }
+              case 'loadingVol': {
+                if (!cfg.loadingMusic) cfg.loadingMusic = {};
+                var sl3 = document.getElementById('loading-music-vol');
+                var lb3 = document.getElementById('loading-music-vol-label');
+                if (sl3) { cfg.loadingMusic.volume = parseInt(sl3.value, 10) / 100; if (lb3) lb3.textContent = sl3.value + '%'; }
+                break;
+              }
+              case 'loadingShuffle': {
+                if (!cfg.loadingMusic) cfg.loadingMusic = {};
+                var cb4 = document.getElementById('loading-music-shuffle');
+                if (cb4) cfg.loadingMusic.shuffle = cb4.checked;
+                break;
+              }
+              case 'livestreamVol': {
+                var sl4 = document.getElementById('se-livestream-vol');
+                var lb4 = document.getElementById('se-livestream-vol-label');
+                if (sl4) { cfg.livestreamDefaultVol = parseInt(sl4.value, 10); if (lb4) lb4.textContent = sl4.value + '%'; }
+                if (window.PFLX_AUDIO) { window.PFLX_AUDIO.liveFeedBase = cfg.livestreamDefaultVol; window.PFLX_AUDIO.refresh(); }
+                break;
+              }
+              case 'duckLevel': {
+                var sl5 = document.getElementById('se-duck-level');
+                var lb5 = document.getElementById('se-duck-level-label');
+                if (sl5) { cfg.livestreamDuckLevel = parseInt(sl5.value, 10); if (lb5) lb5.textContent = sl5.value + '%'; }
+                if (window.PFLX_AUDIO) { window.PFLX_AUDIO.duckLevels.briefing = cfg.livestreamDuckLevel; }
+                break;
+              }
+              case 'muteStreamLoading': {
+                if (!cfg.loadingMusic) cfg.loadingMusic = {};
+                var cb5 = document.getElementById('loading-music-mute-stream');
+                if (cb5) cfg.loadingMusic.muteLiveStreamWhilePlaying = cb5.checked;
+                break;
+              }
+              case 'tts': {
+                var cb6 = document.getElementById('se-tts-enabled');
+                if (cb6) cfg.ttsEnabled = cb6.checked;
+                break;
+              }
+              case 'voiceVol': {
+                var sl6 = document.getElementById('se-voice-vol');
+                var lb6 = document.getElementById('se-voice-vol-label');
+                if (sl6) { cfg.voiceVolume = parseInt(sl6.value, 10) / 100; if (lb6) lb6.textContent = sl6.value + '%'; }
+                break;
+              }
+              case 'voiceSpeed': {
+                var sl7 = document.getElementById('se-voice-speed');
+                var lb7 = document.getElementById('se-voice-speed-label');
+                if (sl7) { cfg.voiceSpeed = parseInt(sl7.value, 10); if (lb7) lb7.textContent = sl7.value + '%'; }
+                break;
+              }
+              case 'sfx': {
+                var cb7 = document.getElementById('toggle-sfx');
+                if (cb7) cfg.sfxEnabled = cb7.checked;
+                break;
+              }
+              case 'sfxVol': {
+                var sl8 = document.getElementById('se-sfx-vol');
+                var lb8 = document.getElementById('se-sfx-vol-label');
+                if (sl8) { cfg.sfxVolume = parseInt(sl8.value, 10) / 100; if (lb8) lb8.textContent = sl8.value + '%'; }
+                break;
+              }
+              case 'transEnabled': {
+                var cb8 = document.getElementById('se-trans-enabled');
+                if (cb8) cfg.transitionsEnabled = cb8.checked;
+                break;
+              }
+              case 'transStyle': {
+                var sel2 = document.getElementById('se-trans-style');
+                if (sel2) cfg.transitionStyle = sel2.value;
+                break;
+              }
+              case 'transSfx': {
+                var cb9 = document.getElementById('se-trans-sfx');
+                if (cb9) cfg.transitionSfx = cb9.checked;
+                break;
+              }
+              case 'ambientEnabled': {
+                if (!cfg.ambient) cfg.ambient = {};
+                var cb10 = document.getElementById('se-ambient-enabled');
+                if (cb10) cfg.ambient.enabled = cb10.checked;
+                if (typeof seAmbientSave === 'function') seAmbientSave();
+                break;
+              }
+              case 'ambientVol': {
+                var sl9 = document.getElementById('se-ambient-mix-vol');
+                var lb9 = document.getElementById('se-ambient-mix-vol-label');
+                if (sl9) { cfg.ambientVolume = parseInt(sl9.value, 10) / 100; if (lb9) lb9.textContent = sl9.value + '%'; }
+                break;
+              }
+              case 'loginMusic': {
+                var cb11 = document.getElementById('toggle-login-music');
+                if (cb11) cfg.loginMusicEnabled = cb11.checked;
+                break;
+              }
+            }
+            // Persist
+            try { localStorage.setItem('pflx_sound_engine', JSON.stringify(SE.config)); } catch (e) {}
+            if (typeof seApplyVolumes === 'function') seApplyVolumes();
+          };
+
+          // ── Loading music list in advanced panel ──
+          window.pflxAdvRenderLoadingMusicList = function () {
+            var container = document.getElementById('pflx-adv-loading-music-list');
+            if (!container) return;
+            if (typeof SE === 'undefined' || !SE.config.loadingMusic) { container.innerHTML = ''; return; }
+            var tracks = SE.config.loadingMusic.tracks || [];
+            if (!tracks.length) {
+              container.innerHTML = '<div style="color:rgba(255,255,255,0.25);font-size:12px;">No loading music. Upload files above.</div>';
+              return;
+            }
+            container.innerHTML = tracks.map(function (t, i) {
+              var name = (typeof escapeHtml === 'function') ? escapeHtml(t.name || 'Track ' + (i + 1)) : (t.name || 'Track ' + (i + 1));
+              return '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:rgba(255,215,0,0.04);border:1px solid rgba(255,215,0,0.12);border-radius:6px;">' +
+                '<span style="font-size:12px;color:#e0e6ff;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + name + '</span>' +
+                '<button onclick="pflxAdvRemoveLoadingTrack(' + i + ')" class="hmc-btn-sm" style="font-size:10px;background:rgba(239,68,68,0.1);border-color:rgba(239,68,68,0.2);color:#ef4444;">&#x2715;</button>' +
+                '</div>';
+            }).join('');
+          };
+
+          window.pflxAdvUploadLoadingMusic = function (input) {
+            if (!input.files || !input.files.length) return;
+            if (typeof SE === 'undefined') return;
+            if (!SE.config.loadingMusic) SE.config.loadingMusic = { enabled: true, shuffle: true, volume: 0.55, muteLiveStreamWhilePlaying: true, tracks: [] };
+            if (!Array.isArray(SE.config.loadingMusic.tracks)) SE.config.loadingMusic.tracks = [];
+            var files = Array.from(input.files);
+            var remaining = files.length;
+            files.forEach(function (file) {
+              if (file.size > 10 * 1024 * 1024) { if (typeof pflxToast === 'function') pflxToast('Max 10MB: ' + file.name, 'error'); remaining--; return; }
+              var reader = new FileReader();
+              reader.onload = function (e) {
+                SE.config.loadingMusic.tracks.push({
+                  id: 'lm-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+                  name: file.name,
+                  url: '',
+                  dataUrl: e.target.result
+                });
+                remaining--;
+                if (remaining <= 0) {
+                  try { localStorage.setItem('pflx_sound_engine', JSON.stringify(SE.config)); } catch (ex) {}
+                  // Also sync to pflxLoadingPlaylist
+                  window.pflxLoadingPlaylist = SE.config.loadingMusic.tracks.map(function (t) { return t.dataUrl || t.url; }).filter(Boolean);
+                  // Also save to pflx_loading_playlist
+                  try { localStorage.setItem('pflx_loading_playlist', JSON.stringify(SE.config.loadingMusic.tracks)); } catch (ex) {}
+                  pflxAdvRenderLoadingMusicList();
+                  if (typeof renderLoadingMusicList === 'function') renderLoadingMusicList();
+                  if (typeof pflxToast === 'function') pflxToast('Loading music added (' + SE.config.loadingMusic.tracks.length + ' tracks)', 'success');
+                }
+              };
+              reader.readAsDataURL(file);
+            });
+            input.value = '';
+          };
+
+          window.pflxAdvRemoveLoadingTrack = function (i) {
+            if (typeof SE === 'undefined' || !SE.config.loadingMusic || !SE.config.loadingMusic.tracks) return;
+            SE.config.loadingMusic.tracks.splice(i, 1);
+            try { localStorage.setItem('pflx_sound_engine', JSON.stringify(SE.config)); } catch (e) {}
+            window.pflxLoadingPlaylist = SE.config.loadingMusic.tracks.map(function (t) { return t.dataUrl || t.url; }).filter(Boolean);
+            try { localStorage.setItem('pflx_loading_playlist', JSON.stringify(SE.config.loadingMusic.tracks)); } catch (e) {}
+            pflxAdvRenderLoadingMusicList();
+            if (typeof renderLoadingMusicList === 'function') renderLoadingMusicList();
+            if (typeof pflxToast === 'function') pflxToast('Track removed', 'success');
+          };
+
+          window.pflxAdvPreviewLoadingMusic = function () {
+            if (typeof previewLoadingMusic === 'function') { previewLoadingMusic(); return; }
+            if (typeof SE === 'undefined' || !SE.config.loadingMusic || !SE.config.loadingMusic.tracks || !SE.config.loadingMusic.tracks.length) {
+              if (typeof pflxToast === 'function') pflxToast('No loading music to preview', 'error');
+              return;
+            }
+            var t = SE.config.loadingMusic.tracks[Math.floor(Math.random() * SE.config.loadingMusic.tracks.length)];
+            var a = new Audio(t.dataUrl || t.url);
+            a.volume = SE.config.loadingMusic.volume || 0.55;
+            a.play().catch(function () {});
+          };
+
+          // ── Reset to defaults ──
+          window.pflxAdvResetAudioDefaults = function () {
+            if (typeof SE === 'undefined') return;
+            SE.config.masterVolume = 0.7;
+            SE.config.masterMute = false;
+            SE.config.bgmEnabled = true;
+            SE.config.bgmVolume = 0.4;
+            SE.config.sfxEnabled = true;
+            SE.config.sfxVolume = 0.7;
+            SE.config.voiceVolume = 0.9;
+            SE.config.voiceSpeed = 100;
+            SE.config.ambientVolume = 0.25;
+            SE.config.loginMusicEnabled = true;
+            SE.config.playlistMode = 'shuffle';
+            SE.config.livestreamDefaultVol = 100;
+            SE.config.livestreamDuckLevel = 20;
+            SE.config.transitionsEnabled = true;
+            SE.config.transitionStyle = 'swoosh';
+            SE.config.transitionSfx = true;
+            SE.config.ttsEnabled = false;
+            if (SE.config.loadingMusic) {
+              SE.config.loadingMusic.enabled = true;
+              SE.config.loadingMusic.shuffle = true;
+              SE.config.loadingMusic.volume = 0.55;
+              SE.config.loadingMusic.muteLiveStreamWhilePlaying = true;
+            }
+            if (SE.config.ambient) {
+              SE.config.ambient.enabled = false;
+            }
+            try { localStorage.setItem('pflx_sound_engine', JSON.stringify(SE.config)); } catch (e) {}
+            if (typeof seApplyVolumes === 'function') seApplyVolumes();
+            if (window.PFLX_AUDIO) {
+              window.PFLX_AUDIO.liveFeedBase = 100;
+              window.PFLX_AUDIO.duckLevels.briefing = 20;
+            }
+            // Re-render panel
+            buildAdvancedSoundPanel();
+            if (typeof pflxToast === 'function') pflxToast('Audio settings reset to defaults', 'success');
+          };
+
+          // Build on load
+          // Wait for SE to be available and DOM ready
+          function tryBuild() {
+            if (typeof SE !== 'undefined' && document.getElementById('host-sound')) {
+              buildAdvancedSoundPanel();
+            }
+          }
+          setTimeout(tryBuild, 1500);
+          setTimeout(tryBuild, 3000);
+
+          // Also rebuild when host-sound tab is activated
+          var origSeHostLoad = window.seHostLoad;
+          if (typeof origSeHostLoad === 'function') {
+            window.seHostLoad = function () {
+              origSeHostLoad();
+              setTimeout(buildAdvancedSoundPanel, 100);
+            };
+          }
+
+          console.log('[PFLX] Advanced Sound Controls Panel loaded');
         })();
 
         function mcRenderModifiers() {
