@@ -5280,8 +5280,20 @@
 
                             <!-- ═══ DASHBOARD PANEL ═══ -->
                             <div class="mc-panel active" id="mc-panel-dashboard">
-                                <h1 class="mc-page-title">Mission Dashboard</h1>
-                                <p class="mc-page-desc">Platform overview — players, tasks, progress, and activity.</p>
+                                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:6px;">
+                                    <h1 class="mc-page-title" id="mc-dash-title" style="margin-bottom:0;">Mission Dashboard</h1>
+                                    <div style="display:flex;gap:4px;" id="mc-dash-toggle-bar">
+                                        <button class="mc-btn" id="mc-dash-btn-host" onclick="mcDashToggle('host')" style="font-size:10px;padding:5px 14px;font-weight:700;border-color:var(--cyan);background:rgba(0,240,255,0.1);color:var(--cyan);">⚙ HOST DASH</button>
+                                        <button class="mc-btn" id="mc-dash-btn-player" onclick="mcDashToggle('player')" style="font-size:10px;padding:5px 14px;font-weight:700;">👤 PLAYER DASH</button>
+                                    </div>
+                                </div>
+                                <p class="mc-page-desc" id="mc-dash-desc">Platform overview — players, tasks, progress, and activity.</p>
+                                <!-- ═══ PLAYER DASHBOARD PREVIEW (toggled) ═══ -->
+                                <div id="mc-dash-player-view" style="display:none;">
+                                    <div id="mc-dash-player-content"></div>
+                                </div>
+                                <!-- ═══ HOST DASHBOARD (default) ═══ -->
+                                <div id="mc-dash-host-view">
                                 <!-- ═══ PLATFORM NOTIFICATION BANNER ═══ -->
                                 <div id="pflx-home-notifications" style="display:none;margin-bottom:14px;"></div>
                                 <!-- ═══ LIVE STREAM PANEL (MC Home only) ═══ -->
@@ -5347,6 +5359,7 @@
                                     </div>
                                     <div id="mc-loot-widget-body" style="padding:8px;"></div>
                                 </div>
+                                </div><!-- /mc-dash-host-view -->
                             </div>
 
                             <!-- ═══ PLAYERS PANEL (full management) ═══ -->
@@ -14853,6 +14866,143 @@
                             (proj.team && proj.team.length ? ' · ' + proj.team.length + ' members' : '') + '</div></div>';
                     }).join('');
             }
+        }
+
+        // ── MC Dashboard: Host ↔ Player toggle ──────────────────────
+        var mcDashMode = 'host';
+        function mcDashToggle(mode) {
+            mcDashMode = mode;
+            var hostView = document.getElementById('mc-dash-host-view');
+            var playerView = document.getElementById('mc-dash-player-view');
+            var btnHost = document.getElementById('mc-dash-btn-host');
+            var btnPlayer = document.getElementById('mc-dash-btn-player');
+            var title = document.getElementById('mc-dash-title');
+            var desc = document.getElementById('mc-dash-desc');
+            if (!hostView || !playerView) return;
+
+            if (mode === 'player') {
+                hostView.style.display = 'none';
+                playerView.style.display = 'block';
+                if (title) title.textContent = 'Player Dashboard';
+                if (desc) desc.textContent = 'Preview the player experience — your stats, quests, deadlines, and goals.';
+                if (btnHost) { btnHost.style.borderColor = ''; btnHost.style.background = ''; btnHost.style.color = ''; }
+                if (btnPlayer) { btnPlayer.style.borderColor = 'var(--cyan)'; btnPlayer.style.background = 'rgba(0,240,255,0.1)'; btnPlayer.style.color = 'var(--cyan)'; }
+                mcRenderPlayerDashPreview();
+            } else {
+                hostView.style.display = 'block';
+                playerView.style.display = 'none';
+                if (title) title.textContent = 'Mission Dashboard';
+                if (desc) desc.textContent = 'Platform overview — players, tasks, progress, and activity.';
+                if (btnPlayer) { btnPlayer.style.borderColor = ''; btnPlayer.style.background = ''; btnPlayer.style.color = ''; }
+                if (btnHost) { btnHost.style.borderColor = 'var(--cyan)'; btnHost.style.background = 'rgba(0,240,255,0.1)'; btnHost.style.color = 'var(--cyan)'; }
+            }
+        }
+
+        function mcRenderPlayerDashPreview() {
+            var container = document.getElementById('mc-dash-player-content');
+            if (!container) return;
+
+            var s = window.activeSession || {};
+            var displayName = s.username || s.name || s.brand || 'PrototypeFLX';
+            var xc = s.xc || 0;
+            var role = s.role || 'Host';
+            var cohort = s.cohort || 'PlayerPool';
+            var rank = (role.toLowerCase() === 'admin' || role.toLowerCase() === 'host') ? 'HOST' : 'S+';
+
+            // ── Player header with stats ──
+            var html = '<div class="mc-card" style="padding:20px;">' +
+                '<div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;">' +
+                '<div style="width:64px;height:64px;border-radius:50%;border:2px solid var(--cyan);overflow:hidden;display:flex;align-items:center;justify-content:center;background:rgba(0,240,255,0.05);">' +
+                '<img src="public/PFLX Core Flat 6.png" alt="PFLX" style="width:100%;height:100%;object-fit:contain;" onerror="this.parentElement.innerHTML=\'&#x1F464;\'">' +
+                '</div>' +
+                '<div style="flex:1;">' +
+                '<div style="font-family:\'Rajdhani\',sans-serif;font-size:22px;font-weight:900;color:var(--cyan);">' + escapeHtml(displayName) + '</div>' +
+                '<div style="font-family:\'Jura\',sans-serif;font-size:12px;color:#8a92b0;letter-spacing:1px;">' + escapeHtml(role) + ' · ' + escapeHtml(cohort) + '</div>' +
+                '</div></div>' +
+                '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">';
+
+            var stats = [
+                { label: 'TOTAL XC', value: xc.toLocaleString(), icon: '&#x26A1;' },
+                { label: 'RANK', value: rank, icon: '&#x2B50;' },
+                { label: 'QUESTS', value: '—', icon: '&#x1F3AF;' },
+                { label: 'POSITION', value: '—', icon: '&#x1F3C6;' }
+            ];
+            stats.forEach(function(st) {
+                html += '<div class="mc-stat-card"><div style="font-size:16px;margin-bottom:4px;">' + st.icon + '</div>' +
+                    '<div class="mc-stat-value" style="color:var(--cyan);">' + st.value + '</div>' +
+                    '<div class="mc-stat-label">' + st.label + '</div></div>';
+            });
+            html += '</div></div>';
+
+            // ── X-Bot Briefing preview ──
+            var briefingText = '';
+            try {
+                var briefEl = document.getElementById('xbot-briefing-text');
+                if (briefEl && briefEl.textContent) briefingText = briefEl.textContent;
+            } catch(e) {}
+            if (!briefingText) {
+                var totalPlayers = mcPlayers ? mcPlayers.filter(function(p) { return p.role !== 'admin'; }).length : 0;
+                var claimed = mcPlayers ? mcPlayers.filter(function(p) { return p.claimed; }).length : 0;
+                briefingText = 'Welcome back, ' + displayName + '. You have ' + totalPlayers + ' players registered (' + claimed + ' claimed). The platform is running smoothly. Head to Host Controls to manage your session, or check the Cohort Manager to review player access. DarkCampus is live for global networking between cohorts.';
+            }
+            html += '<div class="mc-card" style="border-left:3px solid var(--cyan);padding-left:20px;">' +
+                '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">' +
+                '<img src="public/X Official for PFLX.png" alt="X-Bot" style="width:28px;height:28px;border-radius:50%;border:1px solid rgba(0,240,255,0.2);" onerror="this.style.display=\'none\'">' +
+                '<div><div style="font-family:\'Orbitron\',sans-serif;font-size:11px;color:var(--cyan);letter-spacing:1.5px;">X-BOT BRIEFING</div>' +
+                '<div style="font-size:10px;color:#6a7290;font-family:\'Jura\',sans-serif;">Status & Next Steps</div></div></div>' +
+                '<div style="font-family:\'Rajdhani\',sans-serif;font-size:15px;color:#c8cee6;line-height:1.6;">' + escapeHtml(briefingText) + '</div></div>';
+
+            // ── Deadlines ──
+            var deadlineItems = (typeof DEADLINES !== 'undefined' && DEADLINES.length)
+                ? DEADLINES.map(function(d) {
+                    var urgStyle = d.urgent ? 'border-left:3px solid #ef4444;' : '';
+                    var dueColor = d.urgent ? '#ef4444' : 'var(--cyan)';
+                    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.04);border-radius:10px;' + urgStyle + '">' +
+                        '<span style="font-size:13px;color:#e0e6ff;font-weight:600;">' + escapeHtml(d.text) + '</span>' +
+                        '<span style="font-size:12px;color:' + dueColor + ';font-weight:700;font-family:\'Share Tech Mono\',monospace;">' + escapeHtml(d.due) + '</span></div>';
+                }).join('')
+                : '<div style="color:rgba(255,255,255,0.25);font-size:12px;padding:10px;">No upcoming deadlines.</div>';
+            html += '<div class="mc-card" style="border-color:rgba(239,68,68,0.25);background:linear-gradient(135deg,rgba(239,68,68,0.04),rgba(10,18,40,0.6));">' +
+                '<div class="mc-card-title" style="color:#ef4444;">&#x23F0; Deadlines</div>' +
+                '<div style="display:flex;flex-direction:column;gap:6px;">' + deadlineItems + '</div></div>';
+
+            // ── Recent Activity ──
+            var activityItems = (typeof ACTIVITY_FEED !== 'undefined' && ACTIVITY_FEED.length)
+                ? ACTIVITY_FEED.slice(0, 7).map(function(a) {
+                    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.04);border-radius:10px;">' +
+                        '<span style="font-size:13px;color:#e0e6ff;">' + escapeHtml(a.text) + '</span>' +
+                        '<div style="display:flex;align-items:center;gap:12px;">' +
+                        '<span style="font-size:11px;color:rgba(255,255,255,0.3);">' + escapeHtml(a.time || '') + '</span>' +
+                        (a.xc ? '<span style="font-size:12px;color:#22c55e;font-weight:700;font-family:\'Share Tech Mono\',monospace;">+' + a.xc + '</span>' : '') +
+                        '</div></div>';
+                }).join('')
+                : '<div style="color:rgba(255,255,255,0.25);font-size:12px;padding:10px;">No recent activity.</div>';
+            html += '<div class="mc-card"><div class="mc-card-title">Recent Activity</div>' +
+                '<div style="display:flex;flex-direction:column;gap:6px;max-height:350px;overflow-y:auto;">' + activityItems + '</div></div>';
+
+            // ── Goals ──
+            var goalItems = (typeof GOALS !== 'undefined' && GOALS.length)
+                ? GOALS.map(function(g) {
+                    var check = g.complete ? '&#x2705;' : '&#x2B1C;';
+                    var barColor = g.complete ? '#22c55e' : 'var(--cyan)';
+                    var pct = g.progress || (g.complete ? 100 : 0);
+                    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;">' +
+                        '<span style="font-size:16px;">' + check + '</span>' +
+                        '<div style="flex:1;">' +
+                        '<div style="font-size:13px;color:#e0e6ff;font-weight:600;">' + escapeHtml(g.text) + '</div>' +
+                        '<div style="height:4px;background:rgba(255,255,255,0.06);border-radius:4px;margin-top:4px;overflow:hidden;">' +
+                        '<div style="height:100%;width:' + pct + '%;background:' + barColor + ';border-radius:4px;"></div></div>' +
+                        '</div></div>';
+                }).join('')
+                : '<div style="color:rgba(255,255,255,0.25);font-size:12px;padding:10px;">No goals set.</div>';
+            html += '<div class="mc-card"><div class="mc-card-title">Goals</div>' +
+                '<div>' + goalItems + '</div></div>';
+
+            // ── Back to host dash link ──
+            html += '<div style="text-align:center;padding:16px 0;">' +
+                '<button class="mc-btn" onclick="mcDashToggle(\'host\')" style="font-size:12px;padding:8px 24px;">&#x2190; Back to Host Dashboard</button></div>';
+
+            container.innerHTML = html;
         }
 
         // ── Schedule & Epics ────────────────────────────────────────
