@@ -1201,7 +1201,6 @@
         }
 
         /* ── Player-view gating — hide host-only UI when host is acting as player ── */
-        body.pflx-as-player [data-view="mission-control"],
         body.pflx-as-player [data-host-only],
         body.pflx-as-player .host-only,
         body.pflx-as-player .hmc-only,
@@ -13681,13 +13680,10 @@
         const iframeLoadResolvers = {};
 
         function navigateTo(viewName) {
-            // Player-view gating: Mission Control is host-only. If an admin is currently
-            // in Player View, block Mission Control and route them home instead.
+            // When admin opens MC in Player View, allow it but auto-show player dash
             if (viewName === 'mission-control' && window.pflxRole === 'player') {
-                if (typeof pflxToast === 'function') {
-                    pflxToast('Mission Control is hidden while in Player View. Switch to Host View to access admin tools.', 'info');
-                }
-                viewName = 'home';
+                // Let navigation proceed, but switch to player dash after render
+                setTimeout(function() { if (typeof mcDashToggle === 'function') mcDashToggle('player'); }, 100);
             }
             pflxPlaySfx('nav');
             const isIframeApp = !!APP_BASE_URLS[viewName];
@@ -31560,12 +31556,17 @@ RESPONSE RULES:
                 try { localStorage.setItem('pflx_active_role', role); } catch(e) {}
                 // Body class gates host-only UI across the shell
                 document.body.classList.toggle('pflx-as-player', role === 'player');
-                // If host switches to player while sitting in Mission Control, bounce them home
+                // If host switches to player while in MC, auto-show player dash instead of bouncing
                 try {
                     if (role === 'player') {
                         var activeView = document.querySelector('.view.active');
                         if (activeView && activeView.classList.contains('mission-control-view')) {
-                            if (typeof navigateTo === 'function') navigateTo('home');
+                            if (typeof mcDashToggle === 'function') mcDashToggle('player');
+                        }
+                    } else if (role === 'host') {
+                        // Switching back to host — restore host dash if currently on player dash
+                        if (typeof mcDashToggle === 'function' && typeof mcDashMode !== 'undefined' && mcDashMode === 'player') {
+                            mcDashToggle('host');
                         }
                     }
                 } catch(e) {}
