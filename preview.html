@@ -2,11 +2,21 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
     <title>Prototype FLX — The Future Learning eXperience</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Share+Tech+Mono&family=Rajdhani:wght@300;400;500;600;700&family=Jura:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
+        /* ── iOS / iPad Safari global fixes ── */
+        html, body { -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
+        body { overscroll-behavior: none; }
+        /* Safe area insets for notch devices */
+        @supports (padding: env(safe-area-inset-top)) {
+            .toolbar { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+            .view { padding-bottom: env(safe-area-inset-bottom); }
+        }
+
         :root {
+            --pflx-vh: 1vh;
             --toolbar-height: 64px;
             --cyan: #00f0ff;
             --gold: #ffd700;
@@ -832,8 +842,12 @@
             display: grid;
             grid-template-rows: var(--toolbar-height) 1fr;
             height: 100vh;
+            height: calc(var(--pflx-vh, 1vh) * 100);
             width: 100vw;
             max-width: 100vw;
+            /* iOS Safari: prevent rubber-band overscroll */
+            overscroll-behavior: none;
+            -webkit-overflow-scrolling: touch;
         }
 
         /* TOOLBAR — hidden until login */
@@ -9528,6 +9542,106 @@
         </div>
       </div>
     </div>
+
+    <!-- ═══ iPad / Safari Compatibility Shim ═══ -->
+    <script>
+    (function() {
+        'use strict';
+
+        // ── 1. Global error handler — surface silent crashes ──
+        window.onerror = function(msg, src, line, col, err) {
+            console.error('[PFLX Error]', msg, 'at', src, 'line', line, ':', col, err);
+            // Show on-screen banner for debugging on iPad
+            try {
+                var d = document.getElementById('pflx-error-banner');
+                if (!d) {
+                    d = document.createElement('div');
+                    d.id = 'pflx-error-banner';
+                    d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999999;background:#1a0000;color:#ff3355;font:12px/1.4 monospace;padding:8px 12px;max-height:30vh;overflow:auto;border-bottom:2px solid #ff3355;';
+                    d.innerHTML = '<b>PFLX Error Log</b> <button onclick="this.parentElement.remove()" style="float:right;background:none;border:1px solid #ff3355;color:#ff3355;cursor:pointer;font-size:10px;padding:2px 6px;">X</button><hr style="border-color:#ff335540;margin:4px 0;">';
+                    document.body ? document.body.prepend(d) : document.addEventListener('DOMContentLoaded', function() { document.body.prepend(d); });
+                }
+                d.innerHTML += '<div style="border-top:1px solid #ff335520;padding:2px 0;">' + msg + ' <span style="color:#8a92b0;">(line ' + line + ')</span></div>';
+            } catch(e) {}
+            return false; // don't suppress
+        };
+
+        window.addEventListener('unhandledrejection', function(e) {
+            console.error('[PFLX Unhandled Promise]', e.reason);
+        });
+
+        // ── 2. Safe localStorage wrapper for Safari Private Browsing ──
+        // Safari Private Browsing throws QuotaExceededError on setItem,
+        // and some iPadOS versions throw on getItem too.
+        try {
+            var testKey = '__pflx_ls_test__';
+            localStorage.setItem(testKey, '1');
+            localStorage.removeItem(testKey);
+        } catch(e) {
+            // localStorage is broken — replace with in-memory fallback
+            console.warn('[PFLX] localStorage unavailable, using in-memory fallback');
+            var memStore = {};
+            var fakeLS = {
+                getItem: function(k) { return memStore.hasOwnProperty(k) ? memStore[k] : null; },
+                setItem: function(k, v) { memStore[k] = String(v); },
+                removeItem: function(k) { delete memStore[k]; },
+                clear: function() { memStore = {}; },
+                get length() { return Object.keys(memStore).length; },
+                key: function(i) { return Object.keys(memStore)[i] || null; }
+            };
+            try {
+                Object.defineProperty(window, 'localStorage', { value: fakeLS, writable: false, configurable: true });
+            } catch(e2) {
+                // If defineProperty fails, patch the getter
+                window.__pflxFakeLS = fakeLS;
+            }
+        }
+
+        // ── 3. Safe JSON.parse helper ──
+        window.pflxSafeGet = function(key, fallback) {
+            try {
+                var raw = (window.__pflxFakeLS || localStorage).getItem(key);
+                if (raw === null || raw === undefined) return fallback !== undefined ? fallback : null;
+                return JSON.parse(raw);
+            } catch(e) {
+                return fallback !== undefined ? fallback : null;
+            }
+        };
+
+        window.pflxSafeSet = function(key, val) {
+            try {
+                (window.__pflxFakeLS || localStorage).setItem(key, JSON.stringify(val));
+                return true;
+            } catch(e) {
+                console.warn('[PFLX] Storage write failed for', key);
+                return false;
+            }
+        };
+
+        // ── 4. Viewport fix for iOS Safari ──
+        // iOS Safari 100vh includes the URL bar; use CSS custom property for real viewport height
+        function setVH() {
+            var vh = window.innerHeight * 0.01;
+            document.documentElement.style.setProperty('--pflx-vh', vh + 'px');
+        }
+        setVH();
+        window.addEventListener('resize', setVH);
+        window.addEventListener('orientationchange', function() { setTimeout(setVH, 100); });
+
+        // ── 5. Touch event passive listeners (prevent scroll-blocking warnings) ──
+        // iPad Safari logs warnings for non-passive touch listeners
+        try {
+            var passiveSupported = false;
+            var opts = Object.defineProperty({}, 'passive', { get: function() { passiveSupported = true; return true; } });
+            window.addEventListener('testPassive', null, opts);
+            window.removeEventListener('testPassive', null, opts);
+            window.__pflxPassive = passiveSupported ? { passive: true } : false;
+        } catch(e) {
+            window.__pflxPassive = false;
+        }
+
+    })();
+    </script>
 
     <script>
         // ═══════════════════════════════════════════════════════════════
