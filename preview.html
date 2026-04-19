@@ -15309,7 +15309,7 @@
             duckLevels: {
                 intro: 0,
                 briefing: 20,
-                loading: 15
+                loading: 0       // Transition music fully mutes live stream (per spec)
             },
             _lastApplied: -1,
 
@@ -15614,6 +15614,15 @@
 
                     var musicPlayed = false;
 
+                    // ── MUTE ALL other music during loading/transition ──
+                    // Per spec: transition music mutes ALL other music including live stream.
+                    this._bgWasPaused = SE.bgAudio ? SE.bgAudio.paused : true;
+                    this._loginWasPaused = SE.loginAudio ? SE.loginAudio.paused : true;
+                    this._ambientWasPaused = SE.ambientAudio ? SE.ambientAudio.paused : true;
+                    if (SE.bgAudio && !SE.bgAudio.paused) { try { SE.bgAudio.pause(); } catch(e) {} }
+                    if (SE.loginAudio && !SE.loginAudio.paused) { try { SE.loginAudio.pause(); } catch(e) {} }
+                    if (SE.ambientAudio && !SE.ambientAudio.paused) { try { SE.ambientAudio.pause(); } catch(e) {} }
+
                     // ── Host-uploaded loading music gallery (preferred, non-login) ──
                     var track = this._pickLoadingMusicTrack();
                     if (track && (track.dataUrl || track.url)) {
@@ -15627,10 +15636,14 @@
                         aud.play().catch(function(){});
                         this._loadingMusicAudio = aud;
                         musicPlayed = true;
-                        // Duck the Live Feed via the central audio priority manager
-                        if (!SE.config.loadingMusic || SE.config.loadingMusic.muteLiveStreamWhilePlaying !== false) {
-                            try { window.PFLX_AUDIO && window.PFLX_AUDIO.start('loading'); } catch(e) {}
-                        }
+                    }
+                    // Always MUTE live feed during loading transitions (not just duck)
+                    try { window.PFLX_AUDIO && window.PFLX_AUDIO.start('loading'); } catch(e) {}
+                    // Force-mute the live stream iframe completely during transition
+                    this._liveStreamAutoMuted = true;
+                    var lsIframe = document.getElementById('mc-live-stream-iframe');
+                    if (lsIframe && lsIframe.contentWindow) {
+                        try { lsIframe.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*'); } catch(e) {}
                     }
 
                     // ── Always also play the loading SFX bed (legacy upload or synthesized) ──
@@ -15655,7 +15668,8 @@
             },
 
             stopLoadingSfx() {
-                // Stop gallery music + release live stream duck
+                var self = this;
+                // Stop gallery music with fade-out
                 if (this._loadingMusicAudio) {
                     try {
                         var a = this._loadingMusicAudio;
@@ -15671,8 +15685,6 @@
                     } catch(e) { try { this._loadingMusicAudio.pause(); } catch(e2) {} }
                     this._loadingMusicAudio = null;
                 }
-                // Release loading priority — Live Feed returns to prior leading level
-                try { window.PFLX_AUDIO && window.PFLX_AUDIO.stop('loading'); } catch(e) {}
 
                 // Stop legacy custom audio
                 if (this._loadingCustomAudio) {
@@ -15689,6 +15701,55 @@
                     } catch(e) {}
                     this._loadingOsc = null;
                 }
+
+                // ── 5-second delay before resuming normal audio ──
+                // Per spec: after loading finishes, wait 5 seconds then resume normal audio.
+                setTimeout(function() {
+                    // Release loading priority — Live Feed returns to prior leading level
+                    try { window.PFLX_AUDIO && window.PFLX_AUDIO.stop('loading'); } catch(e) {}
+                    self._liveStreamAutoMuted = false;
+
+                    // Unmute live stream (if not user-muted)
+                    if (typeof SE !== 'undefined' && SE.playerPrefs && !SE.playerPrefs.liveStreamMuted) {
+                        var lsIframe = document.getElementById('mc-live-stream-iframe');
+                        if (lsIframe && lsIframe.contentWindow) {
+                            try { lsIframe.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*'); } catch(e) {}
+                        }
+                    }
+                    try { window.PFLX_AUDIO && window.PFLX_AUDIO.refresh(); } catch(e) {}
+
+                    // Resume bg music only if live stream is NOT active
+                    try {
+                        var lsState = typeof pflxGetLiveStream === 'function' ? pflxGetLiveStream() : null;
+                        var lsActive = lsState && lsState.active && lsState.url && !SE.playerPrefs.liveStreamMuted;
+                        if (!lsActive) {
+                            // Resume background music with fade-in
+                            if (!self._bgWasPaused && SE.bgAudio) {
+                                seApplyVolumes();
+                                var targetVol = SE.bgAudio.volume;
+                                SE.bgAudio.volume = 0;
+                                SE.bgAudio.play().catch(function(){});
+                                // Fade in over 1s
+                                var fadeSteps = 20;
+                                var fadeI = 0;
+                                var fadeIn = setInterval(function() {
+                                    fadeI++;
+                                    try { SE.bgAudio.volume = Math.min(targetVol, targetVol * (fadeI / fadeSteps)); } catch(e) {}
+                                    if (fadeI >= fadeSteps) clearInterval(fadeIn);
+                                }, 50);
+                            }
+                            if (!self._loginWasPaused && SE.loginAudio) {
+                                try { SE.loginAudio.play().catch(function(){}); } catch(e) {}
+                            }
+                            if (!self._ambientWasPaused && SE.ambientAudio) {
+                                try { SE.ambientAudio.play().catch(function(){}); } catch(e) {}
+                            }
+                        }
+                    } catch(e) {}
+                    // Re-evaluate auto-mute based on current view
+                    try { if (typeof seApplyLiveStreamAutoMute === 'function') seApplyLiveStreamAutoMute(); } catch(e) {}
+                    console.log('[PFLX] Audio resumed after 5s post-loading delay');
+                }, 5000);
             }
         };
 
@@ -15847,6 +15908,11 @@
             // Load portfolio data when navigating to portfolio
             if (viewName === 'portfolio') {
                 portfolioRender();
+            }
+
+            // Activate live stream on first MC visit (prevents auto-play on login)
+            if (viewName === 'mission-control' && typeof pflxActivateLiveStream === 'function') {
+                pflxActivateLiveStream();
             }
 
             // Sound Engine — play tab-specific music & nav SFX
@@ -20427,6 +20493,18 @@
                 try { mcNav('dashboard'); } catch (e) {}
             }
         }
+        // ── Live Stream Activation Guard ──────────────────────────────────
+        // The live stream iframe should NOT auto-play on login. It only starts
+        // playing when the user first navigates to Mission Control.
+        var _pflxLiveStreamActivated = false;
+
+        function pflxActivateLiveStream() {
+            if (_pflxLiveStreamActivated) return;
+            _pflxLiveStreamActivated = true;
+            console.log('[PFLX] Live stream activated — user navigated to MC');
+            pflxRenderLiveStream(); // Re-render now that activation is true
+        }
+
         function pflxRenderLiveStream() {
             var s = pflxGetLiveStream();
             // MC Theater collapsed card
@@ -20439,8 +20517,11 @@
             var vtPill = document.getElementById('vt-status-pill');
             if (offline && embedWrap && iframe) {
                 if (s.active && s.url) {
+                    // Only load the iframe src if the user has visited MC at least once
                     var embedUrl = pflxToYouTubeEmbed(s.url);
-                    if (iframe.src !== embedUrl) iframe.src = embedUrl;
+                    if (_pflxLiveStreamActivated) {
+                        if (iframe.src !== embedUrl) iframe.src = embedUrl;
+                    }
                     offline.style.display = 'none';
                     embedWrap.style.display = 'block';
                     if (dot) { dot.classList.add('live'); }
@@ -29363,6 +29444,8 @@
 
           // Also patch the message listener for YouTube state changes
           window.addEventListener('message', function (e) {
+            // Only process if live stream has been activated (user visited MC)
+            if (!_pflxLiveStreamActivated) return;
             var data = e.data;
             if (typeof data === 'string') {
               try { data = JSON.parse(data); } catch (_) { return; }
@@ -34574,6 +34657,18 @@ RESPONSE RULES:
                 if (SE.bgAudio) { SE.bgAudio.pause(); SE.bgAudio.currentTime = 0; }
                 return;
             }
+            // ── Audio Mutex: If live stream is active and unmuted, do NOT play bg music ──
+            // Background music only plays when live stream is paused/muted/inactive.
+            try {
+                if (_pflxLiveStreamActivated && !SE.playerPrefs.liveStreamMuted) {
+                    var lsState = typeof pflxGetLiveStream === 'function' ? pflxGetLiveStream() : null;
+                    if (lsState && lsState.active && lsState.url) {
+                        // Live stream is on — suppress bg music
+                        if (SE.bgAudio && !SE.bgAudio.paused) { SE.bgAudio.pause(); }
+                        return;
+                    }
+                }
+            } catch(e) {}
 
             var trackToPlay = null;
             var mode = SE.config.playlistMode || 'shuffle';
@@ -38362,6 +38457,12 @@ RESPONSE RULES:
             }
             if (!youtubeUrl) return;
 
+            // ── Prevent duplicate audio: mute the MC iframe when PiP takes over ──
+            var mcIframe = document.getElementById('mc-live-stream-iframe');
+            if (mcIframe && mcIframe.contentWindow) {
+                try { mcIframe.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*'); } catch(e) {}
+            }
+
             var embedUrl = pflxToYouTubeEmbedPip(youtubeUrl);
             if (pip.iframe.src !== embedUrl) pip.iframe.src = embedUrl;
 
@@ -38379,6 +38480,14 @@ RESPONSE RULES:
             pip.el.style.display = 'none';
             pip.iframe.src = '';
             pip.active = false;
+            // ── Restore MC iframe audio when PiP closes ──
+            if (typeof SE !== 'undefined' && SE.playerPrefs && !SE.playerPrefs.liveStreamMuted) {
+                var mcIframe = document.getElementById('mc-live-stream-iframe');
+                if (mcIframe && mcIframe.contentWindow) {
+                    try { mcIframe.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*'); } catch(e) {}
+                }
+            }
+            try { window.PFLX_AUDIO && window.PFLX_AUDIO.refresh(); } catch(e) {}
         }
 
         // ── Drag System ─────────────────────────────────────────
@@ -38635,6 +38744,10 @@ RESPONSE RULES:
                 }
             }
         }
+
+        // Expose pipHide/pipShow on window so external patches (Feature C armed flag) can call them
+        window.pipHide = pipHide;
+        window.pipShow = pipShow;
 
         // Run init
         if (document.readyState === 'loading') {
