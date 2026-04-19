@@ -5149,6 +5149,23 @@
             <button class="fullscreen-btn" id="toolbar-fs-btn" title="Fullscreen">&#x26F6;</button>
         </div>
 
+        <!-- ═══ LIVE Q&A SIDE PANEL (moderator-activated) ═══ -->
+        <div id="vt-qa-side-panel" style="display:none;position:fixed;top:0;right:0;width:340px;height:100vh;background:linear-gradient(180deg,rgba(10,18,40,0.98),rgba(6,8,15,0.98));border-left:1px solid rgba(0,240,255,0.15);z-index:9990;flex-direction:column;box-shadow:-4px 0 24px rgba(0,0,0,0.5);backdrop-filter:blur(12px);">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid rgba(0,240,255,0.1);">
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:16px;">&#x1F4AC;</span>
+                    <span style="font-family:'Orbitron',sans-serif;font-size:11px;font-weight:800;color:#00f0ff;letter-spacing:1.5px;">LIVE Q&A</span>
+                    <span id="vt-qa-msg-count" style="font-size:9px;background:rgba(239,68,68,0.2);color:#ef4444;padding:2px 6px;border-radius:4px;font-weight:700;">0</span>
+                </div>
+                <button onclick="vtCloseQAPanel()" style="background:none;border:none;color:rgba(255,255,255,0.5);font-size:18px;cursor:pointer;padding:4px 8px;">&times;</button>
+            </div>
+            <div id="vt-qa-panel-messages" style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;"></div>
+            <div style="padding:12px;border-top:1px solid rgba(0,240,255,0.1);display:flex;gap:6px;">
+                <input type="text" id="vt-qa-panel-input" placeholder="Ask a question..." onkeydown="if(event.key==='Enter')vtSendQAMessage()" style="flex:1;background:rgba(10,18,40,0.8);border:1px solid rgba(0,240,255,0.15);color:#e0e6ff;padding:10px 12px;border-radius:8px;font-family:'Rajdhani',sans-serif;font-size:13px;">
+                <button class="vt-sm-btn" onclick="vtSendQAMessage()" style="padding:10px 16px;font-size:12px;">Send</button>
+            </div>
+        </div>
+
         <!-- ═══ LIVE STREAM PIP — floating picture-in-picture overlay ═══ -->
         <div id="pip-container" style="display:none;">
             <!-- Drag handle / title bar -->
@@ -5607,7 +5624,7 @@
                             <div class="mc-nav">
                                 <div class="mc-nav-label">OVERVIEW</div>
                                 <button class="mc-nav-btn active" data-mc="dashboard" onclick="mcNav('dashboard')">
-                                    <span class="mc-icon">&#x1F3E0;</span> Home
+                                    <span class="mc-icon">&#x1F3E0;</span> Home Theater
                                 </button>
                                 <div class="mc-nav-label mc-host-only">PLAYER MANAGEMENT</div>
                                 <button class="mc-nav-btn mc-host-only" data-mc="players" onclick="mcNav('players')">
@@ -5686,7 +5703,7 @@
                                                 <span id="mc-theater-player-dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ef4444;animation:vtPulse 1.5s ease infinite;box-shadow:0 0 6px #ef4444;"></span>
                                                 <span style="font-family:'Orbitron',sans-serif;font-size:12px;font-weight:800;color:#e0e6ff;letter-spacing:1.5px;">VIRTUAL THEATER</span>
                                                 <span style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#22c55e;letter-spacing:1px;">LIVE</span>
-                                                <span style="margin-left:auto;font-family:'Share Tech Mono',monospace;font-size:9px;color:rgba(255,255,255,0.35);letter-spacing:0.5px;" id="vt-player-viewer-count"></span>
+                                                <button id="vt-player-qa-btn" onclick="vtToggleQAPanel()" style="display:none;margin-left:auto;background:rgba(0,240,255,0.08);border:1px solid rgba(0,240,255,0.2);color:#00f0ff;padding:5px 12px;border-radius:6px;font-family:'Share Tech Mono',monospace;font-size:10px;cursor:pointer;letter-spacing:0.5px;">&#x1F4AC; Live Q&A</button>
                                             </div>
                                             <div style="padding:0 16px 16px;">
                                                 <div class="vt-stage-layout" style="border:1px solid rgba(0,240,255,0.1);border-radius:10px;overflow:hidden;max-height:60vh;">
@@ -5702,16 +5719,7 @@
                                                             </div>
                                                         </div>
                                                     </div>
-                                                    <div class="vt-stage-sidebar">
-                                                        <div class="vt-chat" style="flex:1;">
-                                                            <div class="vt-section-label">LIVE Q&A</div>
-                                                            <div class="vt-chat-messages" id="vt-player-chat-messages"></div>
-                                                            <div class="vt-chat-input-row">
-                                                                <input type="text" id="vt-player-chat-input" placeholder="Ask a question..." onkeydown="if(event.key==='Enter')vtSendPlayerChat()" style="flex:1;background:rgba(10,18,40,0.8);border:1px solid rgba(0,240,255,0.12);color:#e0e6ff;padding:8px 10px;border-radius:6px;font-family:'Rajdhani',sans-serif;font-size:12px;">
-                                                                <button class="vt-sm-btn" onclick="vtSendPlayerChat()">Send</button>
-                                                            </div>
-                                                        </div>
-                                                    </div>
+                                                    <!-- Q&A is now a side panel popup, not inline -->
                                                 </div>
                                             </div>
                                         </div>
@@ -16050,6 +16058,9 @@
             if (btn) btn.classList.add('active');
             if (panel) panel.classList.add('active');
 
+            // Theater → PiP when leaving Home Theater, restore when returning
+            vtHandleMCNav(tab);
+
             // Render the active panel
             if (tab === 'dashboard') mcRenderDashboard();
             if (tab === 'players') mcRenderPlayers();
@@ -16200,6 +16211,8 @@
             playerPortalView = view;
             window._ppDetailData = data || null;
             mcRenderPlayerDashPreview();
+            // Theater PiP when navigating away from home in player portal
+            vtHandlePlayerNav(view);
             // Scroll to top of mc-content
             var mc = document.getElementById('mc-content');
             if (mc) mc.scrollTop = 0;
@@ -19669,7 +19682,18 @@
             }
             input.value = '';
         }
-        function vtToggleModeration() { var b = document.getElementById('vt-mod-btn'); if (b) b.textContent = b.textContent === 'MOD: ON' ? 'MOD: OFF' : 'MOD: ON'; }
+        var vtQAEnabled = false;
+        function vtToggleModeration() {
+            vtQAEnabled = !vtQAEnabled;
+            var b = document.getElementById('vt-mod-btn');
+            if (b) b.textContent = vtQAEnabled ? 'Q&A: ON' : 'Q&A: OFF';
+            // Show/hide the Q&A button on the player theater
+            var playerBtn = document.getElementById('vt-player-qa-btn');
+            if (playerBtn) playerBtn.style.display = vtQAEnabled ? 'inline-flex' : 'none';
+            // If disabling, close the panel
+            if (!vtQAEnabled) vtCloseQAPanel();
+            pflxToast(vtQAEnabled ? 'Live Q&A enabled for players' : 'Live Q&A disabled', vtQAEnabled ? 'success' : 'info');
+        }
 
         /* ── Media Technician Controls ── */
         function vtMediaSwitch(source) {
@@ -19909,6 +19933,116 @@
         };
 
         /* ── Expose all functions ── */
+        /* ── Theater ↔ PiP on MC panel/player-portal navigation ── */
+        var vtPipDismissed = false; // Set true when user closes PiP; reset on return to Home Theater
+
+        function vtHandleMCNav(tab) {
+            try {
+                var s = typeof pflxGetLiveStream === 'function' ? pflxGetLiveStream() : null;
+                var streamLive = s && s.active && s.url;
+                if (tab === 'dashboard') {
+                    // Returning to Home Theater — hide PiP, show inline theater, reset dismissed flag
+                    vtPipDismissed = false;
+                    if (typeof pip !== 'undefined' && pip.active && typeof pipHide === 'function') pipHide();
+                    var playerSec = document.getElementById('mc-theater-player-section');
+                    if (playerSec && streamLive) playerSec.style.display = '';
+                } else {
+                    // Navigating away — launch PiP only if not dismissed
+                    if (streamLive && !vtPipDismissed && typeof pip !== 'undefined' && !pip.active && typeof pipShow === 'function') {
+                        pipShow(s.url);
+                    }
+                    var playerSec = document.getElementById('mc-theater-player-section');
+                    if (playerSec) playerSec.style.display = 'none';
+                }
+            } catch (e) { console.warn('[VT] mcNav PiP error:', e); }
+        }
+
+        function vtHandlePlayerNav(view) {
+            try {
+                var s = typeof pflxGetLiveStream === 'function' ? pflxGetLiveStream() : null;
+                var streamLive = s && s.active && s.url;
+                var playerSec = document.getElementById('mc-theater-player-section');
+                if (view === 'home') {
+                    // Returning to Home Theater — hide PiP, show inline, reset dismissed
+                    vtPipDismissed = false;
+                    if (typeof pip !== 'undefined' && pip.active && typeof pipHide === 'function') pipHide();
+                    if (playerSec && streamLive) playerSec.style.display = '';
+                } else {
+                    // Leaving Home Theater — PiP only if not dismissed
+                    if (streamLive && !vtPipDismissed && typeof pip !== 'undefined' && !pip.active && typeof pipShow === 'function') {
+                        pipShow(s.url);
+                    }
+                    if (playerSec) playerSec.style.display = 'none';
+                }
+            } catch (e) { console.warn('[VT] ppNav PiP error:', e); }
+        }
+
+        /* ── PiP close hook — set dismissed flag so it stays away until Home Theater ── */
+        function vtPatchPipClose() {
+            var closeBtn = document.getElementById('pip-close-btn');
+            if (!closeBtn) return;
+            var newBtn = closeBtn.cloneNode(true);
+            if (closeBtn.parentNode) closeBtn.parentNode.replaceChild(newBtn, closeBtn);
+            newBtn.addEventListener('click', function() {
+                vtPipDismissed = true;
+                window.pflxPipArmed = false;
+                if (typeof pipHide === 'function') pipHide();
+            });
+        }
+        // Patch after DOM is ready (delay to ensure PiP IIFE has run)
+        setTimeout(vtPatchPipClose, 2000);
+
+        /* ── Live Q&A Side Panel (moderator-activated popup) ── */
+        var vtQAPanelOpen = false;
+        function vtToggleQAPanel() {
+            vtQAPanelOpen = !vtQAPanelOpen;
+            var panel = document.getElementById('vt-qa-side-panel');
+            if (panel) {
+                panel.style.display = vtQAPanelOpen ? 'flex' : 'none';
+                if (vtQAPanelOpen) panel.classList.add('vt-qa-entering');
+                setTimeout(function() { panel.classList.remove('vt-qa-entering'); }, 300);
+            }
+        }
+        function vtCloseQAPanel() {
+            vtQAPanelOpen = false;
+            var panel = document.getElementById('vt-qa-side-panel');
+            if (panel) panel.style.display = 'none';
+        }
+
+        function vtSendQAMessage() {
+            var input = document.getElementById('vt-qa-panel-input');
+            if (!input || !input.value.trim()) return;
+            var msgs = document.getElementById('vt-qa-panel-messages');
+            if (msgs) {
+                var div = document.createElement('div');
+                div.style.cssText = 'padding:8px 10px;background:rgba(0,240,255,0.04);border:1px solid rgba(0,240,255,0.08);border-radius:8px;';
+                var name = (window.activeSession && window.activeSession.name) || 'Player';
+                var time = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+                div.innerHTML = '<div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-size:11px;font-weight:700;color:#00f0ff;">' + name + '</span><span style="font-size:9px;color:#6a7290;">' + time + '</span></div><div style="font-size:12px;color:#e0e6ff;line-height:1.4;">' + input.value.trim().replace(/</g,'&lt;') + '</div>';
+                msgs.appendChild(div);
+                msgs.scrollTop = msgs.scrollHeight;
+                // Update count badge
+                var count = document.getElementById('vt-qa-msg-count');
+                if (count) count.textContent = msgs.children.length;
+            }
+            // Also send to host-side chat
+            var hostMsgs = document.getElementById('vt-chat-messages');
+            if (hostMsgs) {
+                var div2 = document.createElement('div');
+                div2.className = 'vt-chat-msg';
+                var name2 = (window.activeSession && window.activeSession.name) || 'Player';
+                div2.innerHTML = '<span class="vt-chat-author">' + name2 + '</span> ' + input.value.trim();
+                hostMsgs.appendChild(div2);
+                hostMsgs.scrollTop = hostMsgs.scrollHeight;
+            }
+            input.value = '';
+        }
+
+        window.vtSendQAMessage = vtSendQAMessage;
+        window.vtHandleMCNav = vtHandleMCNav;
+        window.vtHandlePlayerNav = vtHandlePlayerNav;
+        window.vtToggleQAPanel = vtToggleQAPanel;
+        window.vtCloseQAPanel = vtCloseQAPanel;
         window.pflxEditLiveStream = pflxEditLiveStream;
         window.pflxToggleLiveStream = pflxToggleLiveStream;
         window.pflxTickerLiveClick = pflxTickerLiveClick;
