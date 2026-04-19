@@ -5686,12 +5686,17 @@
                                                 <span id="mc-theater-player-dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ef4444;animation:vtPulse 1.5s ease infinite;box-shadow:0 0 6px #ef4444;"></span>
                                                 <span style="font-family:'Orbitron',sans-serif;font-size:12px;font-weight:800;color:#e0e6ff;letter-spacing:1.5px;">VIRTUAL THEATER</span>
                                                 <span style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#22c55e;letter-spacing:1px;">LIVE</span>
+                                                <span style="margin-left:auto;font-family:'Share Tech Mono',monospace;font-size:9px;color:rgba(255,255,255,0.35);letter-spacing:0.5px;" id="vt-player-viewer-count"></span>
                                             </div>
                                             <div style="padding:0 16px 16px;">
                                                 <div class="vt-stage-layout" style="border:1px solid rgba(0,240,255,0.1);border-radius:10px;overflow:hidden;max-height:60vh;">
                                                     <div class="vt-stage-main">
-                                                        <div class="vt-stage-preview" id="vt-player-stage-preview" style="min-height:240px;">
-                                                            <div class="vt-stage-empty">
+                                                        <!-- Live Stream Embed (host's configured stream) -->
+                                                        <div id="vt-player-stream-wrap" style="position:relative;width:100%;aspect-ratio:16/9;background:#000;border-radius:10px 10px 0 0;overflow:hidden;">
+                                                            <iframe id="vt-player-stream-iframe" src="" style="width:100%;height:100%;border:0;" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+                                                            <!-- Offline fallback (shown when no stream) -->
+                                                            <div id="vt-player-stream-offline" style="position:absolute;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(135deg,#0a1228,#1a1f3a);">
+                                                                <div style="font-size:40px;margin-bottom:8px;">&#x1F3AD;</div>
                                                                 <div style="font-family:'Orbitron',sans-serif;font-size:12px;color:rgba(0,240,255,0.4);letter-spacing:2px;">STAGE PREVIEW</div>
                                                                 <div style="font-family:'Rajdhani',sans-serif;font-size:13px;color:#6a7290;margin-top:6px;">Waiting for host broadcast...</div>
                                                             </div>
@@ -19387,9 +19392,15 @@
                     if (vtPill) { vtPill.textContent = 'LIVE'; vtPill.classList.add('live'); }
                     // Auto-expand theater for host when going live
                     if (window.pflxRole === 'host') vtLaunchTheater();
-                    // Show player theater when live
+                    // Show player theater + sync stream iframe
                     var playerSec = document.getElementById('mc-theater-player-section');
                     if (playerSec) playerSec.style.display = '';
+                    var playerIframe = document.getElementById('vt-player-stream-iframe');
+                    var playerOffline = document.getElementById('vt-player-stream-offline');
+                    if (playerIframe) {
+                        if (playerIframe.src !== embedUrl) playerIframe.src = embedUrl;
+                    }
+                    if (playerOffline) playerOffline.style.display = 'none';
                 } else {
                     if (iframe.src) iframe.src = '';
                     offline.style.display = 'flex';
@@ -19398,9 +19409,13 @@
                     if (statusText) statusText.textContent = 'OFFLINE';
                     if (launchBtn) launchBtn.innerHTML = '&#x1F3AC; Launch Theater';
                     if (vtPill) { vtPill.textContent = 'OFFLINE'; vtPill.classList.remove('live'); }
-                    // Hide player theater when offline
+                    // Hide player theater + clear stream
                     var playerSec = document.getElementById('mc-theater-player-section');
                     if (playerSec) playerSec.style.display = 'none';
+                    var playerIframe = document.getElementById('vt-player-stream-iframe');
+                    var playerOffline = document.getElementById('vt-player-stream-offline');
+                    if (playerIframe) playerIframe.src = '';
+                    if (playerOffline) playerOffline.style.display = 'flex';
                 }
             }
             // Ticker indicator
