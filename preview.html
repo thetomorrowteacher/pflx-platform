@@ -16466,12 +16466,9 @@
                     }
                     // Always MUTE live feed during loading transitions (not just duck)
                     try { window.PFLX_AUDIO && window.PFLX_AUDIO.start('loading'); } catch(e) {}
-                    // Force-mute the live stream iframe completely during transition
+                    // Force-mute ALL live stream iframes completely during transition
                     this._liveStreamAutoMuted = true;
-                    var lsIframe = document.getElementById('mc-live-stream-iframe');
-                    if (lsIframe && lsIframe.contentWindow) {
-                        try { lsIframe.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*'); } catch(e) {}
-                    }
+                    if (typeof pflxMuteAllStreamIframes === 'function') pflxMuteAllStreamIframes(null);
 
                     // ── Always also play the loading SFX bed (legacy upload or synthesized) ──
                     // This ensures SFX keep firing *alongside* the shuffled music per spec.
@@ -16536,12 +16533,11 @@
                     try { window.PFLX_AUDIO && window.PFLX_AUDIO.stop('loading'); } catch(e) {}
                     self._liveStreamAutoMuted = false;
 
-                    // Unmute live stream (if not user-muted)
+                    // Unmute ONLY the MC stream iframe (if not user-muted) — player mirror stays muted
                     if (typeof SE !== 'undefined' && SE.playerPrefs && !SE.playerPrefs.liveStreamMuted) {
-                        var lsIframe = document.getElementById('mc-live-stream-iframe');
-                        if (lsIframe && lsIframe.contentWindow) {
-                            try { lsIframe.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*'); } catch(e) {}
-                        }
+                        if (typeof pflxUnmuteStreamIframe === 'function') pflxUnmuteStreamIframe('mc-live-stream-iframe');
+                        // Keep player mirror and PiP muted
+                        if (typeof pflxMuteAllStreamIframes === 'function') pflxMuteAllStreamIframes('mc-live-stream-iframe');
                     }
                     try { window.PFLX_AUDIO && window.PFLX_AUDIO.refresh(); } catch(e) {}
 
@@ -21270,6 +21266,32 @@
         // ═══════════════════════════════════════════════════════════
         // LIVE STREAM PANEL (MC Home) + ticker/Platform-home indicators
         // ═══════════════════════════════════════════════════════════
+
+        /**
+         * pflxMuteAllStreamIframes(except) — mute every YouTube embed EXCEPT the one
+         * whose id matches `except`. This prevents overlapping audio when multiple
+         * iframes (mc-live-stream-iframe, vt-player-stream-iframe, pip-iframe) are
+         * loaded with the same stream URL.
+         */
+        var _streamIframeIds = ['mc-live-stream-iframe', 'vt-player-stream-iframe', 'pip-iframe'];
+        function pflxMuteAllStreamIframes(exceptId) {
+            _streamIframeIds.forEach(function(id) {
+                if (id === exceptId) return;
+                var fr = document.getElementById(id);
+                if (fr && fr.contentWindow) {
+                    try { fr.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*'); } catch(e) {}
+                    try { fr.contentWindow.postMessage('{"event":"command","func":"setVolume","args":[0]}', '*'); } catch(e) {}
+                }
+            });
+        }
+        function pflxUnmuteStreamIframe(id) {
+            var fr = document.getElementById(id);
+            if (fr && fr.contentWindow) {
+                try { fr.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*'); } catch(e) {}
+                try { fr.contentWindow.postMessage('{"event":"command","func":"setVolume","args":[100]}', '*'); } catch(e) {}
+            }
+        }
+
         function pflxGetLiveStream() {
             try {
                 var raw = localStorage.getItem('pflx_live_stream');
@@ -21371,13 +21393,20 @@
                     if (vtPill) { vtPill.textContent = 'LIVE'; vtPill.classList.add('live'); }
                     // Auto-expand theater for host when going live
                     if (window.pflxRole === 'host') vtLaunchTheater();
-                    // Show player theater + sync stream iframe
+                    // Show player theater + sync stream iframe (MUTED — audio comes from mc-live-stream-iframe only)
                     var playerSec = document.getElementById('mc-theater-player-section');
                     if (playerSec) playerSec.style.display = '';
                     var playerIframe = document.getElementById('vt-player-stream-iframe');
                     var playerOffline = document.getElementById('vt-player-stream-offline');
                     if (playerIframe) {
-                        if (playerIframe.src !== embedUrl) playerIframe.src = embedUrl;
+                        // Append mute=1 to prevent autoplay audio from the duplicate iframe
+                        var mutedUrl = embedUrl + (embedUrl.indexOf('?') > -1 ? '&' : '?') + 'mute=1';
+                        if (playerIframe.src !== mutedUrl) playerIframe.src = mutedUrl;
+                        // Also force-mute via postMessage once loaded
+                        setTimeout(function() {
+                            try { playerIframe.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*'); } catch(e) {}
+                            try { playerIframe.contentWindow.postMessage('{"event":"command","func":"setVolume","args":[0]}', '*'); } catch(e) {}
+                        }, 2000);
                     }
                     if (playerOffline) playerOffline.style.display = 'none';
                 } else {
@@ -35724,6 +35753,12 @@ RESPONSE RULES:
             if (!iframe) return;
             // If loading music is currently muting the stream, defer to that flow
             if (PFLX_LOADING && PFLX_LOADING._liveStreamAutoMuted) return;
+
+            // Player mirror iframe must ALWAYS stay muted — audio comes from MC iframe only
+            if (typeof pflxMuteAllStreamIframes === 'function') {
+                pflxMuteAllStreamIframes(iframe.id); // mute everything except mc-live-stream-iframe
+            }
+
             // If player has an explicit "mute now", leave it muted
             if (SE.playerPrefs.liveStreamMuted) {
                 try { iframe.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*'); } catch(e) {}
@@ -35733,6 +35768,10 @@ RESPONSE RULES:
             var viewName = activeView ? (activeView.dataset.view || activeView.id || '') : '';
             var inMC = /mission-control/.test(viewName);
             var shouldMute = !!SE.playerPrefs.muteLiveStreamOutsideMC && !inMC;
+
+            // If PiP is active, mute MC iframe (PiP owns audio)
+            if (typeof pip !== 'undefined' && pip.active) shouldMute = true;
+
             try {
                 if (shouldMute) {
                     iframe.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*');
@@ -39334,10 +39373,12 @@ RESPONSE RULES:
             }
             if (!youtubeUrl) return;
 
-            // ── Prevent duplicate audio: mute the MC iframe when PiP takes over ──
-            var mcIframe = document.getElementById('mc-live-stream-iframe');
-            if (mcIframe && mcIframe.contentWindow) {
-                try { mcIframe.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*'); } catch(e) {}
+            // ── Prevent duplicate audio: mute ALL other stream iframes when PiP takes over ──
+            if (typeof pflxMuteAllStreamIframes === 'function') pflxMuteAllStreamIframes('pip-iframe');
+
+            // Also pause background music while PiP stream plays
+            if (typeof SE !== 'undefined' && SE.bgAudio && !SE.bgAudio.paused) {
+                try { SE.bgAudio.pause(); } catch(e) {}
             }
 
             var embedUrl = pflxToYouTubeEmbedPip(youtubeUrl);
@@ -39357,13 +39398,12 @@ RESPONSE RULES:
             pip.el.style.display = 'none';
             pip.iframe.src = '';
             pip.active = false;
-            // ── Restore MC iframe audio when PiP closes ──
+            // ── Restore MC iframe audio when PiP closes (keep player mirror muted) ──
             if (typeof SE !== 'undefined' && SE.playerPrefs && !SE.playerPrefs.liveStreamMuted) {
-                var mcIframe = document.getElementById('mc-live-stream-iframe');
-                if (mcIframe && mcIframe.contentWindow) {
-                    try { mcIframe.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*'); } catch(e) {}
-                }
+                if (typeof pflxUnmuteStreamIframe === 'function') pflxUnmuteStreamIframe('mc-live-stream-iframe');
             }
+            // Ensure player mirror stays muted
+            if (typeof pflxMuteAllStreamIframes === 'function') pflxMuteAllStreamIframes('mc-live-stream-iframe');
             try { window.PFLX_AUDIO && window.PFLX_AUDIO.refresh(); } catch(e) {}
         }
 
