@@ -25275,27 +25275,47 @@
 
             // ─── QR Code Generator (real, scannable) ─────────────────
             // Embedded QR encoder — Version 2-6 (byte mode), Error Correction L
-            // QR code generation — use CDN library loaded dynamically
+            // QR code generation — use CDN library loaded dynamically with multiple fallbacks
             var _qrLibLoaded = false;
             var _qrLibCallbacks = [];
+            var _qrCDNs = [
+                'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js',
+                'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js',
+                'https://unpkg.com/qrcode-generator@1.4.4/qrcode.js'
+            ];
             function _loadQRLib(cb) {
                 if (_qrLibLoaded && window.qrcode) { cb(); return; }
                 _qrLibCallbacks.push(cb);
                 if (_qrLibCallbacks.length > 1) return; // already loading
-                var s = document.createElement('script');
-                s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
-                s.onload = function() {
-                    _qrLibLoaded = true;
-                    _qrLibCallbacks.forEach(function(fn) { try { fn(); } catch(e) {} });
-                    _qrLibCallbacks = [];
-                };
-                s.onerror = function() {
-                    console.warn('[PFLX] QR library CDN failed, QR codes unavailable');
-                };
-                document.head.appendChild(s);
+                var cdnIdx = 0;
+                function tryNext() {
+                    if (cdnIdx >= _qrCDNs.length) {
+                        console.warn('[PFLX] All QR CDNs failed');
+                        return;
+                    }
+                    var s = document.createElement('script');
+                    s.src = _qrCDNs[cdnIdx++];
+                    s.onload = function() {
+                        if (typeof window.qrcode === 'function') {
+                            _qrLibLoaded = true;
+                            console.log('[PFLX] QR library loaded from CDN ' + (cdnIdx));
+                            _qrLibCallbacks.forEach(function(fn) { try { fn(); } catch(e) { console.error('[PFLX] QR callback error', e); } });
+                            _qrLibCallbacks = [];
+                        } else {
+                            console.warn('[PFLX] QR CDN ' + cdnIdx + ' loaded but qrcode not found, trying next');
+                            tryNext();
+                        }
+                    };
+                    s.onerror = function() {
+                        console.warn('[PFLX] QR CDN ' + cdnIdx + ' failed, trying next');
+                        tryNext();
+                    };
+                    document.head.appendChild(s);
+                }
+                tryNext();
             }
-            // Pre-load the library
-            _loadQRLib(function() { console.log('[PFLX] QR library loaded'); });
+            // Pre-load the library immediately
+            _loadQRLib(function() { });
 
             // Legacy compat — keep the old var name but it's unused now
             var _qr = { encode: function() { return { matrix: [[]], size: 0 }; } };
@@ -25540,60 +25560,88 @@
 
             function generateQRCanvas(text, size) {
                 // Use CDN qrcode-generator if loaded
-                if (window.qrcode) {
-                    var typeNum = 0; // auto-detect version
-                    var errorCorrection = 'L';
-                    var qr = window.qrcode(typeNum, errorCorrection);
-                    qr.addData(text);
-                    qr.make();
-                    var modules = qr.getModuleCount();
-                    var margin = 2;
-                    var totalMods = modules + margin * 2;
-                    var cellSize = Math.max(Math.floor(size / totalMods), 2);
-                    var actualSize = cellSize * totalMods;
+                try {
+                    if (typeof window.qrcode === 'function') {
+                        var typeNum = 0; // auto-detect version
+                        var errorCorrection = 'L';
+                        var qr = window.qrcode(typeNum, errorCorrection);
+                        qr.addData(text);
+                        qr.make();
+                        var modules = qr.getModuleCount();
+                        if (modules > 0) {
+                            var margin = 2;
+                            var totalMods = modules + margin * 2;
+                            var cellSize = Math.max(Math.floor(size / totalMods), 2);
+                            var actualSize = cellSize * totalMods;
 
-                    var canvas = document.createElement('canvas');
-                    canvas.width = actualSize;
-                    canvas.height = actualSize;
-                    var ctx = canvas.getContext('2d');
+                            var canvas = document.createElement('canvas');
+                            canvas.width = actualSize;
+                            canvas.height = actualSize;
+                            canvas.style.width = size + 'px';
+                            canvas.style.height = size + 'px';
+                            var ctx = canvas.getContext('2d');
 
-                    // White background
-                    ctx.fillStyle = '#ffffff';
-                    ctx.fillRect(0, 0, actualSize, actualSize);
+                            // White background
+                            ctx.fillStyle = '#ffffff';
+                            ctx.fillRect(0, 0, actualSize, actualSize);
 
-                    // Draw modules
-                    ctx.fillStyle = '#000000';
-                    for (var r = 0; r < modules; r++) {
-                        for (var c = 0; c < modules; c++) {
-                            if (qr.isDark(r, c)) {
-                                ctx.fillRect((c + margin) * cellSize, (r + margin) * cellSize, cellSize, cellSize);
+                            // Draw modules
+                            ctx.fillStyle = '#000000';
+                            for (var r = 0; r < modules; r++) {
+                                for (var c = 0; c < modules; c++) {
+                                    if (qr.isDark(r, c)) {
+                                        ctx.fillRect((c + margin) * cellSize, (r + margin) * cellSize, cellSize, cellSize);
+                                    }
+                                }
                             }
+                            console.log('[PFLX] QR canvas generated: ' + modules + 'x' + modules + ' → ' + actualSize + 'px');
+                            return canvas;
                         }
                     }
-                    return canvas;
+                } catch (qrErr) {
+                    console.error('[PFLX] QR generation error:', qrErr);
                 }
 
-                // Fallback: return a placeholder canvas if CDN not loaded
+                // Fallback: return a placeholder canvas with a visible loading message
+                console.log('[PFLX] QR lib not ready, showing placeholder and retrying...');
                 var canvas = document.createElement('canvas');
                 canvas.width = size;
                 canvas.height = size;
+                canvas.style.width = size + 'px';
+                canvas.style.height = size + 'px';
                 var ctx = canvas.getContext('2d');
                 ctx.fillStyle = '#ffffff';
                 ctx.fillRect(0, 0, size, size);
-                ctx.fillStyle = '#666666';
-                ctx.font = '12px sans-serif';
+                ctx.fillStyle = '#999999';
+                ctx.font = 'bold 14px sans-serif';
                 ctx.textAlign = 'center';
-                ctx.fillText('QR Loading...', size / 2, size / 2);
-                // Retry when library loads
-                _loadQRLib(function() {
-                    try {
-                        var holder = document.getElementById('pflx-qr-canvas-holder');
-                        if (holder) {
-                            holder.innerHTML = '';
-                            holder.appendChild(generateQRCanvas(text, size));
-                        }
-                    } catch (e) {}
-                });
+                ctx.textBaseline = 'middle';
+                ctx.fillText('QR Loading...', size / 2, size / 2 - 10);
+                ctx.font = '11px sans-serif';
+                ctx.fillText('Please wait', size / 2, size / 2 + 10);
+
+                // Retry when library loads — keep retrying up to 10 seconds
+                var retryCount = 0;
+                function retryQR() {
+                    retryCount++;
+                    if (typeof window.qrcode === 'function') {
+                        try {
+                            var holder = document.getElementById('pflx-qr-canvas-holder');
+                            if (holder) {
+                                holder.innerHTML = '';
+                                holder.appendChild(generateQRCanvas(text, size));
+                                console.log('[PFLX] QR retry succeeded on attempt ' + retryCount);
+                            }
+                        } catch (e) { console.error('[PFLX] QR retry error', e); }
+                    } else if (retryCount < 20) {
+                        setTimeout(retryQR, 500);
+                    } else {
+                        console.warn('[PFLX] QR library never loaded after 10s');
+                    }
+                }
+                _loadQRLib(function() { retryQR(); });
+                // Also poll in case callback doesn't fire
+                setTimeout(retryQR, 1000);
                 return canvas;
             }
 
