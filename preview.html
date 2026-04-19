@@ -11041,29 +11041,197 @@
         </div>
     </div>
 
-    <!-- PERSISTENT BOTTOM TICKER BAR (always visible, matches X-Coin style) -->
+    <!-- PERSISTENT BOTTOM TICKER BAR (unified — all PFLX happenings) -->
     <div class="message-ticker-bar" id="persistentTicker">
       <div class="ticker-live" id="ticker-live-indicator" data-stream-live="false" title="No live stream" onclick="pflxTickerLiveClick()"><div class="ticker-live-dot"></div> <span id="ticker-live-label">OFFLINE</span></div>
       <div class="ticker-scroll-area">
-        <div class="ticker-scroll-content">
-          <span class="ticker-msg">Welcome to PFLX — Season 1 Checkpoint 3</span>
-          <span class="ticker-msg"><span class="ticker-sep">◆</span> Battle Arena: Cipher Mode NOW LIVE</span>
-          <span class="ticker-msg"><span class="ticker-sep">◆</span> New Quest Available: Sound Design Challenge</span>
-          <span class="ticker-msg"><span class="ticker-sep">◆</span> X-Bot Alert: 0 violations detected</span>
-          <span class="ticker-msg"><span class="ticker-sep">◆</span> Next Show: PFLX Live Prototype Showcase at 3:00 PM</span>
-          <span class="ticker-msg"><span class="ticker-sep">◆</span> CURRENT #1 — @MotionMaster leads the PFLX Leaderboard with a Status Score of 26,729</span>
-          <span class="ticker-msg"><span class="ticker-sep">◆</span> 12,500 lifetime XC · 42 badges</span>
-          <!-- duplicate for seamless loop -->
-          <span class="ticker-msg">Welcome to PFLX — Season 1 Checkpoint 3</span>
-          <span class="ticker-msg"><span class="ticker-sep">◆</span> Battle Arena: Cipher Mode NOW LIVE</span>
-          <span class="ticker-msg"><span class="ticker-sep">◆</span> New Quest Available: Sound Design Challenge</span>
-          <span class="ticker-msg"><span class="ticker-sep">◆</span> X-Bot Alert: 0 violations detected</span>
-          <span class="ticker-msg"><span class="ticker-sep">◆</span> Next Show: PFLX Live Prototype Showcase at 3:00 PM</span>
-          <span class="ticker-msg"><span class="ticker-sep">◆</span> CURRENT #1 — @MotionMaster leads the PFLX Leaderboard with a Status Score of 26,729</span>
-          <span class="ticker-msg"><span class="ticker-sep">◆</span> 12,500 lifetime XC · 42 badges</span>
+        <div class="ticker-scroll-content" id="ticker-scroll-content">
+          <!-- Dynamic ticker content populated by pflxTickerEngine -->
+          <span class="ticker-msg">Welcome to PFLX — Initializing...</span>
         </div>
       </div>
     </div>
+    <script>
+    // ═══ PFLX Unified Ticker Engine ═══
+    // Merges events from: Console (MC), X-Coin (economy), Battle Arena, Core Pathways
+    (function() {
+        'use strict';
+        var _tickerEvents = [];       // All events from all sources
+        var _xcoinEvents = [];        // Cached X-Coin economy events
+        var _arenaEvents = [];        // Cached Battle Arena events
+        var _dcEvents = [];           // Cached DarkCampus events
+        var _pathwayEvents = [];      // Cached Core Pathway events
+        var _lastRender = 0;
+
+        // ── Build Console-native events from MC data ──
+        function buildMCTickerEvents() {
+            var events = [];
+            var today = new Date(); today.setHours(0,0,0,0);
+            var now = new Date().toISOString();
+
+            // Season/Checkpoint info
+            if (typeof mcSeasons !== 'undefined' && mcSeasons.length > 0) {
+                var activeSeason = mcSeasons.find(function(s) { return s.active || s.status === 'active'; }) || mcSeasons[0];
+                events.push({ icon: '🎮', color: '#00f0ff', text: 'Welcome to PFLX — ' + (activeSeason.name || 'Season 1'), source: 'mc', date: now });
+            } else {
+                events.push({ icon: '🎮', color: '#00f0ff', text: 'Welcome to PFLX — Ready to play', source: 'mc', date: now });
+            }
+
+            // Active checkpoint
+            if (typeof mcCheckpoints !== 'undefined' && mcCheckpoints.length > 0) {
+                var activeCP = mcCheckpoints.find(function(c) { return c.active || c.status === 'active'; });
+                if (activeCP) {
+                    events.push({ icon: '📍', color: '#00f0ff', text: 'Active Checkpoint: ' + (activeCP.name || activeCP.title || 'Checkpoint'), source: 'mc', date: now });
+                }
+            }
+
+            // Recent task completions
+            if (typeof mcTasks !== 'undefined') {
+                mcTasks.forEach(function(t) {
+                    if (t.status === 'completed' && t.completedAt) {
+                        var d = new Date(t.completedAt);
+                        if (d >= today) {
+                            events.push({ icon: '✅', color: '#4ade80', text: 'TASK COMPLETE — ' + (t.title || t.name), source: 'mc', date: t.completedAt });
+                        }
+                    }
+                });
+            }
+
+            // Recent project submissions
+            if (typeof mcPitches !== 'undefined') {
+                mcPitches.forEach(function(p) {
+                    if (p.status === 'submitted' || p.status === 'pending') {
+                        events.push({ icon: '📋', color: '#a78bfa', text: 'PROJECT PITCH — ' + (p.title || p.name) + ' awaiting review', source: 'mc', date: p.submittedAt || now });
+                    }
+                });
+            }
+
+            // Announcements
+            if (typeof mcAnnouncements !== 'undefined') {
+                mcAnnouncements.forEach(function(a) {
+                    if (a.active !== false) {
+                        events.push({ icon: '📢', color: '#f5c842', text: 'ANNOUNCEMENT — ' + (a.text || a.title || a.message), source: 'mc', date: a.date || now });
+                    }
+                });
+            }
+
+            // Live stream status
+            try {
+                var stream = pflxGetLiveStream();
+                if (stream && stream.active) {
+                    events.push({ icon: '🔴', color: '#ff3355', text: 'LIVE NOW — ' + (stream.title || 'PFLX Live Stream'), source: 'mc', date: now });
+                }
+            } catch(e) {}
+
+            // X-Bot status
+            events.push({ icon: '🤖', color: '#00d4ff', text: 'X-Bot Alert: System operational', source: 'mc', date: now });
+
+            // Leaderboard #1
+            if (typeof mcPlayers !== 'undefined' && mcPlayers.length > 0) {
+                var sorted = mcPlayers.slice().sort(function(a,b) { return (b.xc || 0) - (a.xc || 0); });
+                var leader = sorted[0];
+                if (leader) {
+                    var name = leader.brand || leader.brandName || leader.name || 'Player';
+                    events.push({ icon: '🏆', color: '#f5c842', text: 'CURRENT #1 — @' + name + ' leads with ' + (leader.xc || 0).toLocaleString() + ' XC', source: 'mc', date: now });
+                }
+            }
+
+            return events;
+        }
+
+        // ── Render the ticker bar ──
+        function pflxRenderTicker() {
+            var el = document.getElementById('ticker-scroll-content');
+            if (!el) return;
+
+            // Merge events from ALL PFLX apps
+            var mcEvents = buildMCTickerEvents();
+            var allEvents = mcEvents.concat(_xcoinEvents, _arenaEvents, _dcEvents, _pathwayEvents);
+
+            // Sort by date descending, cap at 50
+            allEvents.sort(function(a,b) { return new Date(b.date).getTime() - new Date(a.date).getTime(); });
+            allEvents = allEvents.slice(0, 50);
+
+            if (allEvents.length === 0) {
+                el.innerHTML = '<span class="ticker-msg">Welcome to PFLX — No events yet</span>';
+                return;
+            }
+
+            // Build HTML — render once, duplicate for seamless loop
+            var html = '';
+            for (var i = 0; i < allEvents.length; i++) {
+                var ev = allEvents[i];
+                var sep = i > 0 ? '<span class="ticker-sep">◆</span> ' : '';
+                html += '<span class="ticker-msg" style="color:' + ev.color + ';">' + sep + ev.icon + ' ' + ev.text + '</span>';
+            }
+            // Duplicate for seamless scroll loop
+            el.innerHTML = html + html;
+
+            // Adjust animation speed based on content length
+            var speed = Math.max(35, allEvents.length * 3);
+            el.style.animationDuration = speed + 's';
+
+            _lastRender = Date.now();
+        }
+
+        // ── Listen for ticker events from ALL sub-apps via postMessage ──
+        window.addEventListener('message', function(event) {
+            try {
+                var msg = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+                if (msg.type === 'pflx_ticker_events' && msg.source && Array.isArray(msg.events)) {
+                    switch (msg.source) {
+                        case 'xcoin':      _xcoinEvents = msg.events; break;
+                        case 'arena':      _arenaEvents = msg.events; break;
+                        case 'darkcampus': _dcEvents = msg.events; break;
+                        case 'pathways':   _pathwayEvents = msg.events; break;
+                    }
+                    console.log('[Ticker] Received', msg.events.length, 'events from', msg.source);
+                    pflxRenderTicker();
+                }
+            } catch(e) {}
+        });
+
+        // ── Request ticker events from all sub-app iframes ──
+        function requestAllTickerEvents() {
+            var iframeIds = ['xcoin-frame', 'arena-frame', 'darkcampus-frame', 'pathway-frame'];
+            iframeIds.forEach(function(id) {
+                var frame = document.getElementById(id);
+                if (frame && frame.contentWindow) {
+                    try {
+                        frame.contentWindow.postMessage(JSON.stringify({ type: 'pflx_ticker_request' }), '*');
+                    } catch(e) {}
+                }
+            });
+            // Also try any iframe that might have a different id pattern
+            var allIframes = document.querySelectorAll('iframe[id*="pflx"], iframe[id*="xcoin"], iframe[id*="arena"], iframe[id*="dark"], iframe[id*="pathway"], iframe[id*="core"]');
+            allIframes.forEach(function(frame) {
+                try {
+                    frame.contentWindow.postMessage(JSON.stringify({ type: 'pflx_ticker_request' }), '*');
+                } catch(e) {}
+            });
+        }
+
+        // ── Initial render + periodic refresh ──
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function() {
+                pflxRenderTicker();
+                setTimeout(requestAllTickerEvents, 4000);
+            });
+        } else {
+            pflxRenderTicker();
+            setTimeout(requestAllTickerEvents, 4000);
+        }
+
+        // Refresh every 60s
+        setInterval(function() {
+            pflxRenderTicker();
+            requestAllTickerEvents();
+        }, 60000);
+
+        // Expose for manual refresh
+        window.pflxRenderTicker = pflxRenderTicker;
+    })();
+    </script>
 
     <!-- ═══ iPad / Safari Compatibility Shim ═══ -->
     <script>
@@ -15978,15 +16146,32 @@
             if (el) el.textContent = total.toLocaleString() + ' XC';
         }
 
+        var _xcoinStoreReady = false;
+        var _xcoinDataRetries = 0;
+        var _xcoinRetryTimer = null;
+
         function initMissionControl() {
             mcLoadData();
             mcNav('dashboard');
             // Request fresh data from X-Coin Supabase once the iframe is ready
-            mcRequestXCoinData();
+            // If X-Coin signals store_ready first, we request immediately;
+            // otherwise mcRequestXCoinData retries with exponential backoff.
+            if (_xcoinStoreReady) {
+                mcRequestXCoinData();
+            } else {
+                // Give X-Coin 3s to signal readiness, then start requesting anyway
+                setTimeout(function() {
+                    if (!_xcoinStoreReady) {
+                        console.log('[MC] X-Coin store not yet ready — requesting anyway with retries');
+                        mcRequestXCoinData();
+                    }
+                }, 3000);
+            }
         }
 
         // Request all data from X-Coin app (Supabase) via postMessage
         // X-Coin's PflxBridge listens for pflx_data_request and responds with pflx_cloud_data
+        // v2: Expanded keys, exponential backoff retry, readiness-aware
         function mcRequestXCoinData() {
             var xcoinFrame = document.getElementById('xcoin-frame');
             if (!xcoinFrame || !xcoinFrame.contentWindow) {
@@ -15994,7 +16179,12 @@
                 setTimeout(mcRequestXCoinData, 2000);
                 return;
             }
-            var dataKeys = ['users', 'checkpoints', 'tasks', 'projects', 'jobs', 'badges', 'cohortGroups'];
+            // All keys MC needs from X-Coin Supabase
+            var dataKeys = [
+                'users', 'checkpoints', 'tasks', 'projects', 'jobs',
+                'badges', 'cohortGroups', 'pflxRanks', 'studios',
+                'pitches', 'seasons', 'sessions', 'modifiers'
+            ];
             dataKeys.forEach(function(key) {
                 try {
                     xcoinFrame.contentWindow.postMessage(JSON.stringify({
@@ -16003,6 +16193,23 @@
                 } catch(e) {}
             });
             console.log('[MC] Requested data from X-Coin:', dataKeys.join(', '));
+
+            // Schedule a retry check — if we don't get data back, request again
+            _xcoinDataRetries++;
+            if (_xcoinDataRetries <= 5) {
+                var delay = Math.min(2000 * Math.pow(1.5, _xcoinDataRetries - 1), 10000);
+                if (_xcoinRetryTimer) clearTimeout(_xcoinRetryTimer);
+                _xcoinRetryTimer = setTimeout(function() {
+                    // Only retry if we still have no player data (primary indicator)
+                    if (!mcPlayers || mcPlayers.length === 0) {
+                        console.log('[MC] No player data yet — retry #' + _xcoinDataRetries);
+                        mcRequestXCoinData();
+                    } else {
+                        console.log('[MC] ✓ Player data loaded — stopping retries');
+                        _xcoinDataRetries = 0;
+                    }
+                }, delay);
+            }
         }
 
         // ── Data Load — pull from localStorage (shared with X-Coin) ─
@@ -16219,6 +16426,14 @@
         window.addEventListener('message', function(event) {
             try {
                 var msg = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+                // ── X-Coin store readiness signal ──
+                if (msg.type === 'pflx_store_ready') {
+                    console.log('[MC] ✓ X-Coin store ready — requesting fresh data');
+                    _xcoinStoreReady = true;
+                    _xcoinDataRetries = 0;
+                    mcRequestXCoinData();
+                }
+
                 if (msg.type === 'pflx_cloud_data') {
                     // X-Coin is sending fresh Supabase data — update MC stores
                     var dataUpdated = false;
@@ -16230,6 +16445,11 @@
                     if (msg.key === 'badges' && msg.data && msg.data.length) { mcBadges = msg.data; mcSaveData('badges'); dataUpdated = true; }
                     if (msg.key === 'jobs' && msg.data && msg.data.length) { mcJobs = msg.data; mcSaveData('jobs'); dataUpdated = true; }
                     if (msg.key === 'cohortGroups' && msg.data && msg.data.length) { mcCohortGroups = msg.data; mcSaveData('cohortgroups'); dataUpdated = true; }
+                    if (msg.key === 'pflxRanks' && msg.data && msg.data.length) { mcPflxRanks = msg.data; mcSaveData('pflxranks'); dataUpdated = true; }
+                    if (msg.key === 'studios' && msg.data && msg.data.length) { mcStudios = msg.data; mcSaveData('studios'); dataUpdated = true; }
+                    if (msg.key === 'pitches' && msg.data && msg.data.length) { mcPitches = msg.data; mcSaveData('pitches'); dataUpdated = true; }
+                    if (msg.key === 'sessions' && msg.data && msg.data.length) { mcSessions = msg.data; mcSaveData('sessions'); dataUpdated = true; }
+                    if (msg.key === 'modifiers' && msg.data && msg.data.length) { mcModifiers = msg.data; mcSaveData('modifiers'); dataUpdated = true; }
                     console.log('[MC] Cloud data received:', msg.key, msg.data ? msg.data.length + ' items' : 'empty');
                     // Refresh the active MC panel so the user sees the data
                     if (dataUpdated) {
