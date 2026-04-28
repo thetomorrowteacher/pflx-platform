@@ -21306,6 +21306,7 @@
             if (offline && embedWrap && iframe) {
                 if (s.active && s.url) {
                     var embedUrl = pflxToYouTubeEmbed(s.url);
+                    var becameLive = !iframe.src; // first activation this render cycle
                     if (iframe.src !== embedUrl) iframe.src = embedUrl;
                     offline.style.display = 'none';
                     embedWrap.style.display = 'block';
@@ -21315,16 +21316,29 @@
                     if (vtPill) { vtPill.textContent = 'LIVE'; vtPill.classList.add('live'); }
                     // Auto-expand theater for host when going live
                     if (window.pflxRole === 'host') vtLaunchTheater();
-                    // Show player theater + sync stream iframe
+                    // Show player theater + sync stream iframe (the player view's
+                    // mirror is ALWAYS muted — single audio source rule).
                     var playerSec = document.getElementById('mc-theater-player-section');
                     if (playerSec) playerSec.style.display = '';
                     var playerIframe = document.getElementById('vt-player-stream-iframe');
                     var playerOffline = document.getElementById('vt-player-stream-offline');
                     if (playerIframe) {
-                        if (playerIframe.src !== embedUrl) playerIframe.src = embedUrl;
+                        // Append &mute=1 so the player mirror starts muted by default.
+                        var muteUrl = embedUrl + (embedUrl.indexOf('?') >= 0 ? '&' : '?') + 'mute=1';
+                        if (playerIframe.src !== muteUrl) playerIframe.src = muteUrl;
+                        // Belt-and-suspenders: also postMessage mute when iframe loads.
+                        playerIframe.onload = function() {
+                            try { playerIframe.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*'); } catch(e) {}
+                        };
                     }
                     if (playerOffline) playerOffline.style.display = 'none';
+                    // BG music — pause when stream goes live (Feature D hookup).
+                    if (becameLive) {
+                        try { if (typeof pauseAllBGMusic === 'function') pauseAllBGMusic(); } catch(e) {}
+                        try { if (typeof window.pflxLiveStreamDuck === 'function') window.pflxLiveStreamDuck(); } catch(e) {}
+                    }
                 } else {
+                    var wasLive = !!iframe.src;
                     if (iframe.src) iframe.src = '';
                     offline.style.display = 'flex';
                     embedWrap.style.display = 'none';
@@ -21339,6 +21353,11 @@
                     var playerOffline = document.getElementById('vt-player-stream-offline');
                     if (playerIframe) playerIframe.src = '';
                     if (playerOffline) playerOffline.style.display = 'flex';
+                    // BG music — schedule resume when stream goes offline.
+                    if (wasLive) {
+                        try { if (typeof scheduleResumeBGMusic === 'function') scheduleResumeBGMusic(); } catch(e) {}
+                        try { if (typeof window.pflxLiveStreamRestore === 'function') window.pflxLiveStreamRestore(); } catch(e) {}
+                    }
                 }
             }
             // Ticker indicator
@@ -21888,18 +21907,19 @@
         }
 
         /* ── PiP close hook — set dismissed flag so it stays away until Home Theater ── */
+        // Previously this cloned the X button to swap its handler, which
+        // collided with another late-arriving cloner (Feature C below) and
+        // sometimes left the button with no live listener at all. Now we just
+        // set the flags via a tiny non-cloning listener; pipOnClose itself
+        // handles the actual close + flag updates.
         function vtPatchPipClose() {
             var closeBtn = document.getElementById('pip-close-btn');
             if (!closeBtn) return;
-            var newBtn = closeBtn.cloneNode(true);
-            if (closeBtn.parentNode) closeBtn.parentNode.replaceChild(newBtn, closeBtn);
-            newBtn.addEventListener('click', function() {
+            closeBtn.addEventListener('click', function() {
                 vtPipDismissed = true;
                 window.pflxPipArmed = false;
-                if (typeof pipHide === 'function') pipHide();
             });
         }
-        // Patch after DOM is ready (delay to ensure PiP IIFE has run)
         setTimeout(vtPatchPipClose, 2000);
 
         /* ── Live Q&A Side Panel (moderator-activated popup) ── */
@@ -30262,19 +30282,15 @@
             } catch (e) { console.warn('[PIP] armed-check error:', e); }
           };
 
-          // Override pipOnClose to disarm
-          var origPipOnClose = window.pipOnClose || (typeof pipOnClose === 'function' ? pipOnClose : null);
-          // We need to patch the close button handler
+          // pipOnClose now handles the disarm directly (see PIP IIFE below).
+          // Previously this cloned the close button to swap its handler, which
+          // collided with vtPatchPipClose (above) and sometimes left no live
+          // listener attached. Just add a passive flag listener instead.
           setTimeout(function () {
             var closeBtn = document.getElementById('pip-close-btn');
             if (closeBtn) {
-              // Remove old listeners by cloning
-              var newBtn = closeBtn.cloneNode(true);
-              if (closeBtn.parentNode) closeBtn.parentNode.replaceChild(newBtn, closeBtn);
-              newBtn.addEventListener('click', function () {
+              closeBtn.addEventListener('click', function () {
                 window.pflxPipArmed = false;
-                if (typeof pipHide === 'function') pipHide();
-                // Do NOT navigate back to MC — just close PIP
               });
             }
           }, 1500);
@@ -39452,6 +39468,19 @@ RESPONSE RULES:
             setTimeout(function() { pip.el.classList.remove('pip-entering'); }, 350);
             pip.active = true;
 
+            // Mute the main MC iframe so audio plays from PIP only (no double feed).
+            try {
+                var mcIf = document.getElementById('mc-live-stream-iframe');
+                if (mcIf && mcIf.contentWindow) {
+                    mcIf.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*');
+                }
+                // Player mirror should stay muted at all times — kick it again to be safe.
+                var plIf = document.getElementById('vt-player-stream-iframe');
+                if (plIf && plIf.contentWindow) {
+                    plIf.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*');
+                }
+            } catch(e) {}
+
             // Restore saved volume
             setTimeout(function() { pipSetVolume(pip.volume); }, 800);
         }
@@ -39461,6 +39490,19 @@ RESPONSE RULES:
             pip.el.style.display = 'none';
             pip.iframe.src = '';
             pip.active = false;
+            // Restore audio on the main MC iframe (unless the player explicitly
+            // muted the stream via the audio panel).
+            try {
+                var mcIf = document.getElementById('mc-live-stream-iframe');
+                if (mcIf && mcIf.contentWindow) {
+                    var explicitlyMuted = (typeof SE !== 'undefined' && SE.playerPrefs && SE.playerPrefs.liveStreamMuted);
+                    if (!explicitlyMuted) {
+                        mcIf.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*');
+                    }
+                }
+                // Re-evaluate priority manager (handles ducking against intro/loading/briefing).
+                if (window.PFLX_AUDIO) window.PFLX_AUDIO.refresh();
+            } catch(e) {}
         }
 
         // ── Drag System ─────────────────────────────────────────
@@ -39656,11 +39698,12 @@ RESPONSE RULES:
             } catch(e) { console.warn('[PIP] auto-activate error:', e); }
         };
 
-        // Close button returns user to MC
+        // X button just closes the PIP — does NOT auto-navigate.
+        // Sets the flags the other modules read so the PIP doesn't re-spawn.
         function pipOnClose() {
+            try { window.pflxPipArmed = false; } catch(e) {}
+            try { if (typeof vtPipDismissed !== 'undefined') vtPipDismissed = true; } catch(e) {}
             pipHide();
-            // Navigate back to Mission Control
-            try { if (typeof navigateTo === 'function') navigateTo('mission-control'); } catch(e) {}
         }
 
         // ── Init ────────────────────────────────────────────────
