@@ -4402,11 +4402,14 @@
             gap: 60px;
             animation: tickerScroll 35s linear infinite;
             white-space: nowrap;
-            padding-left: 100%;
+            /* Note: no padding-left:100% — content is duplicated in JS (html+html)
+               so animating 0% → -50% gives a seamless loop. Padding-left would
+               break the math and cause the visible "reset" mid-cycle. */
+            will-change: transform;
         }
         @keyframes tickerScroll {
-            0% { transform: translateX(0); }
-            100% { transform: translateX(-50%); }
+            from { transform: translateX(0); }
+            to   { transform: translateX(-50%); }
         }
         .ticker-msg {
             font-family: 'Share Tech Mono', monospace;
@@ -6000,7 +6003,7 @@
             </div>
             <div style="position:relative;">
                 <button class="fullscreen-btn" id="music-toggle" title="Audio Controls" style="font-size:14px;" onclick="seTogglePlayerPanel()">&#x266B;</button>
-                <div id="se-player-panel" style="display:none;position:absolute;top:40px;right:0;width:260px;background:#0d1117;border:1px solid rgba(0,240,255,0.2);border-radius:14px;padding:16px;z-index:100;box-shadow:0 8px 32px rgba(0,0,0,0.5);">
+                <div id="se-player-panel" style="display:none;position:absolute;top:40px;right:0;width:260px;background:#0d1117;border:1px solid rgba(0,240,255,0.2);border-radius:14px;padding:16px;z-index:100000;box-shadow:0 8px 32px rgba(0,0,0,0.5);">
                     <div style="font-family:'Orbitron',sans-serif;font-size:10px;font-weight:800;color:var(--cyan);letter-spacing:1px;margin-bottom:12px;">AUDIO CONTROLS</div>
                     <div style="display:flex;flex-direction:column;gap:10px;">
                         <!-- Music toggle + volume -->
@@ -6038,6 +6041,12 @@
                         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:#e0e6ff;">
                             <input type="checkbox" id="se-player-mute-livestream" onchange="sePlayerLiveStreamMuteToggle()" style="accent-color:var(--cyan);"> Mute live stream now
                         </label>
+                        <!-- Live stream volume -->
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <span style="font-size:11px;color:rgba(255,255,255,0.5);min-width:70px;">Stream Vol</span>
+                            <input type="range" min="0" max="100" value="100" id="se-player-livestream-vol" oninput="sePlayerLiveStreamVolUpdate()" style="flex:1;accent-color:#f97316;">
+                            <span id="se-player-livestream-vol-label" style="font-size:10px;color:#f97316;font-weight:700;min-width:28px;">100%</span>
+                        </div>
                         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:11px;color:#8a92b0;">
                             <input type="checkbox" id="se-player-mute-livestream-outside" onchange="sePlayerPrefSave()" style="accent-color:var(--cyan);"> Auto-mute outside Mission Control
                         </label>
@@ -35543,8 +35552,14 @@ RESPONSE RULES:
             // Live stream controls
             var lsMuteNow = document.getElementById('se-player-mute-livestream');
             var lsMuteOut = document.getElementById('se-player-mute-livestream-outside');
+            var lsVol = document.getElementById('se-player-livestream-vol');
+            var lsVolLabel = document.getElementById('se-player-livestream-vol-label');
             if (lsMuteNow) lsMuteNow.checked = !!SE.playerPrefs.liveStreamMuted;
             if (lsMuteOut) lsMuteOut.checked = !!SE.playerPrefs.muteLiveStreamOutsideMC;
+            // liveStreamVolume is 0-100 (matches YouTube setVolume range), default 100
+            var lsv = (SE.playerPrefs.liveStreamVolume === undefined) ? 100 : SE.playerPrefs.liveStreamVolume;
+            if (lsVol) lsVol.value = lsv;
+            if (lsVolLabel) lsVolLabel.textContent = lsv + '%';
         }
 
         function sePlayerPrefSave() {
@@ -35664,6 +35679,40 @@ RESPONSE RULES:
                 if (label) label.textContent = vol.value + '%';
                 sePlayerPrefSave();
             }
+        }
+
+        // Live stream volume — sets PFLX_AUDIO.liveFeedBase and calls iframe setVolume directly
+        function sePlayerLiveStreamVolUpdate() {
+            var vol = document.getElementById('se-player-livestream-vol');
+            var label = document.getElementById('se-player-livestream-vol-label');
+            if (!vol) return;
+            var val = parseInt(vol.value, 10); // 0-100
+            SE.playerPrefs.liveStreamVolume = val;
+            if (label) label.textContent = val + '%';
+            // Persist
+            try {
+                var brand = (typeof activeSession !== 'undefined' && activeSession) ? activeSession.brand : 'guest';
+                localStorage.setItem('pflx_se_prefs_' + brand, JSON.stringify(SE.playerPrefs));
+            } catch(e) {}
+            // Update the priority manager's base level so future apply()s use the new volume
+            try {
+                if (window.PFLX_AUDIO) {
+                    window.PFLX_AUDIO.liveFeedBase = val;
+                    window.PFLX_AUDIO.refresh();
+                }
+            } catch(e) {}
+            // Apply directly to iframe in case priority manager has a different leading source
+            try {
+                var iframe = document.getElementById('mc-live-stream-iframe');
+                if (iframe && iframe.contentWindow && !SE.playerPrefs.liveStreamMuted) {
+                    iframe.contentWindow.postMessage(JSON.stringify({event:'command',func:'setVolume',args:[val]}), '*');
+                    if (val === 0) {
+                        iframe.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*');
+                    } else {
+                        iframe.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*');
+                    }
+                }
+            } catch(e) {}
         }
 
         // ── Close player panel on outside click ─────────────────────
