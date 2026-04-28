@@ -16811,6 +16811,36 @@
         let mcCurrentJobIdx = -1;
         // Data stores — loaded from localStorage, synced with X-Coin Supabase
         let mcPlayers = [];
+        // ── Player identity helpers ──
+        // Brand name is the canonical identifier shown in player-facing views.
+        // Real names are visible only to hosts/admins (and DarkCampus, which
+        // bridges to Discord/Slack where real names already exist).
+        function pflxNormalizePlayerRecord(p) {
+            if (!p || typeof p !== 'object') return p;
+            // X-Coin uses brandName; Console uses brand. Keep both in sync.
+            if (!p.brand && p.brandName) p.brand = p.brandName;
+            if (!p.brandName && p.brand) p.brandName = p.brand;
+            // Ensure badges is always an array (some payloads omit the field).
+            if (!Array.isArray(p.badges)) p.badges = [];
+            return p;
+        }
+        // Brand-first display name. If viewer is host/admin AND the player has
+        // a distinct real name, the host sees "Brand (Real Name)" so they can
+        // disambiguate. Players see only the brand. DarkCampus calls its own
+        // helpers for Discord/Slack identity, so it's not affected here.
+        function pflxDisplayName(player, viewerRole) {
+            if (!player) return 'Player';
+            var brand = player.brand || player.brandName || '';
+            var realName = player.name || '';
+            var role = (viewerRole || window.pflxRole || '').toString().toLowerCase();
+            var isHost = role === 'host' || role === 'admin' || role === 'teacher' || role === 'instructor';
+            if (isHost && brand && realName && brand !== realName) {
+                return brand + ' (' + realName + ')';
+            }
+            return brand || realName || 'Player';
+        }
+        window.pflxNormalizePlayerRecord = pflxNormalizePlayerRecord;
+        window.pflxDisplayName = pflxDisplayName;
         let mcCheckpoints = [];
         let mcTasks = [];
         let mcProjects = [];
@@ -17092,6 +17122,7 @@
         function mcLoadData() {
             try {
                 mcPlayers = JSON.parse(localStorage.getItem('pflx_mc_players') || '[]');
+                mcPlayers.forEach(pflxNormalizePlayerRecord);
                 mcCheckpoints = JSON.parse(localStorage.getItem('pflx_mc_checkpoints') || '[]');
                 mcTasks = JSON.parse(localStorage.getItem('pflx_mc_tasks') || '[]');
                 mcProjects = JSON.parse(localStorage.getItem('pflx_mc_projects') || '[]');
@@ -17326,7 +17357,30 @@
                 if (msg.type === 'pflx_cloud_data') {
                     // X-Coin is sending fresh Supabase data — update MC stores
                     var dataUpdated = false;
-                    if (msg.key === 'users' && msg.data && msg.data.length) { mcPlayers = msg.data; mcSaveData('players'); dataUpdated = true; }
+                    if (msg.key === 'users' && msg.data && msg.data.length) {
+                        // X-Coin uses brandName; Console uses brand. Normalize so the brand
+                        // column in Player Management isn't blanked out on every sync.
+                        msg.data.forEach(pflxNormalizePlayerRecord);
+                        // Also preserve any locally-stored badges that X-Coin's user payload
+                        // doesn't carry (X-Coin sends digitalBadges count, not the array).
+                        var existingById = {};
+                        mcPlayers.forEach(function(ep) { if (ep && ep.id) existingById[ep.id] = ep; });
+                        msg.data.forEach(function(np) {
+                            var prev = existingById[np.id];
+                            if (prev && Array.isArray(prev.badges) && (!np.badges || np.badges.length === 0)) {
+                                np.badges = prev.badges;
+                            }
+                            // Preserve favorite, role-overrides, studio assignment if remote left them blank.
+                            if (prev) {
+                                if (prev.favorite && !np.favorite) np.favorite = prev.favorite;
+                                if (prev.studioId && !np.studioId) np.studioId = prev.studioId;
+                                if (prev.image && !np.image) np.image = prev.image;
+                            }
+                        });
+                        mcPlayers = msg.data;
+                        mcSaveData('players');
+                        dataUpdated = true;
+                    }
                     if (msg.key === 'checkpoints' && msg.data && msg.data.length) { mcCheckpoints = msg.data; mcSaveData('checkpoints'); dataUpdated = true; }
                     if (msg.key === 'tasks' && msg.data && msg.data.length) { mcTasks = msg.data; mcSaveData('tasks'); dataUpdated = true; }
                     if (msg.key === 'projects' && msg.data && msg.data.length) { mcProjects = msg.data; mcSaveData('projects'); dataUpdated = true; }
@@ -17376,6 +17430,64 @@
                 if (!msg || !msg.type) return;
 
                 // Battle Arena results
+                // X-Coin awards/revokes badges → propagate into mcPlayers.badges so
+                // every Console surface (Player Management, leaderboards, ranks,
+                // Pathways gating) sees the change.
+                if ((msg.type === 'pflx_badge_awarded' || msg.type === 'pflx_xcoin_badge_award') && msg.playerId) {
+                    var bp = mcPlayers.find(function(pl) { return pl.id === msg.playerId; });
+                    if (bp) {
+                        if (!Array.isArray(bp.badges)) bp.badges = [];
+                        var bid = msg.badgeId || '';
+                        var bname = msg.badgeName || msg.name || msg.badgeId || 'Badge';
+                        var has = bp.badges.some(function(b) {
+                            if (typeof b === 'string') return b === bid || b === bname;
+                            return b && (b.id === bid || b.name === bname);
+                        });
+                        if (!has) {
+                            bp.badges.push({
+                                id: bid,
+                                name: bname,
+                                category: msg.category || msg.tier || 'Primary',
+                                xcValue: msg.xcValue || msg.xc || 0,
+                                awardedAt: msg.awardedAt || new Date().toISOString(),
+                                awardedBy: msg.awardedBy || 'x-coin'
+                            });
+                            mcSaveData('players');
+                            // Re-render Player Management if it's the active panel.
+                            try { if (typeof mcRenderPlayers === 'function') mcRenderPlayers(); } catch(e) {}
+                            // Fan out to all OTHER sub-app iframes so Pathways / Arena / DarkCampus
+                            // can update their views without each having to listen to X-Coin directly.
+                            try {
+                                if (typeof mcBroadcastToApps === 'function') {
+                                    mcBroadcastToApps('badge_award', { playerId: msg.playerId, badgeId: bid, badgeName: bname, category: msg.category, xcValue: msg.xcValue, source: 'xcoin' });
+                                }
+                            } catch(e) {}
+                            console.log('[PFLX Sync] Badge awarded by X-Coin propagated:', bname, '→', bp.brand || bp.name);
+                        }
+                    }
+                }
+                if ((msg.type === 'pflx_badge_revoked' || msg.type === 'pflx_xcoin_badge_revoke') && msg.playerId) {
+                    var rp = mcPlayers.find(function(pl) { return pl.id === msg.playerId; });
+                    if (rp && Array.isArray(rp.badges)) {
+                        var beforeLen = rp.badges.length;
+                        var rid = msg.badgeId || '';
+                        var rname = msg.badgeName || msg.name || '';
+                        rp.badges = rp.badges.filter(function(b) {
+                            if (typeof b === 'string') return !(b === rid || b === rname);
+                            return !(b && (b.id === rid || b.name === rname));
+                        });
+                        if (rp.badges.length !== beforeLen) {
+                            mcSaveData('players');
+                            try { if (typeof mcRenderPlayers === 'function') mcRenderPlayers(); } catch(e) {}
+                            try {
+                                if (typeof mcBroadcastToApps === 'function') {
+                                    mcBroadcastToApps('badge_revoke', { playerId: msg.playerId, badgeId: rid, badgeName: rname, source: 'xcoin' });
+                                }
+                            } catch(e) {}
+                            console.log('[PFLX Sync] Badge revoked by X-Coin propagated:', rname || rid, '→', rp.brand || rp.name);
+                        }
+                    }
+                }
                 if (msg.type === 'pflx_arena_result') {
                     var result = msg.data;
                     if (result && result.playerId && result.xcEarned) {
