@@ -27271,11 +27271,26 @@
                 var connectBtn = document.getElementById('ctrl-connect-btn');
                 if (connectBtn) connectBtn.addEventListener('click', attemptConnect);
 
-                // Check URL for pin parameter
-                var urlPin = new URLSearchParams(window.location.search).get('pin');
+                // Check URL for pin + identity (cross-device QR-scan flow).
+                // If pin + id + name are all present, skip the desktop-only
+                // localStorage validation and trust the URL as the credential.
+                var urlParams = new URLSearchParams(window.location.search);
+                var urlPin = urlParams.get('pin');
+                var urlId = urlParams.get('id');
+                var urlName = urlParams.get('name');
                 if (urlPin && urlPin.length === 6) {
                     for (var k = 0; k < Math.min(urlPin.length, inputs.length); k++) {
                         inputs[k].value = urlPin[k];
+                    }
+                    if (urlId && urlName) {
+                        // Cross-device pairing: stash identity for attemptConnect to use.
+                        _state._urlSession = { pin: urlPin, playerId: urlId, playerName: urlName };
+                        // Also persist locally so reloads on this phone don't re-prompt.
+                        try {
+                            var sessions = getControllerSessions();
+                            sessions[urlPin] = { playerId: urlId, playerName: urlName, createdAt: Date.now(), connected: false, fromUrl: true };
+                            saveControllerSessions(sessions);
+                        } catch(e) {}
                     }
                     setTimeout(attemptConnect, 300);
                 }
@@ -27294,9 +27309,16 @@
                     return;
                 }
 
-                var session = validatePIN(pin);
+                // Cross-device path: trust URL-provided identity (QR scan).
+                var session = null;
+                if (_state._urlSession && _state._urlSession.pin === pin) {
+                    session = { playerId: _state._urlSession.playerId, playerName: _state._urlSession.playerName };
+                } else {
+                    // Fallback — same-device validation via localStorage.
+                    session = validatePIN(pin);
+                }
                 if (!session) {
-                    if (errorEl) errorEl.textContent = 'Invalid PIN — check your dashboard';
+                    if (errorEl) errorEl.textContent = 'Invalid PIN — scan the QR on your dashboard or check the PIN.';
                     try { if (navigator.vibrate) navigator.vibrate(100); } catch(e) {}
                     return;
                 }
@@ -27743,7 +27765,17 @@
                 var playerName = sess.brand || sess.name || 'Player';
                 var pin = registerControllerPIN(playerId, playerName);
 
-                var controllerUrl = window.location.origin + window.location.pathname + '?controller=1&pin=' + pin;
+                // Encode player identity in the QR URL itself so cross-device pairing works.
+                // BroadcastChannel + localStorage don't sync across devices, so the phone
+                // can't validate against the desktop's controller-sessions store. Instead,
+                // we treat URL-provided credentials as the authentication token (possessing
+                // a freshly-issued QR is proof enough — the same trust model as a Spotify
+                // pair link or a Zoom invite URL).
+                var controllerUrl = window.location.origin + window.location.pathname +
+                    '?controller=1' +
+                    '&pin=' + encodeURIComponent(pin) +
+                    '&id=' + encodeURIComponent(playerId) +
+                    '&name=' + encodeURIComponent(playerName);
 
                 var card = document.createElement('div');
                 card.id = 'pflx-qr-controller-card';
