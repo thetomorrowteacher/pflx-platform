@@ -17084,12 +17084,17 @@
                 mcGameConfig = JSON.parse(localStorage.getItem('pflx_mc_gameconfig') || '{}');
                 mcOnboarding = JSON.parse(localStorage.getItem('pflx_mc_onboarding') || '{}');
                 mcPflxRanks = JSON.parse(localStorage.getItem('pflx_mc_pflxranks') || '[]');
-                // Normalize specificBadgeRequirements: string→array migration
+                // Normalize specificBadgeRequirements + badgeTypeRequirements: string→array.
+                // X-Coin leaderboard expects both as arrays (calls .every()).
                 mcPflxRanks.forEach(function(r) {
                     if (r.specificBadgeRequirements && typeof r.specificBadgeRequirements === 'string') {
                         r.specificBadgeRequirements = r.specificBadgeRequirements.split(',').map(function(s){return s.trim();}).filter(Boolean);
                     }
                     if (!Array.isArray(r.specificBadgeRequirements)) r.specificBadgeRequirements = [];
+                    if (r.badgeTypeRequirements && typeof r.badgeTypeRequirements === 'string') {
+                        r.badgeTypeRequirements = r.badgeTypeRequirements.split(',').map(function(s){return s.trim();}).filter(Boolean);
+                    }
+                    if (!Array.isArray(r.badgeTypeRequirements)) r.badgeTypeRequirements = [];
                 });
                 mcSessions = JSON.parse(localStorage.getItem('pflx_mc_sessions') || '[]');
             } catch(e) { console.warn('[MC] Data load error', e); }
@@ -17192,6 +17197,14 @@
                     { id:'rank-10', level:10, name:'Partner',          icon:'🦅', image:'', color:'var(--cyan)', group:'EXECUTIVE', xcoinUnlock:1000000, xcoinMaintain:750000, checkpointsRequired:20, badgeTypeRequirements:'Primary, Premium, Executive, Signature', specificBadgeRequirements:[], autoApply:{ enabled:false, trigger:'xc_threshold', effect:'auto_promote', scope:'all' }, hostControls:{ canPromote:true, canDemote:true, canOverride:true, canFreeze:false }, cohorts:[], allCohorts:true },
                     { id:'rank-god', level:11, name:'Master Admin', icon:'👁️', image:'', color:'#ff00ff', group:'GOD', xcoinUnlock:Infinity, xcoinMaintain:0, checkpointsRequired:0, badgeTypeRequirements:'', specificBadgeRequirements:[], autoApply:{ enabled:false, trigger:'manual_only', effect:'none', scope:'none' }, hostControls:{ canPromote:true, canDemote:true, canOverride:true, canFreeze:true }, cohorts:[], allCohorts:true, godTier:true, abilities:['reality_warp','system_events','infinite_xc','all_controls','escape_room_creator'] }
                 ];
+                // Apply the same normalization to the seed data so the in-memory
+                // copy is array-shaped immediately (without waiting for next reload).
+                mcPflxRanks.forEach(function(r) {
+                    if (r.badgeTypeRequirements && typeof r.badgeTypeRequirements === 'string') {
+                        r.badgeTypeRequirements = r.badgeTypeRequirements.split(',').map(function(s){return s.trim();}).filter(Boolean);
+                    }
+                    if (!Array.isArray(r.badgeTypeRequirements)) r.badgeTypeRequirements = [];
+                });
                 mcSaveData('pflxranks');
             }
 
@@ -24253,7 +24266,7 @@
                 el = document.getElementById('mc-rank-unlock'); if (el) el.value = r.xcoinUnlock || 0;
                 el = document.getElementById('mc-rank-maintain'); if (el) el.value = r.xcoinMaintain || 0;
                 el = document.getElementById('mc-rank-cp'); if (el) el.value = r.checkpointsRequired || 0;
-                el = document.getElementById('mc-rank-badges'); if (el) el.value = r.badgeTypeRequirements || '';
+                el = document.getElementById('mc-rank-badges'); if (el) el.value = Array.isArray(r.badgeTypeRequirements) ? r.badgeTypeRequirements.join(', ') : (r.badgeTypeRequirements || '');
                 el = document.getElementById('mc-rank-specific'); if (el) el.value = Array.isArray(r.specificBadgeRequirements) ? r.specificBadgeRequirements.join(', ') : (r.specificBadgeRequirements || '');
                 // Re-render badge type chips + specific pills with the loaded values
                 mcRankRenderBadgeTypeToggles();
@@ -24362,7 +24375,7 @@
                 xcoinUnlock: parseInt(document.getElementById('mc-rank-unlock')?.value || '0', 10),
                 xcoinMaintain: parseInt(document.getElementById('mc-rank-maintain')?.value || '0', 10),
                 checkpointsRequired: parseInt(document.getElementById('mc-rank-cp')?.value || '0', 10),
-                badgeTypeRequirements: document.getElementById('mc-rank-badges')?.value || '',
+                badgeTypeRequirements: (document.getElementById('mc-rank-badges')?.value || '').split(',').map(function(s){return s.trim();}).filter(Boolean),
                 specificBadgeRequirements: (document.getElementById('mc-rank-specific')?.value || '').split(',').map(function(s){return s.trim();}).filter(Boolean),
                 autoApply: {
                     enabled: document.getElementById('mc-rank-auto-enabled')?.checked || false,
