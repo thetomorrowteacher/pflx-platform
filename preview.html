@@ -19234,6 +19234,28 @@
             });
             if (alreadyHas) return;
 
+            // Resolve the live XC value from the synced badge catalog.
+            // Falls back to the documented value (1000) if not found.
+            var DEFAULT_XC = 1000;
+            var resolvedXc = DEFAULT_XC;
+            var xcSource = 'default-1000';
+            try {
+                if (typeof mcBadges !== 'undefined' && Array.isArray(mcBadges)) {
+                    var match = mcBadges.find(function(b) {
+                        return (b && (b.id === BADGE_ID || b.name === BADGE_NAME));
+                    });
+                    if (match) {
+                        var fromCatalog = match.xcReward != null ? match.xcReward
+                                        : match.xcValue  != null ? match.xcValue
+                                        : match.xc       != null ? match.xc : null;
+                        if (typeof fromCatalog === 'number' && fromCatalog >= 0) {
+                            resolvedXc = fromCatalog;
+                            xcSource = 'mcBadges-catalog';
+                        }
+                    }
+                }
+            } catch(e) {}
+
             // Award.
             var entry = {
                 id: BADGE_ID,
@@ -19241,7 +19263,7 @@
                 type: 'signature',
                 category: 'Signature',
                 icon: '🎓',
-                xcValue: 5000,
+                xcValue: resolvedXc,
                 awardedAt: new Date().toISOString(),
                 awardedBy: 'auto-onboarding'
             };
@@ -19256,7 +19278,7 @@
                         badgeId: BADGE_ID,
                         badgeName: BADGE_NAME,
                         category: 'Signature',
-                        xcValue: 5000,
+                        xcValue: resolvedXc,
                         reason: 'PFLX onboarding completed',
                         at: Date.now()
                     });
@@ -19277,7 +19299,7 @@
                 }
             } catch(e) {}
 
-            console.log('[PFLX] PFLX User Cert auto-awarded to ' + (p.brand || p.name));
+            console.log('[PFLX] PFLX User Cert auto-awarded to ' + (p.brand || p.name) + ' (xc=' + resolvedXc + ', source=' + xcSource + ')');
         }
         window.pflxAwardOnboardingSignature = pflxAwardOnboardingSignature;
 
