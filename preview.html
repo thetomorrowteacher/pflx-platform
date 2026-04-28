@@ -28963,6 +28963,14 @@
             window.PFLX_LOADING.hide = function () {
               stopLoadingMusic(false);
               if (loadingObserver) { loadingObserver.disconnect(); loadingObserver = null; }
+              // Mark the initial loading sequence as complete on the first hide.
+              // X-Bot briefing audio (toast SFX + ElevenLabs TTS) is gated on
+              // this flag so it doesn't pile up on top of the loading music
+              // during boot.
+              if (!window.pflxInitialLoadingDone) {
+                window.pflxInitialLoadingDone = true;
+                console.log('[PFLX] Initial loading complete — briefing audio unlocked');
+              }
               playGlitchTransition(function () {
                 origHide.call(window.PFLX_LOADING);
               });
@@ -29055,7 +29063,9 @@
                 el.style.transform = 'translateY(0)';
               });
             });
-            if (window.pflxPlaySfx) {
+            // Skip the briefing SFX until the initial loading sequence ends —
+            // otherwise it stacks on top of loading music during boot.
+            if (window.pflxPlaySfx && window.pflxInitialLoadingDone) {
               try { window.pflxPlaySfx('xbot-brief'); } catch (e) {
                 try { window.pflxPlaySfx('notify'); } catch (e2) {}
               }
@@ -36723,6 +36733,14 @@ RESPONSE RULES:
 
         // ElevenLabs TTS for briefing
         function speakBriefing(text) {
+            // Don't fire briefing TTS until the initial loading screens end.
+            // (User-initiated replay still works because replayBriefing waits
+            // for the user to click the replay button — which only appears
+            // post-load.)
+            if (!window.pflxInitialLoadingDone) {
+                console.log('[Briefing] Suppressed — waiting for initial loading to end');
+                return;
+            }
             const apiKey = localStorage.getItem('pflx_xbot_elevenlabs_key');
             if (!apiKey) {
                 console.log('[Briefing] No ElevenLabs key — skipping TTS');
