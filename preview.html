@@ -27106,6 +27106,17 @@
                 saveControllerSessions(sessions);
                 return pin;
             }
+            // Regenerate: drop ALL existing PIN entries for this player, then create a fresh one.
+            // Any phone connected with the old PIN will be invalidated on its next ping.
+            function regenerateControllerPIN(playerId, playerName) {
+                var sessions = getControllerSessions();
+                var clean = {};
+                for (var p in sessions) {
+                    if (sessions[p].playerId !== playerId) clean[p] = sessions[p];
+                }
+                saveControllerSessions(clean);
+                return registerControllerPIN(playerId, playerName);
+            }
             function validatePIN(pin) {
                 var sessions = getControllerSessions();
                 return sessions[pin] || null;
@@ -27698,6 +27709,10 @@
             }
 
             // ─── QR Card for Player Dashboard ───────────────────────
+            // Renders one card PER LOGGED-IN PLAYER. The PIN + QR are uniquely
+            // keyed on activeSession.id (or .pin / .brand), so each player has
+            // their own personal pairing code. PIN regen drops the old entry
+            // and issues a fresh 6-digit one.
             function renderQRCard() {
                 var panel = document.getElementById('mc-panel-dashboard');
                 if (!panel) return;
@@ -27710,7 +27725,7 @@
                 var old = document.getElementById('pflx-qr-controller-card');
                 if (old) old.remove();
 
-                var playerId = sess.id || sess.pin || 'player';
+                var playerId = sess.id || sess.pin || sess.brand || 'player';
                 var playerName = sess.brand || sess.name || 'Player';
                 var pin = registerControllerPIN(playerId, playerName);
 
@@ -27719,13 +27734,15 @@
                 var card = document.createElement('div');
                 card.id = 'pflx-qr-controller-card';
                 card.className = 'mc-card pflx-qr-card';
-
-                var qrCanvas = generateQRCanvas(controllerUrl, 160);
+                card.dataset.playerId = playerId;
 
                 card.innerHTML =
-                    '<div class="pflx-qr-card-title">&#x1F4F1; CONNECT YOUR PHONE</div>' +
-                    '<div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:14px;">Scan the QR code or enter the PIN on your phone to connect a controller.</div>' +
-                    '<div class="pflx-qr-code-box" id="pflx-qr-canvas-holder"></div>' +
+                    '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px;">' +
+                        '<div class="pflx-qr-card-title" style="margin:0;">&#x1F4F1; CONNECT YOUR PHONE</div>' +
+                        '<button class="pflx-qr-regen-btn" id="pflx-qr-regen-btn" title="Generate a new PIN for this player" style="background:rgba(0,240,255,0.08);border:1px solid rgba(0,240,255,0.3);color:var(--cyan);padding:5px 11px;border-radius:6px;font-size:10px;font-weight:700;font-family:\'Share Tech Mono\',monospace;letter-spacing:1px;cursor:pointer;text-transform:uppercase;">&#x21BB; Regen PIN</button>' +
+                    '</div>' +
+                    '<div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:14px;">Personal pairing code for <strong style="color:var(--cyan);">' + escapeHtml(playerName) + '</strong>. Scan the QR or enter the PIN on your phone.</div>' +
+                    '<div class="pflx-qr-code-box" id="pflx-qr-canvas-holder" style="min-width:184px;min-height:184px;display:flex;align-items:center;justify-content:center;"></div>' +
                     '<div class="pflx-qr-pin-display">' + pin + '</div>' +
                     '<div style="font-size:10px;color:rgba(255,255,255,0.3);margin-bottom:8px;">Open PFLX on your phone and go to <strong style="color:var(--cyan);">#controller</strong></div>' +
                     '<div class="pflx-qr-status">' +
@@ -27743,9 +27760,29 @@
                     panel.appendChild(card);
                 }
 
-                // Append QR canvas
-                var holder = document.getElementById('pflx-qr-canvas-holder');
-                if (holder) holder.appendChild(qrCanvas);
+                // Append QR canvas — re-fetch holder AFTER card is in DOM,
+                // generate QR fresh each time, defer to next tick so the
+                // browser has actually laid out the card before sizing.
+                setTimeout(function() {
+                    var holder = document.getElementById('pflx-qr-canvas-holder');
+                    if (!holder) return;
+                    holder.innerHTML = '';
+                    var qrCanvas = generateQRCanvas(controllerUrl, 160);
+                    if (qrCanvas) holder.appendChild(qrCanvas);
+                }, 0);
+
+                // Wire the regenerate button
+                var regenBtn = document.getElementById('pflx-qr-regen-btn');
+                if (regenBtn) {
+                    regenBtn.onclick = function() {
+                        if (typeof pflxPlaySfx === 'function') { try { pflxPlaySfx('click'); } catch(e) {} }
+                        regenerateControllerPIN(playerId, playerName);
+                        renderQRCard(); // re-render with fresh PIN + QR
+                        if (typeof pflxToast === 'function') {
+                            try { pflxToast('New PIN generated for ' + playerName, 'success'); } catch(e) {}
+                        }
+                    };
+                }
             }
 
             // ─── Host: Send Prompt to Controllers ───────────────────
@@ -27810,6 +27847,7 @@
             window.pflxCtrlHostPing = hostPingControllers;
             window.pflxCtrlRenderQRCard = renderQRCard;
             window.pflxCtrlRegisterPIN = registerControllerPIN;
+            window.pflxCtrlRegeneratePIN = regenerateControllerPIN;
             window.pflxCtrlGenerateQR = generateQRCanvas;
         })();
 
