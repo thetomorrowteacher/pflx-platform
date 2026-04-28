@@ -27742,7 +27742,7 @@
                         '<button class="pflx-qr-regen-btn" id="pflx-qr-regen-btn" title="Generate a new PIN for this player" style="background:rgba(0,240,255,0.08);border:1px solid rgba(0,240,255,0.3);color:var(--cyan);padding:5px 11px;border-radius:6px;font-size:10px;font-weight:700;font-family:\'Share Tech Mono\',monospace;letter-spacing:1px;cursor:pointer;text-transform:uppercase;">&#x21BB; Regen PIN</button>' +
                     '</div>' +
                     '<div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:14px;">Personal pairing code for <strong style="color:var(--cyan);">' + escapeHtml(playerName) + '</strong>. Scan the QR or enter the PIN on your phone.</div>' +
-                    '<div class="pflx-qr-code-box" id="pflx-qr-canvas-holder" style="min-width:184px;min-height:184px;display:flex;align-items:center;justify-content:center;"></div>' +
+                    '<div class="pflx-qr-code-box" id="pflx-qr-canvas-holder" style="display:inline-flex;align-items:center;justify-content:center;width:184px;height:184px;padding:12px;background:#fff;border-radius:10px;margin:0 auto 12px;box-sizing:border-box;"></div>' +
                     '<div class="pflx-qr-pin-display">' + pin + '</div>' +
                     '<div style="font-size:10px;color:rgba(255,255,255,0.3);margin-bottom:8px;">Open PFLX on your phone and go to <strong style="color:var(--cyan);">#controller</strong></div>' +
                     '<div class="pflx-qr-status">' +
@@ -27760,16 +27760,30 @@
                     panel.appendChild(card);
                 }
 
-                // Append QR canvas — re-fetch holder AFTER card is in DOM,
-                // generate QR fresh each time, defer to next tick so the
-                // browser has actually laid out the card before sizing.
-                setTimeout(function() {
+                // Append QR canvas — load the CDN lib first if needed, then generate.
+                // We re-fetch the holder by id every time so a stale reference can't
+                // ghost the canvas off-screen.
+                function _placeQR() {
                     var holder = document.getElementById('pflx-qr-canvas-holder');
                     if (!holder) return;
                     holder.innerHTML = '';
                     var qrCanvas = generateQRCanvas(controllerUrl, 160);
-                    if (qrCanvas) holder.appendChild(qrCanvas);
-                }, 0);
+                    if (qrCanvas) {
+                        // Defensive sizing in case the flex container stretches it.
+                        qrCanvas.style.flex = '0 0 auto';
+                        qrCanvas.style.maxWidth = '160px';
+                        qrCanvas.style.maxHeight = '160px';
+                        holder.appendChild(qrCanvas);
+                    }
+                }
+                if (typeof _loadQRLib === 'function') {
+                    _loadQRLib(_placeQR);
+                } else {
+                    setTimeout(_placeQR, 0);
+                }
+                // Belt-and-suspenders: also try a moment later in case the lib
+                // arrived between the call and rendering finishing.
+                setTimeout(_placeQR, 800);
 
                 // Wire the regenerate button
                 var regenBtn = document.getElementById('pflx-qr-regen-btn');
