@@ -15836,6 +15836,16 @@
 
             console.log('[PFLX SSO] Session active:', activeSession);
 
+            // ── Auto-award PFLX User Certification (Signature) on first login ──
+            // Every player who onboards + logs in receives this once. Skips
+            // hosts/teachers/admins (the cert is for student certification).
+            try {
+                var _isStudentLikeRole = !(activeSession.role && /admin|host|teacher|instructor/i.test(activeSession.role));
+                if (_isStudentLikeRole) {
+                    pflxAwardOnboardingSignature(activeSession);
+                }
+            } catch (_awardErr) { console.warn('[PFLX] auto-signature error', _awardErr); }
+
             // ── Reset role to match user's actual role on login ──
             // Prevents stale pflx_active_role="player" from overriding a host login
             var _loginRole = (activeSession.role || '').toLowerCase();
@@ -19175,6 +19185,101 @@
         }
         window.mcRenderPlayerBadges = mcRenderPlayerBadges;
         window.mcRemovePlayerBadge = mcRemovePlayerBadge;
+
+        // Auto-award the PFLX User Certification (Signature tier) on a player's
+        // first onboarding/login. Idempotent: re-running on subsequent logins is
+        // a no-op once the badge is already on the player.
+        function pflxAwardOnboardingSignature(session) {
+            if (!session) return;
+            var BADGE_ID = 'pflx-user-cert';
+            var BADGE_NAME = 'PFLX User Cert';
+
+            // Resolve the mcPlayers record. If the player isn't tracked yet
+            // (e.g. anonymous PlayerPool signup), create a minimal record so
+            // the badge persists and X-Coin can find them by id.
+            if (typeof mcPlayers === 'undefined') return;
+            var p = null;
+            if (session.id) p = mcPlayers.find(function(pl) { return pl.id === session.id; });
+            if (!p && session.brand) p = mcPlayers.find(function(pl) { return pl.brand === session.brand || pl.name === session.brand; });
+            if (!p) {
+                p = {
+                    id: session.id || ('player-' + Date.now() + '-' + Math.random().toString(36).slice(2,8)),
+                    name: session.name || session.brand || 'Player',
+                    brand: session.brand || '',
+                    cohort: session.cohort || 'PlayerPool',
+                    pathway: session.pathway || '',
+                    email: session.email || '',
+                    pin: session.pin || '',
+                    role: session.role || 'Student',
+                    xc: session.xc || 0,
+                    level: session.level || 1,
+                    image: session.image || '',
+                    studioId: session.studioId || '',
+                    joinedAt: new Date().toISOString().split('T')[0],
+                    badges: []
+                };
+                mcPlayers.push(p);
+                // Backfill the session id if it was missing.
+                if (!session.id) {
+                    session.id = p.id;
+                    try { window.activeSession = session; } catch(e) {}
+                }
+            }
+            if (!Array.isArray(p.badges)) p.badges = [];
+
+            // Idempotency check — handle both string and object shapes.
+            var alreadyHas = p.badges.some(function(b) {
+                if (typeof b === 'string') return b === BADGE_ID || b === BADGE_NAME;
+                return b && (b.id === BADGE_ID || b.name === BADGE_NAME);
+            });
+            if (alreadyHas) return;
+
+            // Award.
+            var entry = {
+                id: BADGE_ID,
+                name: BADGE_NAME,
+                type: 'signature',
+                category: 'Signature',
+                icon: '🎓',
+                xcValue: 5000,
+                awardedAt: new Date().toISOString(),
+                awardedBy: 'auto-onboarding'
+            };
+            p.badges.push(entry);
+            try { mcSaveData('players'); } catch(e) {}
+
+            // Broadcast to sub-apps so X-Coin updates the wallet/leaderboard.
+            try {
+                if (typeof mcBroadcastToApps === 'function') {
+                    mcBroadcastToApps('badge_award', {
+                        playerId: p.id,
+                        badgeId: BADGE_ID,
+                        badgeName: BADGE_NAME,
+                        category: 'Signature',
+                        xcValue: 5000,
+                        reason: 'PFLX onboarding completed',
+                        at: Date.now()
+                    });
+                }
+            } catch(e) {}
+
+            // Bump session badge count so the toolbar reflects it immediately.
+            try {
+                session.digitalBadges = (session.digitalBadges || 0) + 1;
+                window.activeSession = session;
+            } catch(e) {}
+
+            // Player feedback.
+            try { if (typeof pflxPlaySfx === 'function') pflxPlaySfx('badge'); } catch(e) {}
+            try {
+                if (typeof pflxToast === 'function') {
+                    pflxToast('🎓 PFLX User Certification awarded — welcome aboard!', 'success');
+                }
+            } catch(e) {}
+
+            console.log('[PFLX] PFLX User Cert auto-awarded to ' + (p.brand || p.name));
+        }
+        window.pflxAwardOnboardingSignature = pflxAwardOnboardingSignature;
 
         function mcClosePlayerForm() {
             document.getElementById('mc-player-edit-modal').style.display = 'none';
