@@ -7737,6 +7737,18 @@
                                             </div>
                                         </div>
 
+                                        <!-- ═══ BADGES ═══ -->
+                                        <div style="border-top:1px solid rgba(0,212,255,0.1);padding-top:16px;margin-bottom:16px;">
+                                            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+                                                <div style="font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;color:var(--cyan);letter-spacing:1px;">BADGES</div>
+                                                <span id="mc-player-form-badges-count" style="font-size:11px;color:rgba(255,255,255,0.4);font-family:'Share Tech Mono',monospace;">0 awarded</span>
+                                            </div>
+                                            <div id="mc-player-form-badges-list" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;background:rgba(10,18,40,0.4);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:8px;">
+                                                <div style="color:rgba(255,255,255,0.3);font-size:12px;text-align:center;padding:14px;">No badges awarded yet.</div>
+                                            </div>
+                                            <div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:6px;">Click the &times; on any badge to revoke it. Saved when you click <strong>Save Player</strong>.</div>
+                                        </div>
+
                                         <!-- Save / Cancel -->
                                         <div style="display:flex;gap:12px;justify-content:flex-end;">
                                             <button onclick="mcClosePlayerForm()" style="padding:10px 20px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:rgba(255,255,255,0.5);font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
@@ -19091,7 +19103,78 @@
             }
             var modal = document.getElementById('mc-player-edit-modal');
             modal.style.display = 'flex';
+            // Populate the BADGES section with this player's awarded badges.
+            try { mcRenderPlayerBadges(p); } catch(e) { console.warn('[MC] renderPlayerBadges error', e); }
         }
+
+        // Render the player's badges in the edit modal with a × button per badge.
+        // Handles both data shapes used in this codebase:
+        //   - string entries (e.g. "Personal Branding L1") — older code path
+        //   - object entries { id, type, category, name, awardedAt, awardedBy }
+        function mcRenderPlayerBadges(player) {
+            var listEl = document.getElementById('mc-player-form-badges-list');
+            var countEl = document.getElementById('mc-player-form-badges-count');
+            if (!listEl) return;
+            var badges = (player && Array.isArray(player.badges)) ? player.badges : [];
+            if (countEl) countEl.textContent = badges.length + ' awarded';
+            if (badges.length === 0) {
+                listEl.innerHTML = '<div style="color:rgba(255,255,255,0.3);font-size:12px;text-align:center;padding:14px;">No badges awarded yet.</div>';
+                return;
+            }
+            // Lookup helper: find a richer record in mcBadges by id / name / category.
+            function lookup(b) {
+                var key = (typeof b === 'string') ? b : (b && (b.id || b.name || b.category || b.type));
+                if (!key || typeof mcBadges === 'undefined' || !Array.isArray(mcBadges)) return null;
+                return mcBadges.find(function(mb) { return mb.id === key || mb.name === key || mb.category === key; }) || null;
+            }
+            var html = '';
+            badges.forEach(function(b, idx) {
+                var meta = lookup(b);
+                var name = meta && (meta.name || meta.id) ? (meta.name || meta.id) : (typeof b === 'string' ? b : (b.name || b.id || b.category || b.type || 'Badge'));
+                var icon = (meta && meta.icon) ? meta.icon : (b && b.icon) ? b.icon : '🎖️';
+                var category = (meta && meta.category) ? meta.category : (b && b.category) ? b.category : '';
+                var xc = (meta && meta.xcValue) ? meta.xcValue : (b && b.xc) ? b.xc : 0;
+                var awardedAt = (b && b.awardedAt) ? new Date(b.awardedAt).toLocaleDateString() : '';
+                var sub = [category, xc ? (xc + ' XC') : '', awardedAt].filter(Boolean).join(' · ');
+                html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.05);border-radius:6px;">' +
+                            '<span style="font-size:18px;flex-shrink:0;">' + icon + '</span>' +
+                            '<div style="flex:1;min-width:0;">' +
+                                '<div style="font-size:12px;color:#e0e6ff;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(String(name)) + '</div>' +
+                                (sub ? '<div style="font-size:10px;color:rgba(255,255,255,0.4);font-family:\'Share Tech Mono\',monospace;">' + escapeHtml(sub) + '</div>' : '') +
+                            '</div>' +
+                            '<button onclick="mcRemovePlayerBadge(\'' + escapeHtml(player.id) + '\', ' + idx + ')" title="Revoke this badge" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#ef4444;width:26px;height:26px;border-radius:5px;cursor:pointer;font-size:14px;font-weight:700;flex-shrink:0;display:flex;align-items:center;justify-content:center;padding:0;">&times;</button>' +
+                        '</div>';
+            });
+            listEl.innerHTML = html;
+        }
+
+        // Revoke a single badge from a player. Removes the entry at `idx` from
+        // player.badges, persists, broadcasts to sub-apps so X-Coin/Pathways
+        // can update their leaderboards, and re-renders the modal list.
+        function mcRemovePlayerBadge(playerId, idx) {
+            var p = mcPlayers.find(function(pl) { return pl.id === playerId; });
+            if (!p || !Array.isArray(p.badges)) return;
+            if (idx < 0 || idx >= p.badges.length) return;
+            var removed = p.badges[idx];
+            // Resolve a stable identifier for the broadcast message.
+            var badgeKey = (typeof removed === 'string') ? removed : (removed && (removed.id || removed.name || removed.category || removed.type)) || '';
+            // Confirm with the host (revoking is a destructive op).
+            var label = (typeof removed === 'string') ? removed : (removed && (removed.name || removed.id || removed.category || removed.type)) || 'this badge';
+            if (typeof confirm === 'function' && !confirm('Revoke "' + label + '" from ' + (p.brand || p.name || 'this player') + '?')) return;
+            p.badges.splice(idx, 1);
+            try { mcSaveData('players'); } catch(e) {}
+            try {
+                if (typeof mcBroadcastToApps === 'function') {
+                    mcBroadcastToApps('badge_revoke', { playerId: playerId, badgeId: badgeKey, byHost: true, at: Date.now() });
+                }
+            } catch(e) {}
+            try { if (typeof pflxPlaySfx === 'function') pflxPlaySfx('delete'); } catch(e) {}
+            try { if (typeof pflxToast === 'function') pflxToast('Badge revoked', 'success'); } catch(e) {}
+            // Re-render the list to reflect the change.
+            mcRenderPlayerBadges(p);
+        }
+        window.mcRenderPlayerBadges = mcRenderPlayerBadges;
+        window.mcRemovePlayerBadge = mcRemovePlayerBadge;
 
         function mcClosePlayerForm() {
             document.getElementById('mc-player-edit-modal').style.display = 'none';
