@@ -28889,7 +28889,19 @@
           window.pflxLoadingPlaylist = window.pflxLoadingPlaylist || [];
           var loadingAudio = null;
           var loadingTrackIdx = 0;
+          // Silence loading music whenever the live stream goes active.
+          window.addEventListener('pflx-livestream-toggle', function (ev) {
+            if (ev && ev.detail && ev.detail.active && loadingAudio) {
+              try { loadingAudio.pause(); } catch (e) {}
+              loadingAudio = null;
+            }
+          });
           function startLoadingMusic() {
+            // Hard rule: never start loading music while the live stream is on air.
+            if (window.pflxLiveStreamActive) {
+              console.log('[PFLX] Loading music suppressed — livestream is active');
+              return;
+            }
             var playlist = window.pflxLoadingPlaylist;
             if (!playlist.length) return;
             if (loadingAudio) stopLoadingMusic(true);
@@ -30323,9 +30335,10 @@
           function pauseAllBGMusic() {
             if (liveStreamPlaying) return;
             liveStreamPlaying = true;
+            window.pflxLiveStreamActive = true;
             if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = null; }
 
-            // Fully pause (not just duck) background music
+            // Fully pause (not just duck) background music — every channel.
             if (typeof SE !== 'undefined') {
               if (SE.bgAudio) {
                 bgMusicWasPaused = SE.bgAudio.paused;
@@ -30340,12 +30353,31 @@
                 if (!ambientWasPaused) { try { SE.ambientAudio.pause(); } catch (e) {} }
               }
             }
-            console.log('[PFLX] Livestream playing — BG music paused');
+            // Legacy oscillator engine.
+            try {
+              if (window.pflxMusic) {
+                if (window.pflxMusic.stop) window.pflxMusic.stop();
+                else if (window.pflxMusic.pause) window.pflxMusic.pause();
+              }
+            } catch (e) {}
+            // Notify any same-page audio source running in a different IIFE
+            // (loading music, pip widgets, etc.) — they listen for this event
+            // and silence themselves.
+            try { window.dispatchEvent(new CustomEvent('pflx-livestream-toggle', { detail: { active: true } })); } catch (e) {}
+            // Notify all sub-app iframes (X-Coin, Battle Arena, Pathways, DarkCampus)
+            // so they can mute their own audio while the host stream is on air.
+            try {
+              if (typeof mcBroadcastToApps === 'function') {
+                mcBroadcastToApps('livestream_active', { active: true });
+              }
+            } catch (e) {}
+            console.log('[PFLX] Livestream playing — ALL background audio muted');
           }
 
           function scheduleResumeBGMusic() {
             if (!liveStreamPlaying) return;
             liveStreamPlaying = false;
+            window.pflxLiveStreamActive = false;
             // 5-second delay before resuming
             if (resumeTimer) clearTimeout(resumeTimer);
             resumeTimer = setTimeout(function () {
@@ -30363,6 +30395,13 @@
               if (!ambientWasPaused && SE.ambientAudio) {
                 try { SE.ambientAudio.play().catch(function () {}); } catch (e) {}
               }
+              // Tell other audio sources they can resume.
+              try { window.dispatchEvent(new CustomEvent('pflx-livestream-toggle', { detail: { active: false } })); } catch (e) {}
+              try {
+                if (typeof mcBroadcastToApps === 'function') {
+                  mcBroadcastToApps('livestream_active', { active: false });
+                }
+              } catch (e) {}
               console.log('[PFLX] BG music resumed after 5s livestream pause');
             }, 5000);
           }
@@ -35604,6 +35643,8 @@ RESPONSE RULES:
 
         // ── Playback Engine — play music for current tab ────────────
         function sePlayForTab(tab) {
+            // Hard rule: never start BG music while the live stream is on air.
+            if (window.pflxLiveStreamActive) return;
             SE.currentTab = tab;
             if (!SE.config.bgmEnabled || !SE.playerPrefs.musicOn || SE.playerPrefs.muteAll) {
                 if (SE.bgAudio) { SE.bgAudio.pause(); SE.bgAudio.currentTime = 0; }
