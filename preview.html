@@ -6003,7 +6003,7 @@
             </div>
             <div style="position:relative;">
                 <button class="fullscreen-btn" id="music-toggle" title="Audio Controls" style="font-size:14px;" onclick="seTogglePlayerPanel()">&#x266B;</button>
-                <div id="se-player-panel" style="display:none;position:absolute;top:40px;right:0;width:260px;background:#0d1117;border:1px solid rgba(0,240,255,0.2);border-radius:14px;padding:16px;z-index:100000;box-shadow:0 8px 32px rgba(0,0,0,0.5);">
+                <div id="se-player-panel" style="display:none;position:fixed;top:64px;right:16px;width:260px;background:#0d1117;border:1px solid rgba(0,240,255,0.2);border-radius:14px;padding:16px;z-index:100000;box-shadow:0 8px 32px rgba(0,0,0,0.5);">
                     <div style="font-family:'Orbitron',sans-serif;font-size:10px;font-weight:800;color:var(--cyan);letter-spacing:1px;margin-bottom:12px;">AUDIO CONTROLS</div>
                     <div style="display:flex;flex-direction:column;gap:10px;">
                         <!-- Music toggle + volume -->
@@ -27760,30 +27760,71 @@
                     panel.appendChild(card);
                 }
 
-                // Append QR canvas — load the CDN lib first if needed, then generate.
-                // We re-fetch the holder by id every time so a stale reference can't
-                // ghost the canvas off-screen.
+                // Render QR via image-based public APIs first (no JS lib dependency,
+                // works even when CDN scripts are blocked). Multi-provider fallback
+                // chain: api.qrserver.com → quickchart.io → goqr.me → finally the
+                // canvas-based CDN encoder.
                 function _placeQR() {
                     var holder = document.getElementById('pflx-qr-canvas-holder');
                     if (!holder) return;
                     holder.innerHTML = '';
-                    var qrCanvas = generateQRCanvas(controllerUrl, 160);
-                    if (qrCanvas) {
-                        // Defensive sizing in case the flex container stretches it.
-                        qrCanvas.style.flex = '0 0 auto';
-                        qrCanvas.style.maxWidth = '160px';
-                        qrCanvas.style.maxHeight = '160px';
-                        holder.appendChild(qrCanvas);
-                    }
+
+                    var encoded = encodeURIComponent(controllerUrl);
+                    var providers = [
+                        'https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=0&data=' + encoded,
+                        'https://quickchart.io/qr?text=' + encoded + '&size=160&margin=0',
+                        'https://chart.googleapis.com/chart?chs=160x160&cht=qr&chld=L|0&chl=' + encoded
+                    ];
+
+                    var img = document.createElement('img');
+                    img.alt = 'QR code — scan to connect controller';
+                    img.width = 160;
+                    img.height = 160;
+                    img.style.cssText = 'display:block;width:160px;height:160px;flex:0 0 auto;background:#fff;';
+                    var idx = 0;
+                    img.onerror = function() {
+                        idx++;
+                        if (idx < providers.length) {
+                            img.src = providers[idx];
+                        } else {
+                            // All image providers failed — last-ditch canvas via CDN library.
+                            img.style.display = 'none';
+                            try {
+                                var qrCanvas = generateQRCanvas(controllerUrl, 160);
+                                if (qrCanvas) {
+                                    qrCanvas.style.flex = '0 0 auto';
+                                    qrCanvas.style.maxWidth = '160px';
+                                    qrCanvas.style.maxHeight = '160px';
+                                    holder.appendChild(qrCanvas);
+                                    // Try the lib retry path so canvas updates when JS lib lands
+                                    if (typeof _loadQRLib === 'function') {
+                                        _loadQRLib(function() {
+                                            try {
+                                                var h2 = document.getElementById('pflx-qr-canvas-holder');
+                                                if (!h2) return;
+                                                h2.innerHTML = '';
+                                                var c2 = generateQRCanvas(controllerUrl, 160);
+                                                if (c2) {
+                                                    c2.style.flex = '0 0 auto';
+                                                    c2.style.maxWidth = '160px';
+                                                    c2.style.maxHeight = '160px';
+                                                    h2.appendChild(c2);
+                                                }
+                                            } catch(e) {}
+                                        });
+                                    }
+                                } else {
+                                    holder.innerHTML = '<div style="font-size:11px;color:#666;text-align:center;padding:0 8px;">QR unavailable<br>Use the PIN below</div>';
+                                }
+                            } catch(e) {
+                                holder.innerHTML = '<div style="font-size:11px;color:#666;text-align:center;padding:0 8px;">QR unavailable<br>Use the PIN below</div>';
+                            }
+                        }
+                    };
+                    img.src = providers[0];
+                    holder.appendChild(img);
                 }
-                if (typeof _loadQRLib === 'function') {
-                    _loadQRLib(_placeQR);
-                } else {
-                    setTimeout(_placeQR, 0);
-                }
-                // Belt-and-suspenders: also try a moment later in case the lib
-                // arrived between the call and rendering finishing.
-                setTimeout(_placeQR, 800);
+                _placeQR();
 
                 // Wire the regenerate button
                 var regenBtn = document.getElementById('pflx-qr-regen-btn');
@@ -35578,7 +35619,27 @@ RESPONSE RULES:
         function seTogglePlayerPanel() {
             var panel = document.getElementById('se-player-panel');
             if (!panel) return;
-            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+            var willOpen = panel.style.display === 'none';
+            panel.style.display = willOpen ? 'block' : 'none';
+            // Position the fixed panel right under the ♪ button each open so it
+            // tracks toolbar moves, fullscreen changes, viewport resizes etc.
+            if (willOpen) {
+                try {
+                    var btn = document.getElementById('music-toggle');
+                    if (btn) {
+                        var r = btn.getBoundingClientRect();
+                        var panelW = 260;
+                        var top = Math.round(r.bottom + 8);
+                        var right = Math.max(8, Math.round(window.innerWidth - r.right));
+                        // Don't let the panel run off the left edge on tiny viewports
+                        if (window.innerWidth - right - panelW < 8) {
+                            right = Math.max(8, window.innerWidth - panelW - 8);
+                        }
+                        panel.style.top = top + 'px';
+                        panel.style.right = right + 'px';
+                    }
+                } catch(e) {}
+            }
             // Load prefs into UI
             var musicEl = document.getElementById('se-player-music');
             var sfxEl = document.getElementById('se-player-sfx');
