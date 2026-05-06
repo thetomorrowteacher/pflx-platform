@@ -29487,17 +29487,33 @@
             'Expert': 4, 'Master': 6, 'Legend': 8, 'Mythic': 10
           };
 
-          // App unlock thresholds: data-view name => minimum numeric rank required
-          var APP_UNLOCK = {
+          // App unlock thresholds: data-view name => minimum numeric rank required.
+          // Default: every app accessible to all players (level 1). Hosts can
+          // re-enable per-app rank gating via localStorage 'pflx_app_unlock'
+          // which holds an object overriding any of the keys below.
+          // (A future Evolution Rankings UI panel will edit this directly.)
+          var APP_UNLOCK_DEFAULT = {
             'home':             1,
             'mission-control':  1,
             'arena':            1,
-            'xcoin':            2,
-            'pathways':         2,
-            'darkcampus':       3,
-            'portfolio':        3,
+            'xcoin':            1,
+            'pathways':         1,
+            'darkcampus':       1,
+            'portfolio':        1,
             'ai-center':        1,
             'settings':         1
+          };
+          var APP_UNLOCK = Object.assign({}, APP_UNLOCK_DEFAULT);
+          try {
+            var _ovr = JSON.parse(localStorage.getItem('pflx_app_unlock') || 'null');
+            if (_ovr && typeof _ovr === 'object') Object.assign(APP_UNLOCK, _ovr);
+          } catch (e) {}
+          // Helper: hosts can call this from console to gate / ungate apps
+          //   pflxSetAppUnlock('xcoin', 3)   → require Apprentice for X-Coin
+          //   pflxSetAppUnlock('xcoin', 1)   → all players can use X-Coin
+          window.pflxSetAppUnlock = function (appKey, level) {
+            APP_UNLOCK[appKey] = (typeof level === 'number') ? level : 1;
+            try { localStorage.setItem('pflx_app_unlock', JSON.stringify(APP_UNLOCK)); } catch (e) {}
           };
 
           function getPlayerLevel() {
@@ -40779,10 +40795,19 @@ RESPONSE RULES:
         // ──────────────────────────────────────────────────────────────
         // pflxOpenEvoRankings: opens the Evolution Rankings page. Lives in
         // Mission Control's gamemgmt panel; Settings → "Evolution Rankings"
-        // and MC sidebar both route here. Host-only.
+        // and MC sidebar both route here. Host-only. Uses the GLOBAL host
+        // helpers (pflxIsHost / pflxIsHostRole) so it works from any IIFE.
         // ──────────────────────────────────────────────────────────────
         window.pflxOpenEvoRankings = function () {
-            if (!isHost()) {
+            var isAHost = false;
+            try {
+                if (typeof window.pflxIsHost === 'function' && window.pflxIsHost()) isAHost = true;
+                if (!isAHost && typeof window.pflxIsHostRole === 'function') {
+                    var sess = window.activeSession || {};
+                    if (window.pflxIsHostRole(sess.role)) isAHost = true;
+                }
+            } catch (e) {}
+            if (!isAHost) {
                 try {
                     if (typeof window.pflxShowSaveToast === 'function') {
                         window.pflxShowSaveToast('Evolution Rankings is host-only', 'error');
