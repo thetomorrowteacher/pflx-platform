@@ -40806,5 +40806,492 @@ RESPONSE RULES:
         }
     })();
     </script>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         PFLX PLAYER MANAGEMENT EXTENSIONS  (host-only)
+         ──────────────────────────────────────────────────────────────────
+         Adds full CRUD + bulk import + edit / multi-cohort / bypass-onboard /
+         badge mgmt / rank override to the Settings → Players sub-tab. Every
+         change persists to localStorage AND broadcasts pflx_force_identity_sync
+         to all iframes so sub-apps re-render with the updated profile. Also
+         appends an activity entry to each player's journey log.
+
+         Public:
+           hmcAddPlayer()          → open Add modal
+           hmcBulkAdd()            → open bulk-paste modal
+           hmcEditPlayer(id)       → open Edit modal (full profile)
+           hmcDeletePlayer(id)     → confirm + remove
+           hmcToggleBypass(id)     → flip onboardingComplete
+           hmcEditBadges(id)       → open badge editor
+           hmcSetRankOverride(id)  → dropdown promote/demote
+           pflxLogActivity(id, type, payload)
+
+         Wrapped (persist + broadcast on every call):
+           hmcAwardXC, hmcDeductXC, hmcPromotePlayer, hmcFreezePlayer,
+           hmcResetPin
+    ═══════════════════════════════════════════════════════════════════ -->
+    <script>
+    (function () {
+        var PLAYERS_KEY = 'pflx_players_local_v1';
+
+        function isHost() {
+            return typeof window.pflxIsHost === 'function' && window.pflxIsHost();
+        }
+
+        // ── Persist all user-modified players to localStorage ──
+        function persistPlayers() {
+            try {
+                if (typeof PLAYERS === 'undefined') return;
+                var saved = PLAYERS.filter(function (p) {
+                    return p && (p.role === 'player' || p.__pflxCustom || p.claimed);
+                }).map(function (p) {
+                    // Strip any heavy fields we don't want to bloat localStorage
+                    var clone = Object.assign({}, p);
+                    if (clone.activity && clone.activity.length > 200) {
+                        clone.activity = clone.activity.slice(-200);
+                    }
+                    return clone;
+                });
+                localStorage.setItem(PLAYERS_KEY, JSON.stringify(saved));
+            } catch (e) { console.warn('[player-mgmt] persist failed', e); }
+        }
+        window.pflxPersistPlayers = persistPlayers;
+
+        // ── Broadcast a player change to all iframes + active session ──
+        function broadcastPlayerChange(player) {
+            if (!player) return;
+            persistPlayers();
+            // If the changed player IS the active session, sync activeSession + toolbar
+            if (window.activeSession && (window.activeSession.id === player.id || window.activeSession.brand === player.brand)) {
+                window.activeSession.xc = player.xc || 0;
+                window.activeSession.totalXcoin = Math.max(window.activeSession.totalXcoin || 0, player.xc || 0);
+                window.activeSession.cohort = Array.isArray(player.cohorts) ? player.cohorts.join(', ') : (player.cohort || 'PlayerPool');
+                window.activeSession.cohorts = Array.isArray(player.cohorts) ? player.cohorts : [player.cohort || 'PlayerPool'];
+                window.activeSession.digitalBadges = player.digitalBadges || 0;
+                window.activeSession.badgeCounts = player.badgeCounts || null;
+                window.activeSession.level = player.level || 1;
+                window.activeSession.onboardingComplete = player.onboardingComplete !== false;
+                window.activeSession.rank = player.rankOverride || window.activeSession.rank || null;
+                try { if (typeof updateToolbarStatus === 'function') updateToolbarStatus(); } catch (e) {}
+                try { if (typeof window.pflxIdentityPersist === 'function') window.pflxIdentityPersist(window.activeSession); } catch (e) {}
+                // Re-broadcast the new identity to iframes
+                document.querySelectorAll('iframe').forEach(function (f) {
+                    if (!f.contentWindow) return;
+                    try {
+                        f.contentWindow.postMessage(JSON.stringify({
+                            type: 'pflx_identity_broadcast',
+                            user: window.activeSession,
+                            role: window.pflxRole || 'player',
+                            forceSync: true
+                        }), '*');
+                    } catch (e) {}
+                });
+            } else {
+                // Different player — tell all iframes to drop cache and re-request identity
+                document.querySelectorAll('iframe').forEach(function (f) {
+                    if (!f.contentWindow) return;
+                    try {
+                        f.contentWindow.postMessage(JSON.stringify({
+                            type: 'pflx_force_identity_sync',
+                            playerId: player.id
+                        }), '*');
+                    } catch (e) {}
+                });
+            }
+            try { logActivity(player.id, 'profile_updated', { by: window.activeSession && window.activeSession.id || null }); } catch (e) {}
+        }
+
+        // ── Activity log: append to player's journey ──
+        function logActivity(playerId, type, payload) {
+            try {
+                if (typeof PLAYERS === 'undefined') return;
+                var p = PLAYERS.find(function (x) { return x.id === playerId; });
+                if (!p) return;
+                p.activity = p.activity || [];
+                p.activity.push({ ts: Date.now(), type: type, payload: payload || {} });
+                if (p.activity.length > 200) p.activity = p.activity.slice(-200);
+                persistPlayers();
+            } catch (e) {}
+        }
+        window.pflxLogActivity = logActivity;
+
+        // ── Modal helpers ──
+        function openModal(html, onMount) {
+            var overlay = document.createElement('div');
+            overlay.className = 'pflx-pm-overlay';
+            overlay.style.cssText = 'position:fixed;inset:0;z-index:99998;background:rgba(2,6,23,0.85);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;';
+            var card = document.createElement('div');
+            card.style.cssText = 'background:linear-gradient(135deg,#0a1228,#0f1830);border:1px solid rgba(0,240,255,0.3);border-radius:14px;padding:24px;width:min(640px,92vw);max-height:90vh;overflow-y:auto;box-shadow:0 12px 40px rgba(0,0,0,0.6);color:#e0e6ff;';
+            card.innerHTML = html;
+            overlay.appendChild(card);
+            document.body.appendChild(overlay);
+            overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+            if (typeof onMount === 'function') onMount(card, function close() { overlay.remove(); });
+            return overlay;
+        }
+
+        function inputCss() {
+            return 'background:rgba(10,18,40,0.8);border:1px solid rgba(0,240,255,0.18);color:#e0e6ff;padding:8px 10px;border-radius:6px;font-family:Rajdhani,sans-serif;font-size:13px;width:100%;box-sizing:border-box;';
+        }
+        function btnCss(kind) {
+            var bg = kind === 'primary' ? 'linear-gradient(135deg,#00d4ff,#7c3aed)' : kind === 'danger' ? 'rgba(239,68,68,0.18)' : 'transparent';
+            var bd = kind === 'danger' ? '1px solid rgba(239,68,68,0.5)' : kind === 'primary' ? 'none' : '1px solid rgba(138,146,176,0.3)';
+            var fg = kind === 'primary' ? '#fff' : kind === 'danger' ? '#fecaca' : '#e0e6ff';
+            return 'padding:9px 18px;background:' + bg + ';border:' + bd + ';color:' + fg + ';border-radius:8px;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:1.5px;cursor:pointer;font-weight:' + (kind === 'primary' ? '700' : '500') + ';';
+        }
+
+        // ── ADD PLAYER ──
+        window.hmcAddPlayer = function () {
+            if (!isHost()) return;
+            openModal(
+                '<div style="font-family:Orbitron,sans-serif;font-size:14px;letter-spacing:2px;color:#00f0ff;margin-bottom:14px;">ADD PLAYER</div>' +
+                '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">' +
+                  fld('pm-add-fullname', 'Full Name *', '1 / span 2') +
+                  fld('pm-add-brand',    'Brand Name * (≤16, ALL CAPS)') +
+                  fld('pm-add-pin',      'PIN (4-digit)', null, '****') +
+                  fld('pm-add-email',    'Email', '1 / span 2', '', 'email') +
+                  fld('pm-add-cohorts',  'Cohorts (comma-separated)', '1 / span 2', 'PlayerPool, Cohort A') +
+                  selFld('pm-add-role',  'Role', ['Student','Creator','Educator','Explorer','admin','host','teacher']) +
+                  fld('pm-add-xc',       'Starting XC', null, '0', 'number') +
+                  '<label style="grid-column:1 / span 2;display:flex;align-items:center;gap:8px;font-family:Rajdhani,sans-serif;font-size:13px;color:#8a92b0;"><input type="checkbox" id="pm-add-bypass" checked> Mark as onboarded (bypass wizard)</label>' +
+                '</div>' +
+                '<div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end;">' +
+                  '<button id="pm-add-cancel" style="' + btnCss('') + '">CANCEL</button>' +
+                  '<button id="pm-add-save" style="' + btnCss('primary') + '">CREATE PLAYER</button>' +
+                '</div>',
+                function (card, close) {
+                    card.querySelector('#pm-add-cancel').onclick = close;
+                    card.querySelector('#pm-add-save').onclick = function () {
+                        var name = (card.querySelector('#pm-add-fullname').value || '').trim();
+                        var brand = (card.querySelector('#pm-add-brand').value || '').trim().toUpperCase();
+                        var pin = (card.querySelector('#pm-add-pin').value || '').trim() || String(Math.floor(1000 + Math.random() * 9000));
+                        var email = (card.querySelector('#pm-add-email').value || '').trim();
+                        var cohortsRaw = (card.querySelector('#pm-add-cohorts').value || 'PlayerPool').trim();
+                        var role = card.querySelector('#pm-add-role').value || 'Student';
+                        var xc = parseInt(card.querySelector('#pm-add-xc').value, 10) || 0;
+                        var bypass = card.querySelector('#pm-add-bypass').checked;
+                        if (!name)  return shake('pm-add-fullname');
+                        if (!brand) return shake('pm-add-brand');
+                        var cohorts = cohortsRaw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+                        var newP = {
+                            id: 'player-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+                            brand: brand, pin: pin, name: name, email: email,
+                            cohort: cohorts.join(', '), cohorts: cohorts,
+                            role: /admin|host|teacher|instructor/i.test(role) ? role.toLowerCase() : 'player',
+                            xc: xc, totalXcoin: xc, digitalBadges: 0, level: 1, claimed: bypass,
+                            onboardingComplete: bypass, __pflxCustom: true, activity: []
+                        };
+                        PLAYERS.push(newP);
+                        BRANDS[brand] = pin;
+                        broadcastPlayerChange(newP);
+                        if (typeof window.pflxIdentityPersistNewPlayer === 'function') window.pflxIdentityPersistNewPlayer(newP);
+                        if (typeof hmcRenderPlayers === 'function') hmcRenderPlayers();
+                        if (typeof populateBrandSelect === 'function') populateBrandSelect();
+                        try { if (typeof window.pflxShowSaveToast === 'function') window.pflxShowSaveToast('Player created · ' + brand); } catch (e) {}
+                        close();
+                    };
+                }
+            );
+        };
+
+        // ── BULK ADD ──
+        window.hmcBulkAdd = function () {
+            if (!isHost()) return;
+            openModal(
+                '<div style="font-family:Orbitron,sans-serif;font-size:14px;letter-spacing:2px;color:#00f0ff;margin-bottom:8px;">BULK ADD PLAYERS</div>' +
+                '<div style="color:#8a92b0;font-family:Rajdhani,sans-serif;font-size:12px;margin-bottom:14px;line-height:1.5;">Paste one player per line. Supported formats:<br>' +
+                  '<code style="color:#a78bfa;font-family:Share Tech Mono,monospace;font-size:11px;">FullName, Email, BrandName, Cohort</code> · or just <code style="color:#a78bfa;font-family:Share Tech Mono,monospace;font-size:11px;">FullName, Email</code> (Brand auto-derived from name).' +
+                '</div>' +
+                '<textarea id="pm-bulk-text" rows="10" placeholder="Alex Rivera, alex@school.edu, PixelProphet, Cohort 2&#10;Sam Chen, sam@school.edu, CodeCrafter, Cohort 2" style="' + inputCss() + 'font-family:Share Tech Mono,monospace;resize:vertical;"></textarea>' +
+                '<label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-family:Rajdhani,sans-serif;font-size:13px;color:#8a92b0;"><input type="checkbox" id="pm-bulk-bypass" checked> Mark all as onboarded</label>' +
+                '<div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end;">' +
+                  '<button id="pm-bulk-cancel" style="' + btnCss('') + '">CANCEL</button>' +
+                  '<button id="pm-bulk-import" style="' + btnCss('primary') + '">IMPORT</button>' +
+                '</div>' +
+                '<div id="pm-bulk-status" style="margin-top:10px;font-size:11px;color:#8a92b0;font-family:Rajdhani,sans-serif;"></div>',
+                function (card, close) {
+                    card.querySelector('#pm-bulk-cancel').onclick = close;
+                    card.querySelector('#pm-bulk-import').onclick = function () {
+                        var text = card.querySelector('#pm-bulk-text').value || '';
+                        var bypass = card.querySelector('#pm-bulk-bypass').checked;
+                        var status = card.querySelector('#pm-bulk-status');
+                        var lines = text.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+                        var added = 0, skipped = 0;
+                        lines.forEach(function (line) {
+                            var parts = line.split(',').map(function (s) { return s.trim(); });
+                            if (parts.length < 2) { skipped++; return; }
+                            var name = parts[0], email = parts[1];
+                            var brand = parts[2] || (name.split(/\s+/)[0] || 'PLAYER').toUpperCase();
+                            var cohort = parts[3] || 'PlayerPool';
+                            if (PLAYERS.find(function (p) { return p.email && p.email.toLowerCase() === email.toLowerCase(); })) { skipped++; return; }
+                            var pin = String(Math.floor(1000 + Math.random() * 9000));
+                            var newP = {
+                                id: 'player-import-' + Date.now() + '-' + added,
+                                brand: brand, pin: pin, name: name, email: email,
+                                cohort: cohort, cohorts: cohort.split(/[,;]/).map(function (s) { return s.trim(); }).filter(Boolean),
+                                role: 'player', xc: 0, totalXcoin: 0, digitalBadges: 0, level: 1,
+                                claimed: bypass, onboardingComplete: bypass, __pflxCustom: true, activity: []
+                            };
+                            PLAYERS.push(newP);
+                            BRANDS[brand] = pin;
+                            if (typeof window.pflxIdentityPersistNewPlayer === 'function') window.pflxIdentityPersistNewPlayer(newP);
+                            added++;
+                        });
+                        persistPlayers();
+                        if (typeof hmcRenderPlayers === 'function') hmcRenderPlayers();
+                        if (typeof populateBrandSelect === 'function') populateBrandSelect();
+                        status.innerHTML = '<span style="color:#22c55e;">✓ ' + added + ' imported</span>' + (skipped ? ' · <span style="color:#f59e0b;">' + skipped + ' skipped (duplicate or invalid)</span>' : '');
+                        try { if (typeof window.pflxShowSaveToast === 'function') window.pflxShowSaveToast('Bulk import: ' + added + ' players added'); } catch (e) {}
+                    };
+                }
+            );
+        };
+
+        // ── EDIT PLAYER ──
+        window.hmcEditPlayer = function (playerId) {
+            if (!isHost()) return;
+            var p = PLAYERS.find(function (x) { return x.id === playerId; });
+            if (!p) return;
+            var cohortsArr = Array.isArray(p.cohorts) ? p.cohorts : (p.cohort || 'PlayerPool').split(/[,;]/).map(function (s) { return s.trim(); }).filter(Boolean);
+            var ranks = (typeof mcPflxRanks !== 'undefined' && mcPflxRanks) || [];
+            var rankOpts = '<option value="">Auto (by XC)</option>' + ranks.map(function (r) {
+                return '<option value="' + r.id + '"' + (p.rankOverride === r.id ? ' selected' : '') + '>' + (r.icon || '') + ' L' + r.level + ' · ' + r.name + '</option>';
+            }).join('');
+            openModal(
+                '<div style="font-family:Orbitron,sans-serif;font-size:14px;letter-spacing:2px;color:#00f0ff;margin-bottom:14px;">EDIT PLAYER · ' + (p.brand || p.name).replace(/</g, '&lt;') + '</div>' +
+                '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">' +
+                  fld('pm-ed-name',     'Full Name', '1 / span 2', '', 'text', p.name || '') +
+                  fld('pm-ed-brand',    'Brand', null, '', 'text', p.brand || '') +
+                  fld('pm-ed-pin',      'PIN', null, '', 'text', p.pin || '') +
+                  fld('pm-ed-email',    'Email', '1 / span 2', '', 'email', p.email || '') +
+                  fld('pm-ed-cohorts',  'Cohorts (comma-separated, multi-cohort OK)', '1 / span 2', '', 'text', cohortsArr.join(', ')) +
+                  selFld('pm-ed-role',  'Role', ['Student','Creator','Educator','Explorer','admin','host','teacher','instructor'], p.role || 'Student') +
+                  fld('pm-ed-xc',       'XC', null, '', 'number', String(p.xc || 0)) +
+                  fld('pm-ed-level',    'Level', null, '', 'number', String(p.level || 1)) +
+                  '<div style="display:flex;flex-direction:column;gap:4px;font-family:Rajdhani,sans-serif;font-size:11px;color:#8a92b0;">RANK OVERRIDE<select id="pm-ed-rank" style="' + inputCss() + '">' + rankOpts + '</select></div>' +
+                  '<label style="grid-column:1 / span 2;display:flex;align-items:center;gap:8px;font-family:Rajdhani,sans-serif;font-size:13px;color:#8a92b0;"><input type="checkbox" id="pm-ed-bypass"' + (p.onboardingComplete !== false ? ' checked' : '') + '> Onboarding complete (bypass wizard)</label>' +
+                  '<label style="grid-column:1 / span 2;display:flex;align-items:center;gap:8px;font-family:Rajdhani,sans-serif;font-size:13px;color:#8a92b0;"><input type="checkbox" id="pm-ed-frozen"' + (p.frozen ? ' checked' : '') + '> Account frozen</label>' +
+                '</div>' +
+                '<div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.06);font-family:Orbitron,sans-serif;font-size:11px;color:rgba(0,240,255,0.7);letter-spacing:2px;">PROFILE PICTURE</div>' +
+                '<div style="display:flex;align-items:center;gap:14px;margin-top:8px;">' +
+                  '<div id="pm-ed-img-preview" style="width:64px;height:64px;border-radius:50%;background:' + (p.image ? "url('" + p.image.replace(/'/g, "\\'") + "') center/cover" : 'rgba(0,240,255,0.08)') + ';border:1px solid rgba(0,240,255,0.3);flex-shrink:0;"></div>' +
+                  '<div style="flex:1;">' +
+                    '<input type="file" id="pm-ed-img-file" accept="image/*" style="' + inputCss() + 'padding:6px;font-size:12px;">' +
+                    '<button id="pm-ed-img-clear" type="button" style="margin-top:6px;' + btnCss('') + 'padding:6px 12px;font-size:10px;">CLEAR IMAGE</button>' +
+                  '</div>' +
+                '</div>' +
+                '<div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.06);font-family:Orbitron,sans-serif;font-size:11px;color:rgba(0,240,255,0.7);letter-spacing:2px;">DIGITAL BADGES</div>' +
+                '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-top:8px;">' +
+                  fld('pm-ed-bsig', 'Signature', null, '', 'number', String((p.badgeCounts && p.badgeCounts.signature) || 0)) +
+                  fld('pm-ed-bpri', 'Primary',   null, '', 'number', String((p.badgeCounts && p.badgeCounts.primary)   || 0)) +
+                  fld('pm-ed-bprm', 'Premium',   null, '', 'number', String((p.badgeCounts && p.badgeCounts.premium)   || 0)) +
+                  fld('pm-ed-bexe', 'Executive', null, '', 'number', String((p.badgeCounts && p.badgeCounts.executive) || 0)) +
+                '</div>' +
+                '<button id="pm-ed-clear-badges" style="margin-top:8px;' + btnCss('danger') + '">REMOVE ALL BADGES</button>' +
+                '<div style="display:flex;gap:10px;margin-top:18px;justify-content:space-between;">' +
+                  '<button id="pm-ed-delete" style="' + btnCss('danger') + '">DELETE PLAYER</button>' +
+                  '<div style="display:flex;gap:10px;">' +
+                    '<button id="pm-ed-cancel" style="' + btnCss('') + '">CANCEL</button>' +
+                    '<button id="pm-ed-save" style="' + btnCss('primary') + '">SAVE CHANGES</button>' +
+                  '</div>' +
+                '</div>',
+                function (card, close) {
+                    card.querySelector('#pm-ed-cancel').onclick = close;
+                    // Profile picture: read uploaded file as data URL into a stash field
+                    var pendingImg = null;
+                    var fileEl = card.querySelector('#pm-ed-img-file');
+                    var previewEl = card.querySelector('#pm-ed-img-preview');
+                    if (fileEl) {
+                        fileEl.addEventListener('change', function () {
+                            var f = fileEl.files && fileEl.files[0];
+                            if (!f) return;
+                            if (f.size > 1024 * 1024) {
+                                alert('Image too large (>1 MB). Pick a smaller one.');
+                                fileEl.value = '';
+                                return;
+                            }
+                            var reader = new FileReader();
+                            reader.onload = function (ev) {
+                                pendingImg = ev.target.result;
+                                if (previewEl) previewEl.style.background = "url('" + pendingImg + "') center/cover";
+                            };
+                            reader.readAsDataURL(f);
+                        });
+                    }
+                    var clearBtn = card.querySelector('#pm-ed-img-clear');
+                    if (clearBtn) clearBtn.onclick = function () {
+                        pendingImg = '';
+                        if (previewEl) previewEl.style.background = 'rgba(0,240,255,0.08)';
+                        if (fileEl) fileEl.value = '';
+                    };
+                    // Stash on card element for save handler to read
+                    card.__getPendingImg = function () { return pendingImg; };
+                    card.querySelector('#pm-ed-clear-badges').onclick = function () {
+                        ['pm-ed-bsig','pm-ed-bpri','pm-ed-bprm','pm-ed-bexe'].forEach(function (id) {
+                            card.querySelector('#' + id).value = '0';
+                        });
+                    };
+                    card.querySelector('#pm-ed-delete').onclick = function () {
+                        if (!confirm('Permanently delete ' + (p.brand || p.name) + '? This cannot be undone.')) return;
+                        var i = PLAYERS.indexOf(p);
+                        if (i >= 0) PLAYERS.splice(i, 1);
+                        if (p.brand) delete BRANDS[p.brand];
+                        persistPlayers();
+                        if (typeof hmcRenderPlayers === 'function') hmcRenderPlayers();
+                        try { if (typeof window.pflxShowSaveToast === 'function') window.pflxShowSaveToast('Player deleted'); } catch (e) {}
+                        close();
+                    };
+                    card.querySelector('#pm-ed-save').onclick = function () {
+                        var newBrand = (card.querySelector('#pm-ed-brand').value || '').trim().toUpperCase();
+                        var newPin = (card.querySelector('#pm-ed-pin').value || '').trim();
+                        var oldBrand = p.brand;
+                        p.name = (card.querySelector('#pm-ed-name').value || '').trim();
+                        p.brand = newBrand;
+                        p.pin = newPin;
+                        p.email = (card.querySelector('#pm-ed-email').value || '').trim();
+                        var cohortsRaw = (card.querySelector('#pm-ed-cohorts').value || 'PlayerPool').trim();
+                        p.cohorts = cohortsRaw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+                        p.cohort = p.cohorts.join(', ');
+                        p.role = card.querySelector('#pm-ed-role').value || 'Student';
+                        p.xc = parseInt(card.querySelector('#pm-ed-xc').value, 10) || 0;
+                        p.level = parseInt(card.querySelector('#pm-ed-level').value, 10) || 1;
+                        var rOv = card.querySelector('#pm-ed-rank').value;
+                        p.rankOverride = rOv || null;
+                        p.onboardingComplete = card.querySelector('#pm-ed-bypass').checked;
+                        p.claimed = p.claimed || p.onboardingComplete;
+                        p.frozen = card.querySelector('#pm-ed-frozen').checked;
+                        p.badgeCounts = {
+                            signature: parseInt(card.querySelector('#pm-ed-bsig').value, 10) || 0,
+                            primary:   parseInt(card.querySelector('#pm-ed-bpri').value, 10) || 0,
+                            premium:   parseInt(card.querySelector('#pm-ed-bprm').value, 10) || 0,
+                            executive: parseInt(card.querySelector('#pm-ed-bexe').value, 10) || 0
+                        };
+                        p.digitalBadges = p.badgeCounts.signature + p.badgeCounts.primary + p.badgeCounts.premium + p.badgeCounts.executive;
+                        // Profile picture — only override if a new image was uploaded or explicitly cleared
+                        var imgVal = (typeof card.__getPendingImg === 'function') ? card.__getPendingImg() : null;
+                        if (imgVal !== null) p.image = imgVal;
+                        // Brand-rename: maintain BRANDS map
+                        if (oldBrand && oldBrand !== newBrand) delete BRANDS[oldBrand];
+                        if (newBrand && newPin) BRANDS[newBrand] = newPin;
+                        broadcastPlayerChange(p);
+                        if (typeof hmcRenderPlayers === 'function') hmcRenderPlayers();
+                        if (typeof populateBrandSelect === 'function') populateBrandSelect();
+                        try { if (typeof window.pflxShowSaveToast === 'function') window.pflxShowSaveToast('Saved · ' + p.brand); } catch (e) {}
+                        close();
+                    };
+                }
+            );
+        };
+
+        window.hmcDeletePlayer = function (id) {
+            if (!isHost()) return;
+            window.hmcEditPlayer(id); // route through edit (which has Delete button)
+        };
+
+        window.hmcToggleBypass = function (id) {
+            if (!isHost()) return;
+            var p = PLAYERS.find(function (x) { return x.id === id; });
+            if (!p) return;
+            p.onboardingComplete = !p.onboardingComplete;
+            p.claimed = p.claimed || p.onboardingComplete;
+            broadcastPlayerChange(p);
+            if (typeof hmcRenderPlayers === 'function') hmcRenderPlayers();
+            try { if (typeof window.pflxShowSaveToast === 'function') window.pflxShowSaveToast(p.brand + ' onboarding ' + (p.onboardingComplete ? 'COMPLETE' : 'PENDING')); } catch (e) {}
+        };
+
+        // ── Wrap existing functions to also persist + broadcast ──
+        ['hmcAwardXC','hmcDeductXC','hmcPromotePlayer','hmcFreezePlayer','hmcResetPin'].forEach(function (fn) {
+            var orig = window[fn];
+            if (typeof orig !== 'function') return;
+            window[fn] = function (id) {
+                var r = orig.apply(this, arguments);
+                try {
+                    var p = PLAYERS.find(function (x) { return x.id === id; });
+                    if (p) {
+                        logActivity(id, fn, { args: Array.prototype.slice.call(arguments) });
+                        broadcastPlayerChange(p);
+                    }
+                } catch (e) {}
+                return r;
+            };
+        });
+
+        // ── Inject "+ Add Player" / "Bulk Add" buttons + Edit column when Players panel renders ──
+        function injectButtons() {
+            var panel = document.getElementById('host-players');
+            if (!panel) return;
+            if (panel.querySelector('#pm-add-btn')) return; // already injected
+            var bar = document.createElement('div');
+            bar.style.cssText = 'display:flex;gap:8px;margin:10px 0 14px;flex-wrap:wrap;';
+            bar.innerHTML =
+                '<button id="pm-add-btn" onclick="hmcAddPlayer()" style="' + btnCss('primary') + '">+ ADD PLAYER</button>' +
+                '<button id="pm-bulk-btn" onclick="hmcBulkAdd()" style="' + btnCss('') + '">BULK ADD</button>' +
+                '<button id="pm-export-btn" onclick="hmcExportPlayers()" style="' + btnCss('') + '">EXPORT CSV</button>';
+            // Insert at top of the panel (after first heading or at the start)
+            var first = panel.firstElementChild;
+            if (first) panel.insertBefore(bar, first); else panel.appendChild(bar);
+        }
+
+        // ── Wrap hmcRenderPlayers to add an Edit button column once table is rendered ──
+        var origRender = window.hmcRenderPlayers;
+        if (typeof origRender === 'function') {
+            window.hmcRenderPlayers = function () {
+                var r = origRender.apply(this, arguments);
+                injectButtons();
+                // Add Edit button to each row (replacing the View label)
+                try {
+                    var tbody = document.getElementById('hmc-player-tbody');
+                    if (!tbody) return r;
+                    tbody.querySelectorAll('button').forEach(function (b) {
+                        if (b.textContent && b.textContent.trim() === 'View') {
+                            b.textContent = 'Edit';
+                            b.setAttribute('onclick', "event.stopPropagation();hmcEditPlayer('" + (b.closest('tr')?.querySelector('td')?.textContent || '') + "')");
+                            // Better: extract id from onclick of the row itself
+                            var rowOnclick = b.closest('tr').getAttribute('onclick') || '';
+                            var idMatch = rowOnclick.match(/hmcShowPlayerDetail\('([^']+)'\)/);
+                            if (idMatch) b.setAttribute('onclick', "event.stopPropagation();hmcEditPlayer('" + idMatch[1] + "')");
+                        }
+                    });
+                } catch (e) {}
+                return r;
+            };
+        }
+
+        // ── Activity hooks: log key events on the active player ──
+        function hookActivity() {
+            // Onboarding complete
+            var btn = document.getElementById('final-pin-btn');
+            if (btn && !btn.dataset.pflxLogged) {
+                btn.dataset.pflxLogged = '1';
+                btn.addEventListener('click', function () {
+                    setTimeout(function () {
+                        if (window.activeSession && window.activeSession.id) {
+                            logActivity(window.activeSession.id, 'onboarding_complete', { ts: Date.now() });
+                        }
+                    }, 200);
+                });
+            }
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', hookActivity);
+        } else {
+            hookActivity();
+        }
+
+        // ── Helpers for inline HTML ──
+        function fld(id, label, gridCol, ph, type, value) {
+            return '<label style="display:flex;flex-direction:column;gap:4px;font-family:Rajdhani,sans-serif;font-size:11px;color:#8a92b0;' + (gridCol ? 'grid-column:' + gridCol + ';' : '') + '">' + label +
+                '<input id="' + id + '" type="' + (type || 'text') + '" placeholder="' + (ph || '') + '" value="' + (value || '').toString().replace(/"/g, '&quot;') + '" style="' + inputCss() + '">' +
+                '</label>';
+        }
+        function selFld(id, label, opts, value) {
+            return '<label style="display:flex;flex-direction:column;gap:4px;font-family:Rajdhani,sans-serif;font-size:11px;color:#8a92b0;">' + label +
+                '<select id="' + id + '" style="' + inputCss() + '">' +
+                opts.map(function (v) { return '<option value="' + v + '"' + (v === value ? ' selected' : '') + '>' + v + '</option>'; }).join('') +
+                '</select></label>';
+        }
+        function shake(id) { var el = document.getElementById(id); if (el && typeof shakeEl === 'function') shakeEl(el); }
+    })();
+    </script>
 </body>
 </html>
