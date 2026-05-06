@@ -6565,8 +6565,9 @@
                                 <button class="mc-nav-btn" data-mc="studios" onclick="mcNav('studios')">
                                     <span class="mc-icon">&#x1F3EC;</span> Startup Studios
                                 </button>
-                                <button class="mc-nav-btn mc-host-only" data-mc="gamemgmt" onclick="mcNav('gamemgmt')">
-                                    <span class="mc-icon">&#x1F3AE;</span> Game Management
+                                <button class="mc-nav-btn mc-host-only" data-mc="gamemgmt" onclick="pflxOpenEvoRankings()" title="Evolution Rankings — also accessible in Platform Settings">
+                                    <span class="mc-icon">&#x1F3C6;</span> Evolution Rankings
+                                    <span style="margin-left:auto;font-size:9px;color:#6a7290;letter-spacing:1px;">↗ SETTINGS</span>
                                 </button>
                                 <button class="mc-nav-btn mc-host-only" data-mc="approvals" onclick="mcNav('approvals')">
                                     <span class="mc-icon">&#x1F514;</span> Approvals
@@ -10228,6 +10229,7 @@
                                 <button class="host-subtab active" data-host-tab="dashboard" onclick="switchHostTab('dashboard')">Dashboard</button>
                                 <button class="host-subtab" data-host-tab="analytics" onclick="switchHostTab('analytics')">📊 Analytics</button>
                                 <button class="host-subtab" data-host-tab="players" onclick="switchHostTab('players')">Players</button>
+                                <button class="host-subtab" data-host-tab="evos" onclick="pflxOpenEvoRankings()">Evolution Rankings</button>
                                 <button class="host-subtab" data-host-tab="session" onclick="switchHostTab('session')">Live Session</button>
                                 <button class="host-subtab" data-host-tab="apps" onclick="switchHostTab('apps')">App Manager</button>
                                 <button class="host-subtab" data-host-tab="sound" onclick="switchHostTab('sound')">Sound Engine</button>
@@ -40262,12 +40264,13 @@ RESPONSE RULES:
             if (banner) return banner;
             banner = document.createElement('div');
             banner.id = 'pflx-mimic-banner';
+            // Bottom of viewport so it doesn't block the top toolbar
             banner.style.cssText =
-                'position:fixed;top:0;left:0;right:0;z-index:99999;' +
+                'position:fixed;bottom:0;left:0;right:0;z-index:99999;' +
                 'background:linear-gradient(90deg,rgba(245,158,11,0.95),rgba(239,68,68,0.95));' +
                 'color:#fff7ed;font-family:Rajdhani,sans-serif;font-size:13px;font-weight:600;' +
                 'padding:8px 16px;display:flex;align-items:center;justify-content:center;gap:14px;' +
-                'box-shadow:0 2px 12px rgba(0,0,0,0.4);';
+                'box-shadow:0 -2px 12px rgba(0,0,0,0.4);';
             banner.innerHTML =
                 '<span style="font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:2px;color:#fef3c7;">MIMIC MODE</span>' +
                 '<span id="pflx-mimic-banner-name">—</span>' +
@@ -40773,6 +40776,29 @@ RESPONSE RULES:
         }
         window.pflxIsHost = pflxIsHost;
 
+        // ──────────────────────────────────────────────────────────────
+        // pflxOpenEvoRankings: opens the Evolution Rankings page. Lives in
+        // Mission Control's gamemgmt panel; Settings → "Evolution Rankings"
+        // and MC sidebar both route here. Host-only.
+        // ──────────────────────────────────────────────────────────────
+        window.pflxOpenEvoRankings = function () {
+            if (!isHost()) {
+                try {
+                    if (typeof window.pflxShowSaveToast === 'function') {
+                        window.pflxShowSaveToast('Evolution Rankings is host-only', 'error');
+                    }
+                } catch (e) {}
+                return false;
+            }
+            try {
+                if (typeof navigateTo === 'function') navigateTo('mission-control');
+                setTimeout(function () {
+                    try { if (typeof mcNav === 'function') mcNav('gamemgmt'); } catch (e) {}
+                }, 80);
+                return true;
+            } catch (e) { return false; }
+        };
+
         window.pflxOpenPlayerManager = function () {
             if (!pflxIsHost()) {
                 try {
@@ -40916,9 +40942,23 @@ RESPONSE RULES:
                 window.activeSession.cohorts = Array.isArray(player.cohorts) ? player.cohorts : [player.cohort || 'PlayerPool'];
                 window.activeSession.digitalBadges = player.digitalBadges || 0;
                 window.activeSession.badgeCounts = player.badgeCounts || null;
-                window.activeSession.level = player.level || 1;
                 window.activeSession.onboardingComplete = player.onboardingComplete !== false;
-                window.activeSession.rank = player.rankOverride || window.activeSession.rank || null;
+                window.activeSession.image = player.image || window.activeSession.image || '';
+                window.activeSession.slogan = player.slogan || window.activeSession.slogan || '';
+                window.activeSession.interests = player.interests || window.activeSession.interests || [];
+                // Resolve rank (override wins, else by XC) and propagate the full rank object
+                var resolvedRank = null;
+                if (player.rankOverride && typeof mcPflxRanks !== 'undefined' && Array.isArray(mcPflxRanks)) {
+                    resolvedRank = mcPflxRanks.find(function (r) { return r.id === player.rankOverride; });
+                }
+                if (!resolvedRank && typeof getRankForXC === 'function') resolvedRank = getRankForXC(player.xc || 0);
+                if (resolvedRank) {
+                    window.activeSession.rank = resolvedRank.id || null;
+                    window.activeSession.rankIcon = resolvedRank.icon || '';
+                    window.activeSession.rankName = resolvedRank.name || '';
+                    window.activeSession.rankLevel = resolvedRank.level || 1;
+                    window.activeSession.level = resolvedRank.level || 1;
+                }
                 try { if (typeof updateToolbarStatus === 'function') updateToolbarStatus(); } catch (e) {}
                 try { if (typeof window.pflxIdentityPersist === 'function') window.pflxIdentityPersist(window.activeSession); } catch (e) {}
                 // Re-broadcast the new identity to iframes
@@ -41575,7 +41615,12 @@ RESPONSE RULES:
             });
 
             tbody.innerHTML = rows.map(function (p) {
-                var rank = (typeof getRankForXC === 'function') ? getRankForXC(p.xc || 0) : { icon: '', name: '' };
+                // Resolve rank — rankOverride wins; otherwise derive from XC.
+                var rank = null;
+                if (p.rankOverride && typeof mcPflxRanks !== 'undefined' && Array.isArray(mcPflxRanks)) {
+                    rank = mcPflxRanks.find(function (r) { return r.id === p.rankOverride; });
+                }
+                if (!rank) rank = (typeof getRankForXC === 'function') ? getRankForXC(p.xc || 0) : { icon: '', name: '' };
                 var roleLabel = (p.roleDisplay || '').trim();
                 if (!roleLabel) {
                     var rl = String(p.role || '').toLowerCase();
