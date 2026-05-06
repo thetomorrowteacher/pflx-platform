@@ -11798,6 +11798,23 @@
                             <button onclick="xbotEqReset()" style="margin-left:auto;padding:4px 12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:#8a92b0;font-size:10px;cursor:pointer;font-family:'Rajdhani',sans-serif;">Reset</button>
                         </div>
                     </div>
+
+                    <!-- ═══ MIMIC PLAYER — see the platform as a chosen player ═══ -->
+                    <div style="margin-top:18px;font-family:'Orbitron',sans-serif;font-size:10px;color:rgba(0,240,255,0.7);letter-spacing:2px;margin-bottom:10px;">MIMIC PLAYER</div>
+                    <div style="padding:12px;background:rgba(167,139,250,0.04);border:1px solid rgba(167,139,250,0.18);border-radius:10px;">
+                        <div id="xbot-mimic-active-banner" style="display:none;margin-bottom:10px;padding:10px;background:linear-gradient(135deg,rgba(245,158,11,0.18),rgba(239,68,68,0.18));border:1px solid rgba(245,158,11,0.45);border-radius:8px;color:#fbbf24;font-family:'Rajdhani',sans-serif;font-size:12px;">
+                            <div style="font-weight:700;letter-spacing:1px;font-family:'Orbitron',sans-serif;font-size:10px;margin-bottom:4px;">CURRENTLY MIMICKING</div>
+                            <div id="xbot-mimic-active-name" style="color:#fde68a;font-size:14px;font-weight:600;">—</div>
+                            <button onclick="pflxMimicExit()" style="margin-top:8px;width:100%;padding:8px;background:rgba(239,68,68,0.18);border:1px solid rgba(239,68,68,0.5);border-radius:6px;color:#fecaca;font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1.5px;cursor:pointer;">EXIT MIMIC &amp; RESTORE</button>
+                        </div>
+                        <input type="text" id="xbot-mimic-search" placeholder="Search players by name or brand…" oninput="pflxMimicRender()" style="width:100%;background:rgba(10,18,40,0.8);border:1px solid rgba(167,139,250,0.25);color:#e0e6ff;padding:8px 10px;border-radius:6px;font-family:'Rajdhani',sans-serif;font-size:13px;margin-bottom:10px;">
+                        <div id="xbot-mimic-list" style="max-height:240px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;">
+                            <div style="color:#6a7290;font-size:11px;font-family:'Rajdhani',sans-serif;text-align:center;padding:12px;">Open this panel to load players.</div>
+                        </div>
+                        <div style="margin-top:10px;font-size:10px;color:#6a7290;font-family:'Rajdhani',sans-serif;line-height:1.5;">
+                            Mimic temporarily replaces your session with a chosen player's so you see their cohort, badges, X-Coin, and view filters. Your master-host session is stashed and restored on exit (or page reload).
+                        </div>
+                    </div>
                 </div>
 
                 <!-- ═══ ENGINEERING / DEV PORTAL (hidden by default) ═══ -->
@@ -15731,11 +15748,17 @@
                 const p2 = document.getElementById('final-pin-2').value;
                 if (p1.length !== 4) { shakeEl(document.getElementById('final-pin-1')); return; }
                 if (p1 !== p2) { shakeEl(document.getElementById('final-pin-2')); document.getElementById('final-pin-2').value = ''; return; }
-                // Register player
+                // Register player — give them a stable ID, mark onboarded, and persist so a
+                // refresh doesn't lose them (the in-memory PLAYERS array is reseeded each load).
                 const newPlayer = {
+                    id: (newPlayerData.isImported && newPlayerData.importedPlayer && newPlayerData.importedPlayer.id)
+                        ? newPlayerData.importedPlayer.id
+                        : 'player-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
                     brand: newPlayerData.brandName, pin: p1, name: newPlayerData.fullName,
-                    email: newPlayerData.email, cohort: newPlayerData.cohort, role: newPlayerData.role,
-                    slogan: newPlayerData.slogan, interests: newPlayerData.interests, claimed: true
+                    email: newPlayerData.email, cohort: newPlayerData.cohort, role: newPlayerData.role || 'Student',
+                    slogan: newPlayerData.slogan, interests: newPlayerData.interests, claimed: true,
+                    onboardingComplete: true,
+                    xc: 0, totalXcoin: 0, digitalBadges: 0, level: 1
                 };
                 // If imported, update existing record
                 if (newPlayerData.isImported && newPlayerData.importedPlayer) {
@@ -15744,6 +15767,9 @@
                     PLAYERS.push(newPlayer);
                 }
                 BRANDS[newPlayerData.brandName] = p1;
+                // Persist to localStorage so PLAYERS / BRANDS rehydrate on the next load
+                try { if (typeof pflxIdentityPersistNewPlayer === 'function') pflxIdentityPersistNewPlayer(newPlayer); } catch(e) {}
+                try { if (typeof pflxIdentityPersist === 'function') pflxIdentityPersist(newPlayer); } catch(e) {}
                 populateBrandSelect();
                 loginUser(newPlayerData.brandName);
             });
@@ -15834,6 +15860,13 @@
                     }
                 }
             } catch(e) { console.warn('[PFLX] pflx_user enrich error', e); }
+
+            // ── Mark this session as onboarded and persist the full profile so a refresh
+            //    auto-restores the user instead of forcing the wizard again. ──
+            activeSession.onboardingComplete = true;
+            activeSession.onboarded = true;
+            try { if (typeof pflxIdentityPersist === 'function') pflxIdentityPersist(activeSession); } catch(e) {}
+            try { localStorage.setItem('pflx_active_brand', activeSession.brand || ''); } catch(e) {}
 
             console.log('[PFLX SSO] Session active:', activeSession);
 
@@ -40148,6 +40181,573 @@ RESPONSE RULES:
             document.addEventListener('DOMContentLoaded', pipInit);
         } else {
             pipInit();
+        }
+    })();
+    </script>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         PFLX MIMIC PLAYER — master-host views the platform as a player
+         API: pflxMimicEnter(playerId) / pflxMimicExit() / pflxMimicIsActive() / pflxMimicRender()
+    ═══════════════════════════════════════════════════════════════════ -->
+    <script>
+    (function () {
+        var STASH_KEY = 'pflx_mimic_stash_v1';
+        var ACTIVE_KEY = 'pflx_mimic_active_v1';
+
+        function isAdmin() {
+            try {
+                var r = (window.activeSession && window.activeSession.role || '').toLowerCase();
+                return r === 'admin' || r === 'host' || r === 'teacher' || r === 'instructor';
+            } catch (e) { return false; }
+        }
+
+        function pflxMimicIsActive() {
+            try { return !!sessionStorage.getItem(ACTIVE_KEY); } catch (e) { return false; }
+        }
+        window.pflxMimicIsActive = pflxMimicIsActive;
+
+        function findPlayer(playerId) {
+            try {
+                if (typeof mcPlayers === 'undefined' || !Array.isArray(mcPlayers)) return null;
+                return mcPlayers.find(function (p) { return p && p.id === playerId; }) || null;
+            } catch (e) { return null; }
+        }
+
+        function buildPlayerSession(p) {
+            return {
+                id:             p.id || null,
+                brand:          p.brand || p.name || 'PLAYER',
+                name:           p.name || p.brand || 'Player',
+                email:          p.email || '',
+                pin:            p.pin || '',
+                role:           p.role || 'Student',
+                cohort:         p.cohort || 'PlayerPool',
+                xc:             p.xc || 0,
+                totalXcoin:     p.totalXcoin || p.xc || 0,
+                digitalBadges:  p.digitalBadges || 0,
+                badgeCounts:    p.badgeCounts || null,
+                image:          p.image || '',
+                level:          p.level || 1,
+                studioId:       p.studioId || '',
+                pathway:        p.pathway || '',
+                __pflxMimic:    true,
+                __pflxMimicOf:  p.id || null
+            };
+        }
+
+        function broadcastIdentity() {
+            try {
+                if (typeof window.pflxBroadcastIdentity === 'function') {
+                    window.pflxBroadcastIdentity(); return;
+                }
+                if (!window.activeSession) return;
+                var payload = {
+                    type: 'pflx_identity_broadcast',
+                    user: window.activeSession,
+                    role: window.pflxRole || 'player'
+                };
+                document.querySelectorAll('iframe').forEach(function (f) {
+                    if (f.contentWindow) { try { f.contentWindow.postMessage(JSON.stringify(payload), '*'); } catch (e) {} }
+                });
+            } catch (e) {}
+        }
+
+        function ensureExitBanner() {
+            var banner = document.getElementById('pflx-mimic-banner');
+            if (banner) return banner;
+            banner = document.createElement('div');
+            banner.id = 'pflx-mimic-banner';
+            banner.style.cssText =
+                'position:fixed;top:0;left:0;right:0;z-index:99999;' +
+                'background:linear-gradient(90deg,rgba(245,158,11,0.95),rgba(239,68,68,0.95));' +
+                'color:#fff7ed;font-family:Rajdhani,sans-serif;font-size:13px;font-weight:600;' +
+                'padding:8px 16px;display:flex;align-items:center;justify-content:center;gap:14px;' +
+                'box-shadow:0 2px 12px rgba(0,0,0,0.4);';
+            banner.innerHTML =
+                '<span style="font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:2px;color:#fef3c7;">MIMIC MODE</span>' +
+                '<span id="pflx-mimic-banner-name">—</span>' +
+                '<button id="pflx-mimic-banner-exit" type="button" ' +
+                'style="background:rgba(0,0,0,0.35);border:1px solid rgba(255,255,255,0.4);color:#fff;' +
+                'padding:4px 12px;border-radius:6px;font-family:Orbitron,sans-serif;font-size:10px;' +
+                'letter-spacing:1.5px;cursor:pointer;">EXIT</button>';
+            document.body.appendChild(banner);
+            banner.querySelector('#pflx-mimic-banner-exit').addEventListener('click', function () { pflxMimicExit(); });
+            return banner;
+        }
+
+        function setBannerVisible(visible, name) {
+            var banner = ensureExitBanner();
+            banner.style.display = visible ? 'flex' : 'none';
+            if (visible) {
+                var nm = banner.querySelector('#pflx-mimic-banner-name');
+                if (nm) nm.textContent = '→  ' + (name || 'player');
+            }
+        }
+
+        function syncXBotPanel(activePlayer) {
+            try {
+                var panelBanner = document.getElementById('xbot-mimic-active-banner');
+                var nameEl = document.getElementById('xbot-mimic-active-name');
+                if (panelBanner) panelBanner.style.display = activePlayer ? 'block' : 'none';
+                if (nameEl) nameEl.textContent = activePlayer ? (activePlayer.name + (activePlayer.brand ? ' · ' + activePlayer.brand : '')) : '—';
+            } catch (e) {}
+        }
+
+        window.pflxMimicEnter = function (playerId) {
+            if (!isAdmin() && !pflxMimicIsActive()) { console.warn('[mimic] only host/admin can enter mimic mode'); return false; }
+            if (pflxMimicIsActive()) { pflxMimicExit({ silent: true }); }
+            var player = findPlayer(playerId);
+            if (!player) { console.warn('[mimic] player not found:', playerId); return false; }
+
+            var stash = {
+                session: window.activeSession ? JSON.parse(JSON.stringify(window.activeSession)) : null,
+                role: window.pflxRole || 'host',
+                bodyAsPlayer: document.body.classList.contains('pflx-as-player'),
+                ts: Date.now()
+            };
+            try { sessionStorage.setItem(STASH_KEY, JSON.stringify(stash)); } catch (e) {}
+
+            var newSession = buildPlayerSession(player);
+            window.activeSession = newSession;
+            try { sessionStorage.setItem(ACTIVE_KEY, JSON.stringify({ playerId: playerId, name: newSession.name, brand: newSession.brand })); } catch (e) {}
+
+            if (typeof window.pflxSetRole === 'function') { window.pflxSetRole('player'); }
+            else { window.pflxRole = 'player'; document.body.classList.add('pflx-as-player'); }
+
+            try {
+                localStorage.setItem('pflx_user', JSON.stringify({
+                    id: newSession.id, brandName: newSession.brand, name: newSession.name,
+                    role: newSession.role, cohort: newSession.cohort,
+                    xcoin: newSession.xc, totalXcoin: newSession.totalXcoin,
+                    digitalBadges: newSession.digitalBadges, image: newSession.image,
+                    level: newSession.level, __pflxMimic: true
+                }));
+            } catch (e) {}
+
+            try { if (typeof pflxRefreshToolbarStatus === 'function') pflxRefreshToolbarStatus(); } catch (e) {}
+            broadcastIdentity();
+            setBannerVisible(true, newSession.name + (newSession.brand ? ' · ' + newSession.brand : ''));
+            syncXBotPanel(newSession);
+            try { if (typeof window.pflxShowSaveToast === 'function') window.pflxShowSaveToast('Now mimicking ' + newSession.name); } catch (e) {}
+            console.info('[mimic] entered mimic mode as', newSession);
+            return true;
+        };
+
+        window.pflxMimicExit = function (opts) {
+            opts = opts || {};
+            var stashRaw;
+            try { stashRaw = sessionStorage.getItem(STASH_KEY); } catch (e) {}
+            if (!stashRaw) {
+                setBannerVisible(false); syncXBotPanel(null);
+                try { sessionStorage.removeItem(ACTIVE_KEY); } catch (e) {}
+                return false;
+            }
+            var stash;
+            try { stash = JSON.parse(stashRaw); } catch (e) { stash = null; }
+            if (!stash) {
+                try { sessionStorage.removeItem(STASH_KEY); sessionStorage.removeItem(ACTIVE_KEY); } catch (e) {}
+                setBannerVisible(false); syncXBotPanel(null);
+                return false;
+            }
+
+            window.activeSession = stash.session || null;
+
+            if (typeof window.pflxSetRole === 'function') {
+                window.pflxSetRole(stash.role === 'host' ? 'host' : 'player');
+            } else {
+                window.pflxRole = stash.role || 'host';
+                document.body.classList.toggle('pflx-as-player', !!stash.bodyAsPlayer);
+            }
+
+            try {
+                if (window.activeSession) {
+                    localStorage.setItem('pflx_user', JSON.stringify({
+                        id: window.activeSession.id, brandName: window.activeSession.brand,
+                        name: window.activeSession.name, role: window.activeSession.role,
+                        cohort: window.activeSession.cohort, xcoin: window.activeSession.xc,
+                        totalXcoin: window.activeSession.totalXcoin,
+                        digitalBadges: window.activeSession.digitalBadges,
+                        image: window.activeSession.image, level: window.activeSession.level
+                    }));
+                }
+            } catch (e) {}
+
+            try { sessionStorage.removeItem(STASH_KEY); sessionStorage.removeItem(ACTIVE_KEY); } catch (e) {}
+            try { if (typeof pflxRefreshToolbarStatus === 'function') pflxRefreshToolbarStatus(); } catch (e) {}
+            broadcastIdentity();
+            setBannerVisible(false);
+            syncXBotPanel(null);
+            if (!opts.silent) {
+                try { if (typeof window.pflxShowSaveToast === 'function') window.pflxShowSaveToast('Mimic ended — host session restored'); } catch (e) {}
+            }
+            console.info('[mimic] exited');
+            pflxMimicRender();
+            return true;
+        };
+
+        window.pflxMimicRender = function () {
+            var listEl = document.getElementById('xbot-mimic-list');
+            if (!listEl) return;
+            var search = (document.getElementById('xbot-mimic-search') || {}).value || '';
+            var q = search.trim().toLowerCase();
+            var players = [];
+            try {
+                if (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) {
+                    players = mcPlayers.filter(function (p) { return p && (p.role === 'player' || p.role === 'Student' || p.role === 'student'); });
+                }
+            } catch (e) {}
+            if (q) {
+                players = players.filter(function (p) {
+                    return ((p.name || '') + ' ' + (p.brand || '') + ' ' + (p.id || '')).toLowerCase().indexOf(q) !== -1;
+                });
+            }
+            players.sort(function (a, b) { return (a.name || a.brand || '').localeCompare(b.name || b.brand || ''); });
+
+            if (!players.length) {
+                listEl.innerHTML = '<div style="color:#6a7290;font-size:11px;font-family:Rajdhani,sans-serif;text-align:center;padding:12px;">No players found' + (q ? ' for "' + q + '"' : '') + '.</div>';
+                return;
+            }
+
+            var activeId = null;
+            try {
+                var act = sessionStorage.getItem(ACTIVE_KEY);
+                if (act) activeId = (JSON.parse(act) || {}).playerId;
+            } catch (e) {}
+
+            var html = '';
+            players.slice(0, 100).forEach(function (p) {
+                var disp = (p.name || p.brand || 'Player').replace(/</g, '&lt;');
+                var brand = (p.brand && p.brand !== p.name) ? ' · ' + p.brand.replace(/</g, '&lt;') : '';
+                var isActive = activeId === p.id;
+                html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(10,18,40,0.6);border:1px solid ' + (isActive ? 'rgba(245,158,11,0.55)' : 'rgba(167,139,250,0.18)') + ';border-radius:8px;">' +
+                    '<div style="flex:1;min-width:0;">' +
+                        '<div style="color:#e0e6ff;font-family:Rajdhani,sans-serif;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + disp + brand + '</div>' +
+                        '<div style="color:#6a7290;font-size:10px;font-family:Share Tech Mono,monospace;">XC ' + (p.xc || 0) + ' · ' + (p.cohort || 'PlayerPool') + '</div>' +
+                    '</div>' +
+                    (isActive
+                        ? '<button onclick="pflxMimicExit()" style="padding:6px 10px;background:rgba(239,68,68,0.18);border:1px solid rgba(239,68,68,0.5);color:#fecaca;border-radius:6px;font-family:Orbitron,sans-serif;font-size:9px;letter-spacing:1px;cursor:pointer;">EXIT</button>'
+                        : '<button onclick="pflxMimicEnter(\'' + (p.id || '').replace(/[\\\'\"]/g, '') + '\')" style="padding:6px 10px;background:rgba(167,139,250,0.15);border:1px solid rgba(167,139,250,0.4);color:#c4b5fd;border-radius:6px;font-family:Orbitron,sans-serif;font-size:9px;letter-spacing:1px;cursor:pointer;">MIMIC</button>') +
+                    '</div>';
+            });
+            if (players.length > 100) {
+                html += '<div style="color:#6a7290;font-size:10px;font-family:Rajdhani,sans-serif;text-align:center;padding:6px;">Showing first 100 of ' + players.length + ' — refine search to narrow.</div>';
+            }
+            listEl.innerHTML = html;
+        };
+
+        function maybeRestoreOnLoad() {
+            try {
+                var act = sessionStorage.getItem(ACTIVE_KEY);
+                if (!act) return;
+                var info = JSON.parse(act);
+                if (!info || !info.playerId) return;
+                var tries = 0;
+                var iv = setInterval(function () {
+                    tries++;
+                    if (typeof mcPlayers !== 'undefined' && window.activeSession) {
+                        clearInterval(iv);
+                        if (isAdmin()) pflxMimicEnter(info.playerId);
+                        else { try { sessionStorage.removeItem(ACTIVE_KEY); } catch (e) {} }
+                    } else if (tries > 80) { clearInterval(iv); }
+                }, 250);
+            } catch (e) {}
+        }
+
+        var origSwitchXBotMode = window.switchXBotMode;
+        if (typeof origSwitchXBotMode === 'function') {
+            window.switchXBotMode = function (mode) {
+                var r = origSwitchXBotMode.apply(this, arguments);
+                if (mode === 'host') { try { pflxMimicRender(); } catch (e) {} }
+                return r;
+            };
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', maybeRestoreOnLoad);
+        } else {
+            maybeRestoreOnLoad();
+        }
+    })();
+    </script>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         PFLX UNIFIED IDENTITY  (auto-login · single-profile · XC sync · skip-onboard)
+         API: pflxIdentityPersist / pflxIdentityPersistNewPlayer / pflxIdentityLoad
+              pflxIdentityClear / pflxBroadcastXC / pflxOpenSkipOnboardForm
+    ═══════════════════════════════════════════════════════════════════ -->
+    <script>
+    (function () {
+        var IDENTITY_KEY  = 'pflx_user';
+        var PLAYERS_KEY   = 'pflx_players_local_v1';
+        var ACTIVE_BRAND  = 'pflx_active_brand';
+
+        function hydratePlayers() {
+            try {
+                if (typeof PLAYERS === 'undefined' || typeof BRANDS === 'undefined') return false;
+                var raw = localStorage.getItem(PLAYERS_KEY);
+                if (!raw) return true;
+                var saved = JSON.parse(raw);
+                if (!Array.isArray(saved)) return true;
+                saved.forEach(function (p) {
+                    if (!p || !p.brand) return;
+                    var existing = PLAYERS.find(function (x) { return x.id === p.id || (x.brand && x.brand.toUpperCase() === (p.brand || '').toUpperCase()); });
+                    if (existing) { Object.assign(existing, p); } else { PLAYERS.push(p); }
+                    if (p.pin) BRANDS[p.brand] = p.pin;
+                });
+                return true;
+            } catch (e) { console.warn('[identity] hydratePlayers failed', e); return false; }
+        }
+        hydratePlayers();
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', hydratePlayers);
+        }
+
+        window.pflxIdentityPersist = function (profile) {
+            if (!profile || typeof profile !== 'object') return;
+            try {
+                var existing = {};
+                try { existing = JSON.parse(localStorage.getItem(IDENTITY_KEY) || '{}'); } catch (e) {}
+                var merged = Object.assign({}, existing, {
+                    id:                 profile.id            || existing.id,
+                    brandName:          profile.brand         || profile.brandName || existing.brandName,
+                    brand:              profile.brand         || existing.brand,
+                    pin:                profile.pin           || existing.pin,
+                    name:               profile.name          || existing.name,
+                    email:              profile.email         || existing.email,
+                    role:               profile.role          || existing.role || 'Student',
+                    cohort:             profile.cohort        || existing.cohort || 'PlayerPool',
+                    slogan:             profile.slogan        || existing.slogan || '',
+                    interests:          profile.interests     || existing.interests || [],
+                    xcoin:              (typeof profile.xc === 'number' ? profile.xc : (typeof profile.xcoin === 'number' ? profile.xcoin : existing.xcoin)) || 0,
+                    totalXcoin:         profile.totalXcoin    || existing.totalXcoin || 0,
+                    digitalBadges:      profile.digitalBadges || existing.digitalBadges || 0,
+                    badgeCounts:        profile.badgeCounts   || existing.badgeCounts || null,
+                    image:              profile.image         || existing.image || '',
+                    level:              profile.level         || existing.level || 1,
+                    studioId:           profile.studioId      || existing.studioId || '',
+                    pathway:            profile.pathway       || existing.pathway || '',
+                    onboardingComplete: profile.onboardingComplete !== false,
+                    onboarded:          profile.onboarded !== false,
+                    keepSignedIn:       profile.keepSignedIn !== false,
+                    lastLoginAt:        Date.now()
+                });
+                localStorage.setItem(IDENTITY_KEY, JSON.stringify(merged));
+                if (merged.brand) localStorage.setItem(ACTIVE_BRAND, merged.brand);
+            } catch (e) { console.warn('[identity] persist failed', e); }
+        };
+
+        window.pflxIdentityPersistNewPlayer = function (player) {
+            if (!player || !player.brand) return;
+            try {
+                var saved = [];
+                try { saved = JSON.parse(localStorage.getItem(PLAYERS_KEY) || '[]'); } catch (e) {}
+                if (!Array.isArray(saved)) saved = [];
+                var i = saved.findIndex(function (p) { return p.id === player.id || (p.brand && p.brand.toUpperCase() === (player.brand || '').toUpperCase()); });
+                if (i >= 0) saved[i] = Object.assign(saved[i], player);
+                else saved.push(player);
+                localStorage.setItem(PLAYERS_KEY, JSON.stringify(saved));
+            } catch (e) { console.warn('[identity] persistNewPlayer failed', e); }
+        };
+
+        window.pflxIdentityLoad = function () {
+            try { return JSON.parse(localStorage.getItem(IDENTITY_KEY) || 'null'); } catch (e) { return null; }
+        };
+
+        window.pflxIdentityClear = function () {
+            try {
+                localStorage.removeItem(IDENTITY_KEY);
+                localStorage.removeItem(ACTIVE_BRAND);
+                localStorage.removeItem('pflx_active_role');
+            } catch (e) {}
+        };
+
+        function tryAutoLogin() {
+            try {
+                var u = window.pflxIdentityLoad();
+                if (!u || !u.brand || !u.pin) return;
+                if (!u.onboardingComplete && !u.onboarded) return;
+                if (u.keepSignedIn === false) return;
+                if (typeof BRANDS !== 'undefined' && BRANDS[u.brand] && BRANDS[u.brand] === u.pin) {
+                    if (typeof loginUser === 'function') {
+                        console.info('[identity] auto-login as', u.brand);
+                        loginUser(u.brand);
+                    }
+                }
+            } catch (e) { console.warn('[identity] auto-login failed', e); }
+        }
+        function scheduleAutoLogin() { setTimeout(tryAutoLogin, 60); }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', scheduleAutoLogin);
+        } else {
+            scheduleAutoLogin();
+        }
+
+        function broadcastIdentityToFrame(frame) {
+            if (!frame || !frame.contentWindow || !window.activeSession) return;
+            var payload = {
+                type: 'pflx_identity_broadcast',
+                user: window.activeSession,
+                role: window.pflxRole || 'player',
+                onboardingComplete: !!(window.activeSession.onboardingComplete || window.activeSession.onboarded),
+                forceSync: true
+            };
+            try { frame.contentWindow.postMessage(JSON.stringify(payload), '*'); } catch (e) {}
+        }
+        document.addEventListener('load', function (ev) {
+            if (ev.target && ev.target.tagName === 'IFRAME') broadcastIdentityToFrame(ev.target);
+        }, true);
+
+        window.pflxBroadcastXC = function (newBalance, opts) {
+            opts = opts || {};
+            try {
+                if (typeof newBalance !== 'number') newBalance = parseInt(newBalance, 10) || 0;
+                if (window.activeSession) {
+                    var prev = window.activeSession.xc || 0;
+                    window.activeSession.xc = newBalance;
+                    window.activeSession.totalXcoin = Math.max(window.activeSession.totalXcoin || 0, newBalance);
+                    window.pflxIdentityPersist(window.activeSession);
+                    if (newBalance !== prev && opts.toast !== false && typeof window.pflxShowSaveToast === 'function') {
+                        var delta = newBalance - prev;
+                        window.pflxShowSaveToast((delta >= 0 ? '+' : '') + delta + ' XC' + (opts.reason ? '  ·  ' + opts.reason : ''));
+                    }
+                }
+                try { if (typeof updateToolbarStatus === 'function') updateToolbarStatus(); } catch (e) {}
+                var msg = JSON.stringify({ type: 'pflx_xc_update', xc: newBalance, reason: opts.reason || '' });
+                document.querySelectorAll('iframe').forEach(function (f) {
+                    if (f.contentWindow) { try { f.contentWindow.postMessage(msg, '*'); } catch (e) {} }
+                });
+                try { if (typeof window.pflxCloudSave === 'function') window.pflxCloudSave('xc', { xc: newBalance, ts: Date.now() }, null); } catch (e) {}
+            } catch (e) { console.warn('[xc] broadcast failed', e); }
+        };
+
+        window.addEventListener('message', function (ev) {
+            try {
+                var msg = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
+                if (!msg || typeof msg !== 'object') return;
+                if (msg.type === 'pflx_xc_changed' && typeof msg.xc === 'number') {
+                    if (window.activeSession && window.activeSession.xc !== msg.xc) {
+                        window.pflxBroadcastXC(msg.xc, { reason: msg.reason || 'sync', toast: false });
+                    }
+                }
+                if (msg.type === 'pflx_identity_request_sync') {
+                    document.querySelectorAll('iframe').forEach(broadcastIdentityToFrame);
+                }
+            } catch (e) {}
+        });
+
+        function buildSkipForm() {
+            if (document.getElementById('pflx-skip-onboard-modal')) return;
+            var modal = document.createElement('div');
+            modal.id = 'pflx-skip-onboard-modal';
+            modal.style.cssText = 'position:fixed;inset:0;z-index:99998;display:none;align-items:center;justify-content:center;background:rgba(2,6,23,0.85);backdrop-filter:blur(8px);';
+            modal.innerHTML =
+                '<div style="background:linear-gradient(135deg,#0a1228,#0f1830);border:1px solid rgba(0,240,255,0.3);border-radius:14px;padding:24px;width:min(560px,92vw);max-height:90vh;overflow-y:auto;box-shadow:0 12px 40px rgba(0,0,0,0.6);">' +
+                  '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">' +
+                    '<div style="font-family:Orbitron,sans-serif;font-size:14px;letter-spacing:2px;color:#00f0ff;">SKIP ONBOARDING — MANUAL ENTRY</div>' +
+                    '<button id="pflx-skip-close" type="button" style="background:transparent;border:none;color:#8a92b0;font-size:20px;cursor:pointer;">×</button>' +
+                  '</div>' +
+                  '<div style="color:#8a92b0;font-family:Rajdhani,sans-serif;font-size:12px;margin-bottom:16px;">Fill in everything once. Submit creates a complete profile, marks you as onboarded, and drops you on the PIN screen.</div>' +
+                  '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">' +
+                    fld('skip-fullname', 'Full Name *', 'text', '', '1 / span 2') +
+                    fld('skip-email',    'Email *',     'email', '', '1 / span 2') +
+                    fld('skip-brand',    'Brand Name *','text', 'ALL CAPS, ≤16') +
+                    fld('skip-slogan',   'Slogan',      'text', '60 chars max') +
+                    sel('skip-role',     'Role',        ['Student','Creator','Educator','Explorer']) +
+                    fld('skip-cohort',   'Cohort',      'text', 'PlayerPool / class name') +
+                  '</div>' +
+                  '<div style="margin-top:14px;font-family:Rajdhani,sans-serif;font-size:12px;color:#8a92b0;margin-bottom:6px;">Interests (pick any)</div>' +
+                  '<div id="skip-interests" style="display:flex;flex-wrap:wrap;gap:6px;">' +
+                    ['CS/AI','Game Dev','Music','Design','Business','Video'].map(function (v) {
+                        return '<button type="button" data-i="' + v + '" class="skip-int-opt" style="padding:6px 12px;background:rgba(167,139,250,0.08);border:1px solid rgba(167,139,250,0.25);color:#c4b5fd;border-radius:6px;font-family:Rajdhani,sans-serif;font-size:12px;cursor:pointer;">' + v + '</button>';
+                    }).join('') +
+                  '</div>' +
+                  '<div style="display:flex;gap:10px;margin-top:18px;">' +
+                    '<button id="pflx-skip-cancel" type="button" style="flex:1;padding:10px;background:transparent;border:1px solid rgba(138,146,176,0.3);color:#8a92b0;border-radius:8px;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:1.5px;cursor:pointer;">CANCEL</button>' +
+                    '<button id="pflx-skip-submit" type="button" style="flex:2;padding:10px;background:linear-gradient(135deg,#00d4ff,#7c3aed);border:none;color:#fff;border-radius:8px;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:1.5px;font-weight:700;cursor:pointer;">CREATE PROFILE → SET PIN</button>' +
+                  '</div>' +
+                '</div>';
+            document.body.appendChild(modal);
+
+            modal.querySelector('#pflx-skip-close').onclick = closeSkip;
+            modal.querySelector('#pflx-skip-cancel').onclick = closeSkip;
+            modal.addEventListener('click', function (ev) { if (ev.target === modal) closeSkip(); });
+
+            var interestState = {};
+            modal.querySelectorAll('.skip-int-opt').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    var i = btn.getAttribute('data-i');
+                    interestState[i] = !interestState[i];
+                    btn.style.background = interestState[i] ? 'rgba(0,240,255,0.18)' : 'rgba(167,139,250,0.08)';
+                    btn.style.borderColor = interestState[i] ? 'rgba(0,240,255,0.5)' : 'rgba(167,139,250,0.25)';
+                    btn.style.color = interestState[i] ? '#00f0ff' : '#c4b5fd';
+                });
+            });
+
+            modal.querySelector('#pflx-skip-submit').onclick = function () {
+                var $ = function (id) { return document.getElementById(id); };
+                var name   = ($('skip-fullname').value || '').trim();
+                var email  = ($('skip-email').value || '').trim();
+                var brand  = ($('skip-brand').value || '').trim().toUpperCase();
+                var slogan = ($('skip-slogan').value || '').trim();
+                var role   = $('skip-role').value || 'Student';
+                var cohort = ($('skip-cohort').value || 'PlayerPool').trim() || 'PlayerPool';
+                if (!name)  { shake('skip-fullname'); return; }
+                if (!email || !email.includes('@')) { shake('skip-email'); return; }
+                if (!brand) { shake('skip-brand'); return; }
+                var interests = Object.keys(interestState).filter(function (k) { return interestState[k]; });
+
+                window.newPlayerData = window.newPlayerData || {};
+                newPlayerData.fullName  = name;
+                newPlayerData.email     = email;
+                newPlayerData.brandName = brand;
+                newPlayerData.slogan    = slogan;
+                newPlayerData.role      = role;
+                newPlayerData.cohort    = cohort;
+                newPlayerData.interests = interests;
+                newPlayerData.isImported = false;
+
+                closeSkip();
+                if (typeof showStep === 'function') showStep('step-final-pin');
+            };
+
+            function fld(id, label, type, ph, gridCol) {
+                return '<label style="display:flex;flex-direction:column;gap:4px;font-family:Rajdhani,sans-serif;font-size:11px;color:#8a92b0;' + (gridCol ? 'grid-column:' + gridCol + ';' : '') + '">' + label +
+                    '<input id="' + id + '" type="' + type + '" placeholder="' + (ph || '') + '" style="background:rgba(10,18,40,0.8);border:1px solid rgba(0,240,255,0.18);color:#e0e6ff;padding:8px 10px;border-radius:6px;font-family:Rajdhani,sans-serif;font-size:13px;">' +
+                    '</label>';
+            }
+            function sel(id, label, opts) {
+                return '<label style="display:flex;flex-direction:column;gap:4px;font-family:Rajdhani,sans-serif;font-size:11px;color:#8a92b0;">' + label +
+                    '<select id="' + id + '" style="background:rgba(10,18,40,0.8);border:1px solid rgba(0,240,255,0.18);color:#e0e6ff;padding:8px 10px;border-radius:6px;font-family:Rajdhani,sans-serif;font-size:13px;">' +
+                    opts.map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('') +
+                    '</select></label>';
+            }
+            function shake(id) { var el = document.getElementById(id); if (el && typeof shakeEl === 'function') shakeEl(el); }
+            function closeSkip() { modal.style.display = 'none'; }
+        }
+
+        window.pflxOpenSkipOnboardForm = function () {
+            buildSkipForm();
+            var modal = document.getElementById('pflx-skip-onboard-modal');
+            if (modal) modal.style.display = 'flex';
+        };
+
+        function injectSkipButton() {
+            var page = document.getElementById('onboard-1');
+            if (!page) return;
+            if (page.querySelector('#pflx-skip-onboard-btn')) return;
+            var btn = document.createElement('button');
+            btn.id = 'pflx-skip-onboard-btn';
+            btn.type = 'button';
+            btn.className = 'login-btn-outline';
+            btn.style.cssText = 'margin-top:8px;border-color:rgba(167,139,250,0.4);color:#c4b5fd;';
+            btn.textContent = 'Skip & Fill Manually';
+            btn.addEventListener('click', window.pflxOpenSkipOnboardForm);
+            page.appendChild(btn);
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', injectSkipButton);
+        } else {
+            injectSkipButton();
         }
     })();
     </script>
