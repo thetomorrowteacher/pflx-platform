@@ -6534,8 +6534,10 @@
                                 <button class="mc-nav-btn active" data-mc="dashboard" onclick="mcNav('dashboard')">
                                     <span class="mc-icon">&#x1F3E0;</span> Home Theater
                                 </button>
+                                <!-- Player Management's canonical home is Platform Settings now.
+                                     Keep this entry as a shortcut so existing muscle memory still works. -->
                                 <div class="mc-nav-label mc-host-only">PLAYER MANAGEMENT</div>
-                                <button class="mc-nav-btn mc-host-only" data-mc="players" onclick="mcNav('players')">
+                                <button class="mc-nav-btn mc-host-only" data-mc="players-shortcut" onclick="pflxOpenPlayerManager()" title="Player Management — now lives in Platform Settings">
                                     <span class="mc-icon">&#x1F465;</span> Player Management
                                     <span class="mc-badge" id="mc-player-count">0</span>
                                 </button>
@@ -7539,7 +7541,7 @@
                                 <div class="mc-card">
                                     <div class="mc-card-title">QUICK ACTIONS</div>
                                     <div style="display:flex;gap:10px;flex-wrap:wrap;">
-                                        <button class="mc-btn" onclick="mcNav('players')">&#x1F465; Manage Players</button>
+                                        <button class="mc-btn" onclick="pflxOpenPlayerManager()" title="Manage Players → Platform Settings">&#x1F465; Manage Players</button>
                                         <button class="mc-btn mc-btn-green" onclick="mcNav('tasks')">&#x1F4CB; Create Task</button>
                                         <button class="mc-btn mc-btn-purple" onclick="mcNav('checkpoints')">&#x1F3C1; New Checkpoint</button>
                                         <button class="mc-btn" onclick="mcNav('media')">&#x1F3AC; Embed Media</button>
@@ -16735,10 +16737,13 @@
             const navBtn = document.querySelector(`[data-view="${viewName}"]`);
             if (navBtn) navBtn.classList.add('active');
 
-            // Role-based settings: show Host or Player settings container
+            // Role-based settings: show Host or Player settings container.
+            // Player Management lives inside host-settings-container, so this gate
+            // is what enforces host-only access to it. Admin / Host / Teacher /
+            // Instructor all qualify (matches the rest of the codebase's role checks).
             if (viewName === 'settings') {
-                const role = activeSession ? (activeSession.role || 'Student') : 'Student';
-                const isAdmin = role.toLowerCase() === 'admin' || role.toLowerCase() === 'host';
+                const role = activeSession ? (activeSession.role || 'Student').toLowerCase() : 'student';
+                const isAdmin = role === 'admin' || role === 'host' || role === 'teacher' || role === 'instructor';
                 // Respect the Host/Player view toggle — admins in Player View get the player settings
                 const isHostView = isAdmin && (window.pflxRole !== 'player');
                 const hostC = document.getElementById('host-settings-container');
@@ -40729,6 +40734,56 @@ RESPONSE RULES:
             buildSkipForm();
             var modal = document.getElementById('pflx-skip-onboard-modal');
             if (modal) modal.style.display = 'flex';
+        };
+
+        // ──────────────────────────────────────────────────────────────
+        // pflxOpenPlayerManager: navigate Platform → Settings → host sub-tab
+        // "Players". Player Management is canonical at Platform Settings, not
+        // Mission Control. This helper lets old "Manage Players" buttons (and
+        // muscle memory) still resolve to the right place.
+        //
+        // HOSTS ONLY. Non-host callers get a toast and no navigation. The
+        // underlying Settings panel is already host-gated (host-settings-
+        // container is hidden for players), but defending in depth: the
+        // helper itself must not transport a non-host into the wrong UI.
+        // ──────────────────────────────────────────────────────────────
+        function pflxIsHost() {
+            try {
+                var sess = window.activeSession || {};
+                var sessRole = (sess.role || '').toLowerCase();
+                if (sessRole === 'admin' || sessRole === 'host' || sessRole === 'teacher' || sessRole === 'instructor') return true;
+                // pflxRole is the runtime view-mode toggle ('host' / 'player'); only counts
+                // when the underlying session is also admin-ish.
+                if (window.pflxRole === 'host' && (sessRole === 'admin' || sessRole === 'host' || sessRole === 'teacher' || sessRole === 'instructor')) return true;
+                return false;
+            } catch (e) { return false; }
+        }
+        window.pflxIsHost = pflxIsHost;
+
+        window.pflxOpenPlayerManager = function () {
+            if (!pflxIsHost()) {
+                try {
+                    if (typeof window.pflxShowSaveToast === 'function') {
+                        window.pflxShowSaveToast('Player Management is host-only', 'error');
+                    } else {
+                        console.warn('[player-manager] blocked: caller is not host/admin');
+                    }
+                } catch (e) {}
+                return false;
+            }
+            try {
+                if (typeof navigateTo === 'function') navigateTo('settings');
+                setTimeout(function () {
+                    try {
+                        if (typeof switchHostTab === 'function') switchHostTab('players');
+                        else {
+                            var btn = document.querySelector('.host-subtab[data-host-tab="players"]');
+                            if (btn) btn.click();
+                        }
+                    } catch (e) { console.warn('[player-manager] switch failed', e); }
+                }, 80);
+                return true;
+            } catch (e) { console.warn('[player-manager] navigate failed', e); return false; }
         };
 
         function injectSkipButton() {
