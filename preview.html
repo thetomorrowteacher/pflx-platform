@@ -40834,9 +40834,43 @@ RESPONSE RULES:
     (function () {
         var PLAYERS_KEY = 'pflx_players_local_v1';
 
-        function isHost() {
-            return typeof window.pflxIsHost === 'function' && window.pflxIsHost();
+        // ── Canonical 4-role system: Player, Instructor, Host, Master Host ──
+        // Legacy roles map: Student/Creator/Educator/Explorer → Player;
+        // teacher → Instructor; admin → Master Host. The gates below accept
+        // ALL of these so existing data keeps working.
+        function isHostRole(role) {
+            if (!role) return false;
+            var r = String(role).toLowerCase().trim();
+            return r === 'admin' || r === 'host' || r === 'master host' ||
+                   r === 'master-host' || r === 'masterhost' ||
+                   r === 'teacher' || r === 'instructor';
         }
+        window.pflxIsHostRole = isHostRole;
+
+        function isHost() {
+            // Defer to the global pflxIsHost helper but ALSO accept the new 4-role names
+            try {
+                if (typeof window.pflxIsHost === 'function' && window.pflxIsHost()) return true;
+                var sess = window.activeSession || {};
+                return isHostRole(sess.role);
+            } catch (e) { return false; }
+        }
+
+        // ── List of all cohorts known to the system (drawn from PLAYERS) ──
+        function getAllCohorts() {
+            try {
+                if (typeof PLAYERS === 'undefined') return [];
+                var set = new Set();
+                PLAYERS.forEach(function (p) {
+                    if (!p) return;
+                    var arr = Array.isArray(p.cohorts) ? p.cohorts : (p.cohort || '').split(/[,;]/).map(function (s) { return s.trim(); });
+                    arr.forEach(function (c) { if (c) set.add(c); });
+                });
+                if (set.size === 0) set.add('PlayerPool');
+                return Array.from(set).sort();
+            } catch (e) { return ['PlayerPool']; }
+        }
+        window.pflxGetAllCohorts = getAllCohorts;
 
         // ── Persist all user-modified players to localStorage ──
         function persistPlayers() {
@@ -40940,46 +40974,125 @@ RESPONSE RULES:
             return 'padding:9px 18px;background:' + bg + ';border:' + bd + ';color:' + fg + ';border-radius:8px;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:1.5px;cursor:pointer;font-weight:' + (kind === 'primary' ? '700' : '500') + ';';
         }
 
+        // ── Roles list (canonical) ──
+        var ROLES_CANONICAL = ['Player', 'Instructor', 'Host', 'Master Host'];
+        var INTERESTS_CATALOG = ['CS/AI', 'Game Dev', 'Music', 'Design', 'Business', 'Video'];
+        var BADGE_TYPES = ['Signature', 'Primary', 'Premium', 'Executive'];
+
+        // Shared cohort multi-select renderer (returns HTML)
+        function cohortMultiSelectHtml(elId, selected) {
+            selected = (selected || []).map(function (s) { return String(s).toLowerCase(); });
+            var all = getAllCohorts();
+            var rows = all.map(function (c, i) {
+                var checked = selected.indexOf(c.toLowerCase()) >= 0 ? 'checked' : '';
+                var safe = c.replace(/"/g, '&quot;');
+                return '<label style="display:flex;align-items:center;gap:6px;padding:5px 8px;background:rgba(10,18,40,0.6);border:1px solid rgba(167,139,250,0.18);border-radius:6px;font-size:12px;color:#c4b5fd;cursor:pointer;font-family:Rajdhani,sans-serif;">' +
+                    '<input type="checkbox" data-cohort-pick="' + safe + '" ' + checked + ' style="accent-color:#00f0ff;"> ' + c + '</label>';
+            }).join('');
+            return '<div style="display:flex;flex-direction:column;gap:4px;font-family:Rajdhani,sans-serif;font-size:11px;color:#8a92b0;grid-column:1 / span 2;">COHORTS (multi-select; click to toggle)' +
+                '<div id="' + elId + '" style="display:flex;flex-wrap:wrap;gap:6px;padding:8px;background:rgba(10,18,40,0.4);border:1px solid rgba(0,240,255,0.12);border-radius:8px;max-height:160px;overflow-y:auto;">' + rows + '</div>' +
+                '<div style="display:flex;gap:6px;margin-top:6px;">' +
+                    '<input type="text" id="' + elId + '-new" placeholder="+ Add cohort name…" style="' + inputCss() + 'flex:1;font-size:12px;">' +
+                    '<button type="button" data-add-cohort="' + elId + '" style="' + btnCss('') + 'font-size:10px;padding:6px 12px;">ADD</button>' +
+                '</div>' +
+                '</div>';
+        }
+        function readCohortPicks(elId) {
+            var box = document.getElementById(elId);
+            if (!box) return [];
+            return Array.prototype.slice.call(box.querySelectorAll('input[data-cohort-pick]'))
+                .filter(function (cb) { return cb.checked; })
+                .map(function (cb) { return cb.getAttribute('data-cohort-pick'); });
+        }
+        function wireCohortAdder(card) {
+            card.querySelectorAll('button[data-add-cohort]').forEach(function (btn) {
+                btn.onclick = function () {
+                    var elId = btn.getAttribute('data-add-cohort');
+                    var inp = document.getElementById(elId + '-new');
+                    if (!inp) return;
+                    var v = (inp.value || '').trim();
+                    if (!v) return;
+                    var box = document.getElementById(elId);
+                    if (!box) return;
+                    var safe = v.replace(/"/g, '&quot;');
+                    var label = document.createElement('label');
+                    label.style.cssText = 'display:flex;align-items:center;gap:6px;padding:5px 8px;background:rgba(10,18,40,0.6);border:1px solid rgba(167,139,250,0.18);border-radius:6px;font-size:12px;color:#c4b5fd;cursor:pointer;font-family:Rajdhani,sans-serif;';
+                    label.innerHTML = '<input type="checkbox" data-cohort-pick="' + safe + '" checked style="accent-color:#00f0ff;"> ' + v;
+                    box.appendChild(label);
+                    inp.value = '';
+                };
+            });
+        }
+
+        // PIN field with eye toggle
+        function pinFieldHtml(id, label, value) {
+            return '<label style="display:flex;flex-direction:column;gap:4px;font-family:Rajdhani,sans-serif;font-size:11px;color:#8a92b0;">' + label +
+                '<div style="position:relative;">' +
+                    '<input id="' + id + '" type="password" value="' + (value || '').toString().replace(/"/g, '&quot;') + '" style="' + inputCss() + 'padding-right:36px;" maxlength="8">' +
+                    '<button type="button" data-pin-toggle="' + id + '" style="position:absolute;top:50%;right:6px;transform:translateY(-50%);background:transparent;border:none;color:#8a92b0;cursor:pointer;padding:4px 8px;font-size:14px;" title="Show / hide PIN">👁</button>' +
+                '</div>' +
+                '</label>';
+        }
+        function wirePinToggles(card) {
+            card.querySelectorAll('button[data-pin-toggle]').forEach(function (btn) {
+                btn.onclick = function () {
+                    var inp = document.getElementById(btn.getAttribute('data-pin-toggle'));
+                    if (!inp) return;
+                    inp.type = inp.type === 'password' ? 'text' : 'password';
+                };
+            });
+        }
+
         // ── ADD PLAYER ──
         window.hmcAddPlayer = function () {
             if (!isHost()) return;
             openModal(
                 '<div style="font-family:Orbitron,sans-serif;font-size:14px;letter-spacing:2px;color:#00f0ff;margin-bottom:14px;">ADD PLAYER</div>' +
                 '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">' +
-                  fld('pm-add-fullname', 'Full Name *', '1 / span 2') +
-                  fld('pm-add-brand',    'Brand Name * (≤16, ALL CAPS)') +
-                  fld('pm-add-pin',      'PIN (4-digit)', null, '****') +
-                  fld('pm-add-email',    'Email', '1 / span 2', '', 'email') +
-                  fld('pm-add-cohorts',  'Cohorts (comma-separated)', '1 / span 2', 'PlayerPool, Cohort A') +
-                  selFld('pm-add-role',  'Role', ['Student','Creator','Educator','Explorer','admin','host','teacher']) +
+                  fld('pm-add-fullname', 'Full Name (host-only; not shown to players) *', '1 / span 2') +
+                  fld('pm-add-brand',    'Brand Name * (≤16, ALL CAPS — public identity)') +
+                  pinFieldHtml('pm-add-pin', 'PIN (4-digit; auto-generated if blank)', '') +
+                  fld('pm-add-email',    'Email (host-only)', '1 / span 2', '', 'email') +
+                  cohortMultiSelectHtml('pm-add-cohorts', ['PlayerPool']) +
+                  selFld('pm-add-role',  'Role', ROLES_CANONICAL, 'Player') +
                   fld('pm-add-xc',       'Starting XC', null, '0', 'number') +
-                  '<label style="grid-column:1 / span 2;display:flex;align-items:center;gap:8px;font-family:Rajdhani,sans-serif;font-size:13px;color:#8a92b0;"><input type="checkbox" id="pm-add-bypass" checked> Mark as onboarded (bypass wizard)</label>' +
+                  fld('pm-add-slogan',   'Slogan (optional, ≤60)', '1 / span 2', '"Building the future..."') +
+                  '<div style="grid-column:1 / span 2;display:flex;flex-direction:column;gap:4px;font-family:Rajdhani,sans-serif;font-size:11px;color:#8a92b0;">INTERESTS (optional, multi)<div id="pm-add-interests" style="display:flex;flex-wrap:wrap;gap:6px;">' +
+                      INTERESTS_CATALOG.map(function (i) { return '<label style="padding:5px 12px;background:rgba(167,139,250,0.08);border:1px solid rgba(167,139,250,0.25);color:#c4b5fd;border-radius:6px;font-size:12px;cursor:pointer;font-family:Rajdhani,sans-serif;"><input type="checkbox" data-int="' + i + '" style="margin-right:5px;accent-color:#00f0ff;">' + i + '</label>'; }).join('') +
+                  '</div></div>' +
+                  '<label style="grid-column:1 / span 2;display:flex;align-items:center;gap:8px;font-family:Rajdhani,sans-serif;font-size:13px;color:#8a92b0;"><input type="checkbox" id="pm-add-bypass" checked> Mark as onboarded (bypass wizard at first login)</label>' +
                 '</div>' +
                 '<div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end;">' +
                   '<button id="pm-add-cancel" style="' + btnCss('') + '">CANCEL</button>' +
                   '<button id="pm-add-save" style="' + btnCss('primary') + '">CREATE PLAYER</button>' +
                 '</div>',
                 function (card, close) {
+                    wireCohortAdder(card);
+                    wirePinToggles(card);
                     card.querySelector('#pm-add-cancel').onclick = close;
                     card.querySelector('#pm-add-save').onclick = function () {
                         var name = (card.querySelector('#pm-add-fullname').value || '').trim();
                         var brand = (card.querySelector('#pm-add-brand').value || '').trim().toUpperCase();
                         var pin = (card.querySelector('#pm-add-pin').value || '').trim() || String(Math.floor(1000 + Math.random() * 9000));
                         var email = (card.querySelector('#pm-add-email').value || '').trim();
-                        var cohortsRaw = (card.querySelector('#pm-add-cohorts').value || 'PlayerPool').trim();
-                        var role = card.querySelector('#pm-add-role').value || 'Student';
+                        var cohorts = readCohortPicks('pm-add-cohorts');
+                        if (cohorts.length === 0) cohorts = ['PlayerPool'];
+                        var role = card.querySelector('#pm-add-role').value || 'Player';
                         var xc = parseInt(card.querySelector('#pm-add-xc').value, 10) || 0;
+                        var slogan = (card.querySelector('#pm-add-slogan').value || '').trim();
+                        var interests = Array.prototype.slice.call(card.querySelectorAll('input[data-int]:checked')).map(function (cb) { return cb.getAttribute('data-int'); });
                         var bypass = card.querySelector('#pm-add-bypass').checked;
                         if (!name)  return shake('pm-add-fullname');
                         if (!brand) return shake('pm-add-brand');
-                        var cohorts = cohortsRaw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
                         var newP = {
                             id: 'player-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
                             brand: brand, pin: pin, name: name, email: email,
                             cohort: cohorts.join(', '), cohorts: cohorts,
-                            role: /admin|host|teacher|instructor/i.test(role) ? role.toLowerCase() : 'player',
-                            xc: xc, totalXcoin: xc, digitalBadges: 0, level: 1, claimed: bypass,
-                            onboardingComplete: bypass, __pflxCustom: true, activity: []
+                            role: role,
+                            xc: xc, totalXcoin: xc, digitalBadges: 0,
+                            badges: [], badgeCounts: { signature: 0, primary: 0, premium: 0, executive: 0 },
+                            slogan: slogan, interests: interests,
+                            claimed: bypass, onboardingComplete: bypass, __pflxCustom: true, activity: []
                         };
                         PLAYERS.push(newP);
                         BRANDS[brand] = pin;
@@ -41057,21 +41170,74 @@ RESPONSE RULES:
             var rankOpts = '<option value="">Auto (by XC)</option>' + ranks.map(function (r) {
                 return '<option value="' + r.id + '"' + (p.rankOverride === r.id ? ' selected' : '') + '>' + (r.icon || '') + ' L' + r.level + ' · ' + r.name + '</option>';
             }).join('');
+
+            // Map legacy role → canonical for display
+            var roleNow = p.role || 'Player';
+            var lc = roleNow.toLowerCase();
+            if (lc === 'admin') roleNow = 'Master Host';
+            else if (lc === 'host') roleNow = 'Host';
+            else if (lc === 'teacher' || lc === 'instructor') roleNow = 'Instructor';
+            else if (lc === 'student' || lc === 'creator' || lc === 'educator' || lc === 'explorer' || lc === 'player') roleNow = 'Player';
+
+            // Ensure player has badges array (legacy badgeCounts → synthesized entries)
+            if (!Array.isArray(p.badges)) {
+                p.badges = [];
+                if (p.badgeCounts) {
+                    BADGE_TYPES.forEach(function (t) {
+                        var k = t.toLowerCase();
+                        var n = (p.badgeCounts[k] || 0) | 0;
+                        for (var i = 0; i < n; i++) {
+                            p.badges.push({ id: 'legacy-' + k + '-' + i + '-' + Date.now(), name: t + ' Badge #' + (i + 1), type: t, xc: 0, awardedAt: Date.now() });
+                        }
+                    });
+                }
+            }
+
+            // Render badge list HTML
+            function renderBadgeListHtml(badges) {
+                if (!badges || badges.length === 0) {
+                    return '<div style="color:#6a7290;font-size:11px;font-family:Rajdhani,sans-serif;text-align:center;padding:12px;">No badges earned yet.</div>';
+                }
+                return badges.map(function (b, i) {
+                    var safeName = (b.name || 'Badge').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+                    var xcChip = (b.xc || 0) > 0 ? '<span style="color:#facc15;font-family:Share Tech Mono,monospace;font-size:10px;margin-left:6px;">+' + b.xc + ' XC</span>' : '';
+                    return '<div data-badge-row="' + i + '" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(10,18,40,0.6);border:1px solid rgba(167,139,250,0.18);border-radius:8px;">' +
+                        '<div style="flex:1;min-width:0;">' +
+                            '<div style="color:#e0e6ff;font-family:Rajdhani,sans-serif;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + safeName + xcChip + '</div>' +
+                            '<div style="color:#6a7290;font-size:10px;font-family:Share Tech Mono,monospace;">' + (b.type || 'Signature') + '</div>' +
+                        '</div>' +
+                        '<button type="button" data-remove-badge="' + i + '" style="' + btnCss('danger') + 'padding:5px 10px;font-size:10px;">REMOVE</button>' +
+                    '</div>';
+                }).join('');
+            }
+
             openModal(
                 '<div style="font-family:Orbitron,sans-serif;font-size:14px;letter-spacing:2px;color:#00f0ff;margin-bottom:14px;">EDIT PLAYER · ' + (p.brand || p.name).replace(/</g, '&lt;') + '</div>' +
                 '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">' +
-                  fld('pm-ed-name',     'Full Name', '1 / span 2', '', 'text', p.name || '') +
-                  fld('pm-ed-brand',    'Brand', null, '', 'text', p.brand || '') +
-                  fld('pm-ed-pin',      'PIN', null, '', 'text', p.pin || '') +
-                  fld('pm-ed-email',    'Email', '1 / span 2', '', 'email', p.email || '') +
-                  fld('pm-ed-cohorts',  'Cohorts (comma-separated, multi-cohort OK)', '1 / span 2', '', 'text', cohortsArr.join(', ')) +
-                  selFld('pm-ed-role',  'Role', ['Student','Creator','Educator','Explorer','admin','host','teacher','instructor'], p.role || 'Student') +
+                  fld('pm-ed-name',     'Full Name (host-only; not shown to players)', '1 / span 2', '', 'text', p.name || '') +
+                  fld('pm-ed-brand',    'Brand (public identity)', null, '', 'text', p.brand || '') +
+                  pinFieldHtml('pm-ed-pin', 'PIN', p.pin || '') +
+                  fld('pm-ed-email',    'Email (host-only)', '1 / span 2', '', 'email', p.email || '') +
+                  cohortMultiSelectHtml('pm-ed-cohorts', cohortsArr) +
+                  selFld('pm-ed-role',  'Role', ROLES_CANONICAL, roleNow) +
                   fld('pm-ed-xc',       'XC', null, '', 'number', String(p.xc || 0)) +
-                  fld('pm-ed-level',    'Level', null, '', 'number', String(p.level || 1)) +
-                  '<div style="display:flex;flex-direction:column;gap:4px;font-family:Rajdhani,sans-serif;font-size:11px;color:#8a92b0;">RANK OVERRIDE<select id="pm-ed-rank" style="' + inputCss() + '">' + rankOpts + '</select></div>' +
-                  '<label style="grid-column:1 / span 2;display:flex;align-items:center;gap:8px;font-family:Rajdhani,sans-serif;font-size:13px;color:#8a92b0;"><input type="checkbox" id="pm-ed-bypass"' + (p.onboardingComplete !== false ? ' checked' : '') + '> Onboarding complete (bypass wizard)</label>' +
+                  '<div style="display:flex;flex-direction:column;gap:4px;font-family:Rajdhani,sans-serif;font-size:11px;color:#8a92b0;grid-column:1 / span 2;">RANK OVERRIDE (optional — if set, overrides XC-derived rank)<select id="pm-ed-rank" style="' + inputCss() + '">' + rankOpts + '</select></div>' +
+                  '<label style="grid-column:1 / span 2;display:flex;align-items:center;gap:8px;font-family:Rajdhani,sans-serif;font-size:13px;color:#8a92b0;"><input type="checkbox" id="pm-ed-bypass"' + (p.onboardingComplete !== false ? ' checked' : '') + '> Onboarding complete (bypass wizard at next login)</label>' +
                   '<label style="grid-column:1 / span 2;display:flex;align-items:center;gap:8px;font-family:Rajdhani,sans-serif;font-size:13px;color:#8a92b0;"><input type="checkbox" id="pm-ed-frozen"' + (p.frozen ? ' checked' : '') + '> Account frozen</label>' +
                 '</div>' +
+
+                // ── ONBOARDING DATA OVERRIDE ──
+                '<div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.06);font-family:Orbitron,sans-serif;font-size:11px;color:rgba(0,240,255,0.7);letter-spacing:2px;">ONBOARDING DATA (manual override — visible to player)</div>' +
+                fld('pm-ed-slogan', 'Slogan (≤60 chars; appears on player card)', null, '"Building the future..."', 'text', p.slogan || '') +
+                '<div style="margin-top:8px;font-family:Rajdhani,sans-serif;font-size:11px;color:#8a92b0;">INTERESTS</div>' +
+                '<div id="pm-ed-interests" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">' +
+                    INTERESTS_CATALOG.map(function (i) {
+                        var checked = Array.isArray(p.interests) && p.interests.indexOf(i) >= 0;
+                        return '<label style="padding:5px 12px;background:rgba(167,139,250,' + (checked ? '0.18' : '0.08') + ');border:1px solid rgba(167,139,250,' + (checked ? '0.5' : '0.25') + ');color:' + (checked ? '#00f0ff' : '#c4b5fd') + ';border-radius:6px;font-size:12px;cursor:pointer;font-family:Rajdhani,sans-serif;"><input type="checkbox" data-int="' + i + '"' + (checked ? ' checked' : '') + ' style="margin-right:5px;accent-color:#00f0ff;">' + i + '</label>';
+                    }).join('') +
+                '</div>' +
+
+                // ── PROFILE PICTURE ──
                 '<div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.06);font-family:Orbitron,sans-serif;font-size:11px;color:rgba(0,240,255,0.7);letter-spacing:2px;">PROFILE PICTURE</div>' +
                 '<div style="display:flex;align-items:center;gap:14px;margin-top:8px;">' +
                   '<div id="pm-ed-img-preview" style="width:64px;height:64px;border-radius:50%;background:' + (p.image ? "url('" + p.image.replace(/'/g, "\\'") + "') center/cover" : 'rgba(0,240,255,0.08)') + ';border:1px solid rgba(0,240,255,0.3);flex-shrink:0;"></div>' +
@@ -41080,14 +41246,23 @@ RESPONSE RULES:
                     '<button id="pm-ed-img-clear" type="button" style="margin-top:6px;' + btnCss('') + 'padding:6px 12px;font-size:10px;">CLEAR IMAGE</button>' +
                   '</div>' +
                 '</div>' +
-                '<div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.06);font-family:Orbitron,sans-serif;font-size:11px;color:rgba(0,240,255,0.7);letter-spacing:2px;">DIGITAL BADGES</div>' +
-                '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-top:8px;">' +
-                  fld('pm-ed-bsig', 'Signature', null, '', 'number', String((p.badgeCounts && p.badgeCounts.signature) || 0)) +
-                  fld('pm-ed-bpri', 'Primary',   null, '', 'number', String((p.badgeCounts && p.badgeCounts.primary)   || 0)) +
-                  fld('pm-ed-bprm', 'Premium',   null, '', 'number', String((p.badgeCounts && p.badgeCounts.premium)   || 0)) +
-                  fld('pm-ed-bexe', 'Executive', null, '', 'number', String((p.badgeCounts && p.badgeCounts.executive) || 0)) +
+
+                // ── DIGITAL BADGES (individual list) ──
+                '<div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.06);font-family:Orbitron,sans-serif;font-size:11px;color:rgba(0,240,255,0.7);letter-spacing:2px;">DIGITAL BADGES (' + p.badges.length + ')</div>' +
+                '<div style="font-size:10px;color:#6a7290;font-family:Rajdhani,sans-serif;margin-top:4px;margin-bottom:8px;">Removing a badge subtracts its XC value from this player.</div>' +
+                '<div id="pm-ed-badges" style="display:flex;flex-direction:column;gap:6px;max-height:240px;overflow-y:auto;">' + renderBadgeListHtml(p.badges) + '</div>' +
+                // Add badge form
+                '<div style="margin-top:10px;padding:10px;background:rgba(0,240,255,0.04);border:1px dashed rgba(0,240,255,0.2);border-radius:8px;">' +
+                    '<div style="font-family:Orbitron,sans-serif;font-size:10px;color:rgba(0,240,255,0.7);letter-spacing:1.5px;margin-bottom:6px;">+ AWARD BADGE</div>' +
+                    '<div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:6px;align-items:end;">' +
+                        '<input id="pm-ed-newb-name" type="text" placeholder="Badge name…" style="' + inputCss() + 'font-size:12px;">' +
+                        '<select id="pm-ed-newb-type" style="' + inputCss() + 'font-size:12px;">' + BADGE_TYPES.map(function (t) { return '<option value="' + t + '">' + t + '</option>'; }).join('') + '</select>' +
+                        '<input id="pm-ed-newb-xc" type="number" placeholder="XC" style="' + inputCss() + 'font-size:12px;">' +
+                        '<button id="pm-ed-newb-add" type="button" style="' + btnCss('primary') + 'padding:8px 14px;font-size:10px;">AWARD</button>' +
+                    '</div>' +
                 '</div>' +
-                '<button id="pm-ed-clear-badges" style="margin-top:8px;' + btnCss('danger') + '">REMOVE ALL BADGES</button>' +
+                '<button id="pm-ed-clear-badges" style="margin-top:10px;' + btnCss('danger') + '">REMOVE ALL BADGES (subtracts total XC)</button>' +
+
                 '<div style="display:flex;gap:10px;margin-top:18px;justify-content:space-between;">' +
                   '<button id="pm-ed-delete" style="' + btnCss('danger') + '">DELETE PLAYER</button>' +
                   '<div style="display:flex;gap:10px;">' +
@@ -41096,8 +41271,11 @@ RESPONSE RULES:
                   '</div>' +
                 '</div>',
                 function (card, close) {
+                    wireCohortAdder(card);
+                    wirePinToggles(card);
                     card.querySelector('#pm-ed-cancel').onclick = close;
-                    // Profile picture: read uploaded file as data URL into a stash field
+
+                    // Profile picture
                     var pendingImg = null;
                     var fileEl = card.querySelector('#pm-ed-img-file');
                     var previewEl = card.querySelector('#pm-ed-img-preview');
@@ -41124,13 +41302,48 @@ RESPONSE RULES:
                         if (previewEl) previewEl.style.background = 'rgba(0,240,255,0.08)';
                         if (fileEl) fileEl.value = '';
                     };
-                    // Stash on card element for save handler to read
                     card.__getPendingImg = function () { return pendingImg; };
-                    card.querySelector('#pm-ed-clear-badges').onclick = function () {
-                        ['pm-ed-bsig','pm-ed-bpri','pm-ed-bprm','pm-ed-bexe'].forEach(function (id) {
-                            card.querySelector('#' + id).value = '0';
+
+                    // Badge editor — work against a working copy
+                    var workingBadges = (p.badges || []).slice();
+                    function refreshBadges() {
+                        var box = card.querySelector('#pm-ed-badges');
+                        if (!box) return;
+                        box.innerHTML = renderBadgeListHtml(workingBadges);
+                        box.querySelectorAll('button[data-remove-badge]').forEach(function (btn) {
+                            btn.onclick = function () {
+                                var i = parseInt(btn.getAttribute('data-remove-badge'), 10);
+                                if (isNaN(i) || !workingBadges[i]) return;
+                                var b = workingBadges[i];
+                                if (!confirm('Remove "' + (b.name || 'badge') + '"?' + ((b.xc || 0) > 0 ? ' This will deduct ' + b.xc + ' XC.' : ''))) return;
+                                workingBadges.splice(i, 1);
+                                refreshBadges();
+                            };
                         });
+                    }
+                    refreshBadges();
+                    card.querySelector('#pm-ed-newb-add').onclick = function () {
+                        var nm = (card.querySelector('#pm-ed-newb-name').value || '').trim();
+                        var tp = card.querySelector('#pm-ed-newb-type').value || 'Signature';
+                        var xc = parseInt(card.querySelector('#pm-ed-newb-xc').value, 10) || 0;
+                        if (!nm) return shake('pm-ed-newb-name');
+                        workingBadges.push({ id: 'badge-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6), name: nm, type: tp, xc: xc, awardedAt: Date.now() });
+                        card.querySelector('#pm-ed-newb-name').value = '';
+                        card.querySelector('#pm-ed-newb-xc').value = '';
+                        // Add the XC immediately to the XC field
+                        var xcField = card.querySelector('#pm-ed-xc');
+                        if (xcField && xc > 0) xcField.value = String((parseInt(xcField.value, 10) || 0) + xc);
+                        refreshBadges();
                     };
+                    card.querySelector('#pm-ed-clear-badges').onclick = function () {
+                        if (!confirm('Remove ALL ' + workingBadges.length + ' badges? This will deduct the sum of their XC values.')) return;
+                        var totalXc = workingBadges.reduce(function (s, b) { return s + (b.xc || 0); }, 0);
+                        workingBadges = [];
+                        var xcField = card.querySelector('#pm-ed-xc');
+                        if (xcField && totalXc > 0) xcField.value = String(Math.max(0, (parseInt(xcField.value, 10) || 0) - totalXc));
+                        refreshBadges();
+                    };
+                    card.__getWorkingBadges = function () { return workingBadges; };
                     card.querySelector('#pm-ed-delete').onclick = function () {
                         if (!confirm('Permanently delete ' + (p.brand || p.name) + '? This cannot be undone.')) return;
                         var i = PLAYERS.indexOf(p);
@@ -41149,25 +41362,32 @@ RESPONSE RULES:
                         p.brand = newBrand;
                         p.pin = newPin;
                         p.email = (card.querySelector('#pm-ed-email').value || '').trim();
-                        var cohortsRaw = (card.querySelector('#pm-ed-cohorts').value || 'PlayerPool').trim();
-                        p.cohorts = cohortsRaw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
-                        p.cohort = p.cohorts.join(', ');
-                        p.role = card.querySelector('#pm-ed-role').value || 'Student';
+                        var cohorts = readCohortPicks('pm-ed-cohorts');
+                        if (cohorts.length === 0) cohorts = ['PlayerPool'];
+                        p.cohorts = cohorts;
+                        p.cohort = cohorts.join(', ');
+                        p.role = card.querySelector('#pm-ed-role').value || 'Player';
                         p.xc = parseInt(card.querySelector('#pm-ed-xc').value, 10) || 0;
-                        p.level = parseInt(card.querySelector('#pm-ed-level').value, 10) || 1;
+                        // Level removed from UI — derived from rank now
                         var rOv = card.querySelector('#pm-ed-rank').value;
                         p.rankOverride = rOv || null;
                         p.onboardingComplete = card.querySelector('#pm-ed-bypass').checked;
                         p.claimed = p.claimed || p.onboardingComplete;
                         p.frozen = card.querySelector('#pm-ed-frozen').checked;
-                        p.badgeCounts = {
-                            signature: parseInt(card.querySelector('#pm-ed-bsig').value, 10) || 0,
-                            primary:   parseInt(card.querySelector('#pm-ed-bpri').value, 10) || 0,
-                            premium:   parseInt(card.querySelector('#pm-ed-bprm').value, 10) || 0,
-                            executive: parseInt(card.querySelector('#pm-ed-bexe').value, 10) || 0
-                        };
-                        p.digitalBadges = p.badgeCounts.signature + p.badgeCounts.primary + p.badgeCounts.premium + p.badgeCounts.executive;
-                        // Profile picture — only override if a new image was uploaded or explicitly cleared
+                        // Onboarding override fields
+                        p.slogan = (card.querySelector('#pm-ed-slogan').value || '').trim();
+                        p.interests = Array.prototype.slice.call(card.querySelectorAll('#pm-ed-interests input[data-int]:checked')).map(function (cb) { return cb.getAttribute('data-int'); });
+                        // Badges — write the working copy + recompute counts from it
+                        var workingBadges = (typeof card.__getWorkingBadges === 'function') ? card.__getWorkingBadges() : (p.badges || []);
+                        p.badges = workingBadges;
+                        var counts = { signature: 0, primary: 0, premium: 0, executive: 0 };
+                        workingBadges.forEach(function (b) {
+                            var k = (b.type || 'Signature').toLowerCase();
+                            if (counts[k] !== undefined) counts[k]++;
+                        });
+                        p.badgeCounts = counts;
+                        p.digitalBadges = workingBadges.length;
+                        // Profile picture
                         var imgVal = (typeof card.__getPendingImg === 'function') ? card.__getPendingImg() : null;
                         if (imgVal !== null) p.image = imgVal;
                         // Brand-rename: maintain BRANDS map
