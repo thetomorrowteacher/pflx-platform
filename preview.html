@@ -40533,7 +40533,9 @@ RESPONSE RULES:
                     pathway:            profile.pathway       || existing.pathway || '',
                     onboardingComplete: profile.onboardingComplete !== false,
                     onboarded:          profile.onboarded !== false,
-                    keepSignedIn:       profile.keepSignedIn !== false,
+                    // keepSignedIn is opt-in (was: anything non-false → true, which auto-logged
+                    // people in too aggressively). Now must be explicitly true.
+                    keepSignedIn:       profile.keepSignedIn === true,
                     lastLoginAt:        Date.now()
                 });
                 localStorage.setItem(IDENTITY_KEY, JSON.stringify(merged));
@@ -40564,6 +40566,17 @@ RESPONSE RULES:
                 localStorage.removeItem(ACTIVE_BRAND);
                 localStorage.removeItem('pflx_active_role');
             } catch (e) {}
+        };
+
+        // Sign out: clear identity + reload so the user lands at the login screen.
+        // Callable from console as `pflxSignOut()` if you ever get stuck.
+        window.pflxSignOut = function () {
+            try {
+                window.pflxIdentityClear();
+                sessionStorage.removeItem('pflx_mimic_stash_v1');
+                sessionStorage.removeItem('pflx_mimic_active_v1');
+                window.location.reload();
+            } catch (e) { console.warn('[identity] signOut failed', e); }
         };
 
         function tryAutoLogin() {
@@ -40974,10 +40987,48 @@ RESPONSE RULES:
             return 'padding:9px 18px;background:' + bg + ';border:' + bd + ';color:' + fg + ';border-radius:8px;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:1.5px;cursor:pointer;font-weight:' + (kind === 'primary' ? '700' : '500') + ';';
         }
 
-        // ── Roles list (canonical) ──
+        // ── Roles list (canonical UI labels) ──
         var ROLES_CANONICAL = ['Player', 'Instructor', 'Host', 'Master Host'];
         var INTERESTS_CATALOG = ['CS/AI', 'Game Dev', 'Music', 'Design', 'Business', 'Video'];
         var BADGE_TYPES = ['Signature', 'Primary', 'Premium', 'Executive'];
+
+        // ── Role normalize: canonical UI label → lowercase storage form ──
+        // The original hmcRenderPlayers filters with strict `p.role === 'player'`.
+        // To stay compatible we always store lowercase. Display logic (in
+        // hmcEditPlayer) maps lowercase → canonical UI label.
+        function normalizeRole(r) {
+            if (!r) return 'player';
+            var lc = String(r).toLowerCase().trim();
+            if (lc === 'master host' || lc === 'master-host' || lc === 'masterhost' || lc === 'admin') return 'admin';
+            if (lc === 'host') return 'host';
+            if (lc === 'teacher' || lc === 'instructor') return 'instructor';
+            // Everything else (including legacy Student/Creator/Educator/Explorer) → player
+            return 'player';
+        }
+        window.pflxNormalizeRole = normalizeRole;
+
+        // ── One-time migration: walk PLAYERS and lowercase any roles that got
+        //    capitalized by the v2 save handler before this fix. This recovers
+        //    players who "disappeared" because their role was stored as
+        //    "Player" / "Instructor" / etc. and didn't match the renderer's
+        //    `=== 'player'` filter. ──
+        (function migrateRoles() {
+            try {
+                if (typeof PLAYERS === 'undefined' || !Array.isArray(PLAYERS)) return;
+                var changed = 0;
+                PLAYERS.forEach(function (p) {
+                    if (!p || !p.role) return;
+                    var n = normalizeRole(p.role);
+                    if (p.role !== n) { p.role = n; changed++; }
+                });
+                if (changed > 0) {
+                    console.info('[player-mgmt] migrated', changed, 'player role(s) to lowercase');
+                    if (typeof window.pflxPersistPlayers === 'function') {
+                        window.pflxPersistPlayers();
+                    }
+                }
+            } catch (e) { console.warn('[player-mgmt] role migration failed', e); }
+        })();
 
         // Shared cohort multi-select renderer (returns HTML)
         function cohortMultiSelectHtml(elId, selected) {
@@ -41088,7 +41139,8 @@ RESPONSE RULES:
                             id: 'player-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
                             brand: brand, pin: pin, name: name, email: email,
                             cohort: cohorts.join(', '), cohorts: cohorts,
-                            role: role,
+                            role: normalizeRole(role),     // store lowercase so the existing list renderer picks them up
+                            roleDisplay: role,             // keep the canonical UI label too
                             xc: xc, totalXcoin: xc, digitalBadges: 0,
                             badges: [], badgeCounts: { signature: 0, primary: 0, premium: 0, executive: 0 },
                             slogan: slogan, interests: interests,
@@ -41098,6 +41150,11 @@ RESPONSE RULES:
                         BRANDS[brand] = pin;
                         broadcastPlayerChange(newP);
                         if (typeof window.pflxIdentityPersistNewPlayer === 'function') window.pflxIdentityPersistNewPlayer(newP);
+                        // Clear any active filter/search so the new/edited row is immediately visible
+                        try {
+                            var s = document.getElementById('hmc-player-search');  if (s) s.value = '';
+                            var c = document.getElementById('hmc-cohort-filter');   if (c) c.value = 'all';
+                        } catch (e) {}
                         if (typeof hmcRenderPlayers === 'function') hmcRenderPlayers();
                         if (typeof populateBrandSelect === 'function') populateBrandSelect();
                         try { if (typeof window.pflxShowSaveToast === 'function') window.pflxShowSaveToast('Player created · ' + brand); } catch (e) {}
@@ -41151,6 +41208,11 @@ RESPONSE RULES:
                             added++;
                         });
                         persistPlayers();
+                        // Clear any active filter/search so the new/edited row is immediately visible
+                        try {
+                            var s = document.getElementById('hmc-player-search');  if (s) s.value = '';
+                            var c = document.getElementById('hmc-cohort-filter');   if (c) c.value = 'all';
+                        } catch (e) {}
                         if (typeof hmcRenderPlayers === 'function') hmcRenderPlayers();
                         if (typeof populateBrandSelect === 'function') populateBrandSelect();
                         status.innerHTML = '<span style="color:#22c55e;">✓ ' + added + ' imported</span>' + (skipped ? ' · <span style="color:#f59e0b;">' + skipped + ' skipped (duplicate or invalid)</span>' : '');
@@ -41350,6 +41412,11 @@ RESPONSE RULES:
                         if (i >= 0) PLAYERS.splice(i, 1);
                         if (p.brand) delete BRANDS[p.brand];
                         persistPlayers();
+                        // Clear any active filter/search so the new/edited row is immediately visible
+                        try {
+                            var s = document.getElementById('hmc-player-search');  if (s) s.value = '';
+                            var c = document.getElementById('hmc-cohort-filter');   if (c) c.value = 'all';
+                        } catch (e) {}
                         if (typeof hmcRenderPlayers === 'function') hmcRenderPlayers();
                         try { if (typeof window.pflxShowSaveToast === 'function') window.pflxShowSaveToast('Player deleted'); } catch (e) {}
                         close();
@@ -41366,7 +41433,9 @@ RESPONSE RULES:
                         if (cohorts.length === 0) cohorts = ['PlayerPool'];
                         p.cohorts = cohorts;
                         p.cohort = cohorts.join(', ');
-                        p.role = card.querySelector('#pm-ed-role').value || 'Player';
+                        var pickedRole = card.querySelector('#pm-ed-role').value || 'Player';
+                        p.role = normalizeRole(pickedRole);  // store lowercase for renderer compatibility
+                        p.roleDisplay = pickedRole;          // keep the canonical UI label
                         p.xc = parseInt(card.querySelector('#pm-ed-xc').value, 10) || 0;
                         // Level removed from UI — derived from rank now
                         var rOv = card.querySelector('#pm-ed-rank').value;
@@ -41394,6 +41463,11 @@ RESPONSE RULES:
                         if (oldBrand && oldBrand !== newBrand) delete BRANDS[oldBrand];
                         if (newBrand && newPin) BRANDS[newBrand] = newPin;
                         broadcastPlayerChange(p);
+                        // Clear any active filter/search so the new/edited row is immediately visible
+                        try {
+                            var s = document.getElementById('hmc-player-search');  if (s) s.value = '';
+                            var c = document.getElementById('hmc-cohort-filter');   if (c) c.value = 'all';
+                        } catch (e) {}
                         if (typeof hmcRenderPlayers === 'function') hmcRenderPlayers();
                         if (typeof populateBrandSelect === 'function') populateBrandSelect();
                         try { if (typeof window.pflxShowSaveToast === 'function') window.pflxShowSaveToast('Saved · ' + p.brand); } catch (e) {}
@@ -41452,30 +41526,93 @@ RESPONSE RULES:
             if (first) panel.insertBefore(bar, first); else panel.appendChild(bar);
         }
 
-        // ── Wrap hmcRenderPlayers to add an Edit button column once table is rendered ──
+        // ── Replace hmcRenderPlayers entirely so we can:
+        //    1. Show ALL accounts (players + instructors + hosts + master hosts),
+        //       not just role === 'player'. The Settings → Players tab is the
+        //       canonical Player Management surface for every kind of account.
+        //    2. Multi-cohort filter (a player whose cohort is "A, B" matches when
+        //       the filter is "A" or "B"). Strict equality used to drop them.
+        //    3. Edit button per row (replacing the old "View").
+        //    4. Role pill so admins/instructors/hosts are visually distinguishable.
+        // ──
         var origRender = window.hmcRenderPlayers;
-        if (typeof origRender === 'function') {
-            window.hmcRenderPlayers = function () {
-                var r = origRender.apply(this, arguments);
-                injectButtons();
-                // Add Edit button to each row (replacing the View label)
-                try {
-                    var tbody = document.getElementById('hmc-player-tbody');
-                    if (!tbody) return r;
-                    tbody.querySelectorAll('button').forEach(function (b) {
-                        if (b.textContent && b.textContent.trim() === 'View') {
-                            b.textContent = 'Edit';
-                            b.setAttribute('onclick', "event.stopPropagation();hmcEditPlayer('" + (b.closest('tr')?.querySelector('td')?.textContent || '') + "')");
-                            // Better: extract id from onclick of the row itself
-                            var rowOnclick = b.closest('tr').getAttribute('onclick') || '';
-                            var idMatch = rowOnclick.match(/hmcShowPlayerDetail\('([^']+)'\)/);
-                            if (idMatch) b.setAttribute('onclick', "event.stopPropagation();hmcEditPlayer('" + idMatch[1] + "')");
-                        }
-                    });
-                } catch (e) {}
-                return r;
-            };
+        function rebuildPlayerTable() {
+            var tbody = document.getElementById('hmc-player-tbody');
+            if (!tbody) return;
+            var search = (document.getElementById('hmc-player-search')?.value || '').toLowerCase();
+            var cohortFilter = document.getElementById('hmc-cohort-filter')?.value || 'all';
+            // Populate cohort filter dropdown (one-time)
+            var cohortSelect = document.getElementById('hmc-cohort-filter');
+            if (cohortSelect && cohortSelect.options.length <= 1) {
+                getAllCohorts().forEach(function (c) {
+                    var opt = document.createElement('option');
+                    opt.value = c; opt.textContent = c;
+                    cohortSelect.appendChild(opt);
+                });
+            }
+
+            // Show every account that isn't a soft-deleted entry
+            var rows = (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) ? PLAYERS.slice() : [];
+            // Multi-cohort filter — match if filter appears in player's cohorts list/string
+            if (cohortFilter !== 'all') {
+                var cf = String(cohortFilter).toLowerCase();
+                rows = rows.filter(function (p) {
+                    var arr = Array.isArray(p.cohorts) ? p.cohorts : (p.cohort || '').split(/[,;]/).map(function (s) { return s.trim(); });
+                    return arr.some(function (c) { return c && c.toLowerCase() === cf; });
+                });
+            }
+            if (search) {
+                rows = rows.filter(function (p) {
+                    return ((p.brand || '') + ' ' + (p.name || '') + ' ' + (p.cohort || '') + ' ' + (p.email || '')).toLowerCase().indexOf(search) !== -1;
+                });
+            }
+            // Sort: hosts/admin first, then by brand
+            rows.sort(function (a, b) {
+                var ah = isHostRole(a.role) ? 0 : 1;
+                var bh = isHostRole(b.role) ? 0 : 1;
+                if (ah !== bh) return ah - bh;
+                return (a.brand || '').localeCompare(b.brand || '');
+            });
+
+            tbody.innerHTML = rows.map(function (p) {
+                var rank = (typeof getRankForXC === 'function') ? getRankForXC(p.xc || 0) : { icon: '', name: '' };
+                var roleLabel = (p.roleDisplay || '').trim();
+                if (!roleLabel) {
+                    var rl = String(p.role || '').toLowerCase();
+                    if (rl === 'admin') roleLabel = 'Master Host';
+                    else if (rl === 'host') roleLabel = 'Host';
+                    else if (rl === 'instructor' || rl === 'teacher') roleLabel = 'Instructor';
+                    else roleLabel = 'Player';
+                }
+                var isHost = isHostRole(p.role);
+                var roleColor = isHost ? '#facc15' : '#a78bfa';
+                var statusHtml = p.claimed
+                    ? '<span class="hmc-player-badge-claimed yes">CLAIMED</span>'
+                    : '<span class="hmc-player-badge-claimed no">PENDING</span>';
+                var safeBrand = (p.brand || '—').replace(/</g, '&lt;');
+                var safeName = (p.name || '—').replace(/</g, '&lt;');
+                var safeCohort = (p.cohort || '—').replace(/</g, '&lt;');
+                return '<tr>' +
+                    '<td><span style="color:var(--cyan);font-family:Orbitron,sans-serif;letter-spacing:1px;">' + safeBrand + '</span> <span style="display:inline-block;margin-left:6px;padding:2px 8px;background:rgba(' + (isHost ? '250,204,21' : '167,139,250') + ',0.12);border:1px solid rgba(' + (isHost ? '250,204,21' : '167,139,250') + ',0.4);border-radius:4px;color:' + roleColor + ';font-family:Orbitron,sans-serif;font-size:9px;letter-spacing:1px;">' + roleLabel + '</span></td>' +
+                    '<td>' + safeName + '</td>' +
+                    '<td>' + safeCohort + '</td>' +
+                    '<td style="font-family:Share Tech Mono,monospace;color:var(--gold);">' + ((p.xc || 0).toLocaleString ? (p.xc || 0).toLocaleString() : (p.xc || 0)) + '</td>' +
+                    '<td>' + (rank.icon || '') + ' ' + (rank.name || '—') + '</td>' +
+                    '<td>' + statusHtml + '</td>' +
+                    '<td>' +
+                        '<button class="hmc-btn-sm hmc-btn-green" onclick="event.stopPropagation();hmcAwardXC(\'' + p.id + '\')">+XC</button> ' +
+                        '<button class="hmc-btn-sm hmc-btn-ghost" onclick="event.stopPropagation();hmcEditPlayer(\'' + p.id + '\')">Edit</button>' +
+                    '</td>' +
+                '</tr>';
+            }).join('');
+
+            var countEl = document.getElementById('hmc-player-count');
+            if (countEl) countEl.textContent = rows.length + ' accounts';
+            injectButtons();
         }
+        window.hmcRenderPlayers = rebuildPlayerTable;
+        // Expose old in case anything calls it directly
+        window.hmcRenderPlayersOriginal = origRender;
 
         // ── Activity hooks: log key events on the active player ──
         function hookActivity() {
