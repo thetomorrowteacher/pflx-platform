@@ -12909,12 +12909,25 @@
             const xcEl = document.getElementById('toolbar-xc');
             if (xcEl) xcEl.textContent = (typeof pflxFormatXC === 'function') ? pflxFormatXC(xc) : xc.toLocaleString();
 
-            // XC progress bar — percentage toward next rank
-            const rank = getRankForXC(xc);
+            // XC progress bar — percentage toward next rank.
+            // Honor any rankOverride or pre-resolved rank on the activeSession.
+            let rank = null;
+            try {
+                // 1) Direct lookup by override id
+                if (activeSession.rank && typeof mcPflxRanks !== 'undefined' && Array.isArray(mcPflxRanks)) {
+                    rank = mcPflxRanks.find(function (r) { return r.id === activeSession.rank; });
+                }
+                // 2) Pre-resolved fields pushed by broadcastPlayerChange
+                if (!rank && activeSession.rankIcon && activeSession.rankName) {
+                    rank = { icon: activeSession.rankIcon, name: activeSession.rankName, level: activeSession.rankLevel || 1, xcUnlock: 0 };
+                }
+            } catch (e) {}
+            // 3) Fallback: derive from XC
+            if (!rank) rank = getRankForXC(xc);
             const nextRank = getNextRank(rank);
             let xcPct = 100;
             if (nextRank) {
-                xcPct = Math.min(100, Math.round(((xc - rank.xcUnlock) / (nextRank.xcUnlock - rank.xcUnlock)) * 100));
+                xcPct = Math.min(100, Math.round(((xc - (rank.xcUnlock || 0)) / (nextRank.xcUnlock - (rank.xcUnlock || 0))) * 100));
             }
             const xcBar = document.getElementById('toolbar-xc-bar');
             if (xcBar) xcBar.style.width = xcPct + '%';
@@ -40350,6 +40363,9 @@ RESPONSE RULES:
 
             try { if (typeof pflxRefreshToolbarStatus === 'function') pflxRefreshToolbarStatus(); } catch (e) {}
             broadcastIdentity();
+            // Force the entire Platform UI to re-render with the mimicked
+            // player's data — toolbar, home dashboard, role pill, iframes.
+            try { if (typeof window.pflxRefreshAllUI === 'function') window.pflxRefreshAllUI(); } catch (e) {}
             setBannerVisible(true, newSession.name + (newSession.brand ? ' · ' + newSession.brand : ''));
             syncXBotPanel(newSession);
             try { if (typeof window.pflxShowSaveToast === 'function') window.pflxShowSaveToast('Now mimicking ' + newSession.name); } catch (e) {}
@@ -40399,6 +40415,8 @@ RESPONSE RULES:
             try { sessionStorage.removeItem(STASH_KEY); sessionStorage.removeItem(ACTIVE_KEY); } catch (e) {}
             try { if (typeof pflxRefreshToolbarStatus === 'function') pflxRefreshToolbarStatus(); } catch (e) {}
             broadcastIdentity();
+            // Restore the host's UI in full — toolbar, home dashboard, role pill, iframes.
+            try { if (typeof window.pflxRefreshAllUI === 'function') window.pflxRefreshAllUI(); } catch (e) {}
             setBannerVisible(false);
             syncXBotPanel(null);
             if (!opts.silent) {
@@ -40589,6 +40607,47 @@ RESPONSE RULES:
 
         // Sign out: clear identity + reload so the user lands at the login screen.
         // Callable from console as `pflxSignOut()` if you ever get stuck.
+        // ──────────────────────────────────────────────────────────────
+        // pflxRefreshAllUI: rebuild every part of the Platform that displays
+        // identity-derived data so the host's screen actually changes when
+        // they mimic, switch role, or edit their own profile.
+        //
+        //   - Toolbar (brand, XC, rank, level, image)
+        //   - Home dashboard (player header card, deadlines, activity, goals)
+        //   - Role pill / view-toggle
+        //   - All iframes (re-broadcast identity)
+        // ──────────────────────────────────────────────────────────────
+        window.pflxRefreshAllUI = function () {
+            try {
+                if (typeof updateToolbarStatus === 'function') updateToolbarStatus();
+            } catch (e) {}
+            try {
+                if (typeof pflxInjectRolePill === 'function') pflxInjectRolePill();
+            } catch (e) {}
+            try {
+                // Re-render the home dashboard from scratch with the current activeSession
+                var dashboard = document.getElementById('dashboard');
+                if (dashboard && window.activeSession && typeof initPlatform === 'function') {
+                    dashboard.innerHTML = '';
+                    initPlatform(window.activeSession.brand || window.activeSession.name || 'PLAYER');
+                }
+            } catch (e) { console.warn('[ui-refresh] dashboard rebuild failed', e); }
+            try {
+                // Re-broadcast identity to every iframe so sub-apps re-render too
+                if (window.activeSession) {
+                    var payload = JSON.stringify({
+                        type: 'pflx_identity_broadcast',
+                        user: window.activeSession,
+                        role: window.pflxRole || 'player',
+                        forceSync: true
+                    });
+                    document.querySelectorAll('iframe').forEach(function (f) {
+                        if (f.contentWindow) { try { f.contentWindow.postMessage(payload, '*'); } catch (e) {} }
+                    });
+                }
+            } catch (e) {}
+        };
+
         window.pflxSignOut = function () {
             try {
                 window.pflxIdentityClear();
