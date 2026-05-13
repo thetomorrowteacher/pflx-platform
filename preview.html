@@ -12713,45 +12713,22 @@
             { week: 'W8', xc: 400 }
         ];
 
-        const RECENT_ACTIVITY = [
-            { type: 'xc', text: 'Completed Daily Quest', time: '2h ago', xc: '+50' },
-            { type: 'quest', text: 'Unlocked New Pathway', time: '4h ago', xc: '+150' },
-            { type: 'social', text: 'Battle Victory vs Player#842', time: '6h ago', xc: '+200' },
-            { type: 'system', text: 'Weekly Bonus Awarded', time: '12h ago', xc: '+100' },
-            { type: 'xc', text: 'Investment Dividend', time: '1d ago', xc: '+75' },
-            { type: 'quest', text: 'Mastered New Skill', time: '2d ago', xc: '+120' },
-            { type: 'social', text: 'Joined Study Group', time: '3d ago', xc: '+50' },
-            { type: 'system', text: 'Achievement Unlocked', time: '4d ago', xc: '+200' }
-        ];
+        // Player-specific data — pulled from the player's activity log + cohort
+        // tasks/checkpoints. Dummy placeholder data removed so dashboards reflect
+        // only what's actually been earned/assigned to that player.
+        //
+        // Future: these arrays get populated from:
+        //   - RECENT_ACTIVITY ← player.activity[] (XC events, badge awards, ...)
+        //   - GOALS           ← cohort goals + per-player progress
+        //   - DEADLINES       ← mcCheckpoints + mcTasks filtered by player
+        // until then they're empty so the cards show "No activity yet" placeholders.
+        const RECENT_ACTIVITY = [];
+        const GOALS = [];
+        const DEADLINES = [];
 
-        const GOALS = [
-            { text: 'Complete Pathway 3', progress: 75, done: false },
-            { text: 'Reach Rank A+', progress: 60, done: false },
-            { text: 'Battle Arena Wins: 50', progress: 40, done: false },
-            { text: 'Master 5 Skills', progress: 80, done: false },
-            { text: 'Build Portfolio', progress: 50, done: false }
-        ];
-
-        const DEADLINES = [
-            { text: 'Season Tournament', due: '2d 5h', urgent: true },
-            { text: 'Pathway Assessment', due: '5d 12h', urgent: false },
-            { text: 'Portfolio Review', due: '7d', urgent: false },
-            { text: 'Next Monthly Bonus', due: '12d', urgent: false }
-        ];
-
-        const EPICS = [
-            { name: 'Master Algorithm Design', status: 'In Progress', progress: 65 },
-            { name: 'Build Full-Stack App', status: 'In Progress', progress: 40 },
-            { name: 'Game Dev Fundamentals', status: 'Not Started', progress: 0 },
-            { name: 'AI & Machine Learning', status: 'Completed', progress: 100 }
-        ];
-
-        const SCHEDULE = [
-            { time: '10:00 AM', event: 'Pathway Lecture' },
-            { time: '2:00 PM', event: 'Battle Arena Tournament' },
-            { time: '6:00 PM', event: 'Study Group' },
-            { time: '8:00 PM', event: 'Free Practice' }
-        ];
+        // Dummy data removed — wire to player.activity / cohort assignments later.
+        const EPICS = [];
+        const SCHEDULE = [];
 
         const AI_COMMANDS = {
             help: { output: 'Available commands: status, players, analytics, scan, quest' },
@@ -15847,17 +15824,45 @@
             const displayName = brandName || 'PLAYER';
             const player = findPlayerByBrand(displayName);
 
-            // Set active session for SSO passthrough to all apps
+            // Set active session for SSO passthrough to all apps. Copy ALL host-editable
+            // fields off the player record (host edits in Player Management land here),
+            // not just identity. Profile image, rank override, badges all flow through.
             activeSession = {
-                id:     player ? player.id : null,
-                brand:  displayName,
-                name:   player ? player.name : displayName,
-                email:  player ? player.email : '',
-                pin:    player ? player.pin : '',
-                role:   player ? player.role : 'Student',
-                cohort: player ? player.cohort : 'PlayerPool',
-                xc:     player ? (player.xc || 0) : 0
+                id:             player ? player.id : null,
+                brand:          displayName,
+                name:           player ? player.name : displayName,
+                email:          player ? player.email : '',
+                pin:            player ? player.pin : '',
+                role:           player ? player.role : 'Student',
+                cohort:         player ? (Array.isArray(player.cohorts) ? player.cohorts.join(', ') : player.cohort) : 'PlayerPool',
+                cohorts:        player && Array.isArray(player.cohorts) ? player.cohorts : (player && player.cohort ? [player.cohort] : ['PlayerPool']),
+                xc:             player ? (player.xc || 0) : 0,
+                totalXcoin:     player ? (player.totalXcoin || player.xc || 0) : 0,
+                image:          player ? (player.image || '') : '',
+                slogan:         player ? (player.slogan || '') : '',
+                interests:      player ? (player.interests || []) : [],
+                level:          player ? (player.level || 1) : 1,
+                digitalBadges:  player ? (player.digitalBadges || 0) : 0,
+                badgeCounts:    player ? (player.badgeCounts || null) : null,
+                badges:         player && Array.isArray(player.badges) ? player.badges : [],
+                rankOverride:   player ? (player.rankOverride || null) : null
             };
+
+            // Resolve rank ONCE here so the toolbar / dashboard / sub-apps all read the same rank.
+            try {
+                let _r = null;
+                if (activeSession.rankOverride && typeof mcPflxRanks !== 'undefined' && Array.isArray(mcPflxRanks)) {
+                    _r = mcPflxRanks.find(function (r) { return r.id === activeSession.rankOverride; });
+                }
+                if (!_r && typeof getRankForXC === 'function') _r = getRankForXC(activeSession.xc || 0);
+                if (_r) {
+                    activeSession.rank = _r.id || null;
+                    activeSession.rankIcon = _r.icon || '';
+                    activeSession.rankName = _r.name || '';
+                    activeSession.rankLevel = _r.level || 1;
+                    activeSession.level = _r.level || activeSession.level || 1;
+                }
+            } catch (e) {}
 
             // Enrich session from pflx_user (written by X-Coin) if available
             try {
@@ -37040,29 +37045,31 @@ RESPONSE RULES:
 
         function buildBriefingMessage() {
             const s = activeSession || {};
-            const name = s.name || s.brand || 'Player';
+            // Use brand (player's public identity) — never the real name in briefings the player sees
+            const name = s.brand || s.name || 'Player';
             const xc = s.xc || 0;
             const role = (s.role || 'Student').toLowerCase();
             const cohort = s.cohort || 'PlayerPool';
-            const isHost = role === 'admin' || role === 'host';
-            const rank = getRankForXC(xc);
+            const isHost = role === 'admin' || role === 'host' || role === 'master-host' || role === 'master host';
+            // Resolve rank — honor rankOverride / pre-resolved fields on activeSession
+            let rank = null;
+            try {
+                if (s.rank && typeof mcPflxRanks !== 'undefined' && Array.isArray(mcPflxRanks)) {
+                    rank = mcPflxRanks.find(r => r.id === s.rank);
+                }
+                if (!rank && s.rankIcon && s.rankName) {
+                    rank = { icon: s.rankIcon, name: s.rankName, level: s.rankLevel || 1, xcUnlock: 0 };
+                }
+            } catch (e) {}
+            if (!rank) rank = getRankForXC(xc);
             const nextRank = getNextRank(rank);
 
-            // Mock progress data — in production this comes from Supabase
-            const checkpoints = [
-                { name: 'Module 3: Visual Identity Systems', pathway: 'Personal Branding', status: 'in_progress', progress: 65 },
-                { name: 'Module 2: Responsive Layouts', pathway: 'Web Development', status: 'not_started', progress: 0 },
-                { name: 'Module 1: Idea Validation', pathway: 'Entrepreneurship', status: 'completed', progress: 100 }
-            ];
-            const projects = [
-                { name: 'Startup Pitch Deck', status: 'in_progress', deadline: 'Apr 10' },
-                { name: 'Brand Identity Package', status: 'not_started', deadline: 'Apr 18' }
-            ];
-            const tasks = [
-                { name: 'Submit logo concepts for review', status: 'pending' },
-                { name: 'Complete branding quiz', status: 'pending' },
-                { name: 'Post introduction in DarkCampus', status: 'completed' }
-            ];
+            // Real player data only — mock checkpoints/projects/tasks removed.
+            // These will be wired to mcCheckpoints / mcProjects / mcTasks filtered
+            // by the player's cohort + assignments in a later push.
+            const checkpoints = [];
+            const projects = [];
+            const tasks = [];
 
             // Find next incomplete checkpoint
             const nextCheckpoint = checkpoints.find(c => c.status === 'in_progress') || checkpoints.find(c => c.status === 'not_started');
@@ -37265,7 +37272,23 @@ RESPONSE RULES:
                             <div class="stat-label">Total XC</div>
                         </div>
                         <div class="stat-box">
-                            <div class="stat-value">${role.toLowerCase() === 'admin' ? 'HOST' : 'S+'}</div>
+                            <div class="stat-value">${(function(){
+                                // Resolve rank — honor activeSession.rank override / pre-resolved fields first
+                                try {
+                                    if (s.rank && typeof mcPflxRanks !== 'undefined' && Array.isArray(mcPflxRanks)) {
+                                        var r = mcPflxRanks.find(function(x){ return x.id === s.rank; });
+                                        if (r) return (r.icon || '') + ' ' + (r.name || '');
+                                    }
+                                    if (s.rankName) return (s.rankIcon || '') + ' ' + s.rankName;
+                                } catch(e) {}
+                                if (role.toLowerCase() === 'admin' || role.toLowerCase() === 'host' || role.toLowerCase() === 'master host' || role.toLowerCase() === 'master-host') return 'HOST';
+                                // Fallback: derive from XC
+                                try {
+                                    var derived = getRankForXC(xc);
+                                    if (derived) return (derived.icon || '') + ' ' + (derived.name || 'Player');
+                                } catch(e) {}
+                                return 'Player';
+                            })()}</div>
                             <div class="stat-label">Rank</div>
                         </div>
                         <div class="stat-box">
