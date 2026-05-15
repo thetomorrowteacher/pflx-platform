@@ -5974,11 +5974,8 @@
                     <div class="status-value rank-value" id="toolbar-rank">Player</div>
                     <div class="status-bar"><div class="status-bar-fill" id="toolbar-rank-bar" style="width:10%"></div></div>
                 </div>
-                <div class="status-item">
-                    <div class="status-label">LEVEL</div>
-                    <div class="status-value" id="toolbar-level">L1</div>
-                    <div class="status-bar"><div class="status-bar-fill" id="toolbar-level-bar" style="width:10%"></div></div>
-                </div>
+                <!-- LEVEL indicator removed — level is part of Evo Rank (rank + name).
+                     Keeping it surfaced separately led to confusion and duplicated state. -->
             </div>
             <!-- Host/Player toggle + X-Bot + Chat — surfaced for admins -->
             <div class="toolbar-host-tools">
@@ -12849,17 +12846,36 @@
         function updateToolbarStatus() {
             if (!activeSession) return;
 
-            // Refresh from pflx_user if available (cross-app sync)
+            // Refresh from the Console's own PLAYERS array (source of truth for host edits).
+            // Previously this read from cross-app pflx_user localStorage, which is a SHARED key
+            // that any sub-app can overwrite — so stale data from a previously logged-in player
+            // (e.g. Neuroflux) bled into the current player's toolbar (wrong image, wrong XC).
+            // Strict ID match against PLAYERS keeps each profile isolated.
+            try {
+                if (activeSession.id && typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) {
+                    var p = PLAYERS.find(function (pp) { return pp && pp.id === activeSession.id; });
+                    if (p) {
+                        activeSession.xc            = typeof p.xc !== 'undefined' ? p.xc : (activeSession.xc || 0);
+                        activeSession.totalXcoin    = typeof p.totalXcoin !== 'undefined' ? p.totalXcoin : (activeSession.totalXcoin || activeSession.xc || 0);
+                        activeSession.digitalBadges = p.digitalBadges || 0;
+                        activeSession.image         = p.image || '';
+                        activeSession.slogan        = p.slogan || activeSession.slogan || '';
+                        activeSession.rankOverride  = p.rankOverride || null;
+                    }
+                }
+            } catch (e) {}
+
+            // Fall back to pflx_user ONLY if a strict id match exists (cross-app sync from sub-app)
             try {
                 const stored = localStorage.getItem('pflx_user');
-                if (stored) {
+                if (stored && activeSession.id) {
                     const u = JSON.parse(stored);
-                    if (u && (u.brandName === activeSession.brand || u.name === activeSession.name || u.id === activeSession.id)) {
-                        activeSession.xc = typeof u.xcoin !== 'undefined' ? u.xcoin : activeSession.xc;
-                        activeSession.totalXcoin = u.totalXcoin || activeSession.xc;
-                        activeSession.digitalBadges = u.digitalBadges || 0;
-                        activeSession.image = u.image || activeSession.image || '';
-                        activeSession.level = u.level || activeSession.level || 1;
+                    if (u && u.id && u.id === activeSession.id) {
+                        // Only adopt fields the sub-app likely owns (xc balance, badge counts).
+                        // Never adopt name/brand/image from pflx_user — those belong to the Console.
+                        if (typeof u.xcoin !== 'undefined') activeSession.xc = u.xcoin;
+                        if (typeof u.totalXcoin !== 'undefined') activeSession.totalXcoin = u.totalXcoin;
+                        if (typeof u.digitalBadges !== 'undefined') activeSession.digitalBadges = u.digitalBadges;
                     }
                 }
             } catch(e) {}
@@ -12922,12 +12938,7 @@
             const rankBar = document.getElementById('toolbar-rank-bar');
             if (rankBar) rankBar.style.width = (rank.level * 10) + '%';
 
-            // Level — use enriched level from X-Coin if available
-            const playerLevel = activeSession.level || rank.level || 1;
-            const lvlEl = document.getElementById('toolbar-level');
-            if (lvlEl) lvlEl.textContent = 'L' + playerLevel;
-            const lvlBar = document.getElementById('toolbar-level-bar');
-            if (lvlBar) lvlBar.style.width = Math.min(100, playerLevel * 10) + '%';
+            // Level indicator removed from toolbar — Evo Rank already conveys progression tier.
         }
 
         // BACKGROUND CANVAS ANIMATION
@@ -15864,21 +15875,26 @@
                 }
             } catch (e) {}
 
-            // Enrich session from pflx_user (written by X-Coin) if available
+            // Enrich session from pflx_user (written by X-Coin) ONLY when the cached
+            // identity strictly matches the current player by id. The previous OR-based
+            // match (brandName || name || id) caused stale data from a previously
+            // logged-in player to bleed into the next session — wrong image, wrong XC.
+            // The Console's own PLAYERS record (already copied above) is always the
+            // source of truth for image / slogan / interests / role / badges.
             try {
                 const stored = localStorage.getItem('pflx_user');
-                if (stored) {
+                if (stored && activeSession.id) {
                     const u = JSON.parse(stored);
-                    if (u && (u.brandName === displayName || u.name === displayName || u.id === activeSession.id)) {
-                        activeSession.xc = typeof u.xcoin !== 'undefined' ? u.xcoin : activeSession.xc;
-                        activeSession.totalXcoin = u.totalXcoin || u.xcoin || activeSession.xc;
-                        activeSession.digitalBadges = u.digitalBadges || 0;
-                        activeSession.badgeCounts = u.badgeCounts || null;
-                        activeSession.image = u.image || '';
-                        activeSession.level = u.level || 1;
-                        activeSession.studioId = u.studioId || '';
-                        activeSession.pathway = u.pathway || '';
-                        activeSession.diagnosticResult = u.diagnosticResult || null;
+                    if (u && u.id && u.id === activeSession.id) {
+                        // Sub-app may have a fresher XC balance than the Console's snapshot —
+                        // adopt numeric fields only. Never adopt image / name / brand from here.
+                        if (typeof u.xcoin !== 'undefined') activeSession.xc = u.xcoin;
+                        if (typeof u.totalXcoin !== 'undefined') activeSession.totalXcoin = u.totalXcoin;
+                        if (typeof u.digitalBadges !== 'undefined') activeSession.digitalBadges = u.digitalBadges;
+                        if (u.badgeCounts) activeSession.badgeCounts = u.badgeCounts;
+                        if (u.studioId) activeSession.studioId = u.studioId;
+                        if (u.pathway) activeSession.pathway = u.pathway;
+                        if (u.diagnosticResult) activeSession.diagnosticResult = u.diagnosticResult;
                     }
                 }
             } catch(e) { console.warn('[PFLX] pflx_user enrich error', e); }
@@ -34771,34 +34787,56 @@ RESPONSE RULES:
         // and merges with activeSession for rich profile data
         function portfolioGetUserData() {
             const base = activeSession || {};
+            // Source of truth: the Console's PLAYERS array (keyed by activeSession.id).
+            // pflx_user is a SHARED cross-app cache that any sub-app can overwrite, so
+            // reading image / xc straight from it caused the previous player's data to
+            // leak into the current portfolio (e.g. CrossTech inheriting Neuroflux's image).
+            let p = null;
+            try {
+                if (base.id && typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) {
+                    p = PLAYERS.find(function (pp) { return pp && pp.id === base.id; }) || null;
+                }
+            } catch (e) {}
+            // pflx_user is only consulted when its id strictly matches the active player.
             let rich = {};
             try {
                 const stored = localStorage.getItem('pflx_user');
-                if (stored) rich = JSON.parse(stored) || {};
+                if (stored) {
+                    const parsed = JSON.parse(stored) || {};
+                    if (parsed && parsed.id && base.id && parsed.id === base.id) {
+                        rich = parsed;
+                    }
+                }
             } catch(e) {}
-            // Merge — pflx_user has the authoritative rich data
+            const src = p || {};
+            // Helpers — prefer the Console's player record (src), then activeSession,
+            // then pflx_user (rich) only if id-matched, then defaults. Image/name/role
+            // are owned by the Console; xc/totalXcoin/badge counts may legitimately
+            // come from pflx_user if the sub-app has a fresher number.
             return {
-                id:               rich.id || base.id || null,
-                brand:            base.brand || rich.brandName || rich.name || 'Player',
-                name:             rich.name || base.name || 'Player',
-                email:            rich.email || base.email || '',
-                role:             base.role || rich.role || 'player',
-                cohort:           rich.cohort || base.cohort || 'PlayerPool',
-                xc:               typeof rich.xcoin !== 'undefined' ? rich.xcoin : (base.xc || 0),
-                totalXcoin:       rich.totalXcoin || rich.xcoin || base.xc || 0,
-                digitalBadges:    rich.digitalBadges || 0,
-                badgeCounts:      rich.badgeCounts || { primary: 0, premium: 0, executive: 0, signature: 0 },
-                image:            rich.image || base.image || localStorage.getItem('pflx_player_img_' + (base.brand || '')) || '',
-                avatar:           rich.avatar || base.avatar || '',
-                level:            rich.level || 1,
-                rank:             rich.rank || 1,
-                studioId:         rich.studioId || '',
-                studioStakeXC:    rich.studioStakeXC || 0,
-                studioStakePercent: rich.studioStakePercent || 0,
-                diagnosticResult: rich.diagnosticResult || null,
-                pathway:          rich.pathway || '',
-                onboardingComplete: rich.onboardingComplete || false,
-                brandingComplete: rich.brandingComplete || false,
+                id:               base.id || src.id || rich.id || null,
+                brand:            base.brand || src.brand || 'Player',
+                name:             src.name || base.name || 'Player',
+                email:            src.email || base.email || '',
+                role:             src.role || base.role || 'player',
+                cohort:           (Array.isArray(src.cohorts) ? src.cohorts.join(', ') : src.cohort) || base.cohort || 'PlayerPool',
+                xc:               typeof src.xc !== 'undefined' ? src.xc : (typeof rich.xcoin !== 'undefined' ? rich.xcoin : (base.xc || 0)),
+                totalXcoin:       (typeof src.totalXcoin !== 'undefined' ? src.totalXcoin : null) ?? rich.totalXcoin ?? rich.xcoin ?? src.xc ?? base.xc ?? 0,
+                digitalBadges:    src.digitalBadges || rich.digitalBadges || 0,
+                badgeCounts:      src.badgeCounts || rich.badgeCounts || { primary: 0, premium: 0, executive: 0, signature: 0 },
+                image:            src.image || base.image || '',
+                avatar:           base.avatar || '',
+                level:            src.level || base.level || 1,
+                rank:             src.rank || base.rank || 1,
+                studioId:         src.studioId || rich.studioId || '',
+                studioStakeXC:    src.studioStakeXC || rich.studioStakeXC || 0,
+                studioStakePercent: src.studioStakePercent || rich.studioStakePercent || 0,
+                diagnosticResult: src.diagnosticResult || rich.diagnosticResult || null,
+                pathway:          src.pathway || rich.pathway || '',
+                slogan:           src.slogan || base.slogan || '',
+                interests:        src.interests || base.interests || [],
+                onboardingComplete: src.onboardingComplete !== false,
+                brandingComplete: src.brandingComplete || rich.brandingComplete || false,
             };
         }
 
@@ -34923,15 +34961,16 @@ RESPONSE RULES:
                 const projects = (data.projects || []).length;
                 // Also count completed tasks from cross-app data
                 const taskStats = portfolioGetTaskStats();
+                // LEVEL tile removed — Evo Rank conveys progression tier already.
+                // 5 tiles look cleaner in a flexible grid that wraps on narrow widths.
                 const statItems = [
                     { label: 'DIGITAL BADGES', value: totalBadges || user.digitalBadges || 0, color: '#f5c842', icon: '&#x1F3C5;' },
                     { label: 'LIFETIME XC', value: (user.totalXcoin || 0).toLocaleString(), color: '#4f8ef7', icon: '&#x26A1;' },
                     { label: 'EVO RANK', value: rank.name, color: '#22c55e', icon: rank.icon || '&#x2B50;' },
                     { label: 'PROJECTS', value: projects, color: '#a78bfa', icon: '&#x1F4BC;' },
                     { label: 'TASKS DONE', value: taskStats.completed, color: '#0ea5e9', icon: '&#x2705;' },
-                    { label: 'LEVEL', value: 'L' + (user.level || 1), color: '#f472b6', icon: '&#x1F4A0;' },
                 ];
-                statsEl.style.gridTemplateColumns = 'repeat(3,1fr)';
+                statsEl.style.gridTemplateColumns = 'repeat(auto-fit, minmax(160px, 1fr))';
                 statsEl.innerHTML = statItems.map(s => `
                     <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:18px;text-align:center;">
                         <div style="font-size:16px;margin-bottom:6px;">${s.icon}</div>
@@ -37261,8 +37300,14 @@ RESPONSE RULES:
             const studioBadge = studioName
                 ? ` · <span style="color:#f5c842;">🏢 ${studioName}</span>`
                 : '';
+            // Resolve the hero avatar — prefer the player's own uploaded image,
+            // fall back to the PFLX core logo only when nothing is uploaded.
+            const heroAvatarSrc = (s.image && String(s.image).length > 0)
+                ? s.image
+                : 'public/PFLX Core Flat 6.png';
+            const heroAvatarFit = (s.image && String(s.image).length > 0) ? 'cover' : 'contain';
             playerHeader.innerHTML = `
-                <div class="player-avatar-lg"><img src="public/PFLX Core Flat 6.png" alt="PFLX" style="width:100%;height:100%;border-radius:50%;object-fit:contain;"></div>
+                <div class="player-avatar-lg"><img src="${heroAvatarSrc}" alt="${displayName}" style="width:100%;height:100%;border-radius:50%;object-fit:${heroAvatarFit};"></div>
                 <div class="player-identity">
                     <div class="player-name">${displayName}</div>
                     <div class="player-subtitle" style="font-family:'Jura',sans-serif;font-size:12px;color:#8a92b0;letter-spacing:1px;margin-top:2px;">${role} · ${cohort}${studioBadge}</div>
@@ -38912,6 +38957,49 @@ RESPONSE RULES:
                         var label = msg.label || msg.message || 'Saved to Cloud ✓';
                         window.pflxShowSaveToast(label);
                         if (msg.ackId && pendingAcks[msg.ackId]) delete pendingAcks[msg.ackId];
+                    }
+
+                    // ── PflxDataBus: canonical cross-app data protocol ──
+                    // sub → Console: "give me player X" → respond with full record
+                    if (msg.type === 'pflx_player_get' && msg.playerId) {
+                        var src = ev.source;
+                        var rec = window.PflxDataBus ? window.PflxDataBus.get(msg.playerId) : null;
+                        if (src && src.postMessage) {
+                            src.postMessage(JSON.stringify({
+                                type: 'pflx_player_data',
+                                player: rec,
+                                playerId: msg.playerId,
+                                ackId: msg.ackId || null
+                            }), '*');
+                        }
+                    }
+
+                    // sub → Console: "apply this partial update to player X"
+                    if (msg.type === 'pflx_player_update' && msg.playerId && msg.changes) {
+                        var updated = window.PflxDataBus
+                            ? window.PflxDataBus.update(msg.playerId, msg.changes, msg.source || 'sub-app')
+                            : null;
+                        if (ev.source && ev.source.postMessage) {
+                            ev.source.postMessage(JSON.stringify({
+                                type: 'pflx_player_data',
+                                player: updated,
+                                playerId: msg.playerId,
+                                ackId: msg.ackId || null
+                            }), '*');
+                        }
+                    }
+
+                    // sub → Console: "give me the roster" (for leaderboards, mimic selector)
+                    if (msg.type === 'pflx_players_list_request') {
+                        var src2 = ev.source;
+                        var list = window.PflxDataBus ? window.PflxDataBus.getAll(msg.filter || null) : [];
+                        if (src2 && src2.postMessage) {
+                            src2.postMessage(JSON.stringify({
+                                type: 'pflx_players_list',
+                                players: list,
+                                ackId: msg.ackId || null
+                            }), '*');
+                        }
                     }
 
                     // Sub-app requests current identity (SSO pull) → respond with active session + role
@@ -40572,25 +40660,33 @@ RESPONSE RULES:
             try {
                 var existing = {};
                 try { existing = JSON.parse(localStorage.getItem(IDENTITY_KEY) || '{}'); } catch (e) {}
-                var merged = Object.assign({}, existing, {
-                    id:                 profile.id            || existing.id,
-                    brandName:          profile.brand         || profile.brandName || existing.brandName,
-                    brand:              profile.brand         || existing.brand,
-                    pin:                profile.pin           || existing.pin,
-                    name:               profile.name          || existing.name,
-                    email:              profile.email         || existing.email,
-                    role:               profile.role          || existing.role || 'Student',
-                    cohort:             profile.cohort        || existing.cohort || 'PlayerPool',
-                    slogan:             profile.slogan        || existing.slogan || '',
-                    interests:          profile.interests     || existing.interests || [],
-                    xcoin:              (typeof profile.xc === 'number' ? profile.xc : (typeof profile.xcoin === 'number' ? profile.xcoin : existing.xcoin)) || 0,
-                    totalXcoin:         profile.totalXcoin    || existing.totalXcoin || 0,
-                    digitalBadges:      profile.digitalBadges || existing.digitalBadges || 0,
-                    badgeCounts:        profile.badgeCounts   || existing.badgeCounts || null,
-                    image:              profile.image         || existing.image || '',
-                    level:              profile.level         || existing.level || 1,
-                    studioId:           profile.studioId      || existing.studioId || '',
-                    pathway:            profile.pathway       || existing.pathway || '',
+                // If the incoming profile belongs to a DIFFERENT player than what's
+                // currently cached, wipe the existing record before merging — otherwise
+                // the previous player's image / xcoin / badges leak into the new profile.
+                var sameUser = !!(existing && existing.id && profile.id && existing.id === profile.id);
+                var base = sameUser ? existing : {};
+                var merged = Object.assign({}, base, {
+                    id:                 profile.id            || base.id,
+                    brandName:          profile.brand         || profile.brandName || base.brandName,
+                    brand:              profile.brand         || base.brand,
+                    pin:                profile.pin           || base.pin,
+                    name:               profile.name          || base.name,
+                    email:              profile.email         || base.email,
+                    role:               profile.role          || base.role || 'Student',
+                    cohort:             profile.cohort        || base.cohort || 'PlayerPool',
+                    slogan:             profile.slogan        || base.slogan || '',
+                    interests:          profile.interests     || base.interests || [],
+                    xcoin:              (typeof profile.xc === 'number' ? profile.xc : (typeof profile.xcoin === 'number' ? profile.xcoin : base.xcoin)) || 0,
+                    totalXcoin:         profile.totalXcoin    || base.totalXcoin || 0,
+                    digitalBadges:      profile.digitalBadges || base.digitalBadges || 0,
+                    badgeCounts:        profile.badgeCounts   || base.badgeCounts || null,
+                    // Image: when switching to a different user, never inherit the prior
+                    // user's image. For the same user, fall back to the cached one only
+                    // if the incoming profile genuinely has none.
+                    image:              (profile.image !== undefined ? profile.image : (sameUser ? (base.image || '') : '')) || '',
+                    level:              profile.level         || base.level || 1,
+                    studioId:           profile.studioId      || base.studioId || '',
+                    pathway:            profile.pathway       || base.pathway || '',
                     onboardingComplete: profile.onboardingComplete !== false,
                     onboarded:          profile.onboarded !== false,
                     // keepSignedIn is opt-in (was: anything non-false → true, which auto-logged
@@ -41068,7 +41164,7 @@ RESPONSE RULES:
                 }
                 try { if (typeof updateToolbarStatus === 'function') updateToolbarStatus(); } catch (e) {}
                 try { if (typeof window.pflxIdentityPersist === 'function') window.pflxIdentityPersist(window.activeSession); } catch (e) {}
-                // Re-broadcast the new identity to iframes
+                // Re-broadcast the new identity to iframes (legacy contract)
                 document.querySelectorAll('iframe').forEach(function (f) {
                     if (!f.contentWindow) return;
                     try {
@@ -41092,8 +41188,136 @@ RESPONSE RULES:
                     } catch (e) {}
                 });
             }
+            // Canonical PflxDataBus event — fired for EVERY player change regardless
+            // of whether the changed player is the active session. Any sub-app that
+            // subscribes to pflx_player_changed will get a fresh authoritative record.
+            // Activity log is stripped to keep the wire payload small.
+            try {
+                var wirePlayer = Object.assign({}, player);
+                delete wirePlayer.activity;
+                document.querySelectorAll('iframe').forEach(function (f) {
+                    if (!f.contentWindow) return;
+                    try {
+                        f.contentWindow.postMessage(JSON.stringify({
+                            type: 'pflx_player_changed',
+                            player: wirePlayer,
+                            source: 'console'
+                        }), '*');
+                    } catch (e) {}
+                });
+            } catch (e) {}
             try { logActivity(player.id, 'profile_updated', { by: window.activeSession && window.activeSession.id || null }); } catch (e) {}
         }
+        window.broadcastPlayerChange = broadcastPlayerChange;
+
+        // ═══════════════════════════════════════════════════════════════════
+        // PflxDataBus — the canonical cross-app data hub
+        // ═══════════════════════════════════════════════════════════════════
+        // Every sub-app (X-Coin, Pathways, Arena, DarkCampus) treats the
+        // Console as the single source of truth for player records. The bus
+        // routes requests and applies updates through the same code path that
+        // the Player Management UI uses, so a Mimic-mode edit, a Battle Arena
+        // win, and an X-Coin task reward all flow through one funnel and
+        // re-broadcast a consistent record to every other surface.
+        //
+        // Protocol (postMessage JSON):
+        //   sub → Console : { type: 'pflx_player_get',    playerId, ackId? }
+        //   sub → Console : { type: 'pflx_player_update', playerId, changes, source, ackId? }
+        //   sub → Console : { type: 'pflx_players_list_request', filter?, ackId? }
+        //   Console → sub : { type: 'pflx_player_data',     player, ackId? }
+        //   Console → all : { type: 'pflx_player_changed',  player, source }
+        //   Console → sub : { type: 'pflx_players_list',    players, ackId? }
+        //
+        // 'changes' is a partial player object. Whitelisted fields only —
+        // sub-apps cannot rename, re-role, or re-cohort a player. They can
+        // adjust xc/totalXcoin/digitalBadges/badgeCounts/badges/slogan/image/
+        // interests/studioId/pathway/diagnosticResult/level/rankOverride.
+        window.PflxDataBus = (function () {
+            var WRITABLE_FIELDS = {
+                xc: 1, totalXcoin: 1, digitalBadges: 1, badgeCounts: 1,
+                badges: 1, slogan: 1, image: 1, interests: 1,
+                studioId: 1, pathway: 1, diagnosticResult: 1,
+                level: 1, rankOverride: 1, activity: 1
+            };
+
+            function getPlayer(playerId) {
+                if (!playerId || typeof PLAYERS === 'undefined') return null;
+                var p = PLAYERS.find(function (x) { return x && x.id === playerId; });
+                return p ? Object.assign({}, p) : null;
+            }
+
+            function getAllPlayers(filter) {
+                if (typeof PLAYERS === 'undefined') return [];
+                var arr = PLAYERS.slice();
+                if (filter && typeof filter === 'object') {
+                    if (filter.role) {
+                        var want = String(filter.role).toLowerCase();
+                        arr = arr.filter(function (p) { return p && String(p.role || '').toLowerCase() === want; });
+                    }
+                    if (filter.cohort) {
+                        arr = arr.filter(function (p) {
+                            if (!p) return false;
+                            if (Array.isArray(p.cohorts)) return p.cohorts.indexOf(filter.cohort) >= 0;
+                            return p.cohort === filter.cohort;
+                        });
+                    }
+                }
+                // Strip activity log to keep the wire payload small
+                return arr.map(function (p) {
+                    var clone = Object.assign({}, p);
+                    delete clone.activity;
+                    return clone;
+                });
+            }
+
+            function applyUpdate(playerId, changes, source) {
+                if (!playerId || !changes || typeof PLAYERS === 'undefined') return null;
+                var p = PLAYERS.find(function (x) { return x && x.id === playerId; });
+                if (!p) {
+                    console.warn('[PflxDataBus] update ignored — unknown player', playerId);
+                    return null;
+                }
+                var dirty = false;
+                Object.keys(changes).forEach(function (k) {
+                    if (!WRITABLE_FIELDS[k]) return;
+                    var prev = p[k];
+                    var next = changes[k];
+                    // Skip no-op writes (avoids broadcast storms)
+                    var same;
+                    try { same = JSON.stringify(prev) === JSON.stringify(next); } catch (e) { same = prev === next; }
+                    if (same) return;
+                    p[k] = next;
+                    dirty = true;
+                });
+                if (!dirty) return Object.assign({}, p);
+                // Keep totalXcoin monotonic
+                if (typeof p.xc === 'number' && typeof p.totalXcoin === 'number' && p.xc > p.totalXcoin) {
+                    p.totalXcoin = p.xc;
+                }
+                try { logActivity(p.id, 'data_bus_update', { source: source || 'unknown', keys: Object.keys(changes) }); } catch (e) {}
+                broadcastPlayerChange(p);
+                return Object.assign({}, p);
+            }
+
+            function broadcastTo(targetWindow, payload) {
+                if (!targetWindow || !targetWindow.postMessage) return;
+                try { targetWindow.postMessage(JSON.stringify(payload), '*'); } catch (e) {}
+            }
+
+            function broadcastAll(payload) {
+                document.querySelectorAll('iframe').forEach(function (f) {
+                    if (f && f.contentWindow) broadcastTo(f.contentWindow, payload);
+                });
+            }
+
+            return {
+                get: getPlayer,
+                getAll: getAllPlayers,
+                update: applyUpdate,
+                broadcastTo: broadcastTo,
+                broadcastAll: broadcastAll
+            };
+        })();
 
         // ── Activity log: append to player's journey ──
         function logActivity(playerId, type, payload) {
