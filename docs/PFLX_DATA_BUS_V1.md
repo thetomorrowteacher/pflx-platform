@@ -1,4 +1,4 @@
-# PFLX Data Bus — v1
+# PFLX Data Bus — v1.1 (Game Economy)
 
 The canonical message protocol that connects the Console (PFLX Platform) with
 every sub-app (X-Coin, Core Pathways, Battle Arena, DarkCampus, Mission Control,
@@ -168,6 +168,134 @@ Both filter fields are optional. Omit `filter` for the full list.
 ```
 
 Activity logs are stripped to keep the payload small.
+
+## Game economy types (v1.1)
+
+Mission Control owns the game state (seasons, checkpoints, tasks, projects, jobs,
+submissions). Sub-apps read it through the bus instead of holding their own copy.
+Awards (XC + badges) flow through a single funnel — `PflxDataBus.award()` — so
+every reward event triggers exactly one `pflx_player_changed` and one
+`pflx_award_granted` broadcast.
+
+### `pflx_mc_get` — sub → Console
+
+> "Give me the player's tasks / checkpoints / projects / seasons / jobs."
+
+```json
+{
+  "type": "pflx_mc_get",
+  "key": "tasks",
+  "opts": { "playerId": "player-1234", "status": "open" },
+  "ackId": "mc-1"
+}
+```
+
+| `key` | What it returns |
+|---|---|
+| `tasks` | Tasks assigned to the player (or cohort) |
+| `checkpoints` | Active checkpoints with progress per player |
+| `projects` | Project assignments |
+| `seasons` | Active season + any past seasons |
+| `jobs` | Open jobs the player can claim (Battle Arena freelance) |
+| `submissions` | The player's submission history (filtered by `opts.status`) |
+
+`opts` is optional. Supported fields: `playerId`, `cohort`, `status`, `activeOnly`.
+
+### `pflx_mc_data` — Console → sub
+
+```json
+{
+  "type": "pflx_mc_data",
+  "key": "tasks",
+  "items": [ ...filtered list... ],
+  "opts": { "playerId": "player-1234" },
+  "ackId": "mc-1"
+}
+```
+
+### `pflx_mc_changed` — Console → all subs
+
+Fires after `mcSaveData(key)` runs in Mission Control. Sub-apps re-fetch / re-render.
+
+```json
+{
+  "type": "pflx_mc_changed",
+  "key": "tasks",
+  "items": [ ...full list, no player filter... ]
+}
+```
+
+### `pflx_award_proposed` — sub → Console
+
+> "Player X earned this. Apply it."
+
+```json
+{
+  "type": "pflx_award_proposed",
+  "playerId": "player-1234",
+  "source": "arena",
+  "award": {
+    "xc": 100,
+    "badge": { "id": "b-arena-victor", "name": "Arena Victor", "category": "primary", "xcValue": 25 },
+    "reason": "arena.match.win"
+  },
+  "ackId": "aw-1"
+}
+```
+
+Console validates, runs `PflxDataBus.award()` which:
+1. Computes new `xc`, `totalXcoin`, `digitalBadges`, `badgeCounts`, `badges`.
+2. Calls `PflxDataBus.update()` — `pflx_player_changed` fires.
+3. Emits `pflx_award_granted` to every iframe (animation / feed / toast).
+4. Logs `award_granted` activity entry on the player record.
+
+### `pflx_award_granted` — Console → all subs
+
+```json
+{
+  "type": "pflx_award_granted",
+  "playerId": "player-1234",
+  "txId": "tx-...",
+  "award": {
+    "xc": 100,
+    "badge": { "id": "b-arena-victor", "name": "Arena Victor", "category": "primary", "xcValue": 25 },
+    "source": "arena",
+    "reason": "arena.match.win"
+  },
+  "player": { ...updated record... }
+}
+```
+
+The actual XC / badge state change is also delivered via `pflx_player_changed` —
+this event is for UI flourishes (confetti, +XC floaters, feed entries). Sub-apps
+that just need to update numbers can ignore `pflx_award_granted` and rely on
+`pflx_player_changed`.
+
+## Worked example — Battle Arena match win
+
+1. Player wins a match in Battle Arena.
+2. Arena posts `{ type: 'pflx_award_proposed', playerId, source: 'arena', award: { xc: 150, badge: {...} } }` to parent.
+3. Console's message router calls `PflxDataBus.award(playerId, award)`.
+4. The Bus applies +150 XC + badge to `PLAYERS[idx]`, fires `pflx_player_changed` and `pflx_award_granted`.
+5. Every iframe gets both events:
+   - X-Coin updates `mockUsers[idx]` (leaderboard rerenders) + dispatches `pflx-award-granted` (toast).
+   - Pathways' player card shows the new totals + a "+150 XC" floater.
+   - DarkCampus posts a feed entry "Player CrossTech won the Arena match!".
+   - Console toolbar/hero/portfolio rerender with the new XC.
+6. `mcPlayers` is mirrored from `PLAYERS` so MC roster row also shows the new totals.
+7. Activity log entry `award_granted` is added with `txId`, source `'arena'`, and the badge id.
+
+End state: one match win, one round-trip, every surface live within ~5ms.
+
+## Worked example — Mission Control task approval
+
+1. Host clicks "Approve" on a task submission in Mission Control.
+2. `mcApproveTask` runs. For every reward on the task:
+   - `PflxDataBus.award(submitterId, { xc: task.xcReward, source: 'mc', reason: 'task:' + task.id })`
+   - For each `task.rewardBadges[i]`: `PflxDataBus.award(submitterId, { badge: i, source: 'mc', reason: 'task:' + task.id })`
+3. Each award fires `pflx_player_changed` + `pflx_award_granted`.
+4. Sub-apps update: X-Coin home shows the new XC balance, Pathways card recalculates Evo Rank, DarkCampus feed gets "task approved" entry, Console toolbar/hero/portfolio refresh.
+5. `mcSaveData('tasks')` runs → `pflx_mc_changed` for key `tasks` → X-Coin home re-renders the "your tasks" list with the task now marked approved.
 
 ## Legacy types (still supported)
 

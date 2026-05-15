@@ -17383,6 +17383,22 @@
 
             // ── Cloud Sync: push to X-Coin Supabase via iframe postMessage ──
             mcCloudSync(type);
+
+            // ── PflxDataBus.mc.changed: notify every iframe that the named
+            // collection just mutated. Sub-apps subscribed to pflx_mc_changed
+            // refresh their cached lists (e.g. X-Coin's player home re-renders
+            // its "your tasks" panel, Pathways re-renders its quest list).
+            // Only fires for keys the bus exposes — internal-only keys
+            // (approvals, gameconfig, modifiers, etc.) stay quiet.
+            try {
+                var canonical = ({
+                    tasks: 'tasks', checkpoints: 'checkpoints', projects: 'projects',
+                    seasons: 'seasons', jobs: 'jobs', approvals: null
+                })[type];
+                if (canonical && window.PflxDataBus && window.PflxDataBus.mc) {
+                    window.PflxDataBus.mc.changed(canonical);
+                }
+            } catch (e) {}
         }
 
         // Push data to X-Coin app for Supabase persistence
@@ -17609,16 +17625,78 @@
                     }
                 }
 
-                // Core Pathways node completion
+                // Core Pathways node completion — route through PflxDataBus.award
+                // so the XC reward flows into PLAYERS, fires pflx_player_changed,
+                // and propagates to toolbar/hero/portfolio/X-Coin/Arena/DarkCampus.
                 if (msg.type === 'pflx_pathway_node_complete') {
                     var node = msg.data;
-                    if (node && node.playerId && node.xcReward) {
-                        var player = mcPlayers.find(function(p) { return p.id === node.playerId; });
-                        if (player) {
-                            player.xc = (player.xc || 0) + node.xcReward;
-                            mcSaveData('players');
-                            mcBroadcastToApps('player_xc_update', { playerId: node.playerId, xc: player.xc });
-                        }
+                    if (node && node.playerId) {
+                        try {
+                            if (node.xcReward && window.PflxDataBus) {
+                                window.PflxDataBus.award(node.playerId, {
+                                    xc: node.xcReward,
+                                    source: 'pathways',
+                                    reason: 'pathway:node:' + (node.nodeId || node.pathwayId || 'unknown')
+                                });
+                            }
+                            if (node.badge && window.PflxDataBus) {
+                                window.PflxDataBus.award(node.playerId, {
+                                    badge: node.badge,
+                                    source: 'pathways',
+                                    reason: 'pathway:node:' + (node.nodeId || node.pathwayId || 'unknown')
+                                });
+                            }
+                            // Mirror into mcPlayers so MC roster shows the new total
+                            var canonP = window.PflxDataBus ? window.PflxDataBus.get(node.playerId) : null;
+                            if (canonP) {
+                                var idxP = mcPlayers.findIndex(function (p) { return p && p.id === node.playerId; });
+                                if (idxP >= 0) {
+                                    mcPlayers[idxP] = Object.assign({}, mcPlayers[idxP], {
+                                        xc: canonP.xc, totalXcoin: canonP.totalXcoin,
+                                        digitalBadges: canonP.digitalBadges, badges: canonP.badges,
+                                        badgeCounts: canonP.badgeCounts
+                                    });
+                                    mcSaveData('players');
+                                }
+                            }
+                        } catch (e) { console.warn('[MC] pathway award failed', e); }
+                    }
+                }
+
+                // ── Arena match result — Battle Arena posts this when a player wins.
+                // Routed through PflxDataBus.award so the XC + badge propagate to
+                // every other surface (toolbar, X-Coin home, Pathways card, etc.)
+                if (msg.type === 'pflx_arena_match_result') {
+                    var match = msg.data || {};
+                    if (match && match.playerId && window.PflxDataBus) {
+                        try {
+                            if (typeof match.xcReward === 'number' && match.xcReward !== 0) {
+                                window.PflxDataBus.award(match.playerId, {
+                                    xc: match.xcReward,
+                                    source: 'arena',
+                                    reason: 'arena:match:' + (match.matchId || 'unknown')
+                                });
+                            }
+                            if (match.badge) {
+                                window.PflxDataBus.award(match.playerId, {
+                                    badge: match.badge,
+                                    source: 'arena',
+                                    reason: 'arena:match:' + (match.matchId || 'unknown')
+                                });
+                            }
+                            var canonA = window.PflxDataBus.get(match.playerId);
+                            if (canonA) {
+                                var idxA = mcPlayers.findIndex(function (p) { return p && p.id === match.playerId; });
+                                if (idxA >= 0) {
+                                    mcPlayers[idxA] = Object.assign({}, mcPlayers[idxA], {
+                                        xc: canonA.xc, totalXcoin: canonA.totalXcoin,
+                                        digitalBadges: canonA.digitalBadges, badges: canonA.badges,
+                                        badgeCounts: canonA.badgeCounts
+                                    });
+                                    mcSaveData('players');
+                                }
+                            }
+                        } catch (e) { console.warn('[MC] arena award failed', e); }
                     }
                 }
 
@@ -20570,48 +20648,66 @@
             task.status = 'approved';
             task.approvedAt = new Date().toISOString().split('T')[0];
 
-            // ── Auto-Reward Distribution ──
-            // Find the submitter (player who submitted)
+            // ── Auto-Reward Distribution (routed through PflxDataBus) ──
+            // Every XC + badge mutation goes through PflxDataBus.award() so:
+            //   1. The canonical PLAYERS record is the one that mutates
+            //   2. pflx_player_changed fires — toolbar/hero/portfolio/sub-apps all update
+            //   3. pflx_award_granted fires — sub-apps can show animations/feed entries
+            //   4. The activity log gets the reason='task:<id>' entry
+            // mcPlayers stays mirrored to PLAYERS so the MC roster UI re-renders too.
             var submitterId = task.submission ? task.submission.submittedBy : null;
             if (submitterId) {
-                var player = mcPlayers.find(function(p) { return p.id === submitterId; });
-                if (player) {
-                    // Award XC
-                    if (task.xcReward) {
-                        player.xc = (player.xc || 0) + task.xcReward;
-                        player.totalXcoin = (player.totalXcoin || 0) + task.xcReward;
-                    }
-                    // Award badges — grant badge AND stack its XC on top of task XC
-                    if (task.rewardBadges && task.rewardBadges.length > 0) {
-                        task.rewardBadges.forEach(function(badgeRef) {
-                            mcGrantBadgeToPlayer(player, badgeRef, 'task:' + task.id);
+                try {
+                    if (task.xcReward && window.PflxDataBus) {
+                        window.PflxDataBus.award(submitterId, {
+                            xc: task.xcReward,
+                            source: 'mc',
+                            reason: 'task:' + task.id
                         });
                     }
-                    // Update evolution rank based on XC thresholds
-                    var rankTiers = [
-                        { name: 'Mythic', min: 25000 },
-                        { name: 'Legend', min: 10000 },
-                        { name: 'Master', min: 5000 },
-                        { name: 'Expert', min: 2000 },
-                        { name: 'Specialist', min: 500 },
-                        { name: 'Player', min: 0 }
-                    ];
-                    for (var ri = 0; ri < rankTiers.length; ri++) {
-                        if ((player.xc || 0) >= rankTiers[ri].min) {
-                            player.rank = rankTiers[ri].name;
-                            break;
+                    if (task.rewardBadges && task.rewardBadges.length > 0 && window.PflxDataBus) {
+                        task.rewardBadges.forEach(function (badgeRef) {
+                            // badgeRef is either an id or a full badge object
+                            var b = (typeof badgeRef === 'string')
+                                ? { id: badgeRef, name: badgeRef }
+                                : { id: badgeRef.id, name: badgeRef.name || badgeRef.title || badgeRef.id, category: badgeRef.category || 'primary', xcValue: badgeRef.xcValue || badgeRef.xc || 0 };
+                            window.PflxDataBus.award(submitterId, {
+                                badge: b,
+                                source: 'mc',
+                                reason: 'task:' + task.id
+                            });
+                        });
+                    }
+                } catch (eAward) { console.warn('[MC] PflxDataBus.award failed', eAward); }
+
+                // Mirror the canonical PLAYERS record back into mcPlayers so the
+                // MC roster row re-renders with the new XC / badge count without
+                // requiring a full reload.
+                try {
+                    var canon = window.PflxDataBus ? window.PflxDataBus.get(submitterId) : null;
+                    if (canon) {
+                        var idx = mcPlayers.findIndex(function (p) { return p && p.id === submitterId; });
+                        if (idx >= 0) {
+                            mcPlayers[idx] = Object.assign({}, mcPlayers[idx], {
+                                xc:            canon.xc,
+                                totalXcoin:    canon.totalXcoin,
+                                digitalBadges: canon.digitalBadges,
+                                badgeCounts:   canon.badgeCounts,
+                                badges:        canon.badges,
+                                level:         canon.level,
+                                rank:          canon.rank
+                            });
                         }
                     }
-                    // Save updated player to localStorage for cross-app sync
-                    try { localStorage.setItem('pflx_user', JSON.stringify(player)); } catch(e) {}
-                }
+                } catch (eMirror) {}
             }
 
-            // Save all data
+            // Save task list (and propagate via pflx_mc_changed automatically)
             mcSaveData('tasks');
             mcSaveData('players');
 
-            // Broadcast to all apps
+            // Legacy ad-hoc broadcast — kept for any sub-app code still listening
+            // for it. New code subscribes to pflx_player_changed / pflx_award_granted.
             mcBroadcastToApps('pflx_task_approved', {
                 taskId: task.id,
                 playerId: submitterId,
@@ -20619,7 +20715,6 @@
                 badges: task.rewardBadges || []
             });
             mcBroadcastToApps('pflx_leaderboard_updated', {});
-            mcBroadcastToApps('pflx_player_updated', { playerId: submitterId });
 
             // Re-render
             mcRenderTasks();
@@ -38989,6 +39084,42 @@ RESPONSE RULES:
                         }
                     }
 
+                    // ── PflxDataBus.mc: sub-app reads Mission Control data ──
+                    // sub → Console: "give me tasks/checkpoints/projects/seasons/jobs/submissions"
+                    if (msg.type === 'pflx_mc_get' && msg.key) {
+                        var src3 = ev.source;
+                        var items = window.PflxDataBus ? window.PflxDataBus.mc.get(msg.key, msg.opts || {}) : [];
+                        if (src3 && src3.postMessage) {
+                            src3.postMessage(JSON.stringify({
+                                type: 'pflx_mc_data',
+                                key: msg.key,
+                                items: items,
+                                opts: msg.opts || null,
+                                ackId: msg.ackId || null
+                            }), '*');
+                        }
+                    }
+
+                    // ── PflxDataBus.award: sub-app proposes an XC / badge reward ──
+                    // Examples:
+                    //   Arena says "player won, give them 100 XC + Victory badge"
+                    //   X-Coin says "task approved, +50 XC + Primary badge"
+                    //   Pathways says "milestone complete, +25 XC"
+                    if (msg.type === 'pflx_award_proposed' && msg.playerId && msg.award) {
+                        var srcA = ev.source;
+                        var granted = window.PflxDataBus
+                            ? window.PflxDataBus.award(msg.playerId, Object.assign({}, msg.award, { source: msg.source || 'sub-app' }))
+                            : null;
+                        if (srcA && srcA.postMessage) {
+                            srcA.postMessage(JSON.stringify({
+                                type: 'pflx_player_data',
+                                player: granted,
+                                playerId: msg.playerId,
+                                ackId: msg.ackId || null
+                            }), '*');
+                        }
+                    }
+
                     // sub → Console: "give me the roster" (for leaderboards, mimic selector)
                     if (msg.type === 'pflx_players_list_request') {
                         var src2 = ev.source;
@@ -41310,10 +41441,148 @@ RESPONSE RULES:
                 });
             }
 
+            // ── MC data accessors ──────────────────────────────────────
+            // Mission Control owns seasons, checkpoints, tasks, projects, jobs,
+            // submissions. The bus exposes them to sub-apps through a single
+            // entry point so X-Coin's player home, Pathways' quest list, etc.
+            // can read fresh authoritative data without each holding a copy.
+            //
+            //   PflxDataBus.mc.get('tasks',       { playerId, cohort, status })
+            //   PflxDataBus.mc.get('checkpoints', { playerId, cohort })
+            //   PflxDataBus.mc.get('projects',    { playerId, cohort })
+            //   PflxDataBus.mc.get('seasons',     { activeOnly: true })
+            //   PflxDataBus.mc.get('jobs',        { playerId, cohort, status })
+            //   PflxDataBus.mc.get('submissions', { playerId, status })
+            function mcGet(key, opts) {
+                opts = opts || {};
+                var arr = null;
+                try {
+                    if (key === 'tasks')        arr = (typeof mcTasks       !== 'undefined') ? mcTasks       : null;
+                    else if (key === 'checkpoints') arr = (typeof mcCheckpoints !== 'undefined') ? mcCheckpoints : null;
+                    else if (key === 'projects')    arr = (typeof mcProjects    !== 'undefined') ? mcProjects    : null;
+                    else if (key === 'seasons')     arr = (typeof mcSeasons     !== 'undefined') ? mcSeasons     : null;
+                    else if (key === 'jobs')        arr = (typeof mcJobs        !== 'undefined') ? mcJobs        : null;
+                    else if (key === 'submissions') arr = (typeof mcSubmissions !== 'undefined') ? mcSubmissions : null;
+                } catch (e) {}
+                if (!Array.isArray(arr)) return [];
+
+                var out = arr.slice();
+                // Cohort filter — matches if item has cohort=any of player's cohorts,
+                // or assignedTo includes the player id or any of their cohorts.
+                function itemMatchesPlayer(item, pid, cohorts) {
+                    if (!item) return false;
+                    // Direct assignment to player id
+                    if (item.playerId === pid || item.submitterId === pid || item.assigneeId === pid) return true;
+                    if (Array.isArray(item.assignedTo) && item.assignedTo.indexOf(pid) >= 0) return true;
+                    // Cohort assignment (string or array)
+                    if (Array.isArray(cohorts) && cohorts.length) {
+                        if (item.cohort && cohorts.indexOf(item.cohort) >= 0) return true;
+                        if (Array.isArray(item.cohorts) && item.cohorts.some(function (c) { return cohorts.indexOf(c) >= 0; })) return true;
+                        if (Array.isArray(item.assignedTo) && item.assignedTo.some(function (a) { return cohorts.indexOf(a) >= 0; })) return true;
+                    }
+                    // "all players" assignment
+                    if (item.assignedTo === 'all' || item.cohort === 'all') return true;
+                    return false;
+                }
+                if (opts.playerId) {
+                    var p = getPlayer(opts.playerId);
+                    var cohorts = p ? (Array.isArray(p.cohorts) ? p.cohorts : (p.cohort ? [p.cohort] : [])) : [];
+                    out = out.filter(function (it) { return itemMatchesPlayer(it, opts.playerId, cohorts); });
+                }
+                if (opts.cohort) {
+                    out = out.filter(function (it) {
+                        if (!it) return false;
+                        if (it.cohort === opts.cohort) return true;
+                        if (Array.isArray(it.cohorts) && it.cohorts.indexOf(opts.cohort) >= 0) return true;
+                        if (Array.isArray(it.assignedTo) && it.assignedTo.indexOf(opts.cohort) >= 0) return true;
+                        return false;
+                    });
+                }
+                if (opts.status) {
+                    out = out.filter(function (it) { return it && it.status === opts.status; });
+                }
+                if (opts.activeOnly) {
+                    out = out.filter(function (it) { return it && (it.isActive || it.active); });
+                }
+                return out;
+            }
+
+            function mcChanged(key) {
+                broadcastAll({ type: 'pflx_mc_changed', key: key, items: mcGet(key, {}) });
+            }
+
+            // ── award() — the single funnel for XC / badge mutations ───
+            // Any sub-app or internal MC flow that wants to grant a reward
+            // calls this. Computes new totals, applies through update() so
+            // pflx_player_changed fires once with the merged state, logs an
+            // activity entry, and emits pflx_award_granted for animations.
+            //
+            //   PflxDataBus.award('player-1234', {
+            //     xc: 50,                       // +XC (negative for spend)
+            //     badge: { id: 'b-7', name: 'First Win', category: 'primary' },
+            //     source: 'arena',              // 'mc' | 'xcoin' | 'arena' | 'pathways' | 'darkcampus'
+            //     reason: 'arena.match.win',    // free-form
+            //   })
+            function award(playerId, awardObj) {
+                if (!playerId || !awardObj) return null;
+                var p = (typeof PLAYERS !== 'undefined') ? PLAYERS.find(function (x) { return x && x.id === playerId; }) : null;
+                if (!p) { console.warn('[PflxDataBus.award] unknown player', playerId); return null; }
+                var changes = {};
+                var deltaXC = typeof awardObj.xc === 'number' ? awardObj.xc : 0;
+                if (deltaXC !== 0) {
+                    changes.xc = Math.max(0, (p.xc || 0) + deltaXC);
+                    // totalXcoin only goes up — never decrements for spends
+                    if (deltaXC > 0) {
+                        changes.totalXcoin = (p.totalXcoin || 0) + deltaXC;
+                    }
+                }
+                if (awardObj.badge && awardObj.badge.id) {
+                    var b = awardObj.badge;
+                    var existing = Array.isArray(p.badges) ? p.badges.slice() : [];
+                    if (existing.indexOf(b.id) < 0) existing.push(b.id);
+                    changes.badges = existing;
+                    changes.digitalBadges = existing.length;
+                    if (b.category) {
+                        var bc = Object.assign({}, p.badgeCounts || {});
+                        bc[b.category] = (bc[b.category] || 0) + 1;
+                        changes.badgeCounts = bc;
+                    }
+                    // Badge may also carry XC value
+                    if (typeof b.xcValue === 'number' && b.xcValue > 0) {
+                        changes.xc = Math.max(0, (changes.xc !== undefined ? changes.xc : (p.xc || 0)) + b.xcValue);
+                        changes.totalXcoin = (changes.totalXcoin !== undefined ? changes.totalXcoin : (p.totalXcoin || 0)) + b.xcValue;
+                    }
+                }
+                if (Object.keys(changes).length === 0) return Object.assign({}, p);
+                var updated = applyUpdate(playerId, changes, awardObj.source || 'award');
+                // Emit canonical award event for sub-app animations / feed entries
+                var txId = 'tx-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+                broadcastAll({
+                    type: 'pflx_award_granted',
+                    playerId: playerId,
+                    txId: txId,
+                    award: {
+                        xc: deltaXC || 0,
+                        badge: awardObj.badge || null,
+                        source: awardObj.source || 'unknown',
+                        reason: awardObj.reason || ''
+                    },
+                    player: updated
+                });
+                try { logActivity(playerId, 'award_granted', { xc: deltaXC, badge: awardObj.badge ? awardObj.badge.id : null, source: awardObj.source, reason: awardObj.reason, txId: txId }); } catch (e) {}
+                return updated;
+            }
+
             return {
                 get: getPlayer,
                 getAll: getAllPlayers,
                 update: applyUpdate,
+                award: award,
+                mc: {
+                    get: mcGet,
+                    changed: mcChanged,
+                    KEYS: ['tasks', 'checkpoints', 'projects', 'seasons', 'jobs', 'submissions']
+                },
                 broadcastTo: broadcastTo,
                 broadcastAll: broadcastAll
             };
