@@ -18463,21 +18463,88 @@
             if (mc) mc.scrollTop = 0;
         }
 
-        // ── Helper: get mock data from localStorage/activeSession ──
+        // ── Helper: read Mission Control data the Player Portal renders.
+        // Source priority: live in-memory mc* arrays (always current within
+        // the same browser session) → pflx_mc_* localStorage (survives reload).
+        // The legacy pflx_tasks / pflx_checkpoints / etc. keys were never
+        // written by MC, which is why the Player Portal showed "No tasks
+        // assigned" even when the host had created and assigned tasks.
         function ppGetSeason() {
-            try { var d = JSON.parse(localStorage.getItem('pflx_seasons') || '[]'); return d[0] || null; } catch(e) { return null; }
+            try {
+                if (typeof mcSeasons !== 'undefined' && Array.isArray(mcSeasons) && mcSeasons.length) return mcSeasons[0];
+                var d = JSON.parse(localStorage.getItem('pflx_mc_seasons') || localStorage.getItem('pflx_seasons') || '[]');
+                return d[0] || null;
+            } catch(e) { return null; }
         }
         function ppGetCheckpoints() {
-            try { return JSON.parse(localStorage.getItem('pflx_checkpoints') || '[]'); } catch(e) { return []; }
+            try {
+                if (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) return mcCheckpoints.slice();
+                return JSON.parse(localStorage.getItem('pflx_mc_checkpoints') || localStorage.getItem('pflx_checkpoints') || '[]');
+            } catch(e) { return []; }
         }
         function ppGetTasks() {
-            try { return JSON.parse(localStorage.getItem('pflx_tasks') || '[]'); } catch(e) { return []; }
+            try {
+                if (typeof mcTasks !== 'undefined' && Array.isArray(mcTasks)) return mcTasks.slice();
+                return JSON.parse(localStorage.getItem('pflx_mc_tasks') || localStorage.getItem('pflx_tasks') || '[]');
+            } catch(e) { return []; }
         }
         function ppGetJobs() {
-            try { return JSON.parse(localStorage.getItem('pflx_jobs') || '[]'); } catch(e) { return []; }
+            try {
+                if (typeof mcJobs !== 'undefined' && Array.isArray(mcJobs)) return mcJobs.slice();
+                return JSON.parse(localStorage.getItem('pflx_mc_jobs') || localStorage.getItem('pflx_jobs') || '[]');
+            } catch(e) { return []; }
         }
         function ppGetProjects() {
-            try { return JSON.parse(localStorage.getItem('pflx_projects') || '[]'); } catch(e) { return []; }
+            try {
+                if (typeof mcProjects !== 'undefined' && Array.isArray(mcProjects)) return mcProjects.slice();
+                return JSON.parse(localStorage.getItem('pflx_mc_projects') || localStorage.getItem('pflx_projects') || '[]');
+            } catch(e) { return []; }
+        }
+        // Helper: does this task/project belong to the given checkpoint?
+        // Tolerates both naming conventions — tasks use 'roundId', projects
+        // use 'checkpointId', some import paths use either.
+        function ppItemInCheckpoint(item, cpId) {
+            if (!item || !cpId) return false;
+            return item.roundId === cpId || item.checkpointId === cpId;
+        }
+        // Helper: is this item assigned to the active player?
+        // Mirrors PflxDataBus.mc.get's filter — inherit cohort from the parent
+        // checkpoint when the item itself has no explicit cohort assignment.
+        function ppItemAssignedToActivePlayer(item) {
+            if (!item) return false;
+            var s = window.activeSession || {};
+            var pid = s.id;
+            var cohorts = Array.isArray(s.cohorts) ? s.cohorts : (s.cohort ? [s.cohort] : []);
+            if (item.playerId === pid || item.submitterId === pid || item.assigneeId === pid) return true;
+            if (Array.isArray(item.assignedTo) && item.assignedTo.indexOf(pid) >= 0) return true;
+            if (cohorts.length) {
+                if (item.cohort && cohorts.indexOf(item.cohort) >= 0) return true;
+                if (Array.isArray(item.cohorts) && item.cohorts.some(function (c) { return cohorts.indexOf(c) >= 0; })) return true;
+                if (Array.isArray(item.assignedTo) && item.assignedTo.some(function (a) { return cohorts.indexOf(a) >= 0; })) return true;
+            }
+            if (item.assignedTo === 'all' || item.cohort === 'all') return true;
+            var hasOwn = (item.assignedTo && (item.assignedTo === 'all' || (Array.isArray(item.assignedTo) && item.assignedTo.length > 0)))
+                      || item.cohort || (Array.isArray(item.cohorts) && item.cohorts.length > 0);
+            if (!hasOwn) {
+                var parentId = item.roundId || item.checkpointId;
+                if (parentId) {
+                    // Task / project — inherit from parent checkpoint
+                    var cps = ppGetCheckpoints();
+                    var cp = cps.find(function (c) { return c && c.id === parentId; });
+                    if (cp) {
+                        if (!cp.assignedTo || cp.assignedTo === 'all' || (Array.isArray(cp.assignedTo) && cp.assignedTo.length === 0)) return true;
+                        if (Array.isArray(cp.assignedTo)) {
+                            if (cp.assignedTo.indexOf(pid) >= 0) return true;
+                            if (cohorts.length && cp.assignedTo.some(function (a) { return cohorts.indexOf(a) >= 0; })) return true;
+                        }
+                    }
+                } else {
+                    // Root-level item (e.g. a checkpoint or job with no cohorts
+                    // checked) — convention is "everyone sees it"
+                    return true;
+                }
+            }
+            return false;
         }
 
         // ── Breadcrumb nav ──
@@ -18504,9 +18571,12 @@
             var xc = s.xc || 0;
             var cohort = s.cohort || 'PlayerPool';
             var season = ppGetSeason();
-            var checkpoints = ppGetCheckpoints();
-            var tasks = ppGetTasks();
-            var jobs = ppGetJobs();
+            // Filter all collections to what this player is actually assigned to.
+            // Checkpoints: any cohort match or "all". Tasks/projects: inherit
+            // cohort from parent checkpoint when item has no own assignment.
+            var checkpoints = ppGetCheckpoints().filter(ppItemAssignedToActivePlayer);
+            var tasks = ppGetTasks().filter(ppItemAssignedToActivePlayer);
+            var jobs = ppGetJobs().filter(ppItemAssignedToActivePlayer);
 
             // Active checkpoint (first with status active/current)
             var activeCp = null;
@@ -18514,16 +18584,14 @@
                 if (checkpoints[i].status === 'active' || checkpoints[i].status === 'current') { activeCp = checkpoints[i]; break; }
             }
 
-            // Task counts
-            var myTasks = tasks.filter(function(t) { return !t.completed; });
-            var completedTasks = tasks.filter(function(t) { return t.completed; });
+            // Task counts — treat status='approved' as done since that's what
+            // mcApproveTask sets when the host approves a submission.
+            var myTasks = tasks.filter(function(t) { return !(t.completed || t.status === 'approved'); });
+            var completedTasks = tasks.filter(function(t) { return t.completed || t.status === 'approved'; });
             var taskPct = tasks.length ? Math.round((completedTasks.length / tasks.length) * 100) : 0;
 
-            // Available jobs for cohort
-            var myJobs = jobs.filter(function(j) {
-                if (!j.cohorts || !j.cohorts.length) return true;
-                return j.cohorts.indexOf(cohort) !== -1;
-            });
+            // Available jobs (already filtered to active player above)
+            var myJobs = jobs;
 
             var html = '';
 
@@ -18722,9 +18790,12 @@
                     daysText = daysLeft > 0 ? daysLeft + ' days left' : 'PAST DUE';
                 }
 
-                // Task count in checkpoint
-                var cpTasks = ppGetTasks().filter(function(t) { return t.checkpointId === cp.id; });
-                var cpDone = cpTasks.filter(function(t) { return t.completed; }).length;
+                // Task count in checkpoint (match both roundId + checkpointId,
+                // filter to the active player's cohort assignment)
+                var cpTasks = ppGetTasks().filter(function(t) {
+                    return ppItemInCheckpoint(t, cp.id) && ppItemAssignedToActivePlayer(t);
+                });
+                var cpDone = cpTasks.filter(function(t) { return t.completed || t.status === 'approved'; }).length;
 
                 html += '<div style="background:' + bgGrad + ';border:1px solid ' + borderColor + ';border-radius:14px;padding:18px;margin-bottom:12px;cursor:pointer;transition:all 0.2s;" onclick="ppNav(\'checkpoint-detail\',{id:\'' + (cp.id || '') + '\'})" onmouseenter="this.style.transform=\'translateY(-2px)\'" onmouseleave="this.style.transform=\'\'">';
 
@@ -18797,9 +18868,14 @@
             }
             html += '</div>';
 
-            // Tasks & Projects in this checkpoint
-            var allTasks = ppGetTasks().filter(function(t) { return t.checkpointId === cp.id; });
-            var projects = ppGetProjects().filter(function(p) { return p.checkpointId === cp.id; });
+            // Tasks & Projects in this checkpoint — match both roundId and
+            // checkpointId, and filter to the active player's cohort.
+            var allTasks = ppGetTasks().filter(function(t) {
+                return ppItemInCheckpoint(t, cp.id) && ppItemAssignedToActivePlayer(t);
+            });
+            var projects = ppGetProjects().filter(function(p) {
+                return ppItemInCheckpoint(p, cp.id) && ppItemAssignedToActivePlayer(p);
+            });
             var standaloneTasks = allTasks.filter(function(t) { return !t.projectId; });
 
             // Projects
@@ -18908,12 +18984,14 @@
         }
 
         // ── MY TASKS (flat list across all checkpoints) ──
+        // Filter to ONLY tasks the active player is actually assigned to —
+        // directly or via the parent checkpoint's cohort.
         function ppRenderMyTasks(el) {
-            var tasks = ppGetTasks();
+            var tasks = ppGetTasks().filter(ppItemAssignedToActivePlayer);
             var html = ppBreadcrumb([{ label: 'Home', view: 'home' }, { label: 'My Tasks', view: 'tasks' }]);
 
-            var pending = tasks.filter(function(t) { return !t.completed; });
-            var done = tasks.filter(function(t) { return t.completed; });
+            var pending = tasks.filter(function(t) { return !(t.completed || t.status === 'approved'); });
+            var done = tasks.filter(function(t) { return t.completed || t.status === 'approved'; });
 
             if (!tasks.length) {
                 html += '<div class="mc-card" style="text-align:center;padding:40px;">' +
@@ -41722,6 +41800,30 @@ RESPONSE RULES:
                 var out = arr.slice();
                 // Cohort filter — matches if item has cohort=any of player's cohorts,
                 // or assignedTo includes the player id or any of their cohorts.
+                // For tasks/projects with empty assignedTo: inherit cohort
+                // assignment from the linked checkpoint (task.roundId →
+                // mcCheckpoints[i].assignedTo). This is the common case — hosts
+                // assign cohorts at the checkpoint level and don't re-specify on
+                // every task. Without inheritance, those tasks were invisible
+                // to players in the checkpoint's cohort.
+                function checkpointMatchesPlayer(cpId, pid, cohorts) {
+                    if (!cpId || typeof mcCheckpoints === 'undefined' || !Array.isArray(mcCheckpoints)) return false;
+                    var cp = mcCheckpoints.find(function (c) { return c && c.id === cpId; });
+                    if (!cp) return false;
+                    // "All" or empty assignment on the checkpoint = everyone matches
+                    if (!cp.assignedTo || cp.assignedTo === 'all' || (Array.isArray(cp.assignedTo) && cp.assignedTo.length === 0)) return true;
+                    if (Array.isArray(cp.assignedTo)) {
+                        if (cp.assignedTo.indexOf(pid) >= 0) return true;
+                        if (Array.isArray(cohorts) && cohorts.length) {
+                            if (cp.assignedTo.some(function (a) { return cohorts.indexOf(a) >= 0; })) return true;
+                        }
+                    }
+                    if (Array.isArray(cohorts) && cohorts.length) {
+                        if (cp.cohort && cohorts.indexOf(cp.cohort) >= 0) return true;
+                        if (Array.isArray(cp.cohorts) && cp.cohorts.some(function (c) { return cohorts.indexOf(c) >= 0; })) return true;
+                    }
+                    return false;
+                }
                 function itemMatchesPlayer(item, pid, cohorts) {
                     if (!item) return false;
                     // Direct assignment to player id
@@ -41735,6 +41837,21 @@ RESPONSE RULES:
                     }
                     // "all players" assignment
                     if (item.assignedTo === 'all' || item.cohort === 'all') return true;
+                    // Empty assignedTo on a task/project — inherit from the parent checkpoint.
+                    // (`roundId` is the legacy field on tasks; `checkpointId` on projects/jobs.)
+                    var noOwnCohort = (
+                        (!item.assignedTo || (Array.isArray(item.assignedTo) && item.assignedTo.length === 0)) &&
+                        !item.cohort && (!Array.isArray(item.cohorts) || item.cohorts.length === 0)
+                    );
+                    if (noOwnCohort) {
+                        var parentCpId = item.roundId || item.checkpointId || null;
+                        if (parentCpId) {
+                            if (checkpointMatchesPlayer(parentCpId, pid, cohorts)) return true;
+                        } else {
+                            // Root-level item with no cohorts — convention is "everyone"
+                            return true;
+                        }
+                    }
                     return false;
                 }
                 if (opts.playerId) {
