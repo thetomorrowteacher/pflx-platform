@@ -16416,9 +16416,14 @@
             return container;
         }
 
-        // Convenience: re-render all three panels. Call after MC mutations.
+        // Convenience: re-render every live Player Home panel. Called after MC
+        // mutations (mcSaveData) and any time the active player record changes.
         function pflxRefreshHomePanels() {
-            try { renderActivityFeed(); renderGoals(); renderDeadlines(); } catch (e) {}
+            try { renderActivityFeed(); } catch (e) {}
+            try { renderGoals();        } catch (e) {}
+            try { renderDeadlines();    } catch (e) {}
+            try { renderInvestmentSummary(); } catch (e) {}
+            try { renderProjects();          } catch (e) {}
         }
         window.pflxRefreshHomePanels = pflxRefreshHomePanels;
         // Refresh whenever MC tasks/checkpoints mutate or the player record changes.
@@ -16493,24 +16498,69 @@
         function renderInvestmentSummary() {
             const container = document.querySelector('.investment-summary') || document.createElement('div');
             container.className = 'investment-summary';
-            container.innerHTML = `
-                <div class="investment-metric">
-                    <div class="investment-value">12,450</div>
-                    <div class="investment-label">Total XC</div>
-                </div>
-                <div class="investment-metric">
-                    <div class="investment-value">8</div>
-                    <div class="investment-label">Active Projects</div>
-                </div>
-                <div class="investment-metric">
-                    <div class="investment-value">847</div>
-                    <div class="investment-label">Quests Completed</div>
-                </div>
-                <div class="investment-metric">
-                    <div class="investment-value">S+</div>
-                    <div class="investment-label">Current Rank</div>
-                </div>
-            `;
+
+            // ── Real metrics from the active session + MC data ──
+            var s = window.activeSession || {};
+            var p = (typeof _ppGetActivePlayerRecord === 'function') ? _ppGetActivePlayerRecord() : null;
+
+            // Total XC — lifetime earned
+            var totalXc = (p && typeof p.totalXcoin === 'number' ? p.totalXcoin : null);
+            if (totalXc == null) totalXc = (typeof s.totalXcoin === 'number') ? s.totalXcoin : (s.xc || 0);
+
+            // Active projects — MC projects assigned to this player that aren't closed
+            var activeProjects = 0;
+            try {
+                if (typeof mcProjects !== 'undefined' && Array.isArray(mcProjects) && typeof ppItemAssignedToActivePlayer === 'function') {
+                    activeProjects = mcProjects.filter(function (pr) {
+                        if (!pr) return false;
+                        if (pr.status === 'archived' || pr.status === 'closed' || pr.status === 'complete') return false;
+                        return ppItemAssignedToActivePlayer(pr);
+                    }).length;
+                }
+            } catch (e) {}
+
+            // Quests completed — tasks the player got approved on, plus arena/cipher wins
+            var questsCompleted = 0;
+            try {
+                if (typeof mcTasks !== 'undefined' && Array.isArray(mcTasks) && typeof ppItemAssignedToActivePlayer === 'function') {
+                    questsCompleted += mcTasks.filter(function (t) {
+                        if (!t) return false;
+                        if (t.status !== 'approved' && !t.completed) return false;
+                        return ppItemAssignedToActivePlayer(t);
+                    }).length;
+                }
+                // Add badge count as a proxy for non-task quest completions
+                if (p && typeof p.digitalBadges === 'number') questsCompleted += p.digitalBadges;
+            } catch (e) {}
+
+            // Current rank — from the player's resolved rank or session
+            var rankLabel = '—';
+            try {
+                if (s.rankName) {
+                    rankLabel = s.rankName;
+                } else if (typeof getRankForXC === 'function') {
+                    var r = getRankForXC(totalXc || 0);
+                    if (r && r.name) rankLabel = (r.icon || '') + ' ' + r.name;
+                }
+            } catch (e) {}
+
+            container.innerHTML =
+                '<div class="investment-metric">' +
+                    '<div class="investment-value">' + Number(totalXc || 0).toLocaleString() + '</div>' +
+                    '<div class="investment-label">Total XC</div>' +
+                '</div>' +
+                '<div class="investment-metric">' +
+                    '<div class="investment-value">' + activeProjects + '</div>' +
+                    '<div class="investment-label">Active Projects</div>' +
+                '</div>' +
+                '<div class="investment-metric">' +
+                    '<div class="investment-value">' + questsCompleted + '</div>' +
+                    '<div class="investment-label">Quests Completed</div>' +
+                '</div>' +
+                '<div class="investment-metric">' +
+                    '<div class="investment-value" style="font-size:14px;line-height:1.2;">' + escapeHtml(String(rankLabel)) + '</div>' +
+                    '<div class="investment-label">Current Rank</div>' +
+                '</div>';
             return container;
         }
 
@@ -16519,28 +16569,63 @@
             container.className = 'projects-grid';
             container.innerHTML = '';
 
-            const projects = [
-                { name: 'Portfolio Website', desc: 'Personal branding' },
-                { name: 'Mobile App', desc: 'Todo tracker' },
-                { name: 'Game Design', desc: '2D platformer' }
-            ];
+            // Pull projects assigned to the active player from MC.
+            var projects = [];
+            try {
+                if (typeof mcProjects !== 'undefined' && Array.isArray(mcProjects) && typeof ppItemAssignedToActivePlayer === 'function') {
+                    projects = mcProjects.filter(function (p) { return p && ppItemAssignedToActivePlayer(p); });
+                }
+            } catch (e) {}
 
-            projects.forEach(proj => {
-                const card = document.createElement('div');
+            if (projects.length === 0) {
+                var empty = document.createElement('div');
+                empty.style.cssText = 'padding:24px;text-align:center;font-size:12px;color:rgba(255,255,255,0.3);font-family:\'Jura\',sans-serif;grid-column: 1 / -1;';
+                empty.textContent = 'No projects yet. Your host creates projects in Mission Control.';
+                container.appendChild(empty);
+                return container;
+            }
+
+            projects.forEach(function (proj) {
+                var card = document.createElement('div');
                 card.className = 'project-card';
-                card.innerHTML = `
-                    <div style="font-size: 32px; margin-bottom: 10px;">📦</div>
-                    <div class="project-name">${proj.name}</div>
-                    <div style="font-size: 11px; color: #8a92b0; margin-top: 5px;">${proj.desc}</div>
-                `;
+                card.style.cursor = 'pointer';
+                var name = proj.name || proj.title || 'Project';
+                var desc = proj.description || proj.tagline || '';
+                card.innerHTML =
+                    '<div style="font-size: 32px; margin-bottom: 10px;">📦</div>' +
+                    '<div class="project-name">' + escapeHtml(name) + '</div>' +
+                    (desc ? '<div style="font-size: 11px; color: #8a92b0; margin-top: 5px;">' + escapeHtml(String(desc).substring(0, 80)) + '</div>' : '');
+                card.onclick = function () {
+                    // Drill into the MC project-detail view
+                    try {
+                        if (typeof window.switchToView === 'function') window.switchToView('mc');
+                        if (typeof ppNav === 'function') ppNav('project-detail', { id: proj.id });
+                    } catch (e) {}
+                };
                 container.appendChild(card);
             });
 
-            const addBtn = document.createElement('div');
+            // The + button now opens MC's project creation flow (host-only).
+            // Players see it disabled with a hint.
+            var s = window.activeSession || {};
+            var isHost = /admin|host|teacher|instructor|master/i.test(String(s.role || ''));
+            var addBtn = document.createElement('div');
             addBtn.className = 'project-add-btn';
             addBtn.textContent = '+';
-            addBtn.onclick = () => {
-                document.getElementById('add-project-modal').classList.add('active');
+            addBtn.title = isHost ? 'Add a new project in Mission Control' : 'Only your host can create new projects';
+            if (!isHost) {
+                addBtn.style.opacity = '0.35';
+                addBtn.style.cursor = 'not-allowed';
+            }
+            addBtn.onclick = function () {
+                if (!isHost) {
+                    if (typeof pflxToast === 'function') pflxToast('Only your host can create projects. Ask them to add one in Mission Control.', 'info');
+                    return;
+                }
+                try {
+                    if (typeof window.switchToView === 'function') window.switchToView('mc');
+                    if (typeof ppNav === 'function') ppNav('home');
+                } catch (e) {}
             };
             container.appendChild(addBtn);
 
