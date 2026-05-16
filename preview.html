@@ -18446,6 +18446,8 @@
                 case 'season': ppRenderSeason(container); break;
                 case 'checkpoints': ppRenderCheckpoints(container); break;
                 case 'checkpoint-detail': ppRenderCheckpointDetail(container); break;
+                case 'project-detail':    ppRenderProjectDetail(container); break;
+                case 'task-detail':       ppRenderTaskDetail(container); break;
                 case 'jobs': ppRenderJobBoard(container); break;
                 case 'tasks': ppRenderMyTasks(container); break;
                 default: ppRenderHome(container);
@@ -18619,10 +18621,14 @@
 
         // ── Breadcrumb nav ──
         function ppBreadcrumb(trail) {
-            return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:16px;font-family:\'Jura\',sans-serif;font-size:12px;">' +
+            return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:16px;font-family:\'Jura\',sans-serif;font-size:12px;flex-wrap:wrap;">' +
                 trail.map(function(item, i) {
                     if (i === trail.length - 1) return '<span style="color:var(--cyan);font-weight:700;">' + escapeHtml(item.label) + '</span>';
-                    return '<span style="color:rgba(255,255,255,0.4);cursor:pointer;text-decoration:underline;" onclick="ppNav(\'' + item.view + '\')">' + escapeHtml(item.label) + '</span>' +
+                    // Carry the data object so drill-up navigations land on the
+                    // right detail view (e.g. "Checkpoint" → that specific cp).
+                    var dataAttr = item.data ? ',' + JSON.stringify(item.data) : '';
+                    var click = 'ppNav(\'' + item.view + '\'' + (item.data ? ',' + JSON.stringify(item.data).replace(/'/g, "\\'").replace(/"/g, '&quot;') : '') + ')';
+                    return '<span style="color:rgba(255,255,255,0.4);cursor:pointer;text-decoration:underline;" onclick="' + click + '">' + escapeHtml(item.label) + '</span>' +
                         '<span style="color:rgba(255,255,255,0.2);">›</span>';
                 }).join('') + '</div>';
         }
@@ -18948,29 +18954,46 @@
             });
             var standaloneTasks = allTasks.filter(function(t) { return !t.projectId; });
 
-            // Projects
+            // Helper — status colors / icons used by task cards
+            function _statusIcon(t) {
+                if (t.status === 'approved' || t.completed) return '✅';
+                if (t.status === 'submitted')                return '⏳';
+                if (t.status === 'rejected')                 return '✗';
+                if (t.requirement === 'required' || t.required) return '🔴';
+                return '⬜';
+            }
+            function _statusColor(t) {
+                if (t.status === 'approved' || t.completed) return 'rgba(255,255,255,0.4)';
+                if (t.status === 'submitted')                return '#f5c842';
+                if (t.status === 'rejected')                 return '#ef4444';
+                return '#e0e6ff';
+            }
+
+            // Projects — clickable to drill into project detail
             if (projects.length) {
                 html += '<div style="font-family:\'Orbitron\',sans-serif;font-size:11px;color:rgba(255,255,255,0.4);letter-spacing:1.5px;margin-bottom:10px;">📁 PROJECTS</div>';
                 projects.forEach(function(proj) {
                     var projTasks = allTasks.filter(function(t) { return t.projectId === proj.id; });
-                    var projDone = projTasks.filter(function(t) { return t.completed; }).length;
+                    var projDone = projTasks.filter(function(t) { return t.completed || t.status === 'approved'; }).length;
                     var projPct = projTasks.length ? Math.round((projDone / projTasks.length) * 100) : 0;
-                    html += '<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(139,92,246,0.15);border-left:3px solid #a78bfa;border-radius:12px;padding:16px;margin-bottom:10px;">' +
+                    html += '<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(139,92,246,0.15);border-left:3px solid #a78bfa;border-radius:12px;padding:16px;margin-bottom:10px;cursor:pointer;" onclick="ppNav(\'project-detail\',{id:\'' + (proj.id || '') + '\'})">' +
                         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
-                        '<span style="font-size:14px;font-weight:700;color:#e0e6ff;">📁 ' + escapeHtml(proj.name || 'Project') + '</span>' +
+                        '<span style="font-size:14px;font-weight:700;color:#e0e6ff;">📁 ' + escapeHtml(proj.name || proj.title || 'Project') + '</span>' +
                         '<span style="font-size:10px;color:rgba(255,255,255,0.4);">' + projDone + '/' + projTasks.length + ' tasks</span></div>' +
                         ppProgressBar(projPct, '#a78bfa');
 
-                    // Tasks within project
+                    // Tasks within project — each clickable
                     if (projTasks.length) {
                         html += '<div style="margin-top:10px;display:flex;flex-direction:column;gap:4px;">';
                         projTasks.forEach(function(t) {
-                            var icon = t.completed ? '✅' : t.required ? '🔴' : '⬜';
-                            var reqLabel = t.required ? '<span style="font-size:9px;color:#ef4444;margin-left:6px;">REQUIRED</span>' : '<span style="font-size:9px;color:rgba(255,255,255,0.25);margin-left:6px;">OPTIONAL</span>';
-                            html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(255,255,255,0.015);border-radius:6px;">' +
+                            var icon = _statusIcon(t);
+                            var col = _statusColor(t);
+                            var done = (t.completed || t.status === 'approved');
+                            var reqLabel = (t.requirement === 'required' || t.required) ? '<span style="font-size:9px;color:#ef4444;margin-left:6px;">REQUIRED</span>' : '<span style="font-size:9px;color:rgba(255,255,255,0.25);margin-left:6px;">OPTIONAL</span>';
+                            html += '<div onclick="event.stopPropagation();ppNav(\'task-detail\',{id:\'' + (t.id || '') + '\'})" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(255,255,255,0.015);border-radius:6px;cursor:pointer;">' +
                                 '<span style="font-size:14px;">' + icon + '</span>' +
-                                '<span style="flex:1;font-size:12px;color:' + (t.completed ? 'rgba(255,255,255,0.4)' : '#e0e6ff') + ';' + (t.completed ? 'text-decoration:line-through;' : '') + '">' + escapeHtml(t.name || 'Task') + reqLabel + '</span>' +
-                                (t.xc ? '<span style="font-size:11px;color:#f5c842;font-family:\'Share Tech Mono\',monospace;">' + t.xc + ' XC</span>' : '') + '</div>';
+                                '<span style="flex:1;font-size:12px;color:' + col + ';' + (done ? 'text-decoration:line-through;' : '') + '">' + escapeHtml(t.title || t.name || 'Task') + reqLabel + '</span>' +
+                                (t.xcReward || t.xc ? '<span style="font-size:11px;color:#f5c842;font-family:\'Share Tech Mono\',monospace;">' + (t.xcReward || t.xc) + ' XC</span>' : '') + '</div>';
                         });
                         html += '</div>';
                     }
@@ -18978,18 +19001,20 @@
                 });
             }
 
-            // Standalone tasks
+            // Standalone tasks — clickable to drill into task detail
             if (standaloneTasks.length) {
                 html += '<div style="font-family:\'Orbitron\',sans-serif;font-size:11px;color:rgba(255,255,255,0.4);letter-spacing:1.5px;margin:16px 0 10px;">📋 TASKS</div>';
                 standaloneTasks.forEach(function(t) {
-                    var icon = t.completed ? '✅' : t.required ? '🔴' : '⬜';
-                    var reqLabel = t.required ? '<span style="font-size:9px;color:#ef4444;margin-left:6px;">REQUIRED</span>' : '<span style="font-size:9px;color:rgba(255,255,255,0.25);margin-left:6px;">OPTIONAL</span>';
-                    html += '<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:10px;margin-bottom:6px;">' +
+                    var icon = _statusIcon(t);
+                    var col = _statusColor(t);
+                    var done = (t.completed || t.status === 'approved');
+                    var reqLabel = (t.requirement === 'required' || t.required) ? '<span style="font-size:9px;color:#ef4444;margin-left:6px;">REQUIRED</span>' : '<span style="font-size:9px;color:rgba(255,255,255,0.25);margin-left:6px;">OPTIONAL</span>';
+                    html += '<div onclick="ppNav(\'task-detail\',{id:\'' + (t.id || '') + '\'})" style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:10px;margin-bottom:6px;cursor:pointer;transition:border-color 0.15s;" onmouseenter="this.style.borderColor=\'rgba(0,212,255,0.3)\'" onmouseleave="this.style.borderColor=\'rgba(255,255,255,0.06)\'">' +
                         '<span style="font-size:16px;">' + icon + '</span>' +
                         '<div style="flex:1;">' +
-                        '<div style="font-size:13px;color:' + (t.completed ? 'rgba(255,255,255,0.4)' : '#e0e6ff') + ';font-weight:600;' + (t.completed ? 'text-decoration:line-through;' : '') + '">' + escapeHtml(t.name || 'Task') + reqLabel + '</div>' +
-                        (t.description ? '<div style="font-size:11px;color:#6a7290;margin-top:2px;">' + escapeHtml(t.description).substring(0, 80) + '</div>' : '') + '</div>' +
-                        (t.xc ? '<span style="font-size:12px;color:#f5c842;font-weight:700;font-family:\'Share Tech Mono\',monospace;">' + t.xc + ' XC</span>' : '') + '</div>';
+                        '<div style="font-size:13px;color:' + col + ';font-weight:600;' + (done ? 'text-decoration:line-through;' : '') + '">' + escapeHtml(t.title || t.name || 'Task') + reqLabel + '</div>' +
+                        (t.description ? '<div style="font-size:11px;color:#6a7290;margin-top:2px;">' + escapeHtml(String(t.description).substring(0, 80)) + '</div>' : '') + '</div>' +
+                        (t.xcReward || t.xc ? '<span style="font-size:12px;color:#f5c842;font-weight:700;font-family:\'Share Tech Mono\',monospace;">' + (t.xcReward || t.xc) + ' XC</span>' : '') + '</div>';
                 });
             }
 
@@ -19053,6 +19078,340 @@
             el.innerHTML = html;
         }
 
+        // ── PROJECT DETAIL — drill-in from a checkpoint or My Projects list ──
+        // Lists tasks belonging to this project, each clickable to its detail.
+        function ppRenderProjectDetail(el) {
+            var d = window._ppDetailData || {};
+            var allProjects = ppGetProjects();
+            var proj = allProjects.find(function (p) { return p && p.id === d.id; });
+            if (!proj) {
+                el.innerHTML = ppBreadcrumb([
+                    { label: 'Home', view: 'home' },
+                    { label: 'Project', view: 'project-detail' }
+                ]) + '<div class="mc-card" style="text-align:center;padding:30px;color:rgba(255,255,255,0.4);">Project not found.</div>';
+                return;
+            }
+            var cps = ppGetCheckpoints();
+            var parentCp = pflxFindCheckpoint(cps, proj.checkpointId || proj.roundId);
+            var tasks = ppGetTasks().filter(function (t) {
+                return t && t.projectId === proj.id && ppItemAssignedToActivePlayer(t);
+            });
+            var done = tasks.filter(function (t) { return t.completed || t.status === 'approved'; }).length;
+            var pct = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
+
+            var crumb = [{ label: 'Home', view: 'home' }];
+            if (parentCp) crumb.push({ label: parentCp.name || 'Checkpoint', view: 'checkpoint-detail', data: { id: parentCp.id } });
+            crumb.push({ label: proj.name || proj.title || 'Project', view: 'project-detail' });
+
+            var html = ppBreadcrumb(crumb);
+            html += '<div class="mc-card" style="padding:20px;margin-bottom:16px;border-left:3px solid #a78bfa;">' +
+                '<div style="font-family:\'Rajdhani\',sans-serif;font-size:22px;font-weight:900;color:#e0e6ff;">📁 ' + escapeHtml(proj.name || proj.title || 'Project') + '</div>' +
+                (proj.description ? '<div style="font-size:13px;color:rgba(255,255,255,0.65);margin-top:6px;line-height:1.6;">' + escapeHtml(proj.description) + '</div>' : '') +
+                '<div style="display:flex;gap:14px;margin-top:14px;align-items:center;flex-wrap:wrap;">' +
+                (proj.xcRewardPool ? '<span style="font-family:\'Share Tech Mono\',monospace;font-size:13px;color:#f5c842;">⚡ ' + proj.xcRewardPool + ' XC pool</span>' : '') +
+                (proj.dueDate ? '<span style="font-size:11px;color:rgba(255,255,255,0.5);">📅 Due ' + escapeHtml(proj.dueDate) + '</span>' : '') +
+                '</div>' +
+                '<div style="margin-top:14px;">' + ppProgressBar(pct, '#a78bfa') + '<div style="margin-top:6px;font-size:11px;color:rgba(255,255,255,0.4);">' + pct + '% · ' + done + '/' + tasks.length + ' tasks completed</div></div>' +
+                '</div>';
+
+            if (!tasks.length) {
+                html += '<div class="mc-card" style="text-align:center;padding:30px;color:rgba(255,255,255,0.3);">No tasks in this project yet.</div>';
+            } else {
+                tasks.forEach(function (t) {
+                    var st = t.status === 'approved' ? '✅' : t.status === 'submitted' ? '⏳' : t.status === 'rejected' ? '✗' : '⬜';
+                    var col = (t.status === 'approved' || t.completed) ? 'rgba(255,255,255,0.4)' : (t.status === 'submitted' ? '#f5c842' : '#e0e6ff');
+                    html += '<div onclick="ppNav(\'task-detail\',{id:\'' + (t.id || '') + '\'})" style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:10px;margin-bottom:6px;cursor:pointer;">' +
+                        '<span style="font-size:16px;">' + st + '</span>' +
+                        '<div style="flex:1;"><div style="font-size:13px;color:' + col + ';font-weight:600;">' + escapeHtml(t.title || t.name || 'Task') + '</div>' +
+                        (t.description ? '<div style="font-size:11px;color:#6a7290;margin-top:2px;">' + escapeHtml(String(t.description).substring(0, 90)) + '</div>' : '') + '</div>' +
+                        (t.xcReward || t.xc ? '<span style="font-size:12px;color:#f5c842;font-weight:700;font-family:\'Share Tech Mono\',monospace;">' + (t.xcReward || t.xc) + ' XC</span>' : '') + '</div>';
+                });
+            }
+
+            el.innerHTML = html;
+        }
+
+        // ── TASK DETAIL — full task view + submission form ──
+        // Shows description, links, deadline, checklist, rewards, and a
+        // submission form that adapts to the host's task settings:
+        //   t.allowLinkSubmit     → URL input with Google Drive instructions
+        //   t.allowFileUpload     → file input (capped at 5MB, base64 stored)
+        //   t.checklist           → check-off list player toggles before submit
+        //   t.links               → host-provided reference links (read-only)
+        //
+        // Submission flow:
+        //   submit → write into t.submission, set t.status='submitted'
+        //   → mcSaveData('tasks') persists + fires pflx_mc_changed
+        //   → host sees it in MC Approvals view
+        //   → host approves via mcApproveTask → PflxDataBus.award → economy
+        function ppRenderTaskDetail(el) {
+            var d = window._ppDetailData || {};
+            var allTasks = ppGetTasks();
+            var task = allTasks.find(function (t) { return t && t.id === d.id; });
+            if (!task) {
+                el.innerHTML = ppBreadcrumb([
+                    { label: 'Home', view: 'home' },
+                    { label: 'Task', view: 'task-detail' }
+                ]) + '<div class="mc-card" style="text-align:center;padding:30px;color:rgba(255,255,255,0.4);">Task not found.</div>';
+                return;
+            }
+            var cps = ppGetCheckpoints();
+            var projs = ppGetProjects();
+            var parentCp = pflxFindCheckpoint(cps, task.roundId || task.checkpointId);
+            var parentProj = pflxFindProject(projs, task.projectId);
+
+            // Breadcrumb chain — Home > Checkpoint > Project > Task. Each parent
+            // carries its own data so clicking back navigates to that specific record.
+            var crumb = [{ label: 'Home', view: 'home' }];
+            if (parentCp)   crumb.push({ label: parentCp.name || 'Checkpoint', view: 'checkpoint-detail', data: { id: parentCp.id } });
+            if (parentProj) crumb.push({ label: parentProj.name || parentProj.title || 'Project', view: 'project-detail', data: { id: parentProj.id } });
+            crumb.push({ label: task.title || task.name || 'Task', view: 'task-detail' });
+
+            var statusBadge = (function () {
+                switch (task.status) {
+                    case 'approved': return '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:4px 12px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:0.1em;">✓ APPROVED</span>';
+                    case 'submitted': return '<span style="background:rgba(245,200,66,0.15);color:#f5c842;padding:4px 12px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:0.1em;">⏳ AWAITING HOST</span>';
+                    case 'rejected': return '<span style="background:rgba(239,68,68,0.15);color:#ef4444;padding:4px 12px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:0.1em;">✗ REJECTED</span>';
+                    default: return '<span style="background:rgba(0,212,255,0.1);color:#00d4ff;padding:4px 12px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:0.1em;">OPEN</span>';
+                }
+            })();
+
+            // Deadline + days-left badge
+            var deadlineHtml = '';
+            if (task.dueDate) {
+                var daysLeft = Math.ceil((new Date(task.dueDate).getTime() - Date.now()) / 86400000);
+                var dColor = daysLeft < 0 ? '#ef4444' : daysLeft <= 2 ? '#f59e0b' : '#22c55e';
+                var dLabel = daysLeft < 0 ? Math.abs(daysLeft) + 'd overdue' : daysLeft === 0 ? 'Due today' : daysLeft + 'd left';
+                deadlineHtml = '<span style="background:rgba(' + (daysLeft < 0 ? '239,68,68' : daysLeft <= 2 ? '245,158,11' : '34,197,94') + ',0.1);color:' + dColor + ';padding:4px 12px;border-radius:999px;font-size:11px;font-weight:700;font-family:\'Share Tech Mono\',monospace;">⏱ ' + dLabel + ' · ' + escapeHtml(task.dueDate) + '</span>';
+            }
+
+            // Reward chips
+            var rewardHtml = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
+            if (task.xcReward || task.xc) {
+                rewardHtml += '<span style="background:rgba(245,200,66,0.1);border:1px solid rgba(245,200,66,0.3);color:#f5c842;padding:6px 14px;border-radius:8px;font-family:\'Share Tech Mono\',monospace;font-size:13px;font-weight:800;">⚡ ' + (task.xcReward || task.xc) + ' XC</span>';
+            }
+            if (Array.isArray(task.rewardBadges) && task.rewardBadges.length) {
+                task.rewardBadges.forEach(function (b) {
+                    var bn = typeof b === 'string' ? b : (b && (b.name || b.id)) || 'Badge';
+                    rewardHtml += '<span style="background:rgba(167,139,250,0.1);border:1px solid rgba(167,139,250,0.3);color:#a78bfa;padding:6px 12px;border-radius:8px;font-size:11px;font-weight:700;">🏅 ' + escapeHtml(String(bn)) + '</span>';
+                });
+            }
+            rewardHtml += '</div>';
+
+            // Progress bar (checklist-based if checklist exists, else by status)
+            var checklist = Array.isArray(task.checklist) ? task.checklist : [];
+            var savedChecks = (task.submission && Array.isArray(task.submission.checklist)) ? task.submission.checklist : [];
+            var checked = savedChecks.filter(Boolean).length;
+            var pct = checklist.length ? Math.round((checked / checklist.length) * 100) :
+                      (task.status === 'approved' ? 100 : task.status === 'submitted' ? 60 : 0);
+
+            // Header card
+            var html = ppBreadcrumb(crumb);
+            html += '<div class="mc-card" style="padding:22px 24px;margin-bottom:18px;border-left:3px solid #00d4ff;">' +
+                '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:10px;">' +
+                '<div style="font-family:\'Rajdhani\',sans-serif;font-size:24px;font-weight:900;color:#e0e6ff;">📋 ' + escapeHtml(task.title || task.name || 'Task') + '</div>' +
+                statusBadge + '</div>' +
+                (task.description ? '<div style="font-size:13px;color:rgba(255,255,255,0.7);line-height:1.7;margin-bottom:14px;">' + escapeHtml(task.description) + '</div>' : '') +
+                '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">' + (deadlineHtml || '') + '</div>' +
+                rewardHtml +
+                '<div style="margin-top:18px;">' + ppProgressBar(pct, '#00d4ff') + '<div style="margin-top:6px;font-size:11px;color:rgba(255,255,255,0.4);">' + pct + '% complete' + (checklist.length ? ' · ' + checked + '/' + checklist.length + ' checked' : '') + '</div></div>' +
+                '</div>';
+
+            // Host-provided reference links
+            if (Array.isArray(task.links) && task.links.length) {
+                html += '<div class="mc-card" style="padding:18px 22px;margin-bottom:14px;">' +
+                    '<div style="font-family:\'Orbitron\',sans-serif;font-size:11px;color:rgba(255,255,255,0.4);letter-spacing:1.5px;margin-bottom:10px;">🔗 RESOURCES FROM HOST</div>';
+                task.links.forEach(function (l) {
+                    var url = typeof l === 'string' ? l : (l && l.url) || '';
+                    var label = typeof l === 'string' ? l : (l && (l.label || l.title || l.url)) || url;
+                    if (!url) return;
+                    html += '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener" style="display:block;padding:8px 12px;background:rgba(0,212,255,0.05);border:1px solid rgba(0,212,255,0.18);border-radius:8px;color:#00d4ff;font-size:12px;margin-bottom:6px;text-decoration:none;">→ ' + escapeHtml(label) + '</a>';
+                });
+                html += '</div>';
+            }
+
+            // Submission section
+            var canSubmit = task.status !== 'approved' && task.status !== 'submitted';
+            var existing = task.submission || {};
+            html += '<div class="mc-card" style="padding:22px 24px;">' +
+                '<div style="font-family:\'Orbitron\',sans-serif;font-size:12px;color:#00d4ff;letter-spacing:1.5px;margin-bottom:14px;">📤 ' + (canSubmit ? 'YOUR SUBMISSION' : 'SUBMITTED') + '</div>';
+
+            if (!canSubmit) {
+                // Read-only — show what they submitted
+                if (existing.description) {
+                    html += '<div style="font-size:11px;letter-spacing:0.1em;color:rgba(255,255,255,0.4);margin-bottom:4px;">DESCRIPTION</div>' +
+                        '<div style="font-size:13px;color:rgba(255,255,255,0.85);line-height:1.6;margin-bottom:14px;padding:10px 12px;background:rgba(255,255,255,0.03);border-radius:8px;">' + escapeHtml(existing.description) + '</div>';
+                }
+                if (existing.link) {
+                    html += '<div style="font-size:11px;letter-spacing:0.1em;color:rgba(255,255,255,0.4);margin-bottom:4px;">LINK</div>' +
+                        '<a href="' + escapeHtml(existing.link) + '" target="_blank" rel="noopener" style="display:block;padding:8px 12px;background:rgba(0,212,255,0.06);border:1px solid rgba(0,212,255,0.2);border-radius:8px;color:#00d4ff;font-size:12px;margin-bottom:14px;text-decoration:none;word-break:break-all;">→ ' + escapeHtml(existing.link) + '</a>';
+                }
+                if (existing.fileName) {
+                    html += '<div style="font-size:11px;letter-spacing:0.1em;color:rgba(255,255,255,0.4);margin-bottom:4px;">FILE</div>' +
+                        '<div style="padding:8px 12px;background:rgba(167,139,250,0.06);border:1px solid rgba(167,139,250,0.2);border-radius:8px;color:#a78bfa;font-size:12px;margin-bottom:14px;">📎 ' + escapeHtml(existing.fileName) + '</div>';
+                }
+                if (Array.isArray(checklist) && checklist.length) {
+                    html += '<div style="font-size:11px;letter-spacing:0.1em;color:rgba(255,255,255,0.4);margin-bottom:6px;">CHECKLIST</div>';
+                    checklist.forEach(function (item, i) {
+                        var on = !!savedChecks[i];
+                        html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:12px;color:' + (on ? '#22c55e' : 'rgba(255,255,255,0.4)') + ';">' +
+                            '<span>' + (on ? '✅' : '⬜') + '</span><span>' + escapeHtml(typeof item === 'string' ? item : (item.label || item.text || '')) + '</span></div>';
+                    });
+                }
+                html += '<div style="margin-top:14px;padding:10px 12px;background:rgba(245,200,66,0.06);border:1px solid rgba(245,200,66,0.2);border-radius:8px;font-size:12px;color:#f5c842;">' +
+                    (task.status === 'approved' ? '✓ Your host approved this. Rewards delivered through X-Coin.' : task.status === 'rejected' ? 'Your host asked for revisions. ' + (existing.hostNote || '') : '⏳ Submission received. Your host will review and approve to release rewards.') +
+                    '</div>';
+                if (task.status === 'rejected') {
+                    html += '<button onclick="ppResubmitTask(\'' + escapeHtml(task.id) + '\')" style="margin-top:10px;padding:10px 18px;background:linear-gradient(135deg,#00d4ff,#7c3aed);color:#fff;border:none;border-radius:8px;font-family:\'Share Tech Mono\',monospace;font-size:12px;font-weight:800;letter-spacing:0.08em;cursor:pointer;">REOPEN AND RESUBMIT</button>';
+                }
+            } else {
+                // Editable submission form. Inputs use unique ids so we can read
+                // them back on submit without setting up complex state.
+                var sid = 'ppSubmit-' + task.id;
+
+                // Checklist (interactive)
+                if (Array.isArray(checklist) && checklist.length) {
+                    html += '<div style="font-size:11px;letter-spacing:0.1em;color:rgba(255,255,255,0.4);margin-bottom:8px;">CHECKLIST (check off as you go)</div>';
+                    checklist.forEach(function (item, i) {
+                        var label = typeof item === 'string' ? item : (item.label || item.text || '');
+                        var pre = !!savedChecks[i];
+                        html += '<label style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;margin-bottom:6px;cursor:pointer;font-size:13px;color:#e0e6ff;">' +
+                            '<input type="checkbox" data-cl="' + sid + '" data-idx="' + i + '"' + (pre ? ' checked' : '') + ' style="width:18px;height:18px;accent-color:#22c55e;cursor:pointer;">' +
+                            escapeHtml(label) + '</label>';
+                    });
+                    html += '<div style="height:14px;"></div>';
+                }
+
+                // Description (always shown)
+                html += '<div style="font-size:11px;letter-spacing:0.1em;color:rgba(255,255,255,0.4);margin-bottom:6px;">DESCRIPTION *</div>' +
+                    '<textarea id="' + sid + '-desc" rows="4" placeholder="What did you do? Reflect on your process." style="width:100%;padding:10px 12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:#fff;font-size:13px;font-family:\'Jura\',sans-serif;resize:vertical;outline:none;margin-bottom:14px;">' + escapeHtml(existing.description || '') + '</textarea>';
+
+                // Link (if host allows)
+                if (task.allowLinkSubmit !== false) {
+                    html += '<div style="font-size:11px;letter-spacing:0.1em;color:rgba(255,255,255,0.4);margin-bottom:6px;">LINK</div>' +
+                        '<input id="' + sid + '-link" type="url" value="' + escapeHtml(existing.link || '') + '" placeholder="https://drive.google.com/…" style="width:100%;padding:10px 12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:#fff;font-size:13px;font-family:\'Share Tech Mono\',monospace;outline:none;margin-bottom:8px;">' +
+                        '<div style="font-size:11px;color:rgba(0,212,255,0.65);background:rgba(0,212,255,0.04);border:1px dashed rgba(0,212,255,0.2);padding:10px 12px;border-radius:8px;margin-bottom:14px;line-height:1.6;">' +
+                        '💡 <b>Google Drive tip:</b> Upload your file to Drive → click <b>Share</b> → change to <b>"Anyone with the link"</b> → copy the link and paste it above. This lets your host open it without requesting access. PFLX will eventually integrate directly with host@prototypeflx.com Drive for managed uploads.' +
+                        '</div>';
+                }
+
+                // File upload (if host allows)
+                if (task.allowFileUpload !== false) {
+                    html += '<div style="font-size:11px;letter-spacing:0.1em;color:rgba(255,255,255,0.4);margin-bottom:6px;">FILE UPLOAD</div>' +
+                        '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">' +
+                        '<label style="padding:10px 18px;background:rgba(167,139,250,0.1);border:1px solid rgba(167,139,250,0.3);border-radius:8px;color:#a78bfa;font-family:\'Share Tech Mono\',monospace;font-size:11px;font-weight:700;letter-spacing:0.06em;cursor:pointer;">' +
+                        'CHOOSE FILE<input id="' + sid + '-file" type="file" style="display:none;" onchange="ppHandleSubmitFile(\'' + sid + '\', this)"></label>' +
+                        '<span id="' + sid + '-filename" style="font-size:12px;color:rgba(255,255,255,0.5);">' + (existing.fileName ? '📎 ' + escapeHtml(existing.fileName) : 'No file chosen') + '</span>' +
+                        '</div>' +
+                        '<div style="font-size:11px;color:rgba(255,255,255,0.3);margin-bottom:14px;">Cap: 5MB. For larger files, use the Google Drive link option above.</div>' +
+                        '<input id="' + sid + '-filedata" type="hidden" value="' + escapeHtml(existing.fileData || '') + '">' +
+                        '<input id="' + sid + '-filenamehidden" type="hidden" value="' + escapeHtml(existing.fileName || '') + '">';
+                }
+
+                // Submit button
+                html += '<div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;">' +
+                    '<button onclick="ppSubmitTask(\'' + escapeHtml(task.id) + '\')" style="flex:1;min-width:180px;padding:12px 20px;background:linear-gradient(135deg,#00d4ff,#7c3aed);color:#fff;border:none;border-radius:10px;font-family:\'Share Tech Mono\',monospace;font-size:13px;font-weight:800;letter-spacing:0.08em;cursor:pointer;">SUBMIT FOR APPROVAL</button>' +
+                    '<button onclick="ppNav(\'home\')" style="padding:12px 20px;background:rgba(255,255,255,0.05);color:rgba(255,255,255,0.5);border:1px solid rgba(255,255,255,0.1);border-radius:10px;font-family:\'Share Tech Mono\',monospace;font-size:12px;font-weight:700;letter-spacing:0.08em;cursor:pointer;">CANCEL</button>' +
+                    '</div>' +
+                    '<div id="' + sid + '-msg" style="margin-top:10px;font-size:12px;"></div>';
+            }
+
+            html += '</div>'; // end submission card
+
+            el.innerHTML = html;
+        }
+
+        // Handle file pick for the task submission form. Caps at 5MB and base64-
+        // encodes into a hidden field so ppSubmitTask can write it onto the task.
+        window.ppHandleSubmitFile = function (sid, input) {
+            var f = input.files && input.files[0];
+            if (!f) return;
+            if (f.size > 5 * 1024 * 1024) {
+                var msg = document.getElementById(sid + '-msg');
+                if (msg) { msg.style.color = '#ef4444'; msg.textContent = 'File too large. Cap is 5MB — use the Google Drive link above for bigger files.'; }
+                input.value = '';
+                return;
+            }
+            var reader = new FileReader();
+            reader.onload = function (e) {
+                var data = (e && e.target && e.target.result) ? String(e.target.result) : '';
+                var dataEl = document.getElementById(sid + '-filedata');
+                var nameEl = document.getElementById(sid + '-filenamehidden');
+                var nameLabel = document.getElementById(sid + '-filename');
+                if (dataEl) dataEl.value = data;
+                if (nameEl) nameEl.value = f.name;
+                if (nameLabel) nameLabel.textContent = '📎 ' + f.name;
+            };
+            reader.readAsDataURL(f);
+        };
+
+        // Persist a submission on the task and flip status to 'submitted'.
+        // mcSaveData('tasks') already fires pflx_mc_changed so every other
+        // surface (X-Coin home, Pathways chips, etc.) updates the count.
+        window.ppSubmitTask = function (taskId) {
+            try {
+                if (typeof mcTasks === 'undefined' || !Array.isArray(mcTasks)) return;
+                var i = mcTasks.findIndex(function (t) { return t && t.id === taskId; });
+                if (i < 0) { console.warn('[pp] task not found', taskId); return; }
+                var t = mcTasks[i];
+                var sid = 'ppSubmit-' + taskId;
+                var msgEl = document.getElementById(sid + '-msg');
+                function setErr(s) { if (msgEl) { msgEl.style.color = '#ef4444'; msgEl.textContent = s; } }
+                function setOk(s)  { if (msgEl) { msgEl.style.color = '#22c55e'; msgEl.textContent = s; } }
+
+                var desc = (document.getElementById(sid + '-desc') || {}).value || '';
+                var link = (document.getElementById(sid + '-link') || {}).value || '';
+                var fileData = (document.getElementById(sid + '-filedata') || {}).value || '';
+                var fileName = (document.getElementById(sid + '-filenamehidden') || {}).value || '';
+                // Read checklist boxes
+                var clBoxes = document.querySelectorAll('input[data-cl="' + sid + '"]');
+                var checks = [];
+                clBoxes.forEach(function (b) {
+                    var idx = parseInt(b.getAttribute('data-idx'), 10) || 0;
+                    checks[idx] = !!b.checked;
+                });
+
+                if (!desc.trim()) { setErr('A description is required.'); return; }
+                // At least a link or a file if the task allows them
+                var needsArtifact = (t.allowLinkSubmit !== false) || (t.allowFileUpload !== false);
+                if (needsArtifact && !link.trim() && !fileName) {
+                    setErr('Add a link or upload a file as evidence.'); return;
+                }
+
+                t.submission = {
+                    description: desc.trim(),
+                    link: link.trim() || null,
+                    fileName: fileName || null,
+                    fileData: fileData || null, // base64 — large but local-only for now
+                    checklist: checks,
+                    submittedBy: (window.activeSession && window.activeSession.id) || null,
+                    submittedAt: new Date().toISOString()
+                };
+                t.status = 'submitted';
+                mcTasks[i] = t;
+                mcSaveData('tasks');
+                try { logActivity(t.submission.submittedBy, 'task_submitted', { taskId: t.id, title: t.title }); } catch (e) {}
+                if (typeof pflxToast === 'function') pflxToast('Submitted — your host will review soon', 'success');
+                setOk('Submitted! Awaiting host review.');
+                // Re-render so the form switches to read-only mode
+                setTimeout(function () { mcRenderPlayerDashPreview(); }, 600);
+            } catch (e) {
+                console.warn('[pp] submit failed', e);
+            }
+        };
+
+        // Reopen a rejected task for resubmission — clears status back to 'open'
+        // and re-renders the form.
+        window.ppResubmitTask = function (taskId) {
+            try {
+                var i = mcTasks.findIndex(function (t) { return t && t.id === taskId; });
+                if (i < 0) return;
+                mcTasks[i].status = 'open';
+                mcSaveData('tasks');
+                mcRenderPlayerDashPreview();
+            } catch (e) {}
+        };
+
         // ── MY TASKS (flat list across all checkpoints) ──
         // Filter to ONLY tasks the active player is actually assigned to —
         // directly or via the parent checkpoint's cohort.
@@ -19086,24 +19445,24 @@
                 pending.forEach(function(t) {
                     var icon = t.required ? '🔴' : '⬜';
                     var reqLabel = t.required ? ' <span style="font-size:9px;color:#ef4444;">REQUIRED</span>' : '';
-                    html += '<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:10px;margin-bottom:6px;">' +
+                    html += '<div onclick="ppNav(\'task-detail\',{id:\'' + (t.id || '') + '\'})" style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:10px;margin-bottom:6px;cursor:pointer;transition:border-color 0.15s;" onmouseenter="this.style.borderColor=\'rgba(0,212,255,0.3)\'" onmouseleave="this.style.borderColor=\'rgba(255,255,255,0.06)\'">' +
                         '<span style="font-size:16px;">' + icon + '</span>' +
                         '<div style="flex:1;">' +
-                        '<div style="font-size:13px;color:#e0e6ff;font-weight:600;">' + escapeHtml(t.name || 'Task') + reqLabel + '</div>' +
+                        '<div style="font-size:13px;color:#e0e6ff;font-weight:600;">' + escapeHtml(t.title || t.name || 'Task') + reqLabel + '</div>' +
                         (t.checkpoint ? '<div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:2px;">📍 ' + escapeHtml(t.checkpoint) + '</div>' : '') + '</div>' +
-                        (t.xc ? '<span style="font-size:12px;color:#f5c842;font-weight:700;font-family:\'Share Tech Mono\',monospace;">' + t.xc + ' XC</span>' : '') +
-                        (t.deadline ? '<span style="font-size:10px;color:rgba(255,255,255,0.3);margin-left:6px;">' + escapeHtml(t.deadline) + '</span>' : '') + '</div>';
+                        (t.xcReward || t.xc ? '<span style="font-size:12px;color:#f5c842;font-weight:700;font-family:\'Share Tech Mono\',monospace;">' + (t.xcReward || t.xc) + ' XC</span>' : '') +
+                        (t.dueDate || t.deadline ? '<span style="font-size:10px;color:rgba(255,255,255,0.3);margin-left:6px;">' + escapeHtml(t.dueDate || t.deadline) + '</span>' : '') + '</div>';
                 });
             }
 
-            // Completed tasks
+            // Completed tasks — also clickable to view submission details
             if (done.length) {
                 html += '<div style="font-family:\'Orbitron\',sans-serif;font-size:11px;color:rgba(255,255,255,0.25);letter-spacing:1.5px;margin:16px 0 10px;">✅ COMPLETED (' + done.length + ')</div>';
                 done.forEach(function(t) {
-                    html += '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(255,255,255,0.01);border:1px solid rgba(255,255,255,0.04);border-radius:10px;margin-bottom:4px;opacity:0.6;">' +
+                    html += '<div onclick="ppNav(\'task-detail\',{id:\'' + (t.id || '') + '\'})" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(255,255,255,0.01);border:1px solid rgba(255,255,255,0.04);border-radius:10px;margin-bottom:4px;opacity:0.7;cursor:pointer;">' +
                         '<span style="font-size:14px;">✅</span>' +
-                        '<span style="flex:1;font-size:12px;color:rgba(255,255,255,0.4);text-decoration:line-through;">' + escapeHtml(t.name || 'Task') + '</span>' +
-                        (t.xc ? '<span style="font-size:11px;color:rgba(245,200,66,0.5);font-family:\'Share Tech Mono\',monospace;">+' + t.xc + ' XC</span>' : '') + '</div>';
+                        '<span style="flex:1;font-size:12px;color:rgba(255,255,255,0.4);text-decoration:line-through;">' + escapeHtml(t.title || t.name || 'Task') + '</span>' +
+                        (t.xcReward || t.xc ? '<span style="font-size:11px;color:rgba(245,200,66,0.5);font-family:\'Share Tech Mono\',monospace;">+' + (t.xcReward || t.xc) + ' XC</span>' : '') + '</div>';
                 });
             }
 
