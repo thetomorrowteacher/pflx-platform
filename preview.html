@@ -3646,11 +3646,15 @@
         }
 
         /* APP LINKS */
+        /* Six apps total — use auto-fit so they shape to the available width:
+           wide viewport → 6 in a row, narrower → wraps to 3+3 or 2+2+2.
+           The fixed repeat(4,1fr) was producing an awkward 4+2 layout. */
         .app-links {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 15px;
+            grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+            gap: 14px;
             margin-top: 20px;
+            justify-items: stretch;
         }
 
         .app-link-btn {
@@ -16495,71 +16499,85 @@
             });
         }
 
+        // Investment Summary — reflects the player's stake in Startup Studios.
+        // The 4 metrics are:
+        //   - My Stake (XC)   : how much XC the player has staked across studios
+        //   - Equity (%)      : their ownership percentage in their primary studio
+        //   - Studios         : count of studios they're a member of
+        //   - Studio Value    : total XC pool in their primary studio (their stake's "container")
         function renderInvestmentSummary() {
             const container = document.querySelector('.investment-summary') || document.createElement('div');
             container.className = 'investment-summary';
 
-            // ── Real metrics from the active session + MC data ──
             var s = window.activeSession || {};
             var p = (typeof _ppGetActivePlayerRecord === 'function') ? _ppGetActivePlayerRecord() : null;
 
-            // Total XC — lifetime earned
-            var totalXc = (p && typeof p.totalXcoin === 'number' ? p.totalXcoin : null);
-            if (totalXc == null) totalXc = (typeof s.totalXcoin === 'number') ? s.totalXcoin : (s.xc || 0);
+            // The player's primary studio + their stake/equity fields are
+            // already plumbed through activeSession (see pflxIdentityPersist).
+            var myStakeXC      = (p && typeof p.studioStakeXC === 'number')      ? p.studioStakeXC      : (typeof s.studioStakeXC === 'number'      ? s.studioStakeXC      : 0);
+            var myEquityPct    = (p && typeof p.studioStakePercent === 'number') ? p.studioStakePercent : (typeof s.studioStakePercent === 'number' ? s.studioStakePercent : 0);
+            var primaryStudioId = (p && p.studioId) || s.studioId || '';
 
-            // Active projects — MC projects assigned to this player that aren't closed
-            var activeProjects = 0;
+            // Look up their primary studio + count memberships
+            var primaryStudio = null;
+            var studioCount = 0;
+            var studioPoolXC = 0;
             try {
-                if (typeof mcProjects !== 'undefined' && Array.isArray(mcProjects) && typeof ppItemAssignedToActivePlayer === 'function') {
-                    activeProjects = mcProjects.filter(function (pr) {
-                        if (!pr) return false;
-                        if (pr.status === 'archived' || pr.status === 'closed' || pr.status === 'complete') return false;
-                        return ppItemAssignedToActivePlayer(pr);
-                    }).length;
+                if (typeof mcStudios !== 'undefined' && Array.isArray(mcStudios)) {
+                    if (primaryStudioId) {
+                        primaryStudio = mcStudios.find(function (st) { return st && st.id === primaryStudioId; }) || null;
+                    }
+                    // Count any studios whose members[] / equity{} mentions this player id
+                    var pid = (p && p.id) || s.id;
+                    mcStudios.forEach(function (st) {
+                        if (!st) return;
+                        var isMember = false;
+                        if (Array.isArray(st.members)) {
+                            isMember = st.members.some(function (m) {
+                                if (typeof m === 'string') return m === pid;
+                                return m && (m.playerId === pid || m.id === pid || m.brand === s.brand);
+                            });
+                        }
+                        if (st.equity && typeof st.equity === 'object' && pid in st.equity) isMember = true;
+                        if (st.id === primaryStudioId) isMember = true;
+                        if (st.founder && (st.founder === pid || st.founder === s.brand)) isMember = true;
+                        if (isMember) studioCount++;
+                    });
+                    if (primaryStudio) {
+                        studioPoolXC = primaryStudio.xcStaked || primaryStudio.xcPool || 0;
+                    }
                 }
             } catch (e) {}
 
-            // Quests completed — tasks the player got approved on, plus arena/cipher wins
-            var questsCompleted = 0;
+            // If they're in a studio but stake fields are 0, try to compute from the equity map
             try {
-                if (typeof mcTasks !== 'undefined' && Array.isArray(mcTasks) && typeof ppItemAssignedToActivePlayer === 'function') {
-                    questsCompleted += mcTasks.filter(function (t) {
-                        if (!t) return false;
-                        if (t.status !== 'approved' && !t.completed) return false;
-                        return ppItemAssignedToActivePlayer(t);
-                    }).length;
-                }
-                // Add badge count as a proxy for non-task quest completions
-                if (p && typeof p.digitalBadges === 'number') questsCompleted += p.digitalBadges;
-            } catch (e) {}
-
-            // Current rank — from the player's resolved rank or session
-            var rankLabel = '—';
-            try {
-                if (s.rankName) {
-                    rankLabel = s.rankName;
-                } else if (typeof getRankForXC === 'function') {
-                    var r = getRankForXC(totalXc || 0);
-                    if (r && r.name) rankLabel = (r.icon || '') + ' ' + r.name;
+                if (primaryStudio && myStakeXC === 0 && primaryStudio.equity && typeof primaryStudio.equity === 'object') {
+                    var pid2 = (p && p.id) || s.id;
+                    if (pid2 && primaryStudio.equity[pid2]) {
+                        myStakeXC = primaryStudio.equity[pid2].xc || primaryStudio.equity[pid2].stakeXC || 0;
+                        if (!myEquityPct) myEquityPct = primaryStudio.equity[pid2].percent || primaryStudio.equity[pid2].equity || 0;
+                    }
                 }
             } catch (e) {}
 
             container.innerHTML =
                 '<div class="investment-metric">' +
-                    '<div class="investment-value">' + Number(totalXc || 0).toLocaleString() + '</div>' +
-                    '<div class="investment-label">Total XC</div>' +
+                    '<div class="investment-value">' + Number(myStakeXC || 0).toLocaleString() + '</div>' +
+                    '<div class="investment-label">My Stake (XC)</div>' +
                 '</div>' +
                 '<div class="investment-metric">' +
-                    '<div class="investment-value">' + activeProjects + '</div>' +
-                    '<div class="investment-label">Active Projects</div>' +
+                    '<div class="investment-value">' + (myEquityPct ? Number(myEquityPct).toFixed(myEquityPct < 10 ? 1 : 0) + '%' : '—') + '</div>' +
+                    '<div class="investment-label">My Equity</div>' +
                 '</div>' +
                 '<div class="investment-metric">' +
-                    '<div class="investment-value">' + questsCompleted + '</div>' +
-                    '<div class="investment-label">Quests Completed</div>' +
+                    '<div class="investment-value">' + studioCount + '</div>' +
+                    '<div class="investment-label">Studios</div>' +
                 '</div>' +
                 '<div class="investment-metric">' +
-                    '<div class="investment-value" style="font-size:14px;line-height:1.2;">' + escapeHtml(String(rankLabel)) + '</div>' +
-                    '<div class="investment-label">Current Rank</div>' +
+                    '<div class="investment-value" style="font-size:14px;line-height:1.2;">' +
+                        (primaryStudio ? Number(studioPoolXC || 0).toLocaleString() + ' XC' : '—') +
+                    '</div>' +
+                    '<div class="investment-label">' + (primaryStudio ? escapeHtml(primaryStudio.name || 'My Studio') + ' Pool' : 'Studio Pool') + '</div>' +
                 '</div>';
             return container;
         }
