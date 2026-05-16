@@ -18507,44 +18507,114 @@
             if (!item || !cpId) return false;
             return item.roundId === cpId || item.checkpointId === cpId;
         }
-        // Helper: is this item assigned to the active player?
-        // Mirrors PflxDataBus.mc.get's filter — inherit cohort from the parent
-        // checkpoint when the item itself has no explicit cohort assignment.
-        function ppItemAssignedToActivePlayer(item) {
-            if (!item) return false;
-            var s = window.activeSession || {};
-            var pid = s.id;
-            var cohorts = Array.isArray(s.cohorts) ? s.cohorts : (s.cohort ? [s.cohort] : []);
-            if (item.playerId === pid || item.submitterId === pid || item.assigneeId === pid) return true;
-            if (Array.isArray(item.assignedTo) && item.assignedTo.indexOf(pid) >= 0) return true;
-            if (cohorts.length) {
-                if (item.cohort && cohorts.indexOf(item.cohort) >= 0) return true;
-                if (Array.isArray(item.cohorts) && item.cohorts.some(function (c) { return cohorts.indexOf(c) >= 0; })) return true;
-                if (Array.isArray(item.assignedTo) && item.assignedTo.some(function (a) { return cohorts.indexOf(a) >= 0; })) return true;
-            }
-            if (item.assignedTo === 'all' || item.cohort === 'all') return true;
-            var hasOwn = (item.assignedTo && (item.assignedTo === 'all' || (Array.isArray(item.assignedTo) && item.assignedTo.length > 0)))
-                      || item.cohort || (Array.isArray(item.cohorts) && item.cohorts.length > 0);
-            if (!hasOwn) {
-                var parentId = item.roundId || item.checkpointId;
-                if (parentId) {
-                    // Task / project — inherit from parent checkpoint
-                    var cps = ppGetCheckpoints();
-                    var cp = cps.find(function (c) { return c && c.id === parentId; });
-                    if (cp) {
-                        if (!cp.assignedTo || cp.assignedTo === 'all' || (Array.isArray(cp.assignedTo) && cp.assignedTo.length === 0)) return true;
-                        if (Array.isArray(cp.assignedTo)) {
-                            if (cp.assignedTo.indexOf(pid) >= 0) return true;
-                            if (cohorts.length && cp.assignedTo.some(function (a) { return cohorts.indexOf(a) >= 0; })) return true;
-                        }
-                    }
-                } else {
-                    // Root-level item (e.g. a checkpoint or job with no cohorts
-                    // checked) — convention is "everyone sees it"
-                    return true;
-                }
-            }
+        // ─────────────────────────────────────────────────────────────────
+        // pflxPlayerCanSeeItem(item, pid, cohorts)
+        //
+        // Walks the full PFLX content hierarchy to decide visibility:
+        //   Season → Checkpoint → Project → Task
+        //   Season → Checkpoint → Job → (when hired) Task
+        //
+        // An item is visible to the player if ANY level in the chain
+        // assigns to them. Empty assignment on a leaf → inherit from
+        // parent. Empty assignment at the root of a chain → "everyone".
+        //
+        // Direct overrides:
+        //   item.playerId === pid          → directly assigned (e.g. job-hire-task)
+        //   item.assignedTo === 'all'      → everyone
+        //   item.assignedTo[] includes pid → directly assigned
+        //   item.hired[] includes pid      → hired for this job (counts as assignment)
+        //
+        // Used by:
+        //   - Player Portal (Console MC home, my tasks, checkpoint detail)
+        //   - PflxDataBus.mc.get filter (sub-apps via the bus)
+        // ─────────────────────────────────────────────────────────────────
+        function pflxItemCohortsMatch(item, cohorts) {
+            if (!cohorts || !cohorts.length) return false;
+            if (item.cohort && cohorts.indexOf(item.cohort) >= 0) return true;
+            if (Array.isArray(item.cohorts) && item.cohorts.some(function (c) { return cohorts.indexOf(c) >= 0; })) return true;
+            if (Array.isArray(item.assignedTo) && item.assignedTo.some(function (a) { return cohorts.indexOf(a) >= 0; })) return true;
             return false;
+        }
+        function pflxItemHasOwnCohort(item) {
+            if (!item) return false;
+            if (item.assignedTo === 'all') return true;
+            if (Array.isArray(item.assignedTo) && item.assignedTo.length > 0) return true;
+            if (item.cohort) return true;
+            if (Array.isArray(item.cohorts) && item.cohorts.length > 0) return true;
+            return false;
+        }
+        function pflxFindCheckpoint(cps, id) {
+            return id ? (cps || []).find(function (c) { return c && c.id === id; }) : null;
+        }
+        function pflxFindProject(pjs, id) {
+            return id ? (pjs || []).find(function (p) { return p && p.id === id; }) : null;
+        }
+        function pflxFindSeason(ss, id) {
+            return id ? (ss || []).find(function (s) { return s && s.id === id; }) : null;
+        }
+        // visit: avoid infinite loops if data is malformed (e.g. circular refs)
+        function pflxPlayerCanSeeItem(item, pid, cohorts, ctx, visit) {
+            if (!item) return false;
+            visit = visit || {};
+            // 1. Direct player-id assignment (the job-hire → task path lands here
+            //    because mcSaveJobForm sets t.playerId on auto-created tasks).
+            if (pid) {
+                if (item.playerId === pid || item.submitterId === pid || item.assigneeId === pid) return true;
+                if (Array.isArray(item.assignedTo) && item.assignedTo.indexOf(pid) >= 0) return true;
+                // Hired for this job — counts as the job being assigned to them
+                // (and also a task is auto-created with playerId; this also makes
+                // the job itself visible in any job-listing surface).
+                if (Array.isArray(item.hired) && item.hired.indexOf(pid) >= 0) return true;
+            }
+            // 2. "Everyone" sentinel on item
+            if (item.assignedTo === 'all' || item.cohort === 'all') return true;
+            // 3. Own cohort matches
+            if (pflxItemCohortsMatch(item, cohorts)) return true;
+            // 4. Item has explicit cohorts but NONE matched — stop here, don't
+            //    inherit. The host opted in to a specific cohort set.
+            if (pflxItemHasOwnCohort(item)) return false;
+            // 5. Item has no own cohorts — walk UP the hierarchy.
+            ctx = ctx || {
+                checkpoints: ppGetCheckpoints(),
+                projects:    ppGetProjects(),
+                seasons:     (function () {
+                    try {
+                        if (typeof mcSeasons !== 'undefined' && Array.isArray(mcSeasons)) return mcSeasons.slice();
+                        return JSON.parse(localStorage.getItem('pflx_mc_seasons') || localStorage.getItem('pflx_seasons') || '[]');
+                    } catch (e) { return []; }
+                })()
+            };
+            //  5a. Task with projectId → project's cohort (which may itself
+            //      inherit from checkpoint / season)
+            if (item.projectId && !visit['proj:' + item.projectId]) {
+                visit['proj:' + item.projectId] = true;
+                var proj = pflxFindProject(ctx.projects, item.projectId);
+                if (proj && pflxPlayerCanSeeItem(proj, pid, cohorts, ctx, visit)) return true;
+            }
+            //  5b. Item with roundId / checkpointId → checkpoint's cohort
+            var cpId = item.roundId || item.checkpointId || null;
+            if (cpId && !visit['cp:' + cpId]) {
+                visit['cp:' + cpId] = true;
+                var cp = pflxFindCheckpoint(ctx.checkpoints, cpId);
+                if (cp && pflxPlayerCanSeeItem(cp, pid, cohorts, ctx, visit)) return true;
+            }
+            //  5c. Checkpoint with seasonId → season's cohort
+            if (item.seasonId && !visit['season:' + item.seasonId]) {
+                visit['season:' + item.seasonId] = true;
+                var season = pflxFindSeason(ctx.seasons, item.seasonId);
+                if (season && pflxPlayerCanSeeItem(season, pid, cohorts, ctx, visit)) return true;
+            }
+            //  5d. Reached the top of the chain with no own cohort and no
+            //      matching ancestor — convention is "everyone sees it".
+            if (!item.projectId && !cpId && !item.seasonId) return true;
+            return false;
+        }
+        // Thin wrapper used by Console Player Portal (binds to activeSession).
+        function ppItemAssignedToActivePlayer(item) {
+            var s = window.activeSession || {};
+            var pid = s.id || null;
+            var cohorts = Array.isArray(s.cohorts) ? s.cohorts : (s.cohort ? [s.cohort] : []);
+            return pflxPlayerCanSeeItem(item, pid, cohorts);
         }
 
         // ── Breadcrumb nav ──
@@ -41798,66 +41868,18 @@ RESPONSE RULES:
                 if (!Array.isArray(arr)) return [];
 
                 var out = arr.slice();
-                // Cohort filter — matches if item has cohort=any of player's cohorts,
-                // or assignedTo includes the player id or any of their cohorts.
-                // For tasks/projects with empty assignedTo: inherit cohort
-                // assignment from the linked checkpoint (task.roundId →
-                // mcCheckpoints[i].assignedTo). This is the common case — hosts
-                // assign cohorts at the checkpoint level and don't re-specify on
-                // every task. Without inheritance, those tasks were invisible
-                // to players in the checkpoint's cohort.
-                function checkpointMatchesPlayer(cpId, pid, cohorts) {
-                    if (!cpId || typeof mcCheckpoints === 'undefined' || !Array.isArray(mcCheckpoints)) return false;
-                    var cp = mcCheckpoints.find(function (c) { return c && c.id === cpId; });
-                    if (!cp) return false;
-                    // "All" or empty assignment on the checkpoint = everyone matches
-                    if (!cp.assignedTo || cp.assignedTo === 'all' || (Array.isArray(cp.assignedTo) && cp.assignedTo.length === 0)) return true;
-                    if (Array.isArray(cp.assignedTo)) {
-                        if (cp.assignedTo.indexOf(pid) >= 0) return true;
-                        if (Array.isArray(cohorts) && cohorts.length) {
-                            if (cp.assignedTo.some(function (a) { return cohorts.indexOf(a) >= 0; })) return true;
-                        }
-                    }
-                    if (Array.isArray(cohorts) && cohorts.length) {
-                        if (cp.cohort && cohorts.indexOf(cp.cohort) >= 0) return true;
-                        if (Array.isArray(cp.cohorts) && cp.cohorts.some(function (c) { return cohorts.indexOf(c) >= 0; })) return true;
-                    }
-                    return false;
-                }
-                function itemMatchesPlayer(item, pid, cohorts) {
-                    if (!item) return false;
-                    // Direct assignment to player id
-                    if (item.playerId === pid || item.submitterId === pid || item.assigneeId === pid) return true;
-                    if (Array.isArray(item.assignedTo) && item.assignedTo.indexOf(pid) >= 0) return true;
-                    // Cohort assignment (string or array)
-                    if (Array.isArray(cohorts) && cohorts.length) {
-                        if (item.cohort && cohorts.indexOf(item.cohort) >= 0) return true;
-                        if (Array.isArray(item.cohorts) && item.cohorts.some(function (c) { return cohorts.indexOf(c) >= 0; })) return true;
-                        if (Array.isArray(item.assignedTo) && item.assignedTo.some(function (a) { return cohorts.indexOf(a) >= 0; })) return true;
-                    }
-                    // "all players" assignment
-                    if (item.assignedTo === 'all' || item.cohort === 'all') return true;
-                    // Empty assignedTo on a task/project — inherit from the parent checkpoint.
-                    // (`roundId` is the legacy field on tasks; `checkpointId` on projects/jobs.)
-                    var noOwnCohort = (
-                        (!item.assignedTo || (Array.isArray(item.assignedTo) && item.assignedTo.length === 0)) &&
-                        !item.cohort && (!Array.isArray(item.cohorts) || item.cohorts.length === 0)
-                    );
-                    if (noOwnCohort) {
-                        var parentCpId = item.roundId || item.checkpointId || null;
-                        if (parentCpId) {
-                            if (checkpointMatchesPlayer(parentCpId, pid, cohorts)) return true;
-                        } else {
-                            // Root-level item with no cohorts — convention is "everyone"
-                            return true;
-                        }
-                    }
-                    return false;
-                }
+                // Cohort filter — uses the shared pflxPlayerCanSeeItem traversal
+                // which walks Season → Checkpoint → Project → Task and respects
+                // job-hire (item.playerId / item.hired[]). See its definition
+                // above for the full inheritance rules.
                 if (opts.playerId) {
                     var p = getPlayer(opts.playerId);
                     var cohorts = p ? (Array.isArray(p.cohorts) ? p.cohorts : (p.cohort ? [p.cohort] : [])) : [];
-                    out = out.filter(function (it) { return itemMatchesPlayer(it, opts.playerId, cohorts); });
+                    out = out.filter(function (it) {
+                        return (typeof pflxPlayerCanSeeItem === 'function')
+                            ? pflxPlayerCanSeeItem(it, opts.playerId, cohorts)
+                            : true;
+                    });
                 }
                 if (opts.cohort) {
                     out = out.filter(function (it) {
