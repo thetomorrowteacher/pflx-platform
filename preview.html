@@ -39290,6 +39290,25 @@ RESPONSE RULES:
 
                     // ── PflxDataBus: canonical cross-app data protocol ──
                     // sub → Console: "give me player X" → respond with full record
+                    // Sub-app requests a navigation (e.g. X-Coin's profile route
+                    // redirecting to the Console's unified portfolio). Route the
+                    // whole shell rather than just the iframe so the user lands
+                    // on the canonical surface.
+                    if (msg.type === 'pflx_navigate' && msg.url) {
+                        try {
+                            // Internal URLs: switch portfolio view in-shell so we
+                            // don't drop the toolbar / nav / iframe state.
+                            var u = String(msg.url);
+                            if (u.indexOf(window.location.origin) === 0) {
+                                var path = u.substring(window.location.origin.length);
+                                window.history.pushState(null, '', path);
+                                window.dispatchEvent(new PopStateEvent('popstate'));
+                            } else {
+                                window.location.href = u;
+                            }
+                        } catch (e) { console.warn('[PFLX] pflx_navigate failed', e); }
+                    }
+
                     if (msg.type === 'pflx_player_get' && msg.playerId) {
                         var src = ev.source;
                         var rec = window.PflxDataBus ? window.PflxDataBus.get(msg.playerId) : null;
