@@ -4,6 +4,27 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
     <title>Prototype FLX — The Future Learning eXperience</title>
+    <!-- Supabase JS client — used by the published-portfolio public view to fetch
+         portfolio data by brand slug from the shared app_data table, and by the
+         publish flow to upsert directly (no longer dependent on the X-Coin iframe
+         being loaded at publish time). Public anon key is safe to embed. -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+    <script>
+      window.PFLX_SUPABASE_URL = 'https://hyxiagexyptzvetqjmnj.supabase.co';
+      window.PFLX_SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh5eGlhZ2V4eXB0enZldHFqbW5qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwODM4MTYsImV4cCI6MjA4OTY1OTgxNn0.hqHVlRu775dZfJrKxSFMNEPhANu5EFm7gJpaJ3RnbnY';
+      // Lazy-init the client only when something asks for it, so the main app
+      // doesn't pay the connection cost unless publish or public-view runs.
+      window.pflxSupabase = function () {
+        if (window.__pflxSupabaseClient) return window.__pflxSupabaseClient;
+        try {
+          if (window.supabase && typeof window.supabase.createClient === 'function') {
+            window.__pflxSupabaseClient = window.supabase.createClient(window.PFLX_SUPABASE_URL, window.PFLX_SUPABASE_ANON);
+            return window.__pflxSupabaseClient;
+          }
+        } catch (e) { console.warn('[PFLX Supabase] init failed', e); }
+        return null;
+      };
+    </script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Share+Tech+Mono&family=Rajdhani:wght@300;400;500;600;700&family=Jura:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         /* ── iOS / iPad Safari global fixes ── */
@@ -12219,15 +12240,49 @@
 
     <script>
         // ═══════════════════════════════════════════════════════════════
-        // ██  PUBLIC PORTFOLIO MODE  (URL: /p/{brand}[#d=base64])
+        // ██  PUBLIC PORTFOLIO MODE  (URLs: /{brand} or /p/{brand}[#d=base64])
         // ═══════════════════════════════════════════════════════════════
-        // When visiting /p/{brand}, render a standalone read-only portfolio
-        // and suppress the rest of the platform shell (login, nav, audio, etc.)
+        // When visiting /{brand} or /p/{brand}, render a standalone read-only
+        // portfolio and suppress the rest of the platform shell.
+        //
+        // The clean URL form (/{brand}) is the canonical share URL. It's stable
+        // across re-publishes — the recipient hits the same URL and gets the
+        // latest data because the public view fetches from Supabase by slug.
+        // The /p/{brand} form is kept as a backwards-compat alias.
+        //
+        // Reserved paths that should NOT be treated as brand slugs:
+        //   - anything matching a real file in the repo (preview.html, etc.)
+        //     which Vercel serves before this rewrite hits
+        //   - the explicit /p/ alias
+        //   - the platform shell's own routes (/landing, /api/*)
+        //   - common static asset extensions
         (function() {
             try {
-                var match = window.location.pathname.match(/^\/p\/([^\/\?#]+)\/?$/);
-                if (!match) return;
-                var brand = decodeURIComponent(match[1]);
+                var path = window.location.pathname.replace(/\/$/, '');
+                var brand = null;
+
+                // Pattern A — legacy /p/<brand>
+                var pMatch = path.match(/^\/p\/([^\/\?#]+)$/);
+                if (pMatch) {
+                    brand = decodeURIComponent(pMatch[1]);
+                } else {
+                    // Pattern B — clean /<brand>. Reject reserved/non-brand paths.
+                    var single = path.match(/^\/([^\/\?#]+)$/);
+                    if (single) {
+                        var candidate = decodeURIComponent(single[1]);
+                        var reserved = {
+                            'landing': 1, 'api': 1, 'public': 1, '_next': 1, 'favicon.ico': 1,
+                            'preview.html': 1, 'landing.html': 1, 'index.html': 1, 'p': 1,
+                            'admin': 1, 'login': 1, 'settings': 1, 'host': 1, 'logout': 1
+                        };
+                        // Reject if it has a file extension (e.g. .png, .css, .js)
+                        var hasExt = /\.[a-z0-9]{2,5}$/i.test(candidate);
+                        if (!reserved[candidate.toLowerCase()] && !hasExt && candidate.length >= 2) {
+                            brand = candidate;
+                        }
+                    }
+                }
+                if (!brand) return;
                 window.__PFLX_PUBLIC_PORTFOLIO__ = brand;
 
                 // Hide everything else as soon as the DOM parses
@@ -12284,8 +12339,9 @@
                     return '';
                 }
 
-                function loadPublicData() {
-                    // Priority 1: base64 hash payload (self-contained, cross-device)
+                // Synchronous read of the embedded-hash payload if present.
+                // Returns null if no hash — caller falls back to Supabase fetch.
+                function loadFromHash() {
                     try {
                         var h = window.location.hash || '';
                         var m2 = h.match(/[#&]d=([^&]+)/);
@@ -12294,15 +12350,17 @@
                             return JSON.parse(decodeURIComponent(escape(json)));
                         }
                     } catch(e) { console.warn('[PFLX Public] hash decode failed', e); }
+                    return null;
+                }
 
-                    // Priority 2: localStorage (same-device preview)
+                // Synchronous localStorage read — same-device fallback.
+                function loadFromLocal() {
                     try {
                         var pub = localStorage.getItem('pflx_published_' + brand);
                         if (pub) return JSON.parse(pub);
                         var raw = localStorage.getItem('pflx_portfolio_' + brand);
                         if (raw) {
                             var data = JSON.parse(raw);
-                            // Enrich with user profile if same device
                             try {
                                 var u = JSON.parse(localStorage.getItem('pflx_user') || '{}');
                                 if (u && (u.brandName === brand || u.name === brand)) {
@@ -12322,6 +12380,47 @@
                         }
                     } catch(e) {}
                     return null;
+                }
+
+                // Async Supabase fetch — looks up the portfolio by slug. This is
+                // what makes the clean URL (prototypeflx.com/<brand>) work cross-
+                // device. The slug is normalized to lowercase to make sharing
+                // robust against case typos.
+                function loadFromSupabase() {
+                    return new Promise(function (resolve) {
+                        try {
+                            var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                            if (!client) { resolve(null); return; }
+                            var slug = String(brand).toLowerCase();
+                            // Try both the canonical key and the legacy bridge key
+                            client
+                                .from('app_data')
+                                .select('data, updated_at')
+                                .in('key', ['pflx_portfolio_pub_' + slug, 'published_portfolio_' + slug])
+                                .order('updated_at', { ascending: false })
+                                .limit(1)
+                                .then(function (res) {
+                                    try {
+                                        if (res && res.data && res.data.length > 0 && res.data[0].data) {
+                                            resolve(res.data[0].data);
+                                        } else { resolve(null); }
+                                    } catch (e) { resolve(null); }
+                                }, function () { resolve(null); });
+                        } catch (e) { resolve(null); }
+                    });
+                }
+
+                // Compose the three priorities. Hash + local are synchronous.
+                // If both miss, fall through to async Supabase fetch.
+                //   Priority 1: URL hash (self-contained)
+                //   Priority 2: localStorage (same-device preview)
+                //   Priority 3: Supabase (cross-device, latest published)
+                function loadPublicData() {
+                    var hashed = loadFromHash();
+                    if (hashed) return Promise.resolve(hashed);
+                    var local = loadFromLocal();
+                    if (local) return Promise.resolve(local);
+                    return loadFromSupabase();
                 }
 
                 function injectExitPreviewButton() {
@@ -12473,14 +12572,52 @@
                     document.body.appendChild(pre);
                 }
 
+                // Render a transient loading state until Supabase replies, then
+                // swap in the real content. If hash/local hits first we skip the
+                // loader and paint immediately.
+                function renderLoading() {
+                    var host = document.getElementById('pflx-public-portfolio');
+                    if (!host) return;
+                    host.innerHTML = '<div class="pflx-pp-container" style="text-align:center;padding:80px 24px;">' +
+                        '<div style="width:38px;height:38px;border-radius:50%;border:2px solid rgba(0,240,255,0.18);border-top-color:#00f0ff;animation:pflxppspin 0.9s linear infinite;margin:0 auto 16px;"></div>' +
+                        '<div style="color:#00f0ff;font-size:11px;letter-spacing:3px;text-transform:uppercase;">Loading portfolio</div>' +
+                        '<div style="color:#6a7290;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;margin-top:6px;">@' + escapeHtmlPP(brand) + '</div>' +
+                        '<style>@keyframes pflxppspin { to { transform: rotate(360deg); } }</style>' +
+                        '</div>';
+                }
+
+                function renderNotFound() {
+                    var host = document.getElementById('pflx-public-portfolio');
+                    if (!host) return;
+                    host.innerHTML = '<div class="pflx-pp-container" style="text-align:center;padding:80px 24px;">' +
+                        '<div style="font-size:56px;line-height:1;">🛰️</div>' +
+                        '<div style="color:#00f0ff;font-size:18px;letter-spacing:3px;text-transform:uppercase;font-weight:700;margin-top:18px;">Portfolio not found</div>' +
+                        '<div style="color:#8a92b0;font-size:13px;line-height:1.6;font-family:Rajdhani,sans-serif;margin-top:10px;max-width:460px;margin-left:auto;margin-right:auto;">' +
+                            'No published portfolio exists yet for <b style="color:#fff;">@' + escapeHtmlPP(brand) + '</b>. ' +
+                            'The owner needs to open their portfolio in the PFLX Platform and click PUBLISH.' +
+                        '</div>' +
+                        '<a href="https://www.prototypeflx.com/" style="display:inline-block;margin-top:24px;padding:12px 28px;background:linear-gradient(135deg,#00d4ff,#7c3aed);color:#fff;text-decoration:none;border-radius:10px;font-family:Orbitron,sans-serif;font-size:12px;letter-spacing:2px;font-weight:700;box-shadow:0 4px 24px rgba(0,212,255,0.35);">OPEN PFLX PLATFORM →</a>' +
+                        '</div>';
+                }
+
                 window.addEventListener('DOMContentLoaded', function() {
                     if (!document.getElementById('pflx-public-portfolio')) {
                         var pre = document.createElement('div');
                         pre.id = 'pflx-public-portfolio';
                         document.body.appendChild(pre);
                     }
-                    renderPublic(loadPublicData());
-                    window.addEventListener('hashchange', function() { renderPublic(loadPublicData()); });
+                    renderLoading();
+                    loadPublicData().then(function (data) {
+                        if (data) { renderPublic(data); }
+                        else { renderNotFound(); }
+                    }).catch(function () { renderNotFound(); });
+                    window.addEventListener('hashchange', function() {
+                        renderLoading();
+                        loadPublicData().then(function (data) {
+                            if (data) { renderPublic(data); }
+                            else { renderNotFound(); }
+                        }).catch(function () { renderNotFound(); });
+                    });
                 });
 
                 // Throw a sentinel so the rest of the script block stops executing
@@ -35707,7 +35844,34 @@ RESPONSE RULES:
             // Persist locally under a stable "published" key for same-device viewing
             try { localStorage.setItem('pflx_published_' + slug, JSON.stringify(snap)); } catch(e) {}
 
-            // Push the published snapshot through the cross-app bridge + cloud save
+            // ── Cross-device persistence: upsert directly into Supabase ──
+            // The shared `app_data` table is keyed by `pflx_portfolio_pub_<slug>`.
+            // This is what makes prototypeflx.com/<brand> work on any device —
+            // the public view fetches by this key. Lowercase slug for stable lookups.
+            try {
+                const client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (client) {
+                    const key = 'pflx_portfolio_pub_' + String(slug).toLowerCase();
+                    client.from('app_data').upsert(
+                        { key: key, data: snap, updated_at: new Date().toISOString() },
+                        { onConflict: 'key' }
+                    ).then(function (res) {
+                        if (res && res.error) {
+                            console.warn('[PFLX Publish] Supabase upsert error:', res.error.message);
+                            if (typeof pflxToast === 'function') pflxToast('Published locally — cloud sync failed (' + res.error.code + ')', 'warning');
+                        } else {
+                            console.log('[PFLX Publish] ✓ Saved to cloud as', key);
+                        }
+                    }, function (err) {
+                        console.warn('[PFLX Publish] Supabase upsert exception:', err);
+                    });
+                } else {
+                    console.warn('[PFLX Publish] Supabase client unavailable — cross-device sharing limited to hash URL');
+                }
+            } catch(e) { console.warn('[PFLX Publish] cloud save error', e); }
+
+            // Legacy: also push through the X-Coin bridge for backwards compat
+            // with anything still reading from `published_portfolio_<slug>`.
             try {
                 if (typeof mcBroadcastToApps === 'function') {
                     mcBroadcastToApps('portfolio_update', { playerId: slug, portfolio: snap });
@@ -35723,39 +35887,46 @@ RESPONSE RULES:
                 }
             } catch(e) { console.warn('[PFLX Publish] bridge error', e); }
 
-            // Build the shareable URL (with base64 hash so it works cross-device)
-            const encoded = portfolioEncodeSnapshot(snap);
+            // Build the stable shareable URL — prototypeflx.com/<slug>.
+            // The portfolio data lives in Supabase (upserted above), so this URL
+            // resolves to the latest published version on every reload, on any
+            // device. Re-publishing updates the same row; the URL never changes.
             const origin = window.location.origin;
-            const path = '/p/' + encodeURIComponent(slug);
-            const cleanUrl = origin + path;
-            const fullUrl = origin + path + (encoded ? '#d=' + encoded : '');
+            const cleanUrl = origin + '/' + encodeURIComponent(slug);
+            // Legacy hash URL (self-contained) — kept as a fallback for cases
+            // where Supabase is unreachable. It also serves as the "preview link"
+            // for the author's own browser.
+            const encoded = portfolioEncodeSnapshot(snap);
+            const hashUrl = origin + '/p/' + encodeURIComponent(slug) + (encoded ? '#d=' + encoded : '');
 
             // Modal
             const popup = document.createElement('div');
             popup.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.78);display:flex;align-items:center;justify-content:center;z-index:10000;backdrop-filter:blur(6px);';
             popup.innerHTML = `
-                <div style="background:#12121c;border:1px solid rgba(0,240,255,0.25);border-radius:20px;padding:32px;max-width:540px;width:92%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+                <div style="background:#12121c;border:1px solid rgba(0,240,255,0.25);border-radius:20px;padding:32px;max-width:560px;width:92%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
                     <div style="font-size:40px;margin-bottom:10px;">&#x1F680;</div>
                     <h3 style="color:white;margin:0 0 6px;font-size:19px;font-family:'Orbitron',sans-serif;letter-spacing:0.04em;">Portfolio Published</h3>
-                    <p style="color:rgba(255,255,255,0.5);font-size:12px;margin-bottom:22px;font-family:'Jura',sans-serif;">Your portfolio is now live at this URL. Share the link anywhere.</p>
+                    <p style="color:rgba(255,255,255,0.5);font-size:12px;margin-bottom:22px;font-family:'Jura',sans-serif;">Your portfolio is live. Share this URL with anyone — re-publishing updates the same link automatically.</p>
 
-                    <div style="display:flex;align-items:center;gap:8px;background:rgba(0,240,255,0.06);border:1px solid rgba(0,240,255,0.25);border-radius:10px;padding:10px 14px;margin-bottom:8px;">
-                        <input id="pflx-pub-url-clean" readonly value="${escapeHtml(cleanUrl)}" style="flex:1;background:transparent;border:none;color:#00f0ff;font-family:'Share Tech Mono',monospace;font-size:12px;outline:none;text-overflow:ellipsis;" />
-                        <button onclick="(function(){var i=document.getElementById('pflx-pub-url-clean');i.select();document.execCommand('copy');this.textContent='COPIED';setTimeout(()=>{this.textContent='COPY';},1500);}).call(this)" style="background:rgba(0,240,255,0.15);border:1px solid rgba(0,240,255,0.3);color:#00f0ff;padding:6px 12px;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;font-family:'Share Tech Mono',monospace;">COPY</button>
+                    <!-- PRIMARY: stable cross-device URL backed by Supabase -->
+                    <div style="display:flex;align-items:center;gap:8px;background:rgba(0,240,255,0.08);border:1px solid rgba(0,240,255,0.4);border-radius:10px;padding:12px 14px;margin-bottom:8px;box-shadow:0 0 22px rgba(0,240,255,0.1);">
+                        <input id="pflx-pub-url-share" readonly value="${escapeHtml(cleanUrl)}" style="flex:1;background:transparent;border:none;color:#00f0ff;font-family:'Share Tech Mono',monospace;font-size:13px;outline:none;text-overflow:ellipsis;" />
+                        <button onclick="(function(b){var i=document.getElementById('pflx-pub-url-share');i.select();document.execCommand('copy');b.textContent='COPIED';setTimeout(function(){b.textContent='COPY';},1500);})(this)" style="background:rgba(0,240,255,0.2);border:1px solid rgba(0,240,255,0.5);color:#fff;padding:8px 14px;border-radius:6px;font-size:11px;font-weight:800;cursor:pointer;font-family:'Share Tech Mono',monospace;letter-spacing:0.06em;">COPY</button>
                     </div>
-                    <p style="color:rgba(255,255,255,0.3);font-size:10px;margin:0 0 18px;font-family:'Jura',sans-serif;">Clean URL — works on the same device (served from your local cache).</p>
+                    <p style="color:#00f0ff;font-size:10px;margin:0 0 4px;font-family:'Share Tech Mono',monospace;letter-spacing:0.1em;">✓ SHAREABLE — same URL forever, auto-updates on republish</p>
+                    <p style="color:rgba(255,255,255,0.3);font-size:10px;margin:0 0 18px;font-family:'Jura',sans-serif;">Recipients always see your latest published version on reload.</p>
 
                     <details style="text-align:left;margin-bottom:18px;">
-                        <summary style="color:rgba(255,255,255,0.5);font-size:11px;cursor:pointer;font-family:'Share Tech Mono',monospace;letter-spacing:0.05em;padding:8px 0;">&#x2192; SHAREABLE LINK (works on any device)</summary>
-                        <div style="display:flex;align-items:center;gap:8px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.3);border-radius:10px;padding:10px 14px;margin-top:6px;">
-                            <input id="pflx-pub-url-full" readonly value="${escapeHtml(fullUrl)}" style="flex:1;background:transparent;border:none;color:#a78bfa;font-family:'Share Tech Mono',monospace;font-size:11px;outline:none;text-overflow:ellipsis;" />
-                            <button onclick="(function(){var i=document.getElementById('pflx-pub-url-full');i.select();document.execCommand('copy');this.textContent='COPIED';setTimeout(()=>{this.textContent='COPY',1500});}).call(this)" style="background:rgba(139,92,246,0.2);border:1px solid rgba(139,92,246,0.4);color:#a78bfa;padding:6px 12px;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;font-family:'Share Tech Mono',monospace;">COPY</button>
+                        <summary style="color:rgba(255,255,255,0.35);font-size:10px;cursor:pointer;font-family:'Share Tech Mono',monospace;letter-spacing:0.08em;padding:6px 0;">→ Self-contained snapshot URL (works without server)</summary>
+                        <div style="display:flex;align-items:center;gap:8px;background:rgba(139,92,246,0.05);border:1px solid rgba(139,92,246,0.2);border-radius:10px;padding:10px 14px;margin-top:6px;">
+                            <input id="pflx-pub-url-hash" readonly value="${escapeHtml(hashUrl)}" style="flex:1;background:transparent;border:none;color:#a78bfa;font-family:'Share Tech Mono',monospace;font-size:11px;outline:none;text-overflow:ellipsis;" />
+                            <button onclick="(function(b){var i=document.getElementById('pflx-pub-url-hash');i.select();document.execCommand('copy');b.textContent='COPIED';setTimeout(function(){b.textContent='COPY';},1500);})(this)" style="background:rgba(139,92,246,0.2);border:1px solid rgba(139,92,246,0.4);color:#a78bfa;padding:6px 12px;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;font-family:'Share Tech Mono',monospace;">COPY</button>
                         </div>
-                        <p style="color:rgba(255,255,255,0.3);font-size:10px;margin:6px 0 0;font-family:'Jura',sans-serif;">Self-contained link — embeds your portfolio data in the URL so anyone can view it from any device or browser.</p>
+                        <p style="color:rgba(255,255,255,0.3);font-size:10px;margin:6px 0 0;font-family:'Jura',sans-serif;">Embeds the portfolio data in the URL — works even if Supabase is down, but the link is long and is a fixed snapshot (re-publishing doesn't update it).</p>
                     </details>
 
                     <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
-                        <a href="${escapeHtml(fullUrl)}" target="_blank" rel="noopener" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);color:white;padding:11px 26px;border-radius:10px;font-weight:700;font-size:12px;text-decoration:none;font-family:'Share Tech Mono',monospace;letter-spacing:0.06em;">OPEN PORTFOLIO &#x2192;</a>
+                        <a href="${escapeHtml(cleanUrl)}" target="_blank" rel="noopener" style="background:linear-gradient(135deg,#00d4ff,#7c3aed);color:white;padding:11px 26px;border-radius:10px;font-weight:700;font-size:12px;text-decoration:none;font-family:'Share Tech Mono',monospace;letter-spacing:0.06em;">OPEN PORTFOLIO &#x2192;</a>
                     </div>
                     <button onclick="this.closest('div').parentElement.remove()" style="margin-top:18px;background:none;border:none;color:rgba(255,255,255,0.3);cursor:pointer;font-size:12px;font-family:'Jura',sans-serif;">Close</button>
                 </div>
