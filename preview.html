@@ -39506,6 +39506,50 @@ RESPONSE RULES:
                         } catch (e) { console.warn('[PFLX] trade_proposed capture failed', e); }
                     }
 
+                    // ── X-Tracker trade action (accept / decline / cancel) ──
+                    // Sub-app's player clicked one of the action buttons. Validate
+                    // who's allowed to do what, update the canonical trade record,
+                    // and broadcast pflx_trade_updated so every iframe re-renders.
+                    if (msg.type === 'pflx_trade_action' && msg.tradeId && msg.action) {
+                        try {
+                            var allT = JSON.parse(localStorage.getItem('pflx_mc_trades') || '[]');
+                            if (!Array.isArray(allT)) allT = [];
+                            var i = allT.findIndex(function (t) { return t && t.id === msg.tradeId; });
+                            if (i >= 0) {
+                                var t = allT[i];
+                                var act = String(msg.action);
+                                // Accept / decline must be the recipient; cancel must be the sender.
+                                // We don't have the actor's id in the message — trust the iframe to
+                                // gate the UI. Future: include playerId and verify.
+                                var prevStatus = t.status;
+                                if (act === 'accept' && (prevStatus === 'pending')) {
+                                    t.status = 'accepted';
+                                } else if (act === 'decline' && (prevStatus === 'pending')) {
+                                    t.status = 'declined';
+                                } else if (act === 'cancel' && (prevStatus === 'pending')) {
+                                    t.status = 'cancelled';
+                                } else {
+                                    // No-op for any other transition
+                                }
+                                t.actedAt = new Date().toISOString();
+                                allT[i] = t;
+                                localStorage.setItem('pflx_mc_trades', JSON.stringify(allT));
+                                document.querySelectorAll('iframe').forEach(function (f) {
+                                    if (!f.contentWindow) return;
+                                    try { f.contentWindow.postMessage(JSON.stringify({ type: 'pflx_trade_updated', trade: t }), '*'); } catch (e) {}
+                                });
+                                // Accepted trades await host approval — toast the host.
+                                if (t.status === 'accepted') {
+                                    if (typeof pflxToast === 'function') {
+                                        pflxToast('🛡 Trade awaits your approval: @' + t.fromBrand + ' ↔ @' + t.toBrand, 'info');
+                                    }
+                                    try { logActivity(t.fromPlayerId, 'trade_accepted', { tradeId: t.id, with: t.toPlayerId }); } catch (e) {}
+                                    try { logActivity(t.toPlayerId, 'trade_accepted', { tradeId: t.id, with: t.fromPlayerId }); } catch (e) {}
+                                }
+                            }
+                        } catch (e) { console.warn('[PFLX] trade_action failed', e); }
+                    }
+
                     if (msg.type === 'pflx_player_get' && msg.playerId) {
                         var src = ev.source;
                         var rec = window.PflxDataBus ? window.PflxDataBus.get(msg.playerId) : null;
@@ -41790,6 +41834,93 @@ RESPONSE RULES:
             try { logActivity(player.id, 'profile_updated', { by: window.activeSession && window.activeSession.id || null }); } catch (e) {}
         }
         window.broadcastPlayerChange = broadcastPlayerChange;
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Host trade approval — pflxTradeApprove / pflxTradeDeny
+        // ═══════════════════════════════════════════════════════════════════
+        // Player-to-player trades flow:
+        //   Player A proposes (pending)
+        //   Player B accepts  (accepted — awaiting host approval)
+        //   Host approves     → PflxDataBus.award fires for both players
+        //                       and the XC moves canonically; status=host_approved
+        //   Host denies       → status=host_denied, broadcast back
+        //
+        // The host can call these from the browser console or from any UI we
+        // wire later (a "Pending Trades" panel in MC Approvals is the
+        // natural home). Both functions broadcast pflx_trade_updated so
+        // every X-Tracker view re-renders with the new status.
+        //
+        //   window.pflxTradeApprove(tradeId, hostNote?)
+        //   window.pflxTradeDeny(tradeId, hostNote?)
+        //   window.pflxListPendingTrades()  → returns the awaiting-host queue
+        function pflxLoadTrades() {
+            try {
+                var arr = JSON.parse(localStorage.getItem('pflx_mc_trades') || '[]');
+                return Array.isArray(arr) ? arr : [];
+            } catch (e) { return []; }
+        }
+        function pflxSaveTrades(arr) {
+            try { localStorage.setItem('pflx_mc_trades', JSON.stringify(arr)); } catch (e) {}
+        }
+        function pflxBroadcastTradeUpdate(trade) {
+            document.querySelectorAll('iframe').forEach(function (f) {
+                if (!f.contentWindow) return;
+                try { f.contentWindow.postMessage(JSON.stringify({ type: 'pflx_trade_updated', trade: trade }), '*'); } catch (e) {}
+            });
+        }
+        window.pflxTradeApprove = function (tradeId, hostNote) {
+            var all = pflxLoadTrades();
+            var i = all.findIndex(function (t) { return t && t.id === tradeId; });
+            if (i < 0) { console.warn('[PFLX trade] unknown trade', tradeId); return null; }
+            var t = all[i];
+            if (t.status !== 'accepted') {
+                console.warn('[PFLX trade] cannot approve from status', t.status);
+                return null;
+            }
+            // Settle XC via PflxDataBus.award (canonical funnel — fires
+            // pflx_player_changed for both players + pflx_award_granted).
+            // Sender: -offerXc (they pay what they offered) + requestXc (they
+            //   receive what they requested in return). Net = requestXc - offerXc.
+            // Recipient: -requestXc + offerXc. Net = offerXc - requestXc.
+            var fromNet = (parseInt(t.requestXc, 10) || 0) - (parseInt(t.offerXc, 10) || 0);
+            var toNet   = (parseInt(t.offerXc,   10) || 0) - (parseInt(t.requestXc, 10) || 0);
+            try {
+                if (window.PflxDataBus && fromNet !== 0) {
+                    window.PflxDataBus.award(t.fromPlayerId, { xc: fromNet, source: 'trade', reason: 'trade:' + t.id });
+                }
+                if (window.PflxDataBus && toNet !== 0) {
+                    window.PflxDataBus.award(t.toPlayerId,   { xc: toNet,   source: 'trade', reason: 'trade:' + t.id });
+                }
+            } catch (e) { console.warn('[PFLX trade] award failed', e); }
+            t.status = 'host_approved';
+            t.actedAt = new Date().toISOString();
+            if (hostNote) t.hostNote = String(hostNote);
+            all[i] = t;
+            pflxSaveTrades(all);
+            pflxBroadcastTradeUpdate(t);
+            try { logActivity(t.fromPlayerId, 'trade_settled', { tradeId: t.id, with: t.toPlayerId, net: fromNet }); } catch (e) {}
+            try { logActivity(t.toPlayerId,   'trade_settled', { tradeId: t.id, with: t.fromPlayerId, net: toNet }); } catch (e) {}
+            if (typeof pflxToast === 'function') pflxToast('✓ Trade approved — XC moved', 'success');
+            return t;
+        };
+        window.pflxTradeDeny = function (tradeId, hostNote) {
+            var all = pflxLoadTrades();
+            var i = all.findIndex(function (t) { return t && t.id === tradeId; });
+            if (i < 0) return null;
+            var t = all[i];
+            if (t.status !== 'accepted') return null;
+            t.status = 'host_denied';
+            t.actedAt = new Date().toISOString();
+            if (hostNote) t.hostNote = String(hostNote);
+            all[i] = t;
+            pflxSaveTrades(all);
+            pflxBroadcastTradeUpdate(t);
+            if (typeof pflxToast === 'function') pflxToast('Trade denied', 'info');
+            return t;
+        };
+        window.pflxListPendingTrades = function () {
+            return pflxLoadTrades().filter(function (t) { return t && t.status === 'accepted'; });
+        };
 
         // ═══════════════════════════════════════════════════════════════════
         // PflxDataBus — the canonical cross-app data hub
