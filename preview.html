@@ -39457,6 +39457,55 @@ RESPONSE RULES:
                         } catch (e) { console.warn('[PFLX] pflx_navigate failed', e); }
                     }
 
+                    // ── X-Tracker reward request from a player ──
+                    // Player used X-Coin → X-Tracker → Submit. We stage the
+                    // request in a queue the MC Approvals view will read and
+                    // toast the host so they know to review.
+                    if (msg.type === 'pflx_reward_request_submitted' && msg.request) {
+                        try {
+                            var queue = [];
+                            try { queue = JSON.parse(localStorage.getItem('pflx_mc_reward_requests') || '[]'); } catch (e) {}
+                            if (!Array.isArray(queue)) queue = [];
+                            queue.unshift(msg.request);
+                            queue = queue.slice(0, 500);
+                            localStorage.setItem('pflx_mc_reward_requests', JSON.stringify(queue));
+                            // Tiny audit log entry on the player record so the
+                            // request is visible in their activity stream too.
+                            try { logActivity(msg.request.playerId, 'reward_requested', {
+                                type: msg.request.type, amount: msg.request.amount || null,
+                                badge: msg.request.badgeName || msg.request.badgeCategory || null,
+                                requestId: msg.request.id
+                            }); } catch (e) {}
+                            if (typeof pflxToast === 'function') {
+                                pflxToast('📥 Reward request from @' + (msg.request.brand || 'Player'), 'info');
+                            }
+                        } catch (e) { console.warn('[PFLX] reward_request capture failed', e); }
+                    }
+
+                    // ── X-Tracker peer trade proposed ──
+                    // Two players negotiating a barter (XC + service). Stage the
+                    // offer so both sides can see it in their X-Tracker list, and
+                    // toast the recipient if they're the active session.
+                    if (msg.type === 'pflx_trade_proposed' && msg.trade) {
+                        try {
+                            var trades = [];
+                            try { trades = JSON.parse(localStorage.getItem('pflx_mc_trades') || '[]'); } catch (e) {}
+                            if (!Array.isArray(trades)) trades = [];
+                            trades.unshift(msg.trade);
+                            trades = trades.slice(0, 500);
+                            localStorage.setItem('pflx_mc_trades', JSON.stringify(trades));
+                            // Forward the trade to all iframes so the recipient's
+                            // X-Tracker can show it without a manual refresh.
+                            document.querySelectorAll('iframe').forEach(function (f) {
+                                if (!f.contentWindow) return;
+                                try { f.contentWindow.postMessage(JSON.stringify({ type: 'pflx_trade_inbox', trade: msg.trade }), '*'); } catch (e) {}
+                            });
+                            if (window.activeSession && msg.trade.toPlayerId === window.activeSession.id) {
+                                if (typeof pflxToast === 'function') pflxToast('🤝 New trade offer from @' + msg.trade.fromBrand, 'info');
+                            }
+                        } catch (e) { console.warn('[PFLX] trade_proposed capture failed', e); }
+                    }
+
                     if (msg.type === 'pflx_player_get' && msg.playerId) {
                         var src = ev.source;
                         var rec = window.PflxDataBus ? window.PflxDataBus.get(msg.playerId) : null;
