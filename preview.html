@@ -16172,23 +16172,109 @@
             }
         }
 
-        // RENDER FUNCTIONS
+        // ─────────────────────────────────────────────────────────────────
+        // Player Home panels — Deadlines / Recent Activity / Goals
+        // All three pull live from MC + the player's activity log so they
+        // populate as the host creates work and the player progresses.
+        // Each renderer accepts no args and reads the active player from
+        // window.activeSession; if there's no session yet the panels show
+        // a friendly empty state.
+        // ─────────────────────────────────────────────────────────────────
+
+        // Format an activity-log entry into a row { text, time, xc, type, color }.
+        // The log is populated by logActivity() across the codebase — see
+        // entries like 'award_granted', 'task_submitted', 'profile_updated',
+        // 'data_bus_update', 'trade_settled', etc.
+        function _ppFormatActivity(a) {
+            if (!a || !a.type) return null;
+            var p = a.payload || {};
+            var ts = a.ts ? new Date(a.ts) : new Date();
+            // Time-ago string
+            var diff = Math.max(0, Date.now() - ts.getTime());
+            var mins = Math.floor(diff / 60000);
+            var hours = Math.floor(mins / 60);
+            var days = Math.floor(hours / 24);
+            var timeAgo = days > 0 ? days + 'd ago' : hours > 0 ? hours + 'h ago' : mins > 0 ? mins + 'm ago' : 'just now';
+
+            var text = '', xc = '', color = 'var(--cyan)';
+            switch (a.type) {
+                case 'award_granted':
+                    text = p.badge ? 'Badge earned: ' + p.badge : 'XC awarded';
+                    xc = typeof p.xc === 'number' && p.xc !== 0 ? (p.xc > 0 ? '+' : '') + p.xc + ' XC' : '';
+                    color = p.xc > 0 ? '#22c55e' : p.badge ? '#f5c842' : '#00d4ff';
+                    if (p.source) text += ' (' + String(p.source) + ')';
+                    break;
+                case 'task_submitted':
+                    text = 'Submitted: ' + (p.title || p.taskId || 'a task');
+                    color = '#f59e0b';
+                    break;
+                case 'reward_requested':
+                    text = 'Reward request sent to host';
+                    if (p.amount) xc = '+' + p.amount + ' XC requested';
+                    color = '#a78bfa';
+                    break;
+                case 'trade_accepted':
+                    text = 'Trade accepted — awaiting host approval';
+                    color = '#3b82f6';
+                    break;
+                case 'trade_settled':
+                    text = 'Trade settled';
+                    if (typeof p.net === 'number' && p.net !== 0) xc = (p.net > 0 ? '+' : '') + p.net + ' XC';
+                    color = p.net > 0 ? '#22c55e' : '#ef4444';
+                    break;
+                case 'profile_updated':  text = 'Profile updated';                                        color = 'rgba(255,255,255,0.4)'; break;
+                case 'data_bus_update':  text = 'Stats updated (' + (p.source || 'system') + ')';        color = 'rgba(255,255,255,0.4)'; break;
+                default:                 text = String(a.type).replace(/_/g, ' ');                       color = 'rgba(255,255,255,0.5)'; break;
+            }
+            return { text: text, time: timeAgo, xc: xc, type: a.type, color: color };
+        }
+
+        function _ppGetActivePlayerRecord() {
+            try {
+                var s = window.activeSession;
+                if (!s || !s.id || typeof PLAYERS === 'undefined') return null;
+                return PLAYERS.find(function (p) { return p && p.id === s.id; }) || null;
+            } catch (e) { return null; }
+        }
+
+        function _ppFilteredTasksForActive() {
+            try {
+                if (typeof mcTasks === 'undefined' || !Array.isArray(mcTasks)) return [];
+                return mcTasks.filter(function (t) {
+                    return t && (typeof ppItemAssignedToActivePlayer === 'function'
+                        ? ppItemAssignedToActivePlayer(t)
+                        : true);
+                });
+            } catch (e) { return []; }
+        }
+
         function renderActivityFeed() {
             const container = document.querySelector('.activity-feed') || document.createElement('div');
             container.className = 'activity-feed';
             container.innerHTML = '';
 
-            RECENT_ACTIVITY.forEach(activity => {
-                const item = document.createElement('div');
-                item.className = `activity-item type-${activity.type}`;
-                item.innerHTML = `
-                    <div class="activity-text">${activity.text}</div>
-                    <div class="activity-time">${activity.time}</div>
-                    <div class="activity-xc">${activity.xc}</div>
-                `;
+            var p = _ppGetActivePlayerRecord();
+            var rows = (p && Array.isArray(p.activity)) ? p.activity.slice() : [];
+            rows.sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
+            rows = rows.map(_ppFormatActivity).filter(Boolean).slice(0, 8);
+
+            if (!rows.length) {
+                var empty = document.createElement('div');
+                empty.style.cssText = 'padding:16px;text-align:center;font-size:11px;color:rgba(255,255,255,0.3);font-family:\'Jura\',sans-serif;';
+                empty.textContent = 'No activity yet. Submit a task or earn XC to see it here.';
+                container.appendChild(empty);
+                return container;
+            }
+
+            rows.forEach(function (activity) {
+                var item = document.createElement('div');
+                item.className = 'activity-item type-' + activity.type;
+                item.innerHTML =
+                    '<div class="activity-text" style="color:' + activity.color + ';">' + escapeHtml(activity.text) + '</div>' +
+                    '<div class="activity-time">' + escapeHtml(activity.time) + '</div>' +
+                    (activity.xc ? '<div class="activity-xc">' + escapeHtml(activity.xc) + '</div>' : '');
                 container.appendChild(item);
             });
-
             return container;
         }
 
@@ -16197,21 +16283,68 @@
             container.className = 'goals-list';
             container.innerHTML = '';
 
-            GOALS.forEach((goal, idx) => {
-                const item = document.createElement('div');
+            var goals = [];
+            var s = window.activeSession || {};
+            var p = _ppGetActivePlayerRecord();
+
+            // ── Goal 1: rank progression ──
+            try {
+                var xcNow = (s.xc || (p && p.xc) || 0);
+                var rank = (typeof getRankForXC === 'function') ? getRankForXC(xcNow) : null;
+                var next = rank && typeof getNextRank === 'function' ? getNextRank(rank) : null;
+                if (rank && next) {
+                    var span = (next.xcUnlock || 0) - (rank.xcUnlock || 0);
+                    var inSpan = xcNow - (rank.xcUnlock || 0);
+                    var pct = span > 0 ? Math.min(100, Math.round((inSpan / span) * 100)) : 0;
+                    goals.push({ text: 'Reach ' + (next.icon || '') + ' ' + (next.name || 'next rank') + ' — ' + Math.max(0, (next.xcUnlock || 0) - xcNow).toLocaleString() + ' XC to go', progress: pct });
+                }
+            } catch (e) {}
+
+            // ── Goal 2: active checkpoint completion ──
+            try {
+                if (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) {
+                    var activeCp = mcCheckpoints.find(function (c) { return c && (c.status === 'active' || c.isActive) && ppItemAssignedToActivePlayer(c); });
+                    if (activeCp) {
+                        var cpTasks = _ppFilteredTasksForActive().filter(function (t) {
+                            return t && (t.roundId === activeCp.id || t.checkpointId === activeCp.id);
+                        });
+                        var done = cpTasks.filter(function (t) { return t.completed || t.status === 'approved'; }).length;
+                        var pct2 = cpTasks.length ? Math.round((done / cpTasks.length) * 100) : 0;
+                        goals.push({ text: 'Finish ' + (activeCp.name || 'active checkpoint') + ' (' + done + '/' + cpTasks.length + ' tasks)', progress: pct2 });
+                    }
+                }
+            } catch (e) {}
+
+            // ── Goal 3: badges (next milestone — 5 / 10 / 25) ──
+            try {
+                var badges = (p && typeof p.digitalBadges === 'number') ? p.digitalBadges : (s.digitalBadges || 0);
+                var tiers = [5, 10, 25, 50, 100];
+                var nextTier = tiers.find(function (t) { return badges < t; }) || 100;
+                var bPct = Math.min(100, Math.round((badges / nextTier) * 100));
+                goals.push({ text: 'Earn ' + nextTier + ' digital badges (' + badges + ' so far)', progress: bPct });
+            } catch (e) {}
+
+            if (!goals.length) {
+                var empty = document.createElement('div');
+                empty.style.cssText = 'padding:16px;text-align:center;font-size:11px;color:rgba(255,255,255,0.3);font-family:\'Jura\',sans-serif;';
+                empty.textContent = 'No goals yet. Goals will appear as the host opens checkpoints.';
+                container.appendChild(empty);
+                return container;
+            }
+
+            goals.forEach(function (goal, idx) {
+                var item = document.createElement('div');
                 item.className = 'goal-item';
-                item.innerHTML = `
-                    <div class="goal-header">
-                        <div class="goal-checkbox" onclick="this.classList.toggle('checked')">✓</div>
-                        <div class="goal-text">${goal.text}</div>
-                    </div>
-                    <div class="goal-progress-bar">
-                        <div class="goal-progress-fill" style="width: ${goal.progress}%"></div>
-                    </div>
-                `;
+                item.innerHTML =
+                    '<div class="goal-header">' +
+                        '<div class="goal-checkbox' + (goal.progress >= 100 ? ' checked' : '') + '">' + (goal.progress >= 100 ? '✓' : (idx + 1)) + '</div>' +
+                        '<div class="goal-text">' + escapeHtml(goal.text) + '</div>' +
+                    '</div>' +
+                    '<div class="goal-progress-bar">' +
+                        '<div class="goal-progress-fill" style="width: ' + goal.progress + '%"></div>' +
+                    '</div>';
                 container.appendChild(item);
             });
-
             return container;
         }
 
@@ -16220,18 +16353,82 @@
             container.className = 'deadlines-list';
             container.innerHTML = '';
 
-            DEADLINES.forEach(deadline => {
-                const item = document.createElement('div');
-                item.className = `deadline-item ${deadline.urgent ? 'urgent' : ''}`;
-                item.innerHTML = `
-                    <div class="deadline-text">${deadline.text}</div>
-                    <div class="deadline-timer">${deadline.due}</div>
-                `;
-                container.appendChild(item);
+            // Pull tasks assigned to the active player with future / open dueDates.
+            var tasks = _ppFilteredTasksForActive().filter(function (t) {
+                if (!t || !t.dueDate) return false;
+                if (t.status === 'approved' || t.completed) return false;
+                return true;
             });
 
+            // Sort ascending by due date — soonest first
+            tasks.sort(function (a, b) { return new Date(a.dueDate) - new Date(b.dueDate); });
+
+            // Also include any active checkpoint with an endDate as an
+            // umbrella deadline, in case the player has no individual tasks
+            // but the checkpoint itself is closing soon.
+            try {
+                if (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) {
+                    mcCheckpoints.forEach(function (cp) {
+                        if (!cp || !cp.endDate) return;
+                        if (cp.status !== 'active' && !cp.isActive) return;
+                        if (!ppItemAssignedToActivePlayer(cp)) return;
+                        tasks.push({ id: cp.id, title: cp.name || 'Checkpoint', dueDate: cp.endDate, _isCheckpoint: true });
+                    });
+                    tasks.sort(function (a, b) { return new Date(a.dueDate) - new Date(b.dueDate); });
+                }
+            } catch (e) {}
+
+            tasks = tasks.slice(0, 6);
+
+            if (!tasks.length) {
+                var empty = document.createElement('div');
+                empty.style.cssText = 'padding:16px;text-align:center;font-size:11px;color:rgba(255,255,255,0.3);font-family:\'Jura\',sans-serif;';
+                empty.textContent = 'No upcoming deadlines. You\'re all caught up.';
+                container.appendChild(empty);
+                return container;
+            }
+
+            tasks.forEach(function (t) {
+                var daysLeft = Math.ceil((new Date(t.dueDate).getTime() - Date.now()) / 86400000);
+                var urgent = daysLeft <= 2;
+                var label = daysLeft < 0 ? Math.abs(daysLeft) + 'd overdue'
+                          : daysLeft === 0 ? 'Due today'
+                          : daysLeft + 'd left';
+                var item = document.createElement('div');
+                item.className = 'deadline-item' + (urgent ? ' urgent' : '');
+                var prefix = t._isCheckpoint ? '🏁 ' : '📋 ';
+                item.innerHTML =
+                    '<div class="deadline-text">' + prefix + escapeHtml(t.title || t.name || 'Task') + '</div>' +
+                    '<div class="deadline-timer">' + escapeHtml(label) + '</div>';
+                // Click → drill into task detail (skip checkpoint sentinel)
+                if (!t._isCheckpoint && t.id) {
+                    item.style.cursor = 'pointer';
+                    item.onclick = function () {
+                        // Navigate to the MC Player Portal task detail view.
+                        try {
+                            if (typeof window.switchToView === 'function') window.switchToView('mc');
+                            if (typeof ppNav === 'function') ppNav('task-detail', { id: t.id });
+                        } catch (e) {}
+                    };
+                }
+                container.appendChild(item);
+            });
             return container;
         }
+
+        // Convenience: re-render all three panels. Call after MC mutations.
+        function pflxRefreshHomePanels() {
+            try { renderActivityFeed(); renderGoals(); renderDeadlines(); } catch (e) {}
+        }
+        window.pflxRefreshHomePanels = pflxRefreshHomePanels;
+        // Refresh whenever MC tasks/checkpoints mutate or the player record changes.
+        try {
+            window.addEventListener('storage', function (ev) {
+                if (ev && (String(ev.key || '').indexOf('pflx_mc_') === 0 || ev.key === 'pflx_players_local_v1')) {
+                    pflxRefreshHomePanels();
+                }
+            });
+        } catch (e) {}
 
         function drawProgressGraph() {
             const canvas = document.querySelector('.graph-canvas');
@@ -17536,6 +17733,10 @@
                     window.PflxDataBus.mc.changed(canonical);
                 }
             } catch (e) {}
+            // Same-tab refresh for the player Home panels (Deadlines / Recent
+            // Activity / Goals) — they read live from mcTasks / mcCheckpoints /
+            // PLAYERS so they pick up the change immediately.
+            try { if (typeof pflxRefreshHomePanels === 'function') pflxRefreshHomePanels(); } catch (e) {}
         }
 
         // Push data to X-Coin app for Supabase persistence
