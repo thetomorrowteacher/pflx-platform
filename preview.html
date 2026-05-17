@@ -13080,6 +13080,10 @@
             if (rankBar) rankBar.style.width = (rank.level * 10) + '%';
 
             // Level indicator removed from toolbar — Evo Rank already conveys progression tier.
+
+            // Apply cohort-based access gating to the toolbar app tiles
+            // (dim + grayscale on apps this player's cohorts don't grant).
+            try { if (typeof pflxApplyCohortGatingToToolbar === 'function') pflxApplyCohortGatingToToolbar(); } catch (e) {}
         }
 
         // BACKGROUND CANVAS ANIMATION
@@ -13988,9 +13992,12 @@
         // ── Save All Host Settings ──
         function hmcSaveAllSettings() {
             pflxPlaySfx('save');
-            // Save Sound Engine config
+            // Save Sound Engine config. Canonical key is 'pflx_sound_engine' —
+            // 'pflx_se_config' was a legacy alias that caused two competing
+            // writers to overwrite each other (toggling a setting via one path
+            // didn't show up in the other on next read). Single key now.
             if (typeof SE !== 'undefined') {
-                localStorage.setItem('pflx_se_config', JSON.stringify(SE.config));
+                localStorage.setItem('pflx_sound_engine', JSON.stringify(SE.config));
                 localStorage.setItem('pflx_se_player_prefs', JSON.stringify(SE.playerPrefs));
             }
             // Save Loading Gallery
@@ -14556,7 +14563,9 @@
         }
 
         function loadingMusicSave() {
-            try { localStorage.setItem('pflx_se_config', JSON.stringify(SE.config)); } catch(e) {}
+            // Canonical key — same as seHostSave. The legacy 'pflx_se_config'
+            // alias was removed to stop two writers competing.
+            try { localStorage.setItem('pflx_sound_engine', JSON.stringify(SE.config)); } catch(e) {}
         }
 
         function loadingMusicSettingSave() {
@@ -14900,18 +14909,158 @@
             COHORTS[activeCohortKey][feat] = val;
         }
 
+        // ─────────────────────────────────────────────────────────────────
+        // Cohort settings persistence
+        // ─────────────────────────────────────────────────────────────────
+        // COHORTS lives in memory; we shadow the per-cohort overrides
+        // (app access toggles + feature flags) into localStorage so they
+        // survive reload. On boot, pflxLoadCohortOverrides() merges saved
+        // overrides back into COHORTS.
+        var PFLX_COHORT_KEY = 'pflx_cohort_overrides_v1';
+
+        function pflxLoadCohortOverrides() {
+            try {
+                var raw = localStorage.getItem(PFLX_COHORT_KEY);
+                if (!raw) return;
+                var saved = JSON.parse(raw) || {};
+                Object.keys(saved).forEach(function (k) {
+                    if (COHORTS[k]) Object.assign(COHORTS[k], saved[k]);
+                });
+            } catch (e) { console.warn('[cohort] load failed', e); }
+        }
+        function pflxSaveCohortOverrides() {
+            try {
+                var out = {};
+                Object.keys(COHORTS).forEach(function (k) {
+                    var c = COHORTS[k];
+                    out[k] = {
+                        apps: c.apps || {},
+                        pathwayFull: !!c.pathwayFull, arenaFull: !!c.arenaFull,
+                        seasons: !!c.seasons, projects: !!c.projects, internships: !!c.internships
+                    };
+                });
+                localStorage.setItem(PFLX_COHORT_KEY, JSON.stringify(out));
+            } catch (e) { console.warn('[cohort] save failed', e); }
+        }
+        // Boot-load
+        try { pflxLoadCohortOverrides(); } catch (e) {}
+
         function saveCohortSettings() {
             if (!activeCohortKey) return;
             pflxPlaySfx('save');
+            pflxSaveCohortOverrides();
             // Flash confirmation
             const btn = document.querySelector('#cohort-save-row .login-btn');
             const orig = btn.textContent;
             btn.textContent = '✓ Saved';
             btn.style.opacity = '0.7';
             setTimeout(() => { btn.textContent = orig; btn.style.opacity = '1'; }, 1500);
-            // In a real app, this would POST to a backend
             console.log('Cohort settings saved:', activeCohortKey, COHORTS[activeCohortKey]);
+            // Notify any open windows / mimic sessions so toolbar gating
+            // refreshes without a reload.
+            try {
+                window.dispatchEvent(new CustomEvent('pflx-cohort-settings-changed', {
+                    detail: { cohort: activeCohortKey }
+                }));
+            } catch (e) {}
         }
+
+        // ─────────────────────────────────────────────────────────────────
+        // App access — union across the active player's cohorts
+        // ─────────────────────────────────────────────────────────────────
+        // If a player belongs to multiple cohorts, ANY cohort granting an
+        // app overrides others denying it (most-permissive wins). Hosts
+        // (admin/teacher/master roles) always have full access regardless
+        // of cohort flags.
+        function pflxPlayerCanAccessApp(appKey) {
+            try {
+                if (!appKey) return true;
+                var s = window.activeSession || {};
+                // Hosts always have full access
+                var role = String(s.role || '').toLowerCase();
+                if (/admin|host|teacher|instructor|master/.test(role)) return true;
+                // Build the player's cohort list — supports both legacy
+                // single-string `cohort` and the v2 multi-cohort array.
+                var cohorts = [];
+                if (Array.isArray(s.cohorts)) cohorts = s.cohorts.slice();
+                else if (s.cohort) cohorts = String(s.cohort).split(/\s*,\s*/);
+                if (!cohorts.length) cohorts = ['PlayerPool'];
+                // Union rule — true if any cohort grants
+                for (var i = 0; i < cohorts.length; i++) {
+                    var c = COHORTS[cohorts[i]] || COHORTS['PlayerPool'];
+                    if (c && c.apps && c.apps[appKey] !== false) return true;
+                }
+                return false;
+            } catch (e) { return true; }
+        }
+        window.pflxPlayerCanAccessApp = pflxPlayerCanAccessApp;
+
+        // ─────────────────────────────────────────────────────────────────
+        // Access-Locked modal — shown when a player taps a toolbar app
+        // their cohorts have disabled. Non-blocking — they dismiss and stay
+        // on whatever view they were already on (Home by default).
+        // ─────────────────────────────────────────────────────────────────
+        function pflxShowAccessLocked(appKey, appLabel) {
+            try {
+                // Don't stack multiple modals
+                var existing = document.getElementById('pflx-access-locked-modal');
+                if (existing) existing.remove();
+                var s = window.activeSession || {};
+                var cohorts = Array.isArray(s.cohorts) ? s.cohorts.join(', ') : (s.cohort || 'PlayerPool');
+
+                var icons = { xcoin: '⚡', pathways: '🛰️', arena: '⚔️', darkcampus: '🌑' };
+                var icon = icons[appKey] || '🔒';
+
+                var overlay = document.createElement('div');
+                overlay.id = 'pflx-access-locked-modal';
+                overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.78);display:flex;align-items:center;justify-content:center;z-index:10000;backdrop-filter:blur(6px);';
+                overlay.innerHTML =
+                    '<div style="background:#12121c;border:1px solid rgba(239,68,68,0.35);border-radius:18px;padding:30px;max-width:460px;width:90%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.5);">' +
+                        '<div style="font-size:46px;line-height:1;margin-bottom:8px;">' + icon + '</div>' +
+                        '<div style="font-size:11px;font-weight:800;letter-spacing:0.18em;color:#ef4444;text-transform:uppercase;margin-bottom:6px;">🔒 ACCESS LOCKED</div>' +
+                        '<h3 style="color:#fff;margin:0 0 10px;font-size:20px;font-family:\'Orbitron\',sans-serif;letter-spacing:0.04em;">' + escapeHtml(appLabel || appKey) + ' is restricted</h3>' +
+                        '<p style="color:rgba(255,255,255,0.55);font-size:13px;line-height:1.6;margin:0 0 18px;font-family:\'Jura\',sans-serif;">' +
+                            'Your cohort access settings don\'t include ' + escapeHtml(appLabel || appKey) + ' right now. ' +
+                            'Ask your host to enable this app for your cohort in <b style="color:#00d4ff;">Settings → Cohort Manager</b>.' +
+                        '</p>' +
+                        '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px 14px;margin-bottom:18px;font-size:11px;color:rgba(255,255,255,0.5);font-family:\'Share Tech Mono\',monospace;letter-spacing:0.05em;">' +
+                            'Your cohorts: ' + escapeHtml(String(cohorts)) +
+                        '</div>' +
+                        '<button onclick="document.getElementById(\'pflx-access-locked-modal\').remove();" style="padding:10px 24px;background:linear-gradient(135deg,#00d4ff,#7c3aed);color:#fff;border:none;border-radius:10px;font-family:\'Share Tech Mono\',monospace;font-size:12px;font-weight:800;letter-spacing:0.06em;cursor:pointer;">UNDERSTOOD</button>' +
+                    '</div>';
+                overlay.onclick = function (ev) { if (ev.target === overlay) overlay.remove(); };
+                document.body.appendChild(overlay);
+            } catch (e) { console.warn('[access-locked]', e); }
+        }
+        window.pflxShowAccessLocked = pflxShowAccessLocked;
+
+        // Subtle visual hint — dim a toolbar tile slightly if the active
+        // player can't access it. The tile stays clickable (so they get the
+        // explanation when they tap), it just looks less inviting.
+        function pflxApplyCohortGatingToToolbar() {
+            try {
+                var gated = ['xcoin', 'pathways', 'arena', 'darkcampus'];
+                gated.forEach(function (k) {
+                    var btn = document.querySelector('.nav-btn[data-view="' + k + '"]');
+                    if (!btn) return;
+                    var ok = (typeof pflxPlayerCanAccessApp === 'function') ? pflxPlayerCanAccessApp(k) : true;
+                    if (ok) {
+                        btn.style.opacity = '';
+                        btn.style.filter = '';
+                        btn.removeAttribute('data-pflx-locked');
+                    } else {
+                        btn.style.opacity = '0.45';
+                        btn.style.filter = 'grayscale(0.6)';
+                        btn.setAttribute('data-pflx-locked', '1');
+                        btn.title = (btn.title || '') + ' — locked for your cohort';
+                    }
+                });
+            } catch (e) {}
+        }
+        window.pflxApplyCohortGatingToToolbar = pflxApplyCohortGatingToToolbar;
+        // Re-apply whenever the player or cohort settings change
+        window.addEventListener('pflx-cohort-settings-changed', function () { pflxApplyCohortGatingToToolbar(); });
+        window.addEventListener('pflx-identity-changed', function () { pflxApplyCohortGatingToToolbar(); });
 
         function initLogin() {
             // Populate brand dropdown with claimed players
@@ -17082,6 +17231,20 @@
         const iframeLoadResolvers = {};
 
         function navigateTo(viewName) {
+            // ── Cohort access gate ──
+            // Block the player from opening apps their cohorts disabled in
+            // Settings → Cohort Manager. Hosts always pass through.
+            // The toolbar tiles stay visible (so the player knows the app
+            // exists) but tapping a locked one shows an "Access Locked"
+            // modal explaining the host can grant access.
+            try {
+                var gatedApps = { xcoin: 'X-Coin', pathways: 'Core Pathways', arena: 'Battle Arena', darkcampus: 'DarkCampus' };
+                if (gatedApps[viewName] && typeof pflxPlayerCanAccessApp === 'function' && !pflxPlayerCanAccessApp(viewName)) {
+                    pflxShowAccessLocked(viewName, gatedApps[viewName]);
+                    return;
+                }
+            } catch (e) {}
+
             // When admin opens MC in Player View, allow it but auto-show player dash
             if (viewName === 'mission-control' && window.pflxRole === 'player') {
                 // Let navigation proceed, but switch to player dash after render
@@ -36987,6 +37150,26 @@ RESPONSE RULES:
             if (vol) SE.config.masterVolume = parseInt(vol.value, 10) / 100;
             try { localStorage.setItem('pflx_sound_engine', JSON.stringify(SE.config)); } catch(e) {}
             seApplyVolumes();
+            // Make BGM / Login Music toggles take effect on currently playing
+            // audio — the previous behavior only applied to *future* audio
+            // starts, so disabling BGM mid-session did nothing until a
+            // tab switch. Now: disable pauses, enable resumes.
+            try {
+                if (SE.bgAudio) {
+                    if (SE.config.bgmEnabled === false) {
+                        SE.bgAudio.pause();
+                    } else if (SE.bgAudio.paused && SE.playing) {
+                        SE.bgAudio.play().catch(function(){});
+                    }
+                }
+                if (SE.loginAudio) {
+                    if (SE.config.loginMusicEnabled === false) {
+                        SE.loginAudio.pause();
+                    } else if (SE.loginAudio.paused) {
+                        SE.loginAudio.play().catch(function(){});
+                    }
+                }
+            } catch (e) {}
         }
 
         function seHostLoad() {
