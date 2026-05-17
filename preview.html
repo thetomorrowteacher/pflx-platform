@@ -33014,31 +33014,91 @@
             }
 
             // ── Subscribe to remote skin changes ──
-            // Polls Supabase every 8 seconds for the current global skin and
-            // applies it if it differs from what we're showing. The master host
-            // who just changed the skin will see their own change pass through
-            // — applyOnly=true on the receive path keeps us from re-publishing.
+            // Two-tier strategy:
+            //   1. Supabase Realtime channel — pushes UPDATE/INSERT events on
+            //      the app_data row keyed 'pflx_active_skin_global' the moment
+            //      they happen. Sub-second propagation, what the user actually
+            //      wants when running a live class.
+            //   2. Polling fallback — runs every 30s as a safety net for
+            //      sessions where the WebSocket can't connect (corporate
+            //      proxies, tab-throttled mobile browsers, etc.).
+            // Both paths call applySkinFromRemote() which dedupes against the
+            // currently-shown skin so we never re-publish or re-flash on echoes.
             var _pflxSkinPollIv = null;
+            var _pflxSkinChannel = null;
+            var _pflxSkinRealtimeOk = false;
+            function applySkinFromRemote(remoteSkin, setBy) {
+                if (!remoteSkin) return;
+                if (remoteSkin === _activeSkin) return;
+                console.log('[reality-warp] ← remote skin', remoteSkin, setBy ? '(set by ' + setBy + ')' : '');
+                realityWarp(remoteSkin, true, true);
+                // Toast non-master viewers so they know who triggered the warp
+                try {
+                    var s = window.activeSession || {};
+                    var role = String(s.role || '').toLowerCase();
+                    var isMaster = /admin|host|master|teacher|instructor/.test(role);
+                    if (!isMaster && typeof pflxToast === 'function' && setBy) {
+                        pflxToast('🌀 Reality Warp by ' + setBy, 'info');
+                    }
+                } catch (e) {}
+            }
             function pflxStartSkinSubscriber() {
+                var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (!client) return;
+
+                // ── Realtime channel ──
+                if (!_pflxSkinChannel && typeof client.channel === 'function') {
+                    try {
+                        _pflxSkinChannel = client
+                            .channel('pflx-reality-warp')
+                            .on('postgres_changes', {
+                                event: '*',                                  // INSERT or UPDATE
+                                schema: 'public',
+                                table: 'app_data',
+                                filter: 'key=eq.pflx_active_skin_global'
+                            }, function (payload) {
+                                try {
+                                    var row = payload && (payload.new || payload.record);
+                                    var data = row && row.data;
+                                    if (data) applySkinFromRemote(data.skin || 'default', data.setBy);
+                                } catch (e) { console.warn('[reality-warp] payload error', e); }
+                            })
+                            .subscribe(function (status) {
+                                if (status === 'SUBSCRIBED') {
+                                    _pflxSkinRealtimeOk = true;
+                                    console.log('[reality-warp] ✓ Realtime channel live');
+                                } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+                                    _pflxSkinRealtimeOk = false;
+                                    console.warn('[reality-warp] realtime status:', status, '— relying on polling fallback');
+                                }
+                            });
+                    } catch (e) { console.warn('[reality-warp] realtime setup failed', e); }
+                }
+
+                // ── Polling fallback ──
                 if (_pflxSkinPollIv) return;
                 async function tick() {
+                    // If realtime is healthy, slow the poll way down — we don't
+                    // need redundant fetches. Still fire one occasionally as a
+                    // belt-and-suspenders for missed websocket events.
                     try {
-                        var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
-                        if (!client) return;
-                        var res = await client.from('app_data').select('data, updated_at').eq('key', 'pflx_active_skin_global').limit(1);
+                        var c = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                        if (!c) return;
+                        var res = await c.from('app_data').select('data, updated_at').eq('key', 'pflx_active_skin_global').limit(1);
                         if (res && res.data && res.data[0] && res.data[0].data) {
-                            var remoteSkin = res.data[0].data.skin || 'default';
-                            if (remoteSkin && remoteSkin !== _activeSkin) {
-                                // Apply locally — this is the cross-device sync
-                                // moment. Skip the write-back via applyOnly=true.
-                                realityWarp(remoteSkin, true, true);
-                            }
+                            applySkinFromRemote(res.data[0].data.skin || 'default', res.data[0].data.setBy);
                         }
-                    } catch (e) { /* silent — transient network errors are fine */ }
+                    } catch (e) { /* transient errors are fine */ }
                 }
-                // Boot with one immediate fetch, then poll
+                // Boot with one immediate fetch (catches the current value
+                // before realtime has had a chance to fire its first event)
                 tick();
-                _pflxSkinPollIv = setInterval(tick, 8000);
+                _pflxSkinPollIv = setInterval(function () {
+                    // Faster fallback (10s) when realtime is down; slow heartbeat
+                    // (60s) when realtime is healthy.
+                    if (_pflxSkinRealtimeOk && Math.random() > 0.16) return;
+                    tick();
+                }, 10000);
             }
             // Kick off the subscriber as soon as the Supabase client is ready —
             // we don't gate on session because the global skin should apply
