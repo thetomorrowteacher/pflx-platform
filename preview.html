@@ -9837,8 +9837,15 @@
                     <!-- Cohort Manager -->
                     <div class="settings-panel" id="settings-cohorts">
                         <div class="cohort-manager">
-                            <h2 style="color: var(--cyan); margin-bottom: 6px; font-family: 'Orbitron', sans-serif; font-size: 18px;">Cohort Manager</h2>
-                            <p style="color: #8a92b0; font-size: 13px; margin-bottom: 20px; font-family: 'Jura', sans-serif;">Control app access, feature permissions, and org grouping per cohort</p>
+                            <h2 style="color: var(--cyan); margin-bottom: 6px; font-family: 'Orbitron', sans-serif; font-size: 18px;">Organization &amp; Cohort Manager</h2>
+                            <p style="color: #8a92b0; font-size: 13px; margin-bottom: 12px; font-family: 'Jura', sans-serif;">Master controls live at the organization level and cascade to every cohort under it. Per-cohort toggles below <em>override</em> the org default for that cohort only.</p>
+                            <!-- Cross-link: jump to Organization Management to set master access -->
+                            <div style="margin-bottom:16px; padding:10px 14px; background:rgba(167,139,250,0.06); border:1px solid rgba(167,139,250,0.2); border-radius:8px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+                                <div style="font-size:12px; color:#c8cee6; font-family:'Jura',sans-serif;">
+                                    🛡 To set master access for an entire organization, edit it in <b style="color:#a78bfa;">Host Controls → Organization Management</b>.
+                                </div>
+                                <button onclick="doNavigate('settings');switchSettingsTab('host');setTimeout(function(){if(typeof switchHostTab==='function')switchHostTab('orgs');},120);" style="font-size:10px; padding:6px 14px; border-radius:6px; background:rgba(167,139,250,0.15); border:1px solid rgba(167,139,250,0.4); color:#a78bfa; font-family:'Share Tech Mono',monospace; letter-spacing:0.06em; cursor:pointer;">OPEN ORG MANAGEMENT →</button>
+                            </div>
 
                             <!-- Cohort Selector (grouped by organization) -->
                             <div class="cohort-select-row">
@@ -13337,14 +13344,52 @@
 
         // ═══ HOST CONTROL: ORGANIZATION MANAGEMENT ═══
 
+        // Persistence — ORGANIZATIONS is the const seed; user edits land in
+        // localStorage and overlay the seed on each render.
+        var PFLX_ORG_KEY = 'pflx_organizations_v1';
+        function hmcLoadOrgs() {
+            try {
+                var raw = localStorage.getItem(PFLX_ORG_KEY);
+                if (!raw) return;
+                var saved = JSON.parse(raw) || {};
+                Object.keys(saved).forEach(function (k) {
+                    if (saved[k] && typeof saved[k] === 'object') {
+                        // Merge over the seed; lets us add new fields later
+                        ORGANIZATIONS[k] = Object.assign({}, ORGANIZATIONS[k] || {}, saved[k]);
+                    }
+                });
+            } catch (e) { console.warn('[org] load failed', e); }
+        }
+        function hmcSaveOrgs() {
+            try { localStorage.setItem(PFLX_ORG_KEY, JSON.stringify(ORGANIZATIONS)); } catch (e) { console.warn('[org] save failed', e); }
+            // Keep COHORTS[*].org in sync — each cohort can only belong to ONE
+            // org at a time. The org row IS the source of truth for membership.
+            try {
+                var cohortToOrg = {};
+                Object.keys(ORGANIZATIONS).forEach(function (k) {
+                    var o = ORGANIZATIONS[k];
+                    if (!o || !Array.isArray(o.cohorts)) return;
+                    o.cohorts.forEach(function (c) { cohortToOrg[c] = k; });
+                });
+                Object.keys(COHORTS).forEach(function (c) {
+                    if (cohortToOrg[c]) COHORTS[c].org = cohortToOrg[c];
+                });
+            } catch (e) {}
+        }
+        // Boot-load org overrides
+        try { hmcLoadOrgs(); } catch (e) {}
+
         function hmcRenderOrgs() {
             const container = document.getElementById('hmc-org-cards');
             if (!container) return;
             container.innerHTML = '';
             Object.keys(ORGANIZATIONS).forEach(key => {
                 const org = ORGANIZATIONS[key];
-                const cohortCount = org.cohorts.length;
-                const playerCount = PLAYERS.filter(p => org.cohorts.includes(p.cohort)).length;
+                const cohortCount = (org.cohorts || []).length;
+                const playerCount = PLAYERS.filter(function (p) {
+                    var pc = Array.isArray(p.cohorts) ? p.cohorts : (p.cohort ? [p.cohort] : []);
+                    return pc.some(function (c) { return (org.cohorts || []).indexOf(c) >= 0; });
+                }).length;
                 const tierColors = { free: '#8a92b0', standard: '#34d399', premium: '#f5c842', enterprise: '#a78bfa' };
                 const tierColor = tierColors[org.subscription] || '#8a92b0';
 
@@ -13354,12 +13399,14 @@
                 card.innerHTML = `
                     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
                         <div>
-                            <div style="font-family:'Orbitron',sans-serif;font-size:14px;color:#e0e6ff;letter-spacing:1px;">${org.name}</div>
-                            <div style="font-size:11px;color:#6a7290;font-family:'Jura',sans-serif;">${org.shortName} · ${org.contact || 'No contact'}</div>
+                            <div style="font-family:'Orbitron',sans-serif;font-size:14px;color:#e0e6ff;letter-spacing:1px;">${escapeHtml(org.name)}</div>
+                            <div style="font-size:11px;color:#6a7290;font-family:'Jura',sans-serif;">${escapeHtml(org.shortName)} · ${escapeHtml(org.contact || 'No contact')}</div>
                         </div>
-                        <div style="display:flex;gap:6px;align-items:center;">
-                            <span style="font-size:9px;padding:3px 10px;border-radius:4px;font-family:'Orbitron',sans-serif;letter-spacing:1px;background:${tierColor}18;border:1px solid ${tierColor}40;color:${tierColor};">${org.subscription.toUpperCase()}</span>
+                        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                            <span style="font-size:9px;padding:3px 10px;border-radius:4px;font-family:'Orbitron',sans-serif;letter-spacing:1px;background:${tierColor}18;border:1px solid ${tierColor}40;color:${tierColor};">${escapeHtml(org.subscription.toUpperCase())}</span>
                             <span style="font-size:10px;padding:3px 8px;border-radius:4px;background:${org.active ? 'rgba(52,211,153,0.1)' : 'rgba(255,51,85,0.1)'};color:${org.active ? '#34d399' : '#ff3355'};border:1px solid ${org.active ? 'rgba(52,211,153,0.2)' : 'rgba(255,51,85,0.2)'};">${org.active ? 'ACTIVE' : 'INACTIVE'}</span>
+                            <button onclick="hmcOpenOrgEditor('${escapeHtml(key)}')" style="font-size:10px;padding:4px 10px;border-radius:4px;background:rgba(0,240,255,0.08);border:1px solid rgba(0,240,255,0.3);color:var(--cyan);font-family:'Share Tech Mono',monospace;letter-spacing:0.06em;cursor:pointer;">EDIT</button>
+                            ${key !== 'STANDALONE' ? `<button onclick="hmcDeleteOrg('${escapeHtml(key)}')" style="font-size:10px;padding:4px 10px;border-radius:4px;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.3);color:#ef4444;font-family:'Share Tech Mono',monospace;letter-spacing:0.06em;cursor:pointer;">DELETE</button>` : ''}
                         </div>
                     </div>
                     <div style="display:flex;gap:16px;margin-bottom:10px;">
@@ -13372,17 +13419,174 @@
                             <div style="font-size:10px;color:#8a92b0;">Players</div>
                         </div>
                         <div style="text-align:center;">
-                            <div style="font-family:'Orbitron',sans-serif;font-size:18px;color:var(--gold);">${org.maxPlayers || '∞'}</div>
+                            <div style="font-family:'Orbitron',sans-serif;font-size:18px;color:var(--gold);">${org.maxPlayers === Infinity || !org.maxPlayers ? '∞' : org.maxPlayers}</div>
                             <div style="font-size:10px;color:#8a92b0;">Max Cap</div>
                         </div>
                     </div>
                     <div style="display:flex;flex-wrap:wrap;gap:4px;">
-                        ${org.cohorts.map(c => `<span style="font-size:10px;padding:2px 8px;border-radius:3px;background:rgba(0,240,255,0.06);border:1px solid rgba(0,240,255,0.12);color:var(--cyan);font-family:'Share Tech Mono',monospace;">${c}</span>`).join('')}
+                        ${(org.cohorts || []).map(c => `<span style="font-size:10px;padding:2px 8px;border-radius:3px;background:rgba(0,240,255,0.06);border:1px solid rgba(0,240,255,0.12);color:var(--cyan);font-family:'Share Tech Mono',monospace;">${escapeHtml(c)}</span>`).join('') || '<span style="font-size:10px;color:rgba(255,255,255,0.3);font-style:italic;">No cohorts assigned</span>'}
                     </div>
                 `;
                 container.appendChild(card);
             });
         }
+
+        // ── Org editor modal ─────────────────────────────────────────────
+        // Opens an inline modal letting the host:
+        //   - Edit name / shortName / contact / subscription / max cap / active
+        //   - Toggle which cohorts belong to this org (checkboxes for every
+        //     cohort in COHORTS). A cohort can only belong to ONE org at a
+        //     time — checking it here uncheck-and-remove it from any other
+        //     org on save.
+        window.hmcOpenOrgEditor = function (orgKey) {
+            var org = ORGANIZATIONS[orgKey];
+            if (!org) return;
+            // Build the cohort list — every cohort known in COHORTS plus any
+            // legacy strings that exist on org.cohorts but aren't in COHORTS.
+            var allCohorts = Object.keys(COHORTS || {});
+            (org.cohorts || []).forEach(function (c) { if (allCohorts.indexOf(c) < 0) allCohorts.push(c); });
+            allCohorts.sort();
+            // Note which other orgs claim each cohort (so the UI can warn)
+            var cohortClaimedBy = {};
+            Object.keys(ORGANIZATIONS).forEach(function (k) {
+                if (k === orgKey) return;
+                (ORGANIZATIONS[k].cohorts || []).forEach(function (c) { cohortClaimedBy[c] = k; });
+            });
+
+            var overlay = document.createElement('div');
+            overlay.id = 'pflx-org-editor-modal';
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;z-index:10000;backdrop-filter:blur(6px);padding:20px;';
+            overlay.innerHTML =
+                '<div style="background:#12121c;border:1px solid rgba(0,240,255,0.3);border-radius:18px;padding:28px;max-width:640px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.5);">' +
+                    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">' +
+                        '<h3 style="margin:0;color:var(--cyan);font-family:Orbitron,sans-serif;font-size:16px;letter-spacing:0.06em;">EDIT ORGANIZATION</h3>' +
+                        '<button onclick="document.getElementById(\'pflx-org-editor-modal\').remove();" style="background:none;border:none;color:rgba(255,255,255,0.4);font-size:24px;cursor:pointer;line-height:1;">×</button>' +
+                    '</div>' +
+                    // Identity fields
+                    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px;">' +
+                        '<div><label style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.4);">Organization Name</label><input id="org-edit-name" type="text" value="' + escapeHtml(org.name || '') + '" style="width:100%;margin-top:4px;padding:8px 12px;border-radius:6px;background:rgba(10,18,40,0.6);border:1px solid rgba(255,255,255,0.1);color:#fff;font-size:13px;outline:none;"></div>' +
+                        '<div><label style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.4);">Short Name (key — read-only)</label><input type="text" value="' + escapeHtml(orgKey) + '" readonly style="width:100%;margin-top:4px;padding:8px 12px;border-radius:6px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);color:rgba(255,255,255,0.5);font-size:13px;font-family:\'Share Tech Mono\',monospace;"></div>' +
+                        '<div><label style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.4);">Contact Email</label><input id="org-edit-contact" type="email" value="' + escapeHtml(org.contact || '') + '" style="width:100%;margin-top:4px;padding:8px 12px;border-radius:6px;background:rgba(10,18,40,0.6);border:1px solid rgba(255,255,255,0.1);color:#fff;font-size:13px;outline:none;"></div>' +
+                        '<div><label style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.4);">Subscription Tier</label><select id="org-edit-sub" style="width:100%;margin-top:4px;padding:8px 12px;border-radius:6px;background:rgba(10,18,40,0.6);border:1px solid rgba(255,255,255,0.1);color:#fff;font-size:13px;outline:none;">' +
+                            ['free','standard','premium','enterprise'].map(function (t) { return '<option value="' + t + '"' + (org.subscription === t ? ' selected' : '') + '>' + t.toUpperCase() + '</option>'; }).join('') +
+                        '</select></div>' +
+                        '<div><label style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.4);">Max Players</label><input id="org-edit-cap" type="number" min="0" value="' + (org.maxPlayers === Infinity ? '' : (org.maxPlayers || '')) + '" placeholder="(blank = unlimited)" style="width:100%;margin-top:4px;padding:8px 12px;border-radius:6px;background:rgba(10,18,40,0.6);border:1px solid rgba(255,255,255,0.1);color:#fff;font-size:13px;outline:none;"></div>' +
+                        '<div><label style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.4);display:block;">Active</label>' +
+                            '<label style="display:inline-flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer;color:#e0e6ff;font-size:13px;">' +
+                                '<input id="org-edit-active" type="checkbox"' + (org.active !== false ? ' checked' : '') + ' style="width:18px;height:18px;accent-color:#22c55e;cursor:pointer;">' +
+                                'Active' +
+                            '</label>' +
+                        '</div>' +
+                    '</div>' +
+                    // Master app access (org-wide) — cascades to all cohorts unless cohort overrides
+                    '<div style="margin-bottom:14px;background:rgba(167,139,250,0.04);border:1px solid rgba(167,139,250,0.2);border-radius:10px;padding:14px;">' +
+                        '<label style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#a78bfa;font-weight:700;display:block;margin-bottom:4px;">🛡 Master App Access (org-wide)</label>' +
+                        '<p style="font-size:11px;color:rgba(255,255,255,0.4);margin:0 0 12px;font-family:Jura,sans-serif;">Sets the default for every cohort in this organization. Individual cohorts can override in <b style="color:var(--cyan);">Cohort Manager</b>.</p>' +
+                        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;">' +
+                            ['xcoin','pathways','arena','darkcampus'].map(function (app) {
+                                var checked = !(org.apps && org.apps[app] === false);
+                                var label = ({xcoin:'X-Coin', pathways:'Pathways', arena:'Battle Arena', darkcampus:'DarkCampus'})[app];
+                                return '<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:6px;cursor:pointer;font-size:12px;color:#e0e6ff;">' +
+                                    '<input type="checkbox" data-app="' + app + '"' + (checked ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:#22c55e;cursor:pointer;">' +
+                                    escapeHtml(label) + '</label>';
+                            }).join('') +
+                        '</div>' +
+                        '<div style="margin-top:12px;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.4);margin-bottom:6px;">Feature flags</div>' +
+                        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;">' +
+                            [
+                                {key:'pathwayFull', label:'Full Pathways'},
+                                {key:'arenaFull',   label:'Full Arena'},
+                                {key:'seasons',     label:'Seasons'},
+                                {key:'projects',    label:'Projects'},
+                                {key:'internships', label:'Internships'}
+                            ].map(function (f) {
+                                var checked = !!org[f.key];
+                                return '<label style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:6px;cursor:pointer;font-size:12px;color:#e0e6ff;">' +
+                                    '<input type="checkbox" data-feat="' + f.key + '"' + (checked ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:#a78bfa;cursor:pointer;">' +
+                                    escapeHtml(f.label) + '</label>';
+                            }).join('') +
+                        '</div>' +
+                    '</div>' +
+                    // Cohort checkboxes
+                    '<div style="margin-bottom:14px;">' +
+                        '<label style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#00d4ff;font-weight:700;display:block;margin-bottom:8px;">Cohorts in this Organization</label>' +
+                        '<p style="font-size:11px;color:rgba(255,255,255,0.4);margin:0 0 10px;font-family:Jura,sans-serif;">A cohort can only belong to one organization at a time. Checking a cohort that\'s claimed elsewhere will move it here on save.</p>' +
+                        '<div id="org-edit-cohorts" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px;max-height:280px;overflow-y:auto;padding:10px;background:rgba(0,240,255,0.02);border:1px solid rgba(0,240,255,0.1);border-radius:8px;">' +
+                            allCohorts.map(function (c) {
+                                var checked = (org.cohorts || []).indexOf(c) >= 0;
+                                var claimedNote = cohortClaimedBy[c] ? ' <span style="font-size:9px;color:#f59e0b;">(in ' + escapeHtml(cohortClaimedBy[c]) + ')</span>' : '';
+                                return '<label style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:6px;cursor:pointer;font-size:12px;color:#e0e6ff;">' +
+                                    '<input type="checkbox" data-cohort="' + escapeHtml(c) + '"' + (checked ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:#00d4ff;cursor:pointer;">' +
+                                    escapeHtml(c) + claimedNote +
+                                '</label>';
+                            }).join('') +
+                        '</div>' +
+                    '</div>' +
+                    // Actions
+                    '<div style="display:flex;gap:10px;justify-content:flex-end;">' +
+                        '<button onclick="document.getElementById(\'pflx-org-editor-modal\').remove();" style="padding:10px 18px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);border-radius:8px;font-family:Share Tech Mono,monospace;font-size:11px;font-weight:700;letter-spacing:0.08em;cursor:pointer;">CANCEL</button>' +
+                        '<button onclick="hmcSaveOrgEditor(\'' + escapeHtml(orgKey) + '\')" style="padding:10px 22px;background:linear-gradient(135deg,#00d4ff,#7c3aed);color:#fff;border:none;border-radius:8px;font-family:Share Tech Mono,monospace;font-size:12px;font-weight:800;letter-spacing:0.08em;cursor:pointer;">SAVE CHANGES</button>' +
+                    '</div>' +
+                '</div>';
+            document.body.appendChild(overlay);
+        };
+
+        window.hmcSaveOrgEditor = function (orgKey) {
+            var org = ORGANIZATIONS[orgKey];
+            if (!org) return;
+            org.name        = (document.getElementById('org-edit-name')?.value || org.name || '').trim();
+            org.contact     = (document.getElementById('org-edit-contact')?.value || '').trim() || null;
+            org.subscription = document.getElementById('org-edit-sub')?.value || org.subscription;
+            var capVal = (document.getElementById('org-edit-cap')?.value || '').trim();
+            org.maxPlayers = capVal === '' ? Infinity : (parseInt(capVal, 10) || 0);
+            org.active = !!document.getElementById('org-edit-active')?.checked;
+
+            // Master app access (cascades to cohorts unless cohort overrides)
+            org.apps = org.apps || {};
+            document.querySelectorAll('#pflx-org-editor-modal input[data-app]').forEach(function (cb) {
+                org.apps[cb.getAttribute('data-app')] = !!cb.checked;
+            });
+            // Feature flags
+            document.querySelectorAll('#pflx-org-editor-modal input[data-feat]').forEach(function (cb) {
+                org[cb.getAttribute('data-feat')] = !!cb.checked;
+            });
+
+            // Collect newly-checked cohorts
+            var checked = [];
+            document.querySelectorAll('#org-edit-cohorts input[type="checkbox"]').forEach(function (cb) {
+                if (cb.checked) checked.push(cb.getAttribute('data-cohort'));
+            });
+            // Remove these cohorts from any OTHER org first (single-belong rule)
+            Object.keys(ORGANIZATIONS).forEach(function (k) {
+                if (k === orgKey) return;
+                ORGANIZATIONS[k].cohorts = (ORGANIZATIONS[k].cohorts || []).filter(function (c) { return checked.indexOf(c) < 0; });
+            });
+            org.cohorts = checked;
+
+            hmcSaveOrgs();
+            document.getElementById('pflx-org-editor-modal')?.remove();
+            hmcRenderOrgs();
+            // Tell every surface that cohort/org access may have changed so
+            // the toolbar re-applies its dim/lock state immediately.
+            try { window.dispatchEvent(new CustomEvent('pflx-cohort-settings-changed', { detail: { org: orgKey } })); } catch (e) {}
+            if (typeof pflxToast === 'function') pflxToast('Organization saved', 'success');
+        };
+
+        window.hmcDeleteOrg = function (orgKey) {
+            if (orgKey === 'STANDALONE') return;
+            var org = ORGANIZATIONS[orgKey];
+            if (!org) return;
+            if (!confirm('Delete organization "' + (org.name || orgKey) + '"? Its cohorts will be returned to the Standalone Players pool.')) return;
+            // Move its cohorts to STANDALONE so they don't end up orphaned
+            (org.cohorts || []).forEach(function (c) {
+                if (!ORGANIZATIONS.STANDALONE) return;
+                if (ORGANIZATIONS.STANDALONE.cohorts.indexOf(c) < 0) ORGANIZATIONS.STANDALONE.cohorts.push(c);
+            });
+            delete ORGANIZATIONS[orgKey];
+            hmcSaveOrgs();
+            hmcRenderOrgs();
+            if (typeof pflxToast === 'function') pflxToast('Organization deleted', 'info');
+        };
 
         function hmcAddOrg() {
             const name = document.getElementById('hmc-org-new-name').value.trim();
@@ -14993,10 +15197,28 @@
                 if (Array.isArray(s.cohorts)) cohorts = s.cohorts.slice();
                 else if (s.cohort) cohorts = String(s.cohort).split(/\s*,\s*/);
                 if (!cohorts.length) cohorts = ['PlayerPool'];
-                // Union rule — true if any cohort grants
+                // ── Org → Cohort cascade ──
+                // For each cohort the player belongs to:
+                //   resolved = cohort.apps[app]                  (if set)
+                //              ?? org_of_cohort.apps[app]        (master default)
+                //              ?? true                           (open by default)
+                // Union rule: if ANY cohort resolves to true, the player has
+                // access. So a multi-cohort player only loses access when EVERY
+                // cohort they're in (with org cascade applied) denies it.
+                function resolveCohortApp(cohortName) {
+                    var c = COHORTS[cohortName] || COHORTS['PlayerPool'];
+                    if (c && c.apps && c.apps[appKey] === false) return false;
+                    if (c && c.apps && c.apps[appKey] === true)  return true;
+                    // Cohort didn't set it — fall through to the org
+                    var orgKey = c && c.org;
+                    if (orgKey && ORGANIZATIONS[orgKey] && ORGANIZATIONS[orgKey].apps) {
+                        if (ORGANIZATIONS[orgKey].apps[appKey] === false) return false;
+                        if (ORGANIZATIONS[orgKey].apps[appKey] === true)  return true;
+                    }
+                    return true; // open by default when neither sets a value
+                }
                 for (var i = 0; i < cohorts.length; i++) {
-                    var c = COHORTS[cohorts[i]] || COHORTS['PlayerPool'];
-                    if (c && c.apps && c.apps[appKey] !== false) return true;
+                    if (resolveCohortApp(cohorts[i])) return true;
                 }
                 return false;
             } catch (e) { return true; }
