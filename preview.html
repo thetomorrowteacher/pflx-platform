@@ -32960,7 +32960,12 @@
             }
 
             // ── Reality Warp ──
-            function realityWarp(skinId, animate) {
+            // applyOnly=true means "just paint this skin locally" — used by the
+            // Supabase subscriber when it receives a change from another device,
+            // so we don't write back in a loop. The default path (master host
+            // pressed a skin button) publishes to Supabase so every other
+            // logged-in dashboard in the suite picks it up too.
+            function realityWarp(skinId, animate, applyOnly) {
                 var old = _activeSkin;
                 _activeSkin = skinId || 'default';
                 localStorage.setItem('pflx_active_skin', _activeSkin);
@@ -32979,11 +32984,71 @@
                     if (typeof pflxPlaySfx === 'function') pflxPlaySfx('click');
                 }
 
-                // Broadcast to iframes
+                // Broadcast to local iframes (same-browser sub-apps)
                 if (typeof mcBroadcastToApps === 'function') {
                     mcBroadcastToApps('pflx_reality_warp', { skin: _activeSkin });
                 }
+
+                // ── Cross-device sync via Supabase ──
+                // Only master hosts can publish. Other roles just listen and
+                // mirror whatever the master host has chosen.
+                if (!applyOnly && old !== _activeSkin) {
+                    var s = window.activeSession || {};
+                    var role = String(s.role || '').toLowerCase();
+                    var isMaster = /admin|host|master|teacher|instructor/.test(role);
+                    if (isMaster) {
+                        try {
+                            var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                            if (client) {
+                                client.from('app_data').upsert(
+                                    { key: 'pflx_active_skin_global', data: { skin: _activeSkin, setBy: s.brand || s.name || 'host', setAt: new Date().toISOString() }, updated_at: new Date().toISOString() },
+                                    { onConflict: 'key' }
+                                ).then(function (res) {
+                                    if (res && res.error) console.warn('[reality-warp] cloud sync error:', res.error.message);
+                                    else console.log('[reality-warp] ✓ Published skin to all devices:', _activeSkin);
+                                }, function (err) { console.warn('[reality-warp] cloud sync threw', err); });
+                            }
+                        } catch (e) { console.warn('[reality-warp] cloud publish failed', e); }
+                    }
+                }
             }
+
+            // ── Subscribe to remote skin changes ──
+            // Polls Supabase every 8 seconds for the current global skin and
+            // applies it if it differs from what we're showing. The master host
+            // who just changed the skin will see their own change pass through
+            // — applyOnly=true on the receive path keeps us from re-publishing.
+            var _pflxSkinPollIv = null;
+            function pflxStartSkinSubscriber() {
+                if (_pflxSkinPollIv) return;
+                async function tick() {
+                    try {
+                        var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                        if (!client) return;
+                        var res = await client.from('app_data').select('data, updated_at').eq('key', 'pflx_active_skin_global').limit(1);
+                        if (res && res.data && res.data[0] && res.data[0].data) {
+                            var remoteSkin = res.data[0].data.skin || 'default';
+                            if (remoteSkin && remoteSkin !== _activeSkin) {
+                                // Apply locally — this is the cross-device sync
+                                // moment. Skip the write-back via applyOnly=true.
+                                realityWarp(remoteSkin, true, true);
+                            }
+                        }
+                    } catch (e) { /* silent — transient network errors are fine */ }
+                }
+                // Boot with one immediate fetch, then poll
+                tick();
+                _pflxSkinPollIv = setInterval(tick, 8000);
+            }
+            // Kick off the subscriber as soon as the Supabase client is ready —
+            // we don't gate on session because the global skin should apply
+            // even on the login screen, so a player landing on prototypeflx.com
+            // sees the host's current Reality Warp the moment the page paints.
+            try {
+                // Give the Supabase SDK a beat to attach
+                setTimeout(pflxStartSkinSubscriber, 400);
+                window.addEventListener('pflx-identity-changed', function () { pflxStartSkinSubscriber(); });
+            } catch (e) {}
 
             // ── System Event CRUD ──
             function saveEvents() {
