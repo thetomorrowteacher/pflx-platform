@@ -42756,6 +42756,7 @@ RESPONSE RULES:
 
         window.pflxIdentityPersistNewPlayer = function (player) {
             if (!player || !player.brand) return;
+            // ── Local persistence ──
             try {
                 var saved = [];
                 try { saved = JSON.parse(localStorage.getItem(PLAYERS_KEY) || '[]'); } catch (e) {}
@@ -42765,7 +42766,89 @@ RESPONSE RULES:
                 else saved.push(player);
                 localStorage.setItem(PLAYERS_KEY, JSON.stringify(saved));
             } catch (e) { console.warn('[identity] persistNewPlayer failed', e); }
+            // ── Cloud persistence ──
+            // Push to Supabase so every other host's dashboard picks the new
+            // player up on their next boot (and immediately via realtime if
+            // it's enabled on the app_data table). Each player gets a row keyed
+            // 'pflx_player_<id>' so adds don't trample each other across hosts.
+            try {
+                var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (client && player.id) {
+                    client.from('app_data').upsert(
+                        { key: 'pflx_player_' + player.id, data: player, updated_at: new Date().toISOString() },
+                        { onConflict: 'key' }
+                    ).then(function (res) {
+                        if (res && res.error) console.warn('[identity] cloud persist error:', res.error.message);
+                        else console.log('[identity] ✓ Player published to cloud:', player.brand);
+                    }, function (err) { console.warn('[identity] cloud persist threw', err); });
+                }
+            } catch (e) { console.warn('[identity] cloud persist failed', e); }
         };
+
+        // ── Pull every player row from the shared Supabase roster ──
+        // Merges with the in-memory PLAYERS array and writes the union back
+        // to localStorage so the next reload doesn't need to round-trip.
+        // Called on boot (after the Supabase client is ready) and again
+        // any time the host opens Player Management or hits a refresh.
+        window.pflxIdentityFetchRosterFromCloud = async function () {
+            try {
+                var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (!client) return [];
+                var res = await client.from('app_data')
+                    .select('key, data, updated_at')
+                    .like('key', 'pflx_player_%')
+                    .limit(2000);
+                if (!res || !res.data) return [];
+                var fetched = res.data.map(function (r) { return r && r.data; }).filter(Boolean);
+                if (!fetched.length) return [];
+                // Merge into in-memory PLAYERS
+                if (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) {
+                    fetched.forEach(function (p) {
+                        if (!p || !p.id) return;
+                        var existing = PLAYERS.find(function (x) { return x && (x.id === p.id || (x.brand && p.brand && x.brand.toUpperCase() === p.brand.toUpperCase())); });
+                        if (existing) Object.assign(existing, p);
+                        else PLAYERS.push(p);
+                        if (p.pin && typeof BRANDS !== 'undefined') BRANDS[p.brand] = p.pin;
+                    });
+                }
+                // Sync back to localStorage so subsequent reads (Player Mgmt,
+                // hydratePlayers on next boot) see the full union.
+                try {
+                    var saved = [];
+                    try { saved = JSON.parse(localStorage.getItem(PLAYERS_KEY) || '[]'); } catch (e) {}
+                    if (!Array.isArray(saved)) saved = [];
+                    fetched.forEach(function (p) {
+                        if (!p || !p.id) return;
+                        var i = saved.findIndex(function (s) { return s && s.id === p.id; });
+                        if (i >= 0) saved[i] = Object.assign({}, saved[i], p);
+                        else saved.push(p);
+                    });
+                    localStorage.setItem(PLAYERS_KEY, JSON.stringify(saved));
+                } catch (e) {}
+                console.log('[identity] ✓ Pulled', fetched.length, 'players from cloud');
+                // Tell any open Player Management view to re-render
+                try { window.dispatchEvent(new CustomEvent('pflx-roster-updated', { detail: { count: fetched.length } })); } catch (e) {}
+                return fetched;
+            } catch (e) { console.warn('[identity] cloud fetch failed', e); return []; }
+        };
+        // Kick off the boot fetch once the Supabase client is ready
+        setTimeout(function () {
+            try { window.pflxIdentityFetchRosterFromCloud(); } catch (e) {}
+        }, 600);
+
+        // When the cloud fetch lands, re-render any open Player Management
+        // view so newly-discovered players appear without a manual reload.
+        window.addEventListener('pflx-roster-updated', function (ev) {
+            try {
+                if (typeof hmcRenderPlayers === 'function') hmcRenderPlayers();
+                if (typeof mcRenderPlayers === 'function') mcRenderPlayers();
+                if (typeof populateBrandSelect === 'function') populateBrandSelect();
+                if (typeof pflxToast === 'function' && ev.detail && ev.detail.count) {
+                    var n = ev.detail.count;
+                    pflxToast('Roster synced — ' + n + ' player' + (n === 1 ? '' : 's') + ' from cloud', 'success');
+                }
+            } catch (e) {}
+        });
 
         window.pflxIdentityLoad = function () {
             try { return JSON.parse(localStorage.getItem(IDENTITY_KEY) || 'null'); } catch (e) { return null; }
@@ -43169,7 +43252,28 @@ RESPONSE RULES:
         }
         window.pflxGetAllCohorts = getAllCohorts;
 
-        // ── Persist all user-modified players to localStorage ──
+        // ── Persist all user-modified players to localStorage + cloud ──
+        // Local write is synchronous. Cloud writes are debounced + per-player
+        // upserts so a host editing a single player doesn't trigger a full
+        // roster rewrite. Same row key as pflxIdentityPersistNewPlayer so
+        // adds and edits land in the same place.
+        var _pflxCloudPersistQueue = {};
+        var _pflxCloudPersistTimer = null;
+        function _pflxFlushCloudPersist() {
+            _pflxCloudPersistTimer = null;
+            var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+            if (!client) return;
+            var keys = Object.keys(_pflxCloudPersistQueue);
+            if (!keys.length) return;
+            var rows = keys.map(function (id) {
+                var p = _pflxCloudPersistQueue[id];
+                return { key: 'pflx_player_' + id, data: p, updated_at: new Date().toISOString() };
+            });
+            _pflxCloudPersistQueue = {};
+            client.from('app_data').upsert(rows, { onConflict: 'key' }).then(function (res) {
+                if (res && res.error) console.warn('[player-mgmt] cloud persist error:', res.error.message);
+            }, function (err) { console.warn('[player-mgmt] cloud persist threw', err); });
+        }
         function persistPlayers() {
             try {
                 if (typeof PLAYERS === 'undefined') return;
@@ -43184,6 +43288,11 @@ RESPONSE RULES:
                     return clone;
                 });
                 localStorage.setItem(PLAYERS_KEY, JSON.stringify(saved));
+                // Enqueue for cloud persist — debounced so a bulk edit doesn't
+                // hammer Supabase with one upsert per character typed.
+                saved.forEach(function (p) { if (p && p.id) _pflxCloudPersistQueue[p.id] = p; });
+                if (_pflxCloudPersistTimer) clearTimeout(_pflxCloudPersistTimer);
+                _pflxCloudPersistTimer = setTimeout(_pflxFlushCloudPersist, 1200);
             } catch (e) { console.warn('[player-mgmt] persist failed', e); }
         }
         window.pflxPersistPlayers = persistPlayers;
