@@ -16807,7 +16807,208 @@
             try { renderDeadlines();    } catch (e) {}
             try { renderInvestmentSummary(); } catch (e) {}
             try { renderProjects();          } catch (e) {}
+            try { renderApprovalsCard();     } catch (e) {}
         }
+
+        // ─────────────────────────────────────────────────────────────────
+        // Approvals card — host-only aggregate of pending submissions
+        // ─────────────────────────────────────────────────────────────────
+        function _pflxLoadRewardRequests() {
+            try {
+                var arr = JSON.parse(localStorage.getItem('pflx_mc_reward_requests') || '[]');
+                return Array.isArray(arr) ? arr : [];
+            } catch (e) { return []; }
+        }
+        function _pflxSaveRewardRequests(arr) {
+            try { localStorage.setItem('pflx_mc_reward_requests', JSON.stringify(arr)); } catch (e) {}
+        }
+        function _pflxPlayerBrandById(id) {
+            try {
+                if (typeof PLAYERS === 'undefined') return null;
+                var p = PLAYERS.find(function (x) { return x && x.id === id; });
+                return p ? (p.brand || p.brandName || p.name) : null;
+            } catch (e) { return null; }
+        }
+        function renderApprovalsCard() {
+            var listEl = document.getElementById('approvals-list');
+            var badgeEl = document.getElementById('approvals-count-badge');
+            if (!listEl) return; // card not on this page (player mode)
+
+            var items = [];
+
+            // 1. X-Tracker reward requests (pending only)
+            _pflxLoadRewardRequests().forEach(function (r) {
+                if (!r || r.status !== 'pending') return;
+                items.push({
+                    kind: 'reward',
+                    id: r.id,
+                    submittedAt: r.submittedAt,
+                    brand: r.brand || _pflxPlayerBrandById(r.playerId) || 'Player',
+                    title: r.type === 'xc' ? ('⚡ ' + (r.amount || 0).toLocaleString() + ' XC requested')
+                            : ('🏅 Badge: ' + (r.badgeName || (r.badgeCategory || 'Digital Badge'))),
+                    sub: r.description || '',
+                    link: r.proofLink || '',
+                    file: r.proofFileName || ''
+                });
+            });
+
+            // 2. MC task submissions (status === 'submitted')
+            try {
+                if (typeof mcTasks !== 'undefined' && Array.isArray(mcTasks)) {
+                    mcTasks.forEach(function (t) {
+                        if (!t || t.status !== 'submitted') return;
+                        var subBy = t.submission && t.submission.submittedBy;
+                        items.push({
+                            kind: 'task',
+                            id: t.id,
+                            submittedAt: t.submission && t.submission.submittedAt,
+                            brand: _pflxPlayerBrandById(subBy) || 'Player',
+                            title: '📋 Task: ' + (t.title || t.name || 'Untitled'),
+                            sub: (t.submission && t.submission.description) || '',
+                            link: (t.submission && t.submission.link) || '',
+                            file: (t.submission && t.submission.fileName) || '',
+                            xc: t.xcReward || 0,
+                            badges: t.rewardBadges || []
+                        });
+                    });
+                }
+            } catch (e) {}
+
+            // Sort newest-first
+            items.sort(function (a, b) {
+                return new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0);
+            });
+
+            if (badgeEl) badgeEl.textContent = String(items.length);
+
+            if (items.length === 0) {
+                listEl.innerHTML = '<div style="padding:14px;text-align:center;font-size:12px;color:rgba(255,255,255,0.35);font-family:\'Jura\',sans-serif;">No pending approvals. New submissions show up here in real time.</div>';
+                return;
+            }
+
+            // Render up to 10 — full list lives in MC Approvals tab
+            listEl.innerHTML = items.slice(0, 10).map(function (it) {
+                var icon = it.kind === 'reward' ? '🎯' : '📋';
+                var color = it.kind === 'reward' ? '#a78bfa' : '#00d4ff';
+                var dataKind = it.kind;
+                var dataId = String(it.id || '').replace(/'/g, '');
+                var linkHtml = it.link
+                    ? '<a href="' + escapeHtml(it.link) + '" target="_blank" rel="noopener" style="font-size:11px;color:#00d4ff;text-decoration:none;margin-right:8px;">🔗 Link</a>'
+                    : '';
+                var fileHtml = it.file
+                    ? '<span style="font-size:11px;color:#a78bfa;margin-right:8px;">📎 ' + escapeHtml(it.file) + '</span>'
+                    : '';
+                return '<div style="padding:12px 14px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid ' + color + '33;">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px;">' +
+                        '<div style="flex:1;min-width:0;">' +
+                            '<div style="font-size:13px;color:#e0e6ff;font-weight:700;margin-bottom:3px;">' + icon + ' ' + escapeHtml(it.title) + '</div>' +
+                            '<div style="font-size:11px;color:rgba(255,255,255,0.45);font-family:\'Jura\',sans-serif;">@' + escapeHtml(it.brand) + (it.submittedAt ? ' · ' + new Date(it.submittedAt).toLocaleString() : '') + '</div>' +
+                        '</div>' +
+                    '</div>' +
+                    (it.sub ? '<div style="font-size:12px;color:rgba(255,255,255,0.6);margin-bottom:8px;font-family:\'Jura\',sans-serif;line-height:1.5;">' + escapeHtml(String(it.sub).substring(0, 240)) + '</div>' : '') +
+                    (linkHtml || fileHtml ? '<div style="margin-bottom:10px;">' + linkHtml + fileHtml + '</div>' : '') +
+                    '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+                        '<button onclick="pflxApproveSubmission(\'' + dataKind + '\',\'' + escapeHtml(dataId) + '\')" style="padding:7px 14px;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;border:none;border-radius:6px;font-family:\'Share Tech Mono\',monospace;font-size:11px;font-weight:800;letter-spacing:0.06em;cursor:pointer;">✓ APPROVE</button>' +
+                        '<button onclick="pflxDenySubmission(\'' + dataKind + '\',\'' + escapeHtml(dataId) + '\')" style="padding:7px 14px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.4);color:#ef4444;border-radius:6px;font-family:\'Share Tech Mono\',monospace;font-size:11px;font-weight:700;letter-spacing:0.06em;cursor:pointer;">✗ DENY</button>' +
+                    '</div>' +
+                '</div>';
+            }).join('');
+        }
+        window.renderApprovalsCard = renderApprovalsCard;
+
+        window.pflxApproveSubmission = function (kind, id) {
+            try {
+                if (kind === 'reward') {
+                    var queue = _pflxLoadRewardRequests();
+                    var i = queue.findIndex(function (r) { return r && r.id === id; });
+                    if (i < 0) return;
+                    var r = queue[i];
+                    // Fire the reward through PflxDataBus.award so it propagates
+                    // to every surface in the suite (player's toolbar / hero /
+                    // portfolio / X-Coin home / Pathways card all update).
+                    if (window.PflxDataBus && r.playerId) {
+                        if (r.type === 'xc' && r.amount) {
+                            window.PflxDataBus.award(r.playerId, {
+                                xc: r.amount,
+                                source: 'xtracker',
+                                reason: 'xtracker.reward_request:' + r.id
+                            });
+                        } else if (r.type === 'badge') {
+                            window.PflxDataBus.award(r.playerId, {
+                                badge: {
+                                    id: 'b-xt-' + r.id,
+                                    name: r.badgeName || r.badgeCategory || 'Digital Badge',
+                                    category: r.badgeCategory || 'primary'
+                                },
+                                source: 'xtracker',
+                                reason: 'xtracker.reward_request:' + r.id
+                            });
+                        }
+                    }
+                    r.status = 'approved';
+                    r.reviewedAt = new Date().toISOString();
+                    queue[i] = r;
+                    _pflxSaveRewardRequests(queue);
+                    // Tell the player's X-Tracker so its 'My requests' list updates
+                    document.querySelectorAll('iframe').forEach(function (f) {
+                        if (!f.contentWindow) return;
+                        try { f.contentWindow.postMessage(JSON.stringify({ type: 'pflx_reward_request_resolved', request: r }), '*'); } catch (e) {}
+                    });
+                    if (typeof pflxToast === 'function') pflxToast('✓ Reward approved for @' + (r.brand || 'player'), 'success');
+                } else if (kind === 'task') {
+                    // Reuse the existing MC task approval pipeline — it already
+                    // routes XC + badges through PflxDataBus.award.
+                    if (typeof mcTasks !== 'undefined' && Array.isArray(mcTasks)) {
+                        var idx = mcTasks.findIndex(function (t) { return t && t.id === id; });
+                        if (idx >= 0 && typeof mcApproveTask === 'function') {
+                            mcApproveTask(idx);
+                        }
+                    }
+                }
+                renderApprovalsCard();
+            } catch (e) { console.warn('[approvals] approve failed', e); }
+        };
+
+        window.pflxDenySubmission = function (kind, id) {
+            try {
+                var note = prompt('Optional: explain why this is being denied (the player will see it).', '') || '';
+                if (kind === 'reward') {
+                    var queue = _pflxLoadRewardRequests();
+                    var i = queue.findIndex(function (r) { return r && r.id === id; });
+                    if (i < 0) return;
+                    queue[i].status = 'denied';
+                    queue[i].reviewedAt = new Date().toISOString();
+                    queue[i].reviewerNote = note;
+                    _pflxSaveRewardRequests(queue);
+                    document.querySelectorAll('iframe').forEach(function (f) {
+                        if (!f.contentWindow) return;
+                        try { f.contentWindow.postMessage(JSON.stringify({ type: 'pflx_reward_request_resolved', request: queue[i] }), '*'); } catch (e) {}
+                    });
+                    if (typeof pflxToast === 'function') pflxToast('Reward request denied', 'info');
+                } else if (kind === 'task') {
+                    if (typeof mcTasks !== 'undefined' && Array.isArray(mcTasks)) {
+                        var idx = mcTasks.findIndex(function (t) { return t && t.id === id; });
+                        if (idx >= 0) {
+                            mcTasks[idx].status = 'rejected';
+                            if (mcTasks[idx].submission) mcTasks[idx].submission.hostNote = note;
+                            try { mcSaveData('tasks'); } catch (e) {}
+                            if (typeof pflxToast === 'function') pflxToast('Task submission rejected', 'info');
+                        }
+                    }
+                }
+                renderApprovalsCard();
+            } catch (e) { console.warn('[approvals] deny failed', e); }
+        };
+
+        // Auto-refresh approvals card on any submission inbound
+        window.addEventListener('message', function (ev) {
+            try {
+                var m = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
+                if (m && (m.type === 'pflx_reward_request_submitted' || m.type === 'pflx_player_update')) {
+                    setTimeout(function () { try { renderApprovalsCard(); } catch (e) {} }, 50);
+                }
+            } catch (e) {}
+        });
         window.pflxRefreshHomePanels = pflxRefreshHomePanels;
         // Refresh whenever MC tasks/checkpoints mutate or the player record changes.
         try {
@@ -39091,6 +39292,34 @@ RESPONSE RULES:
                 `;
                 dashboard.appendChild(studioCard);
             }
+
+            // ── Approvals card — HOST ONLY ──
+            // Aggregates pending submissions across three sources so the host
+            // sees everything they need to act on at a glance:
+            //   1. X-Tracker reward requests  (pflx_mc_reward_requests)
+            //   2. MC task submissions        (mcTasks where status='submitted')
+            //   3. Pathways node completions  (auto-approved via award; not in queue)
+            // The Approve button routes through PflxDataBus.award() for reward
+            // requests and mcApproveTask() for task submissions. Both fire
+            // pflx_player_changed → every surface updates, including the
+            // player's own dashboard (XC tick, badge count, activity feed).
+            // Hidden entirely when the host is toggled into Player Mode.
+            try {
+                if (window.pflxRole === 'host') {
+                    const approvalsCard = document.createElement('div');
+                    approvalsCard.className = 'dashboard-card';
+                    approvalsCard.id = 'home-approvals-card';
+                    approvalsCard.style.cssText = 'border-color:rgba(245,200,66,0.3);background:linear-gradient(135deg,rgba(245,200,66,0.05),rgba(10,18,40,0.6));';
+                    approvalsCard.innerHTML =
+                        '<h3 style="color:#f5c842;margin-bottom:15px;display:flex;align-items:center;gap:8px;">' +
+                            '<span style="font-size:16px;">🛡</span> Approvals' +
+                            '<span id="approvals-count-badge" style="margin-left:auto;background:rgba(245,200,66,0.15);color:#f5c842;padding:3px 10px;border-radius:999px;font-size:11px;font-family:\'Share Tech Mono\',monospace;font-weight:800;letter-spacing:0.06em;">0</span>' +
+                        '</h3>' +
+                        '<div id="approvals-list" style="display:flex;flex-direction:column;gap:8px;"></div>';
+                    dashboard.appendChild(approvalsCard);
+                    try { renderApprovalsCard(); } catch (e) { console.warn('[approvals] render error', e); }
+                }
+            } catch (e) {}
 
             // Deadlines card — high priority, placed above activity feed
             const deadlinesCard = document.createElement('div');
