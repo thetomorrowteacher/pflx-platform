@@ -6015,7 +6015,7 @@
                 </button>
             </div>
 
-            <div class="toolbar-profile">
+            <div class="toolbar-profile" id="toolbar-profile" onclick="pflxOpenPortfolioShortcut()" style="cursor:pointer;" title="Open your portfolio">
                 <div class="profile-avatar" id="toolbar-profile-avatar">
                   <img id="toolbar-profile-avatar-img" src="public/PFLX Core Flat 6.png" alt="PFLX" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">
                 </div>
@@ -9707,8 +9707,12 @@
                         <!-- Profile Header Card -->
                         <div id="portfolio-header" style="display:flex; align-items:center; gap:24px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:20px; padding:28px; margin-bottom:24px; position:relative; overflow:hidden;">
                             <div style="position:absolute; top:0; left:0; right:0; height:3px; background:linear-gradient(90deg, var(--cyan), #8b5cf6, transparent);"></div>
-                            <!-- Avatar -->
-                            <div id="portfolio-avatar" style="width:120px; height:120px; border-radius:22px; background:linear-gradient(135deg, #4f8ef7, #8b5cf6); display:flex; align-items:center; justify-content:center; font-size:36px; font-weight:900; color:white; overflow:hidden; border:3px solid rgba(255,255,255,0.1); flex-shrink:0;"></div>
+                            <!-- Avatar — click to change your profile image -->
+                            <div style="position:relative; flex-shrink:0;">
+                                <div id="portfolio-avatar" onclick="document.getElementById('portfolio-avatar-input').click()" title="Click to change your profile image" style="width:120px; height:120px; border-radius:22px; background:linear-gradient(135deg, #4f8ef7, #8b5cf6); display:flex; align-items:center; justify-content:center; font-size:36px; font-weight:900; color:white; overflow:hidden; border:3px solid rgba(255,255,255,0.1); cursor:pointer;"></div>
+                                <div onclick="document.getElementById('portfolio-avatar-input').click()" title="Change profile image" style="position:absolute; bottom:-6px; right:-6px; width:34px; height:34px; border-radius:50%; background:linear-gradient(135deg,#00d4ff,#7c3aed); border:2px solid #0a0a0f; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:15px; box-shadow:0 2px 10px rgba(0,212,255,0.4);">📷</div>
+                                <input type="file" id="portfolio-avatar-input" accept="image/*" style="display:none;" onchange="portfolioUploadAvatar(event)">
+                            </div>
                             <div style="flex:1; min-width:0;">
                                 <h2 id="portfolio-brand" style="margin:0 0 4px; font-size:30px; font-weight:900; color:#f0f0ff;"></h2>
                                 <p id="portfolio-real-name" style="margin:0 0 4px; font-size:13px; color:rgba(255,255,255,0.45); display:none;"></p>
@@ -13040,16 +13044,18 @@
             const nameEl = document.getElementById('toolbar-player-name');
             if (nameEl) nameEl.textContent = (activeSession.name || 'PLAYER').toUpperCase();
 
-            // Profile avatar — swap from the PFLX logo placeholder to the
-            // signed-in user's image when available. Falls back to the
-            // PFLX Core logo when no image is uploaded yet.
-            const avatarImgEl = document.getElementById('toolbar-profile-avatar-img');
-            if (avatarImgEl) {
-                const src = activeSession.image && activeSession.image.length > 0
-                    ? activeSession.image
-                    : 'public/PFLX Core Flat 6.png';
-                if (avatarImgEl.getAttribute('src') !== src) {
-                    avatarImgEl.setAttribute('src', src);
+            // Profile avatar — show the signed-in user's uploaded image when
+            // available, otherwise their brand/name initial on a gradient.
+            // We never fall back to the PFLX Core logo: that made photo-less
+            // players look like the platform brand itself.
+            const avatarBoxEl = document.getElementById('toolbar-profile-avatar');
+            if (avatarBoxEl) {
+                const hasImg = activeSession.image && String(activeSession.image).length > 0;
+                if (hasImg) {
+                    avatarBoxEl.innerHTML = `<img id="toolbar-profile-avatar-img" src="${activeSession.image}" alt="${(activeSession.brand || activeSession.name || 'PFLX')}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
+                } else {
+                    const tbInitial = String(activeSession.brand || activeSession.name || 'P').trim().charAt(0).toUpperCase();
+                    avatarBoxEl.innerHTML = `<div style="width:100%;height:100%;border-radius:50%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#00d4ff,#7c3aed);color:#fff;font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;">${tbInitial}</div>`;
                 }
             }
 
@@ -13360,6 +13366,7 @@
                 });
             } catch (e) { console.warn('[org] load failed', e); }
         }
+        var _hmcApplyingCloudOrgs = false;
         function hmcSaveOrgs() {
             try { localStorage.setItem(PFLX_ORG_KEY, JSON.stringify(ORGANIZATIONS)); } catch (e) { console.warn('[org] save failed', e); }
             // Keep COHORTS[*].org in sync — each cohort can only belong to ONE
@@ -13375,9 +13382,53 @@
                     if (cohortToOrg[c]) COHORTS[c].org = cohortToOrg[c];
                 });
             } catch (e) {}
+            // ── Cloud persistence ── push org/cohort access config to Supabase
+            // so every player's app-gating reflects host changes on next boot
+            // (and live via Realtime). Suppressed while a cloud pull applies.
+            if (_hmcApplyingCloudOrgs) return;
+            try {
+                var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (client) {
+                    client.from('app_data').upsert(
+                        { key: 'pflx_organizations', data: { orgs: ORGANIZATIONS, updatedAt: Date.now() }, updated_at: new Date().toISOString() },
+                        { onConflict: 'key' }
+                    ).then(function (res) {
+                        if (res && res.error) console.warn('[org] cloud save error:', res.error.message);
+                    }, function (err) { console.warn('[org] cloud save threw', err); });
+                }
+            } catch (e) {}
         }
-        // Boot-load org overrides
+        // Apply organizations pulled from the cloud into the in-memory map.
+        window.hmcApplyCloudOrgs = function (payload) {
+            try {
+                var orgs = (payload && payload.orgs !== undefined) ? payload.orgs : payload;
+                if (!orgs || typeof orgs !== 'object') return false;
+                _hmcApplyingCloudOrgs = true;
+                Object.keys(orgs).forEach(function (k) {
+                    if (orgs[k] && typeof orgs[k] === 'object') {
+                        ORGANIZATIONS[k] = Object.assign({}, ORGANIZATIONS[k] || {}, orgs[k]);
+                    }
+                });
+                hmcSaveOrgs();   // mirror to localStorage; cloud re-push suppressed
+                _hmcApplyingCloudOrgs = false;
+                try { if (typeof hmcRenderOrgs === 'function') hmcRenderOrgs(); } catch (e) {}
+                try { window.dispatchEvent(new CustomEvent('pflx-cohort-settings-changed')); } catch (e) {}
+                return true;
+            } catch (e) { _hmcApplyingCloudOrgs = false; console.warn('[org] apply cloud failed', e); return false; }
+        };
+        // Boot-load org overrides (local first, then cloud)
         try { hmcLoadOrgs(); } catch (e) {}
+        setTimeout(function () {
+            try {
+                var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (!client) return;
+                client.from('app_data').select('data').eq('key', 'pflx_organizations').limit(1).then(function (res) {
+                    if (res && res.data && res.data[0] && res.data[0].data) {
+                        if (window.hmcApplyCloudOrgs(res.data[0].data)) console.log('[org] ✓ pulled org config from cloud');
+                    }
+                });
+            } catch (e) {}
+        }, 850);
 
         function hmcRenderOrgs() {
             const container = document.getElementById('hmc-org-cards');
@@ -15296,6 +15347,19 @@
             // Populate brand dropdown with claimed players
             populateBrandSelect();
 
+            // Pull the latest roster from the cloud so a player who claimed
+            // their account on another device (or whose claim only persisted
+            // to Supabase) can still log in here. When it lands it re-runs
+            // populateBrandSelect via the 'pflx-roster-updated' event, and
+            // refreshes the BRANDS pin map used by the login check.
+            try {
+                if (typeof window.pflxIdentityFetchRosterFromCloud === 'function') {
+                    window.pflxIdentityFetchRosterFromCloud().then(function () {
+                        try { populateBrandSelect(); } catch (e) {}
+                    });
+                }
+            } catch (e) {}
+
             // === STEP 1: Existing player login ===
             document.getElementById('login-btn').addEventListener('click', () => {
                 const brand = document.getElementById('brand-select').value;
@@ -16283,7 +16347,8 @@
                     email: newPlayerData.email, cohort: newPlayerData.cohort, role: newPlayerData.role || 'Student',
                     slogan: newPlayerData.slogan, interests: newPlayerData.interests, claimed: true,
                     onboardingComplete: true,
-                    xc: 0, totalXcoin: 0, digitalBadges: 0, level: 1
+                    xc: 0, totalXcoin: 0, digitalBadges: 0, level: 1,
+                    updatedAt: Date.now()
                 };
                 // If imported, update existing record
                 if (newPlayerData.isImported && newPlayerData.importedPlayer) {
@@ -18414,6 +18479,11 @@
 
             // ── Cloud Sync: push to X-Coin Supabase via iframe postMessage ──
             mcCloudSync(type);
+            // ── Direct cloud persistence: upsert this collection to Supabase
+            // app_data so every host + player dashboard reacts (boot pull +
+            // Realtime). Suppressed automatically while a cloud pull is being
+            // applied, so it never echoes back into an upload loop.
+            try { mcCloudPush(type); } catch (e) {}
 
             // ── PflxDataBus.mc.changed: notify every iframe that the named
             // collection just mutated. Sub-apps subscribed to pflx_mc_changed
@@ -18466,6 +18536,208 @@
                 }), '*');
             }
         }
+
+        // ═══════════════════════════════════════════════════════════════════
+        //  MISSION CONTROL — DIRECT SUPABASE PERSISTENCE
+        //  Every MC collection (seasons, checkpoints, projects, tasks, jobs,
+        //  badges, ranks, studios, …) is mirrored to its own app_data row
+        //  keyed 'pflx_mc_<type>'. Host edits push (debounced); every player
+        //  and host dashboard pulls on boot and stays live via Realtime — so
+        //  a change a host makes in MC / X-Coin / Pathways / Arena reaches
+        //  every dashboard without anyone reloading. This no longer depends
+        //  on the X-Coin iframe being loaded to reach the cloud.
+        // ═══════════════════════════════════════════════════════════════════
+        var MC_CLOUD_TYPES = ['players','checkpoints','tasks','projects','seasons',
+            'announcements','badges','jobs','pitches','studios','cohortgroups',
+            'modifiers','gameconfig','onboarding','pflxranks','sessions'];
+        var _mcApplyingCloud = false;     // true while a cloud pull is writing in
+        var _mcCloudQueue = {};
+        var _mcCloudTimer = null;
+
+        function _mcCollectionFor(type) {
+            switch (type) {
+                case 'players': return mcPlayers;
+                case 'checkpoints': return mcCheckpoints;
+                case 'tasks': return mcTasks;
+                case 'projects': return mcProjects;
+                case 'seasons': return mcSeasons;
+                case 'announcements': return mcAnnouncements;
+                case 'badges': return mcBadges;
+                case 'jobs': return mcJobs;
+                case 'pitches': return mcPitches;
+                case 'studios': return mcStudios;
+                case 'cohortgroups': return mcCohortGroups;
+                case 'modifiers': return mcModifiers;
+                case 'gameconfig': return mcGameConfig;
+                case 'onboarding': return mcOnboarding;
+                case 'pflxranks': return mcPflxRanks;
+                case 'sessions': return mcSessions;
+                default: return undefined;
+            }
+        }
+        function _mcApplyCollection(type, items) {
+            switch (type) {
+                case 'players': mcPlayers = items; break;
+                case 'checkpoints': mcCheckpoints = items; break;
+                case 'tasks': mcTasks = items; break;
+                case 'projects': mcProjects = items; break;
+                case 'seasons': mcSeasons = items; break;
+                case 'announcements': mcAnnouncements = items; break;
+                case 'badges': mcBadges = items; break;
+                case 'jobs': mcJobs = items; break;
+                case 'pitches': mcPitches = items; break;
+                case 'studios': mcStudios = items; break;
+                case 'cohortgroups': mcCohortGroups = items; break;
+                case 'modifiers': mcModifiers = items; break;
+                case 'gameconfig': mcGameConfig = items; break;
+                case 'onboarding': mcOnboarding = items; break;
+                case 'pflxranks': mcPflxRanks = items; break;
+                case 'sessions': mcSessions = items; break;
+                default: return false;
+            }
+            return true;
+        }
+
+        function _mcCloudFlush() {
+            _mcCloudTimer = null;
+            var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+            if (!client) return;
+            var types = Object.keys(_mcCloudQueue);
+            if (!types.length) return;
+            var stamp = Date.now();
+            var rows = types.map(function (t) {
+                return {
+                    key: 'pflx_mc_' + t,
+                    data: { items: _mcCloudQueue[t], updatedAt: stamp },
+                    updated_at: new Date().toISOString()
+                };
+            });
+            _mcCloudQueue = {};
+            client.from('app_data').upsert(rows, { onConflict: 'key' }).then(function (res) {
+                if (res && res.error) console.warn('[MC cloud] save error:', res.error.message);
+                else console.log('[MC cloud] ✓ pushed', types.join(', '));
+            }, function (err) { console.warn('[MC cloud] save threw', err); });
+        }
+        function mcCloudPush(type) {
+            if (_mcApplyingCloud) return;   // don't echo a cloud pull straight back
+            var list = (type === 'all') ? MC_CLOUD_TYPES : [type];
+            list.forEach(function (t) {
+                var coll = _mcCollectionFor(t);
+                if (typeof coll !== 'undefined') _mcCloudQueue[t] = coll;
+            });
+            if (!Object.keys(_mcCloudQueue).length) return;
+            if (_mcCloudTimer) clearTimeout(_mcCloudTimer);
+            _mcCloudTimer = setTimeout(_mcCloudFlush, 1000);
+        }
+        window.mcCloudPush = mcCloudPush;
+
+        // Apply one MC collection that arrived from the cloud: update the
+        // in-memory array, mirror to localStorage (cloud re-push suppressed).
+        function _mcIngestCloudRow(key, payload) {
+            var type = String(key || '').replace('pflx_mc_', '');
+            if (MC_CLOUD_TYPES.indexOf(type) < 0) return false;
+            var items = (payload && payload.items !== undefined) ? payload.items : payload;
+            if (items === undefined || items === null) return false;
+            _mcApplyingCloud = true;
+            var ok = false;
+            try {
+                if (_mcApplyCollection(type, items)) {
+                    mcSaveData(type);   // writes localStorage; mcCloudPush is suppressed
+                    ok = true;
+                }
+            } catch (e) { console.warn('[MC cloud] ingest failed', e); }
+            _mcApplyingCloud = false;
+            return ok;
+        }
+
+        // Boot pull — fetch every MC collection once so this dashboard opens
+        // with the shared, current data instead of a stale local copy.
+        window.mcCloudPull = async function () {
+            var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+            if (!client) return;
+            try {
+                var res = await client.from('app_data')
+                    .select('key, data')
+                    .like('key', 'pflx_mc_%')
+                    .limit(200);
+                if (!res || !res.data) return;
+                var changed = [];
+                res.data.forEach(function (row) {
+                    if (!row || !row.key) return;
+                    if (_mcIngestCloudRow(row.key, row.data)) {
+                        changed.push(String(row.key).replace('pflx_mc_', ''));
+                    }
+                });
+                if (changed.length) {
+                    console.log('[MC cloud] ✓ pulled', changed.join(', '));
+                    _mcAfterCloudChange(changed);
+                }
+            } catch (e) { console.warn('[MC cloud] pull failed', e); }
+        };
+
+        // Realtime — when any host (on any device) edits an MC collection,
+        // its app_data row updates and this fires, so every open dashboard
+        // re-renders live.
+        var _mcCloudChannel = null;
+        function mcStartCloudRealtime() {
+            if (_mcCloudChannel) return;
+            var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+            if (!client || typeof client.channel !== 'function') return;
+            try {
+                _mcCloudChannel = client.channel('pflx-mc')
+                    .on('postgres_changes', { event: '*', schema: 'public', table: 'app_data' }, function (payload) {
+                        try {
+                            var row = payload && (payload.new || payload.record);
+                            if (!row || !row.key) return;
+                            // Organization / cohort-access config
+                            if (row.key === 'pflx_organizations') {
+                                if (typeof window.hmcApplyCloudOrgs === 'function' && window.hmcApplyCloudOrgs(row.data)) {
+                                    console.log('[MC cloud] ← realtime update: organizations');
+                                }
+                                return;
+                            }
+                            if (String(row.key).indexOf('pflx_mc_') !== 0) return;
+                            if (_mcIngestCloudRow(row.key, row.data)) {
+                                var t = String(row.key).replace('pflx_mc_', '');
+                                console.log('[MC cloud] ← realtime update:', t);
+                                _mcAfterCloudChange([t]);
+                            }
+                        } catch (e) { console.warn('[MC cloud] realtime payload error', e); }
+                    })
+                    .subscribe(function (status) {
+                        if (status === 'SUBSCRIBED') console.log('[MC cloud] ✓ Realtime live');
+                    });
+            } catch (e) { console.warn('[MC cloud] realtime setup failed', e); }
+        }
+
+        // Re-render whatever's on screen after MC data changes underneath us.
+        function _mcAfterCloudChange(types) {
+            try { if (typeof pflxRefreshHomePanels === 'function') pflxRefreshHomePanels(); } catch (e) {}
+            // Tell sub-app iframes their cached MC lists are stale.
+            try {
+                if (window.PflxDataBus && window.PflxDataBus.mc) {
+                    (types || []).forEach(function (t) {
+                        var canonical = ({ tasks:'tasks', checkpoints:'checkpoints', projects:'projects', seasons:'seasons', jobs:'jobs' })[t];
+                        if (canonical) window.PflxDataBus.mc.changed(canonical);
+                    });
+                }
+            } catch (e) {}
+            // Sidebar counts
+            try {
+                var pc = document.getElementById('mc-player-count');
+                var cc = document.getElementById('mc-cp-count');
+                var tc = document.getElementById('mc-task-count');
+                if (pc) pc.textContent = mcPlayers.filter(function (p) { return p.role !== 'admin'; }).length;
+                if (cc) cc.textContent = mcCheckpoints.length;
+                if (tc) tc.textContent = mcTasks.length;
+            } catch (e) {}
+        }
+
+        // Kick off boot pull + realtime once Supabase is reachable.
+        setTimeout(function () {
+            try { window.mcCloudPull(); } catch (e) {}
+            try { mcStartCloudRealtime(); } catch (e) {}
+        }, 800);
 
         // Listen for cloud data coming back from X-Coin / other apps
         window.addEventListener('message', function(event) {
@@ -36639,20 +36911,19 @@ RESPONSE RULES:
             const user = portfolioGetUserData();
 
             // Header — Avatar
-            // Source-of-truth chain: user.image (host-uploaded in Player Management)
-            //                     → PFLX Core logo (matches toolbar fallback)
-            // This keeps the portfolio's hero avatar in lockstep with what the
-            // toolbar shows: an uploaded profile picture when one exists, the
-            // PFLX Core logo when it doesn't. The old behavior of falling back
-            // to a single letter (e.g. "P" for PROTOTYPEFLX) made the portfolio
-            // look unfinished compared to every other surface.
+            // Source-of-truth chain: user.image (host-uploaded OR self-uploaded)
+            //                     → player's brand/name initial on a gradient.
+            // We deliberately do NOT fall back to the PFLX Core logo here: that
+            // made every player without a photo look like the platform brand.
             const avatarEl = document.getElementById('portfolio-avatar');
             if (avatarEl) {
-                const imgSrc = user.image && String(user.image).length > 0
-                    ? user.image
-                    : 'public/PFLX Core Flat 6.png';
-                const fitMode = user.image && String(user.image).length > 0 ? 'cover' : 'contain';
-                avatarEl.innerHTML = `<img src="${imgSrc}" alt="${(user.brand || 'PFLX')}" style="width:100%;height:100%;object-fit:${fitMode};">`;
+                const hasImg = user.image && String(user.image).length > 0;
+                if (hasImg) {
+                    avatarEl.innerHTML = `<img src="${user.image}" alt="${(user.brand || 'PFLX')}" style="width:100%;height:100%;object-fit:cover;">`;
+                } else {
+                    const initial = String(user.brand || user.name || 'P').trim().charAt(0).toUpperCase();
+                    avatarEl.innerHTML = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#00d4ff,#7c3aed);color:#fff;font-family:Orbitron,sans-serif;font-weight:700;font-size:clamp(28px,5vw,52px);letter-spacing:1px;">${initial}</div>`;
+                }
             }
             const brandEl = document.getElementById('portfolio-brand');
             if (brandEl) brandEl.textContent = user.brand || user.name || 'Player';
@@ -37060,6 +37331,64 @@ RESPONSE RULES:
             html += '</div>';
             container.innerHTML = html;
         }
+
+        // ── Toolbar avatar → portfolio shortcut ──────────────────────
+        // Clicking the profile chip in the toolbar jumps the player straight
+        // into their portfolio. Works for hosts and players alike.
+        window.pflxOpenPortfolioShortcut = function () {
+            try {
+                if (typeof navigateTo === 'function') navigateTo('portfolio');
+                else if (typeof window.switchToView === 'function') window.switchToView('portfolio');
+            } catch (e) { console.warn('[portfolio] shortcut nav failed', e); }
+        };
+
+        // ── Upload / change the player's profile image from the portfolio ──
+        // Compresses the image (reuses pflxCompressImage so localStorage quota
+        // is never blown), writes it onto the active player's record, pushes
+        // through PflxDataBus + persistence so the toolbar, hero card, X-Coin,
+        // Pathways card and the cloud roster all update.
+        window.portfolioUploadAvatar = function (ev) {
+            var file = ev && ev.target && ev.target.files && ev.target.files[0];
+            if (!file) return;
+            if (file.size > 8 * 1024 * 1024) { alert('Image too large — pick something under 8MB.'); return; }
+            var apply = function (dataUrl) {
+                try {
+                    var s = window.activeSession || {};
+                    s.image = dataUrl;
+                    // Update the canonical PLAYERS record
+                    if (s.id && typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) {
+                        var p = PLAYERS.find(function (x) { return x && x.id === s.id; });
+                        if (p) {
+                            p.image = dataUrl;
+                            // Persist (localStorage + debounced Supabase upsert) and
+                            // broadcast so every surface re-renders with the new image.
+                            try { if (typeof persistPlayers === 'function') persistPlayers(); } catch (e) {}
+                            try { if (typeof broadcastPlayerChange === 'function') broadcastPlayerChange(p); } catch (e) {}
+                        }
+                    }
+                    // Update identity cache + toolbar/hero immediately
+                    try { if (typeof pflxIdentityPersist === 'function') pflxIdentityPersist(s); } catch (e) {}
+                    try { if (typeof updateToolbarStatus === 'function') updateToolbarStatus(); } catch (e) {}
+                    try { if (typeof portfolioRender === 'function') portfolioRender(); } catch (e) {}
+                    if (typeof pflxToast === 'function') pflxToast('Profile image updated', 'success');
+                } catch (e) { console.warn('[portfolio] avatar apply failed', e); }
+            };
+            // Compress when the helper is available, else fall back to raw read
+            if (typeof pflxCompressImage === 'function') {
+                pflxCompressImage(file, { maxW: 512, maxH: 512, quality: 0.85 })
+                    .then(apply)
+                    .catch(function () {
+                        var r = new FileReader();
+                        r.onload = function (e) { apply(String(e.target.result || '')); };
+                        r.readAsDataURL(file);
+                    });
+            } else {
+                var r = new FileReader();
+                r.onload = function (e) { apply(String(e.target.result || '')); };
+                r.readAsDataURL(file);
+            }
+            ev.target.value = '';
+        };
 
         // ── Edit Mode Toggle ─────────────────────────────────────────
         function portfolioToggleEdit() {
@@ -42756,6 +43085,11 @@ RESPONSE RULES:
 
         window.pflxIdentityPersistNewPlayer = function (player) {
             if (!player || !player.brand) return;
+            // Stamp a write time so cross-device merges are last-write-wins.
+            // Without this, a stale cloud row can clobber a freshly-claimed
+            // local record on the next reload — which was making claimed
+            // players unable to log back in (their new PIN got overwritten).
+            player.updatedAt = Date.now();
             // ── Local persistence ──
             try {
                 var saved = [];
@@ -42790,6 +43124,21 @@ RESPONSE RULES:
         // to localStorage so the next reload doesn't need to round-trip.
         // Called on boot (after the Supabase client is ready) and again
         // any time the host opens Player Management or hits a refresh.
+        // Last-write-wins helper: should the incoming record `inc` replace the
+        // record `cur` we already hold? A record with a newer (or any, when the
+        // current one has none) updatedAt wins. This stops a stale cloud row
+        // from overwriting a freshly-claimed local profile.
+        window.pflxRecordIsNewer = function (inc, cur) {
+            if (!cur) return true;
+            if (!inc) return false;
+            var ti = Number(inc.updatedAt) || 0;
+            var tc = Number(cur.updatedAt) || 0;
+            // If neither side is stamped, prefer the one that looks "claimed"
+            // (it carries real player-set data); otherwise keep current.
+            if (ti === 0 && tc === 0) return !!inc.claimed && !cur.claimed;
+            return ti >= tc;
+        };
+
         window.pflxIdentityFetchRosterFromCloud = async function () {
             try {
                 var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
@@ -42801,14 +43150,22 @@ RESPONSE RULES:
                 if (!res || !res.data) return [];
                 var fetched = res.data.map(function (r) { return r && r.data; }).filter(Boolean);
                 if (!fetched.length) return [];
-                // Merge into in-memory PLAYERS
+                // Merge into in-memory PLAYERS — last-write-wins on updatedAt so a
+                // stale cloud row never clobbers a newer local (just-claimed) one.
                 if (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) {
                     fetched.forEach(function (p) {
                         if (!p || !p.id) return;
                         var existing = PLAYERS.find(function (x) { return x && (x.id === p.id || (x.brand && p.brand && x.brand.toUpperCase() === p.brand.toUpperCase())); });
-                        if (existing) Object.assign(existing, p);
-                        else PLAYERS.push(p);
-                        if (p.pin && typeof BRANDS !== 'undefined') BRANDS[p.brand] = p.pin;
+                        if (existing) {
+                            if (window.pflxRecordIsNewer(p, existing)) Object.assign(existing, p);
+                        } else {
+                            PLAYERS.push(p);
+                        }
+                        // Only adopt the cloud PIN if the cloud record is the
+                        // authoritative (newer) one — otherwise keep local PIN.
+                        if (p.pin && typeof BRANDS !== 'undefined') {
+                            if (!existing || window.pflxRecordIsNewer(p, existing)) BRANDS[p.brand] = p.pin;
+                        }
                     });
                 }
                 // Sync back to localStorage so subsequent reads (Player Mgmt,
@@ -42820,8 +43177,11 @@ RESPONSE RULES:
                     fetched.forEach(function (p) {
                         if (!p || !p.id) return;
                         var i = saved.findIndex(function (s) { return s && s.id === p.id; });
-                        if (i >= 0) saved[i] = Object.assign({}, saved[i], p);
-                        else saved.push(p);
+                        if (i >= 0) {
+                            if (window.pflxRecordIsNewer(p, saved[i])) saved[i] = Object.assign({}, saved[i], p);
+                        } else {
+                            saved.push(p);
+                        }
                     });
                     localStorage.setItem(PLAYERS_KEY, JSON.stringify(saved));
                 } catch (e) {}
@@ -42855,20 +43215,28 @@ RESPONSE RULES:
                             if (!row || !row.key || String(row.key).indexOf('pflx_player_') !== 0) return;
                             var p = row.data;
                             if (!p || !p.id) return;
-                            // Merge into PLAYERS
+                            // Merge into PLAYERS — last-write-wins on updatedAt.
                             if (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) {
                                 var existing = PLAYERS.find(function (x) { return x && x.id === p.id; });
-                                if (existing) Object.assign(existing, p);
-                                else PLAYERS.push(p);
-                                if (p.pin && typeof BRANDS !== 'undefined') BRANDS[p.brand] = p.pin;
+                                if (existing) {
+                                    if (window.pflxRecordIsNewer(p, existing)) Object.assign(existing, p);
+                                } else {
+                                    PLAYERS.push(p);
+                                }
+                                if (p.pin && typeof BRANDS !== 'undefined') {
+                                    if (!existing || window.pflxRecordIsNewer(p, existing)) BRANDS[p.brand] = p.pin;
+                                }
                             }
                             // Sync to localStorage
                             try {
                                 var saved = JSON.parse(localStorage.getItem(PLAYERS_KEY) || '[]');
                                 if (!Array.isArray(saved)) saved = [];
                                 var i = saved.findIndex(function (s) { return s && s.id === p.id; });
-                                if (i >= 0) saved[i] = Object.assign({}, saved[i], p);
-                                else saved.push(p);
+                                if (i >= 0) {
+                                    if (window.pflxRecordIsNewer(p, saved[i])) saved[i] = Object.assign({}, saved[i], p);
+                                } else {
+                                    saved.push(p);
+                                }
                                 localStorage.setItem(PLAYERS_KEY, JSON.stringify(saved));
                             } catch (e) {}
                             // Re-render any open roster views
@@ -43359,6 +43727,9 @@ RESPONSE RULES:
         // ── Broadcast a player change to all iframes + active session ──
         function broadcastPlayerChange(player) {
             if (!player) return;
+            // Stamp the write time so cross-device merges keep this edit
+            // (last-write-wins) instead of letting a stale cloud row win.
+            try { player.updatedAt = Date.now(); } catch (e) {}
             persistPlayers();
             // If the changed player IS the active session, sync activeSession + toolbar
             if (window.activeSession && (window.activeSession.id === player.id || window.activeSession.brand === player.brand)) {
