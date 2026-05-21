@@ -42831,9 +42831,68 @@ RESPONSE RULES:
                 return fetched;
             } catch (e) { console.warn('[identity] cloud fetch failed', e); return []; }
         };
-        // Kick off the boot fetch once the Supabase client is ready
+        // ── Realtime roster subscriber ──
+        // Listens for INSERT/UPDATE on the app_data table and, when the row
+        // is a player row (key starts with 'pflx_player_'), merges the record
+        // into PLAYERS immediately. Realtime postgres_changes filters only
+        // support eq/in (not prefix LIKE), so we subscribe to the whole table
+        // and prefix-check in JS — app_data write volume is low enough that
+        // this is cheap. Falls back silently if Realtime isn't enabled on the
+        // table yet (the 600ms boot fetch + per-reload fetch still cover it).
+        var _pflxRosterChannel = null;
+        function pflxStartRosterSubscriber() {
+            if (_pflxRosterChannel) return;
+            var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+            if (!client || typeof client.channel !== 'function') return;
+            try {
+                _pflxRosterChannel = client
+                    .channel('pflx-roster')
+                    .on('postgres_changes', {
+                        event: '*', schema: 'public', table: 'app_data'
+                    }, function (payload) {
+                        try {
+                            var row = payload && (payload.new || payload.record);
+                            if (!row || !row.key || String(row.key).indexOf('pflx_player_') !== 0) return;
+                            var p = row.data;
+                            if (!p || !p.id) return;
+                            // Merge into PLAYERS
+                            if (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) {
+                                var existing = PLAYERS.find(function (x) { return x && x.id === p.id; });
+                                if (existing) Object.assign(existing, p);
+                                else PLAYERS.push(p);
+                                if (p.pin && typeof BRANDS !== 'undefined') BRANDS[p.brand] = p.pin;
+                            }
+                            // Sync to localStorage
+                            try {
+                                var saved = JSON.parse(localStorage.getItem(PLAYERS_KEY) || '[]');
+                                if (!Array.isArray(saved)) saved = [];
+                                var i = saved.findIndex(function (s) { return s && s.id === p.id; });
+                                if (i >= 0) saved[i] = Object.assign({}, saved[i], p);
+                                else saved.push(p);
+                                localStorage.setItem(PLAYERS_KEY, JSON.stringify(saved));
+                            } catch (e) {}
+                            // Re-render any open roster views
+                            try {
+                                if (typeof hmcRenderPlayers === 'function') hmcRenderPlayers();
+                                if (typeof mcRenderPlayers === 'function') mcRenderPlayers();
+                                if (typeof populateBrandSelect === 'function') populateBrandSelect();
+                            } catch (e) {}
+                            console.log('[roster] ← realtime player update:', p.brand);
+                        } catch (e) { console.warn('[roster] realtime payload error', e); }
+                    })
+                    .subscribe(function (status) {
+                        if (status === 'SUBSCRIBED') console.log('[roster] ✓ Realtime channel live');
+                        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+                            console.warn('[roster] realtime status:', status, '— boot/reload fetch still covers it');
+                        }
+                    });
+            } catch (e) { console.warn('[roster] realtime setup failed', e); }
+        }
+
+        // Kick off the boot fetch + realtime subscriber once Supabase is ready
         setTimeout(function () {
             try { window.pflxIdentityFetchRosterFromCloud(); } catch (e) {}
+            try { pflxStartRosterSubscriber(); } catch (e) {}
         }, 600);
 
         // When the cloud fetch lands, re-render any open Player Management
