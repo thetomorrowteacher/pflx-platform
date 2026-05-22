@@ -18912,6 +18912,33 @@
                     if (typeof pflxToast === 'function') pflxToast('New Arena submission to review!', 'info');
                 }
 
+                // Phase-based Module completion (CONNECTOR_CONTRACT.md) → unified Approvals Queue.
+                // Core Pathways forwards the Completion Record up here when a Module finishes.
+                if (msg.type === 'pflx_module_completion') {
+                    var rec = msg.payload || msg.data || {};
+                    if (!mcApprovals) mcApprovals = [];
+                    var modPlayer = (rec.player && rec.player.brand) || 'Player';
+                    mcApprovals.push({
+                        id: 'appr-mod-' + Date.now(),
+                        type: 'module_completion',
+                        title: (rec.nodeTitle || rec.moduleId || 'Module') + ' — ' + modPlayer,
+                        submittedBy: modPlayer,
+                        date: new Date().toISOString().split('T')[0],
+                        action: 'pending',
+                        moduleId: rec.moduleId || '',
+                        nodeId: rec.nodeId || '',
+                        pathwaySlug: rec.pathwaySlug || '',
+                        playerId: (rec.player && rec.player.id) || '',
+                        submission: rec.submission || {},
+                        score: (rec.score != null) ? rec.score : null,
+                        reward: rec.reward || null,
+                        submittedAt: rec.submittedAt || Date.now()
+                    });
+                    mcSaveData('approvals');
+                    try { if (typeof mcRenderApprovals === 'function') mcRenderApprovals(); } catch (e) {}
+                    if (typeof pflxToast === 'function') pflxToast('New module completion to review!', 'info');
+                }
+
                 // DarkCampus usage data
                 if (msg.type === 'pflx_darkcampus_usage') {
                     var usage = msg.data;
@@ -34219,6 +34246,13 @@
                 }
             });
 
+            // Add phase-based Module completions from approvals
+            mcApprovals.filter(function(a) { return a.type === 'module_completion' && a.action === 'pending'; }).forEach(function(a) {
+                if (mcApprovalFilter === 'pending' || mcApprovalFilter === 'all') {
+                    items.push({ type: 'module_completion', id: a.id, title: a.title, submittedBy: a.submittedBy || '', date: a.date || '', status: 'pending', ref: a });
+                }
+            });
+
             // Add historical approvals
             if (mcApprovalFilter !== 'pending') {
                 mcApprovals.filter(function(a) { return mcApprovalFilter === 'approved' ? a.action === 'approved' : a.action === 'rejected'; }).forEach(function(a) {
@@ -34232,13 +34266,25 @@
 
             list.innerHTML = items.length === 0 ? '<div style="color:rgba(255,255,255,0.25);font-size:13px;">No items to show.</div>' :
                 items.map(function(it) {
-                    var typeIcon = it.type === 'task' ? '&#x2705;' : it.type === 'arena_external' ? '&#x1F3AE;' : '&#x1F4A1;';
+                    var typeIcon = it.type === 'task' ? '&#x2705;' : it.type === 'arena_external' ? '&#x1F3AE;' : it.type === 'module_completion' ? '&#x1F393;' : '&#x1F4A1;';
                     var sc = it.status === 'pending' ? '#f5c842' : it.status === 'approved' ? '#22c55e' : '#ef4444';
+                    var typeLabel = it.type === 'module_completion' ? 'module completion' : it.type;
+                    var detail = '';
+                    if (it.type === 'module_completion' && it.ref && it.ref.submission) {
+                        var sub = it.ref.submission, rw = it.ref.reward, bits = [];
+                        if (sub.link) bits.push('<a href="' + escapeHtml(sub.link) + '" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:none;">&#x1F517; Submission link</a>');
+                        if (sub.file) bits.push('<span style="color:#a78bfa;">&#x1F4CE; ' + escapeHtml(sub.file) + '</span>');
+                        if (rw && rw.xc) bits.push('<span style="color:#22c55e;">Awards ' + rw.xc + ' XC on approval</span>');
+                        detail = '<div style="font-size:11px;color:rgba(255,255,255,0.55);margin:4px 0 8px;line-height:1.6;">' +
+                            (sub.description ? escapeHtml(String(sub.description).substring(0, 280)) + '<br>' : '') +
+                            bits.join(' &nbsp;&middot;&nbsp; ') + '</div>';
+                    }
                     return '<div class="mc-card">' +
                         '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">' +
                         '<div><span style="margin-right:6px;">' + typeIcon + '</span><span style="font-weight:900;color:#f0f0ff;">' + escapeHtml(it.title || 'Untitled') + '</span>' +
-                        '<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:2px;">by ' + escapeHtml(it.submittedBy) + ' · ' + (it.type) + '</div></div>' +
+                        '<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:2px;">by ' + escapeHtml(it.submittedBy) + ' · ' + typeLabel + '</div></div>' +
                         '<span class="mc-pill" style="color:' + sc + ';border-color:' + sc + ';">' + it.status.toUpperCase() + '</span></div>' +
+                        detail +
                         (it.status === 'pending' ? '<div style="display:flex;gap:6px;">' +
                         '<button class="mc-btn mc-btn-green" style="font-size:10px;padding:4px 10px;" onclick="mcApproveItem(\'' + it.type + '\',\'' + it.id + '\')">Approve</button>' +
                         '<button class="mc-btn" style="font-size:10px;padding:4px 10px;color:#ef4444;border-color:rgba(239,68,68,0.3);" onclick="mcRejectItem(\'' + it.type + '\',\'' + it.id + '\')">Reject</button></div>' : '') +
@@ -34264,6 +34310,23 @@
                     mcBroadcastToApps('pflx_pitch_approved', { pitchId: p.id, title: p.title, pathway: p.pathway, pathwayNodeId: p.pathwayNodeId });
                 }
                 mcApprovals.push({ type:'pitch', id:id, title:p?p.title:'', action:'approved', date:new Date().toISOString().split('T')[0], submittedBy:p?p.submittedBy:'' });
+            } else if (type === 'module_completion') {
+                var ma = mcApprovals.find(function(x) { return x.id === id; });
+                if (ma) {
+                    ma.action = 'approved';
+                    // Pay the node's clamped reward to the player — PflxDataBus is the authority,
+                    // so XC + badges propagate to the toolbar, portfolio, and every sub-app.
+                    try {
+                        if (ma.playerId && ma.reward && window.PflxDataBus) {
+                            if (ma.reward.xc) window.PflxDataBus.award(ma.playerId, { xc: ma.reward.xc, source: 'mc', reason: 'module:' + ma.moduleId });
+                            (ma.reward.badgeIds || []).forEach(function(bid) {
+                                window.PflxDataBus.award(ma.playerId, { badge: { id: bid, name: bid }, source: 'mc', reason: 'module:' + ma.moduleId });
+                            });
+                        }
+                    } catch (eMod) { console.warn('[MC] module reward award failed', eMod); }
+                    // Notify Core Pathways → the Module shows Approved and the node marks complete.
+                    try { mcBroadcastToApps('module_approval', { nodeId: ma.nodeId, moduleId: ma.moduleId, playerId: ma.playerId, approved: true, xcAwarded: (ma.reward && ma.reward.xc) || 0, badges: (ma.reward && ma.reward.badgeIds) || [] }); } catch (e) {}
+                }
             }
             mcSaveData('approvals');
             mcRenderApprovals();
@@ -34278,6 +34341,13 @@
                 var p = mcPitches.find(function(p) { return p.id === id; });
                 if (p) { p.status = 'rejected'; mcSaveData('pitches'); }
                 mcApprovals.push({ type:'pitch', id:id, title:p?p.title:'', action:'rejected', date:new Date().toISOString().split('T')[0], submittedBy:p?p.submittedBy:'' });
+            } else if (type === 'module_completion') {
+                var mr = mcApprovals.find(function(x) { return x.id === id; });
+                if (mr) {
+                    mr.action = 'rejected';
+                    // Notify Core Pathways → the node returns to in-progress so the player can revise.
+                    try { mcBroadcastToApps('module_approval', { nodeId: mr.nodeId, moduleId: mr.moduleId, playerId: mr.playerId, approved: false, note: 'Returned for revision — review host feedback.' }); } catch (e) {}
+                }
             }
             mcSaveData('approvals');
             mcRenderApprovals();
