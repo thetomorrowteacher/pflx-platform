@@ -6015,13 +6015,60 @@
                 </button>
             </div>
 
-            <div class="toolbar-profile" id="toolbar-profile" onclick="pflxOpenPortfolioShortcut()" style="cursor:pointer;" title="Open your portfolio">
+            <div class="toolbar-profile" id="toolbar-profile" onclick="pflxToggleProfileDropdown(event)" style="cursor:pointer;position:relative;" title="Your profile">
                 <div class="profile-avatar" id="toolbar-profile-avatar">
                   <img id="toolbar-profile-avatar-img" src="public/PFLX Core Flat 6.png" alt="PFLX" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">
                 </div>
                 <div class="profile-info">
                     <div class="profile-name" id="toolbar-player-name">PLAYER</div>
                     <div class="profile-status">Online</div>
+                </div>
+                <!-- Quick player profile dropdown — replaces the old "click avatar → /portfolio" jump.
+                     Anchored to .toolbar-profile (position:relative). Click outside closes; click inside
+                     stays open. Populated on open via pflxRenderProfileDropdown(). -->
+                <div id="pflx-profile-dropdown"
+                     onclick="event.stopPropagation()"
+                     style="display:none;position:absolute;top:calc(100% + 10px);right:0;width:280px;
+                            background:rgba(13,17,23,0.97);backdrop-filter:blur(12px);
+                            border:1px solid rgba(0,240,255,0.25);border-radius:14px;
+                            padding:16px;z-index:100000;cursor:default;
+                            box-shadow:0 12px 40px rgba(0,0,0,0.6);">
+                    <!-- Header: avatar + name + role -->
+                    <div style="display:flex;align-items:center;gap:12px;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.06);">
+                        <div id="pd-avatar" style="width:48px;height:48px;border-radius:50%;border:2px solid rgba(0,240,255,0.3);overflow:hidden;flex-shrink:0;background:rgba(0,240,255,0.05);">
+                            <img id="pd-avatar-img" src="" alt="" style="width:100%;height:100%;object-fit:cover;display:none;">
+                        </div>
+                        <div style="flex:1;min-width:0;">
+                            <div id="pd-name" style="font-family:'Orbitron',sans-serif;font-size:13px;font-weight:800;color:#e0e6ff;letter-spacing:0.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</div>
+                            <div id="pd-role" style="font-size:10px;font-weight:700;color:rgba(255,255,255,0.45);letter-spacing:0.1em;margin-top:2px;text-transform:uppercase;">—</div>
+                        </div>
+                    </div>
+                    <!-- Stat row: XC / Badges / Level -->
+                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;">
+                        <div style="text-align:center;padding:8px 4px;background:rgba(255,255,255,0.02);border-radius:8px;border:1px solid rgba(255,255,255,0.05);">
+                            <div id="pd-xc" style="font-family:monospace;font-size:14px;font-weight:900;color:#4f8ef7;">0</div>
+                            <div style="font-size:8px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.08em;margin-top:3px;">X-COIN</div>
+                        </div>
+                        <div style="text-align:center;padding:8px 4px;background:rgba(255,255,255,0.02);border-radius:8px;border:1px solid rgba(255,255,255,0.05);">
+                            <div id="pd-badges" style="font-family:monospace;font-size:14px;font-weight:900;color:#f5c842;">0</div>
+                            <div style="font-size:8px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.08em;margin-top:3px;">BADGES</div>
+                        </div>
+                        <div style="text-align:center;padding:8px 4px;background:rgba(255,255,255,0.02);border-radius:8px;border:1px solid rgba(255,255,255,0.05);">
+                            <div id="pd-rank" style="font-family:monospace;font-size:14px;font-weight:900;color:#22c55e;">—</div>
+                            <div style="font-size:8px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.08em;margin-top:3px;">RANK</div>
+                        </div>
+                    </div>
+                    <!-- Actions -->
+                    <div style="display:flex;flex-direction:column;gap:6px;margin-top:14px;">
+                        <button onclick="pflxCloseProfileDropdown();pflxOpenPortfolioShortcut();"
+                                style="width:100%;padding:9px 10px;background:rgba(0,240,255,0.08);border:1px solid rgba(0,240,255,0.25);color:#00f0ff;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.06em;border-radius:8px;cursor:pointer;">
+                            VIEW PORTFOLIO
+                        </button>
+                        <button onclick="pflxCloseProfileDropdown();if(typeof window.pflxSignOut==='function')window.pflxSignOut();"
+                                style="width:100%;padding:9px 10px;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.25);color:#ef4444;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.06em;border-radius:8px;cursor:pointer;">
+                            SIGN OUT
+                        </button>
+                    </div>
                 </div>
             </div>
             <div style="position:relative;">
@@ -37445,6 +37492,74 @@ RESPONSE RULES:
                 else if (typeof window.switchToView === 'function') window.switchToView('portfolio');
             } catch (e) { console.warn('[portfolio] shortcut nav failed', e); }
         };
+
+        // ── Quick Profile Dropdown ────────────────────────────────────
+        // Replaces the old "click toolbar avatar → /portfolio" navigation.
+        // Toggles a dropdown anchored to .toolbar-profile showing key player
+        // stats and Sign-Out / View-Portfolio actions. Click outside closes.
+        window.pflxRenderProfileDropdown = function () {
+            try {
+                var s = window.activeSession || {};
+                // Pull canonical record if available (broader data than session cache)
+                var p = null;
+                if (s.id && typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) {
+                    p = PLAYERS.find(function (x) { return x && x.id === s.id; });
+                }
+                var name = (p && (p.brand || p.name)) || s.brand || s.name || 'Player';
+                var role = (p && p.role) || s.role || 'Player';
+                if (typeof role === 'string') role = role.toUpperCase();
+                var avatar = (p && p.image) || s.image || '';
+                var xc = (p && typeof p.xc === 'number') ? p.xc : (s.xc || 0);
+                var bc = (p && p.badgeCounts) || s.badgeCounts || {};
+                var badges = (bc.primary||0)+(bc.premium||0)+(bc.executive||0)+(bc.signature||0);
+                if (!badges && typeof p?.digitalBadges === 'number') badges = p.digitalBadges;
+                var totalXc = (p && typeof p.totalXcoin === 'number') ? p.totalXcoin : xc;
+                var rank = (typeof getRankForXC === 'function') ? getRankForXC(totalXc || 0) : null;
+                var rankLabel = rank ? (rank.name || '—') : '—';
+
+                var nameEl = document.getElementById('pd-name'); if (nameEl) nameEl.textContent = name;
+                var roleEl = document.getElementById('pd-role'); if (roleEl) roleEl.textContent = role;
+                var imgEl = document.getElementById('pd-avatar-img');
+                if (imgEl) {
+                    if (avatar) { imgEl.src = avatar; imgEl.style.display = 'block'; }
+                    else { imgEl.style.display = 'none'; }
+                }
+                var xcEl = document.getElementById('pd-xc'); if (xcEl) xcEl.textContent = (xc || 0).toLocaleString();
+                var bdgEl = document.getElementById('pd-badges'); if (bdgEl) bdgEl.textContent = badges || 0;
+                var rkEl = document.getElementById('pd-rank'); if (rkEl) rkEl.textContent = rankLabel;
+            } catch (e) { console.warn('[profile dropdown] render failed', e); }
+        };
+
+        window.pflxCloseProfileDropdown = function () {
+            var dd = document.getElementById('pflx-profile-dropdown');
+            if (dd) dd.style.display = 'none';
+        };
+
+        window.pflxToggleProfileDropdown = function (ev) {
+            try { if (ev) ev.stopPropagation(); } catch (e) {}
+            var dd = document.getElementById('pflx-profile-dropdown');
+            if (!dd) return;
+            var open = dd.style.display !== 'none';
+            if (open) { dd.style.display = 'none'; return; }
+            window.pflxRenderProfileDropdown();
+            dd.style.display = 'block';
+        };
+
+        // One-time bind: click-outside closes the dropdown.
+        if (!window._pflxProfileOutsideBound) {
+            window._pflxProfileOutsideBound = true;
+            document.addEventListener('click', function (ev) {
+                var dd = document.getElementById('pflx-profile-dropdown');
+                if (!dd || dd.style.display === 'none') return;
+                var anchor = document.getElementById('toolbar-profile');
+                if (anchor && anchor.contains(ev.target)) return;
+                dd.style.display = 'none';
+            });
+            // Escape key also closes
+            document.addEventListener('keydown', function (ev) {
+                if (ev.key === 'Escape') window.pflxCloseProfileDropdown();
+            });
+        }
 
         // ── Upload / change the player's profile image from the portfolio ──
         // Compresses the image (reuses pflxCompressImage so localStorage quota
