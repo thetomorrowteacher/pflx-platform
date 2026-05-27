@@ -18598,6 +18598,23 @@
             return true;
         }
 
+        // Some sibling PFLX apps (e.g. X-Coin) read from unprefixed legacy keys
+        // (DATA_KEYS in pflx-xcoin-check/app/lib/persistence.ts). When MC edits
+        // one of these collections, we shadow-write to the legacy key in
+        // parallel with the canonical pflx_mc_* row, so X-Coin's next boot/
+        // realtime tick sees the fresh values without a manual sync.
+        //
+        // Mapping: MC type → legacy app_data key. The shadow row stores the
+        // RAW items array (no {items, updatedAt} wrapper) because the
+        // consumer apps expect a plain array.
+        var MC_LEGACY_MIRROR = {
+            modifiers: 'modifiers'
+            // future: add other legacy-keyed siblings here as we discover
+            // drift (only when the sibling app doesn't already write its
+            // own copy — coinCategories, startupStudios etc. are owned by
+            // X-Coin so we don't shadow them).
+        };
+
         function _mcCloudFlush() {
             _mcCloudTimer = null;
             var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
@@ -18605,12 +18622,23 @@
             var types = Object.keys(_mcCloudQueue);
             if (!types.length) return;
             var stamp = Date.now();
-            var rows = types.map(function (t) {
-                return {
+            var nowIso = new Date().toISOString();
+            var rows = [];
+            types.forEach(function (t) {
+                // Canonical MC row.
+                rows.push({
                     key: 'pflx_mc_' + t,
                     data: { items: _mcCloudQueue[t], updatedAt: stamp },
-                    updated_at: new Date().toISOString()
-                };
+                    updated_at: nowIso
+                });
+                // Optional shadow-mirror to a legacy key for sibling apps.
+                if (MC_LEGACY_MIRROR[t]) {
+                    rows.push({
+                        key: MC_LEGACY_MIRROR[t],
+                        data: _mcCloudQueue[t],
+                        updated_at: nowIso
+                    });
+                }
             });
             _mcCloudQueue = {};
             client.from('app_data').upsert(rows, { onConflict: 'key' }).then(function (res) {
