@@ -8042,6 +8042,28 @@
                                             </select>
                                         </div>
                                     </div>
+                                    <!-- FLP (Future Learning Protocol) phase + objective. Phase is
+                                         required for new tasks; objective is optional finer crosswalk.
+                                         Phase choice drives objective dropdown via mcTaskOnPhaseChange. -->
+                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(0,212,255,0.7);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;">FLP Phase</label>
+                                            <select id="mc-task-flx-phase" onchange="mcTaskOnPhaseChange()" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(0,212,255,0.25);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                                <option value="">Select phase…</option>
+                                                <option value="engagement">Engagement (Connection)</option>
+                                                <option value="development">Development (Ideation + Creation)</option>
+                                                <option value="enhancement">Enhancement (Reflection)</option>
+                                                <option value="fulfillment">Fulfillment (Production)</option>
+                                                <option value="bypass">— Bypass (no FLP tagging)</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">FLX Objective</label>
+                                            <select id="mc-task-flx-objective" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                                <option value="">— (none)</option>
+                                            </select>
+                                        </div>
+                                    </div>
                                     <div style="margin-bottom:12px;">
                                         <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Description</label>
                                         <textarea id="mc-task-desc" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;min-height:60px;box-sizing:border-box;font-family:'Jura',sans-serif;" placeholder="Description..."></textarea>
@@ -8054,8 +8076,10 @@
                                             </select>
                                         </div>
                                         <div>
-                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">XC Reward</label>
-                                            <input type="number" id="mc-task-xc" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="50" value="50">
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">XC Reward (Base)</label>
+                                            <input type="number" id="mc-task-xc" oninput="mcTaskRecalcRewardTotal()" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="50" value="50">
+                                            <!-- Live total = base XC + sum(checked badge XC). Updates on input/check. -->
+                                            <div id="mc-task-xc-total" style="margin-top:6px;font-size:10px;color:#f5c842;font-weight:700;letter-spacing:0.05em;">TOTAL: 50 XC</div>
                                         </div>
                                         <div>
                                             <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Due Date</label>
@@ -22344,7 +22368,7 @@
                 badgesDiv.innerHTML = allBadges.length === 0 ? '<span style="font-size:11px;color:rgba(255,255,255,0.25);">No badges defined</span>' :
                     allBadges.map(function(b) {
                         return '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;padding:3px 0;">' +
-                            '<input type="checkbox" class="mc-task-badge-cb" value="' + b.id + '"> ' +
+                            '<input type="checkbox" class="mc-task-badge-cb" value="' + b.id + '" data-xc="' + (b.xc || 0) + '" onchange="mcTaskRecalcRewardTotal()"> ' +
                             '<span style="flex:1;">' + escapeHtml(b.name) + '</span>' +
                             '<span style="color:#f5c842;font-weight:700;font-size:11px;">' + (b.xc || 0) + ' XC</span>' +
                             '</label>';
@@ -22375,6 +22399,10 @@
                 var el;
                 el = document.getElementById('mc-task-title'); if (el) el.value = t.title || '';
                 el = document.getElementById('mc-task-category'); if (el) el.value = t.category || '';
+                // FLP fields — phase first (populates objective options), then objective.
+                el = document.getElementById('mc-task-flx-phase'); if (el) el.value = t.flxPhase || '';
+                mcTaskOnPhaseChange();
+                el = document.getElementById('mc-task-flx-objective'); if (el) el.value = t.flxObjective || '';
                 el = document.getElementById('mc-task-desc'); if (el) el.value = t.description || '';
                 el = document.getElementById('mc-task-checkpoint'); if (el) el.value = t.roundId || '';
                 el = document.getElementById('mc-task-xc'); if (el) el.value = t.xcReward || 50;
@@ -22472,7 +22500,12 @@
                 el = document.getElementById('mc-task-session-code'); if (el) el.value = '';
                 el = document.getElementById('mc-task-dc-channel'); if (el) el.checked = true;
                 el = document.getElementById('mc-task-xbot-enabled'); if (el) el.checked = true;
+                // Reset FLP fields for new task
+                el = document.getElementById('mc-task-flx-phase'); if (el) el.value = '';
+                mcTaskOnPhaseChange();
             }
+            // Recompute the live XC total (base + selected badges) after every load/reset
+            try { mcTaskRecalcRewardTotal(); } catch (e) {}
             form.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
 
@@ -22481,6 +22514,75 @@
             if (form) form.style.display = 'none';
             mcTaskEditIndex = -1;
         }
+
+        // ── Future Learning Protocol — objectives grouped by phase ─────────
+        // Used to populate the FLX Objective dropdown when a phase is picked
+        // in the task edit form. Source of truth: docs/MODULE_STRUCTURE.md §3.
+        var PFLX_FLX_OBJECTIVES = {
+            engagement: [
+                { code: 'FLX.CN.1', label: 'Use empathetic understanding to inform and shape solution development.' },
+                { code: 'FLX.CN.2', label: 'Generate and communicate precise questions to define the problem.' },
+                { code: 'FLX.CN.3', label: 'Research relevant information across cultural, societal, and environmental contexts.' }
+            ],
+            development: [
+                { code: 'FLX.ID.1', label: 'Engage in divergent thinking; brainstorm a broad range of solutions.' },
+                { code: 'FLX.ID.2', label: 'Collaborate with partners and stakeholders to clarify and ideate.' },
+                { code: 'FLX.ID.3', label: 'Develop and organize a clear, detailed plan of execution.' },
+                { code: 'FLX.CR.1', label: 'Construct physical or digital representations of multiple solutions.' },
+                { code: 'FLX.CR.2', label: 'Develop and leverage skills in various prototyping methods and tools.' },
+                { code: 'FLX.CR.3', label: 'Iterate and improve on prototypes based on feedback and self-reflection.' }
+            ],
+            enhancement: [
+                { code: 'FLX.RE.1', label: 'Conduct comprehensive testing; gather feedback and self-evaluation.' },
+                { code: 'FLX.RE.2', label: 'Refine and improve the solution based on feedback and testing.' },
+                { code: 'FLX.RE.3', label: 'Showcase a reflective understanding of the learning process.' }
+            ],
+            fulfillment: [
+                { code: 'FLX.PR.1', label: 'Complete the final solution for real-world implementation on a timeline.' },
+                { code: 'FLX.PR.2', label: 'Develop and execute a presentation method showing concept-to-product.' },
+                { code: 'FLX.PR.3', label: 'Determine and manage financial implications and marketing strategy.' }
+            ]
+        };
+        window.PFLX_FLX_OBJECTIVES = PFLX_FLX_OBJECTIVES;
+
+        // Repopulate the objective dropdown based on the selected phase. Preserves
+        // the currently-selected objective if it still belongs to the new phase.
+        function mcTaskOnPhaseChange() {
+            var phase = (document.getElementById('mc-task-flx-phase') || {}).value || '';
+            var objSel = document.getElementById('mc-task-flx-objective');
+            if (!objSel) return;
+            var current = objSel.value;
+            var opts = ['<option value="">— (none)</option>'];
+            (PFLX_FLX_OBJECTIVES[phase] || []).forEach(function (o) {
+                opts.push('<option value="' + o.code + '" title="' + escapeHtml(o.label) + '">' + o.code + ' — ' + escapeHtml(o.label.length > 60 ? o.label.slice(0, 57) + '…' : o.label) + '</option>');
+            });
+            objSel.innerHTML = opts.join('');
+            // Restore prior selection if it's still valid for the new phase
+            if (current && (PFLX_FLX_OBJECTIVES[phase] || []).some(function (o) { return o.code === current; })) {
+                objSel.value = current;
+            }
+        }
+        window.mcTaskOnPhaseChange = mcTaskOnPhaseChange;
+
+        // ── Task Reward Total ──────────────────────────────────────────────
+        // The task's reward XC is the BASE XC (mc-task-xc) PLUS the sum of XC
+        // values on every currently-checked digital badge. Updates live as
+        // host edits base XC or toggles badges. Read at save time via the same
+        // helper so the persisted task.totalXc matches what the host saw.
+        function mcTaskRecalcRewardTotal() {
+            var base = parseInt((document.getElementById('mc-task-xc') || {}).value, 10) || 0;
+            var badgeXc = 0;
+            document.querySelectorAll('.mc-task-badge-cb:checked').forEach(function (cb) {
+                badgeXc += parseInt(cb.getAttribute('data-xc') || '0', 10) || 0;
+            });
+            var total = base + badgeXc;
+            var el = document.getElementById('mc-task-xc-total');
+            if (el) {
+                el.textContent = 'TOTAL: ' + total.toLocaleString() + ' XC' + (badgeXc > 0 ? '  (' + base + ' base + ' + badgeXc + ' from badges)' : '');
+            }
+            return { base: base, badges: badgeXc, total: total };
+        }
+        window.mcTaskRecalcRewardTotal = mcTaskRecalcRewardTotal;
 
         function mcSaveTaskForm() {
             var title = (document.getElementById('mc-task-title')?.value || '').trim();
@@ -22498,6 +22600,15 @@
                 title: title,
                 description: document.getElementById('mc-task-desc')?.value || '',
                 category: document.getElementById('mc-task-category')?.value || '',
+                // FLP framework tagging — phase is the FLP strand the task lives in.
+                // 'bypass' explicitly opts out of FLP grouping (UI shows in "Bypass" bucket).
+                // Empty string = untagged (UI shows in "Uncategorized" until host tags).
+                // flxObjective is optional fine-grained crosswalk per MODULE_STRUCTURE §3.
+                flxPhase: document.getElementById('mc-task-flx-phase')?.value || '',
+                flxObjective: document.getElementById('mc-task-flx-objective')?.value || '',
+                // Live total XC = base + sum(checked badge XC). Stored at save time
+                // so list views can render the full reward without re-summing.
+                totalXc: (function () { try { return mcTaskRecalcRewardTotal().total; } catch (e) { return 0; } })(),
                 roundId: document.getElementById('mc-task-checkpoint')?.value || '',
                 xcReward: parseInt(document.getElementById('mc-task-xc')?.value || '50', 10),
                 dueDate: document.getElementById('mc-task-due')?.value || '',
