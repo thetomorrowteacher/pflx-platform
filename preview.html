@@ -7601,6 +7601,16 @@
                                     <div id="pflx-dc-board-body" style="padding:6px;display:flex;flex-direction:column;gap:6px;max-height:240px;overflow-y:auto;"></div>
                                 </div>
                                 <div class="mc-stat-grid" id="mc-dashboard-stats"></div>
+                                <!-- Cloud Save Rollout widget — fed live by pflxRenderCloudRolloutWidget -->
+                                <div class="mc-card" id="mc-cloud-rollout-card">
+                                    <div class="mc-card-title" style="display:flex;align-items:center;justify-content:space-between;">
+                                        <span>☁ CLOUD SAVE ROLLOUT</span>
+                                        <button onclick="pflxRenderCloudRolloutWidget(true)" title="Refresh now" style="background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.3);color:#00d4ff;font-size:10px;padding:3px 10px;border-radius:6px;cursor:pointer;font-family:'Share Tech Mono',monospace;letter-spacing:0.04em;">REFRESH</button>
+                                    </div>
+                                    <div id="mc-cloud-rollout-body" style="padding:6px 4px;">
+                                        <div style="padding:14px;text-align:center;color:rgba(255,255,255,0.4);font-size:12px;">Loading…</div>
+                                    </div>
+                                </div>
                                 <div class="mc-card">
                                     <div class="mc-card-title">RECENT ACTIVITY</div>
                                     <div id="mc-activity-feed" style="display:flex;flex-direction:column;gap:8px;max-height:300px;overflow-y:auto;"></div>
@@ -46098,6 +46108,96 @@ RESPONSE RULES:
             // boot-time Supabase work.
             setTimeout(function () { try { pflxLoadCloudSavesGlobal(); } catch (e) {} }, 800);
         })();
+
+        // ── Cloud Save Rollout widget ─────────────────────────────────────
+        // Aggregates module_saves rows: total count, unique players, unique
+        // modules touched, last 24h activity, and a per-tier breakdown.
+        // Cached for 60s so toggling between MC views doesn't hammer the API.
+        var __cloudRolloutCache = { ts: 0, data: null };
+        window.pflxRenderCloudRolloutWidget = function (force) {
+            var body = document.getElementById('mc-cloud-rollout-body');
+            if (!body) return;
+            var now = Date.now();
+            if (!force && __cloudRolloutCache.data && (now - __cloudRolloutCache.ts) < 60000) {
+                _paintRollout(__cloudRolloutCache.data);
+                return;
+            }
+            body.innerHTML = '<div style="padding:14px;text-align:center;color:rgba(255,255,255,0.4);font-size:12px;">⏳ Fetching rollout stats…</div>';
+            var sb = (typeof pflxSupabase === 'function') ? pflxSupabase() : null;
+            if (!sb) {
+                body.innerHTML = '<div style="padding:14px;text-align:center;color:#ef4444;font-size:11px;">Cloud client unavailable</div>';
+                return;
+            }
+            sb.from('module_saves')
+                .select('player_id, module_id, node_id, tier, updated_at')
+                .limit(2000)
+                .then(function (res) {
+                    if (res && res.error) {
+                        body.innerHTML = '<div style="padding:14px;text-align:center;color:#ef4444;font-size:11px;">Fetch error: ' + escapeHtml(res.error.message || '?') + '</div>';
+                        return;
+                    }
+                    var rows = (res && res.data) || [];
+                    var data = _aggregateRollout(rows);
+                    __cloudRolloutCache = { ts: now, data: data };
+                    _paintRollout(data);
+                });
+        };
+
+        function _aggregateRollout(rows) {
+            var dayAgo = Date.now() - 86400000;
+            var totals = { total: rows.length, players: new Set(), modules: new Set(), last24h: 0, tiers: { starter:0, novice:0, pro:0 } };
+            rows.forEach(function (r) {
+                if (r.player_id) totals.players.add(r.player_id);
+                if (r.module_id) totals.modules.add(r.module_id);
+                if (r.tier && totals.tiers[r.tier] !== undefined) totals.tiers[r.tier]++;
+                if (r.updated_at && new Date(r.updated_at).getTime() >= dayAgo) totals.last24h++;
+            });
+            return {
+                total: totals.total,
+                players: totals.players.size,
+                modules: totals.modules.size,
+                last24h: totals.last24h,
+                tiers: totals.tiers
+            };
+        }
+
+        function _paintRollout(d) {
+            var body = document.getElementById('mc-cloud-rollout-body');
+            if (!body) return;
+            function stat(label, val, color) {
+                return '<div style="text-align:center;padding:10px 6px;background:rgba(' + color + ',0.05);border:1px solid rgba(' + color + ',0.2);border-radius:8px;">' +
+                    '<div style="font-family:monospace;font-size:18px;font-weight:900;color:rgb(' + color + ');">' + val.toLocaleString() + '</div>' +
+                    '<div style="font-size:9px;font-weight:700;color:rgba(255,255,255,0.45);letter-spacing:0.08em;text-transform:uppercase;margin-top:3px;">' + label + '</div>' +
+                '</div>';
+            }
+            var tierBars = '';
+            var maxTier = Math.max(d.tiers.starter, d.tiers.novice, d.tiers.pro, 1);
+            ['starter','novice','pro'].forEach(function (t) {
+                var m = pflxTierMeta(t);
+                var pct = Math.round(d.tiers[t] / maxTier * 100);
+                tierBars += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">' +
+                    '<div style="width:70px;">' + pflxTierPillHTML(t) + '</div>' +
+                    '<div style="flex:1;height:8px;background:rgba(255,255,255,0.04);border-radius:4px;overflow:hidden;"><div style="width:' + pct + '%;height:100%;background:rgb(' + m.rgb + ');border-radius:4px;"></div></div>' +
+                    '<div style="font-family:monospace;font-size:11px;color:rgb(' + m.rgb + ');font-weight:700;min-width:28px;text-align:right;">' + d.tiers[t] + '</div>' +
+                '</div>';
+            });
+            body.innerHTML =
+                '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;">' +
+                    stat('TOTAL SLOTS', d.total, '0,212,255') +
+                    stat('PLAYERS',     d.players, '167,139,250') +
+                    stat('MODULES',     d.modules, '245,200,66') +
+                    stat('LAST 24H',    d.last24h, '34,197,94') +
+                '</div>' +
+                '<div style="font-family:Orbitron,sans-serif;font-size:10px;font-weight:800;color:rgba(255,255,255,0.5);letter-spacing:0.12em;margin-bottom:8px;">BY TIER</div>' +
+                tierBars +
+                (d.total === 0
+                    ? '<div style="padding:10px;text-align:center;color:rgba(255,255,255,0.35);font-size:11px;font-style:italic;margin-top:6px;">No cloud saves yet — enable in Platform Settings or add ?cloudSaves=1 to pathway URLs.</div>'
+                    : '');
+        }
+
+        // Initial render — fires on load + lazy refresh whenever the home
+        // dashboard becomes visible.
+        setTimeout(function () { try { pflxRenderCloudRolloutWidget(); } catch (e) {} }, 1500);
 
         // ── Host: change a player's tier ──────────────────────────────────
         // Prompt the host to pick a new tier for the player, append to
