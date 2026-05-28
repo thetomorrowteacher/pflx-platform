@@ -10141,6 +10141,36 @@
                                             <span class="toggle-slider"></span>
                                         </label>
                                     </div>
+                                    <div class="cohort-toggle-row">
+                                        <div class="cohort-toggle-app">
+                                            <span style="font-size:18px;">🎨</span>
+                                            <span>My Portfolio Development</span>
+                                        </div>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="cohort-app-portfolio" onchange="updateCohortApp('portfolio', this.checked)">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                    <div class="cohort-toggle-row">
+                                        <div class="cohort-toggle-app">
+                                            <span style="font-size:18px;">🤖</span>
+                                            <span>AI Center</span>
+                                        </div>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="cohort-app-ai-center" onchange="updateCohortApp('ai-center', this.checked)">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                    <div class="cohort-toggle-row">
+                                        <div class="cohort-toggle-app">
+                                            <img src="public/Mission Control Icon.png" class="cohort-app-icon" alt="MC" onerror="this.style.display='none'">
+                                            <span>Mission Control</span>
+                                        </div>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="cohort-app-mission-control" onchange="updateCohortApp('mission-control', this.checked)">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
                                 </div>
                             </div>
 
@@ -13134,6 +13164,24 @@
         function buildAppURL(appKey) {
             if (!activeSession) return APP_BASE_URLS[appKey] || '#';
             const base = APP_BASE_URLS[appKey];
+            // Resolve the player's tier (URL → localStorage → 'novice') and
+            // the comma-separated list of apps the player is allowed into.
+            // Sub-apps read these from the SSO URL to (a) render with the
+            // right tier-aware content and (b) self-block if a host toggled
+            // access off after they signed in.
+            var tier = 'novice';
+            try {
+                var stored = localStorage.getItem('pflx_player_tier');
+                if (stored === 'starter' || stored === 'novice' || stored === 'pro') tier = stored;
+            } catch (e) {}
+            var allowedApps = [];
+            try {
+                ['xcoin','pathways','arena','darkcampus','portfolio','ai-center','mission-control'].forEach(function (k) {
+                    if (typeof pflxPlayerCanAccessApp !== 'function' || pflxPlayerCanAccessApp(k)) {
+                        allowedApps.push(k);
+                    }
+                });
+            } catch (e) {}
             const params = new URLSearchParams({
                 sso: 'pflx',
                 user: activeSession.name,
@@ -13142,10 +13190,32 @@
                 pin: activeSession.pin,
                 role: activeSession.role || 'Student',
                 cohort: activeSession.cohort || 'PlayerPool',
+                tier: tier,
+                allowedApps: allowedApps.join(','),
                 autoselect: 'true'  // Auto-select this player in the sub-app, PIN-only entry
             });
             return `${base}?${params.toString()}`;
         }
+
+        // Broadcast access-revocation to all live iframes when a host toggles
+        // an app off mid-session. The iframe app should listen for this and
+        // render its own access-denied screen if its app key is targeted.
+        function pflxBroadcastAccessChange(appKey, allowed) {
+            try {
+                var iframes = document.querySelectorAll('iframe[data-app]');
+                iframes.forEach(function (f) {
+                    try {
+                        f.contentWindow.postMessage({
+                            type: 'pflx_access_change',
+                            app: appKey,
+                            allowed: !!allowed,
+                            ts: Date.now()
+                        }, '*');
+                    } catch (e) {}
+                });
+            } catch (e) {}
+        }
+        window.pflxBroadcastAccessChange = pflxBroadcastAccessChange;
 
         // Convenience — returns all URLs for current session
         function getAppURLs() {
@@ -15355,11 +15425,16 @@
             document.getElementById('cohort-stat-claimed').textContent = members.filter(p => p.claimed).length;
             document.getElementById('cohort-stat-pending').textContent = members.filter(p => !p.claimed).length;
 
-            // App toggles
+            // App toggles. Defaults to TRUE for the new apps so existing
+            // cohorts don't suddenly lose access when they upgrade. Hosts
+            // can explicitly flip any of them off.
             document.getElementById('cohort-app-xcoin').checked = c.apps.xcoin;
             document.getElementById('cohort-app-pathways').checked = c.apps.pathways;
             document.getElementById('cohort-app-arena').checked = c.apps.arena;
             document.getElementById('cohort-app-darkcampus').checked = c.apps.darkcampus;
+            document.getElementById('cohort-app-portfolio').checked = c.apps.portfolio !== false;
+            document.getElementById('cohort-app-ai-center').checked = c.apps['ai-center'] !== false;
+            document.getElementById('cohort-app-mission-control').checked = c.apps['mission-control'] !== false;
 
             // Feature toggles — set defaults if not yet defined
             const defaults = { pathwayFull: true, pathwaySubmit: true, pathwayLeaderboard: true, arenaFull: true, arenaWager: true, arenaTournament: true, specialChallenges: false, sponsoredProjects: false, internships: false, exclusiveRewards: false };
@@ -15392,6 +15467,11 @@
             // Refresh feature groups visibility
             if (app === 'pathways') document.getElementById('feature-group-pathways').style.display = val ? 'block' : 'none';
             if (app === 'arena') document.getElementById('feature-group-arena').style.display = val ? 'block' : 'none';
+            // Push the change to any live iframes so the sub-app can self-
+            // block immediately if a player is currently inside. Sub-app
+            // listens for pflx_access_change and either redirects home or
+            // renders its own Access Denied panel.
+            try { pflxBroadcastAccessChange(app, !!val); } catch (e) {}
         }
 
         function updateCohortFeature(feat, val) {
@@ -15516,25 +15596,25 @@
                 var s = window.activeSession || {};
                 var cohorts = Array.isArray(s.cohorts) ? s.cohorts.join(', ') : (s.cohort || 'PlayerPool');
 
-                var icons = { xcoin: '⚡', pathways: '🛰️', arena: '⚔️', darkcampus: '🌑' };
+                var icons = { xcoin: '⚡', pathways: '🛰️', arena: '⚔️', darkcampus: '🌑', portfolio: '🎨', 'ai-center': '🤖', 'mission-control': '🛰️' };
                 var icon = icons[appKey] || '🔒';
 
                 var overlay = document.createElement('div');
                 overlay.id = 'pflx-access-locked-modal';
-                overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.78);display:flex;align-items:center;justify-content:center;z-index:10000;backdrop-filter:blur(6px);';
+                overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);display:flex;align-items:center;justify-content:center;z-index:100000;backdrop-filter:blur(8px);';
                 overlay.innerHTML =
-                    '<div style="background:#12121c;border:1px solid rgba(239,68,68,0.35);border-radius:18px;padding:30px;max-width:460px;width:90%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.5);">' +
-                        '<div style="font-size:46px;line-height:1;margin-bottom:8px;">' + icon + '</div>' +
-                        '<div style="font-size:11px;font-weight:800;letter-spacing:0.18em;color:#ef4444;text-transform:uppercase;margin-bottom:6px;">🔒 ACCESS LOCKED</div>' +
-                        '<h3 style="color:#fff;margin:0 0 10px;font-size:20px;font-family:\'Orbitron\',sans-serif;letter-spacing:0.04em;">' + escapeHtml(appLabel || appKey) + ' is restricted</h3>' +
-                        '<p style="color:rgba(255,255,255,0.55);font-size:13px;line-height:1.6;margin:0 0 18px;font-family:\'Jura\',sans-serif;">' +
-                            'Your cohort access settings don\'t include ' + escapeHtml(appLabel || appKey) + ' right now. ' +
-                            'Ask your host to enable this app for your cohort in <b style="color:#00d4ff;">Settings → Cohort Manager</b>.' +
-                        '</p>' +
-                        '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px 14px;margin-bottom:18px;font-size:11px;color:rgba(255,255,255,0.5);font-family:\'Share Tech Mono\',monospace;letter-spacing:0.05em;">' +
-                            'Your cohorts: ' + escapeHtml(String(cohorts)) +
+                    '<div style="background:linear-gradient(180deg,#12121c,#0a0a14);border:1px solid rgba(239,68,68,0.45);border-radius:18px;padding:36px 30px;max-width:480px;width:90%;text-align:center;box-shadow:0 24px 80px rgba(0,0,0,0.65), 0 0 60px rgba(239,68,68,0.15);">' +
+                        '<div style="font-size:54px;line-height:1;margin-bottom:10px;">' + icon + '</div>' +
+                        '<h2 style="color:#ef4444;margin:0 0 8px;font-size:24px;font-family:\'Orbitron\',sans-serif;letter-spacing:0.08em;text-shadow:0 0 18px rgba(239,68,68,0.5);">ACCESS DENIED</h2>' +
+                        '<p style="color:rgba(255,255,255,0.78);font-size:14px;line-height:1.65;margin:0 0 8px;font-family:\'Jura\',sans-serif;font-weight:500;">contact your Instructional Coach, Cohort Lead, or PFLX Host for support!</p>' +
+                        '<div style="margin:18px 0 16px;padding:10px 14px;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.18);border-radius:10px;font-size:11px;color:rgba(255,255,255,0.55);font-family:\'Share Tech Mono\',monospace;letter-spacing:0.06em;">' +
+                            '<div style="margin-bottom:4px;color:rgba(239,68,68,0.85);font-weight:700;">RESTRICTED APP</div>' +
+                            escapeHtml(appLabel || appKey) +
                         '</div>' +
-                        '<button onclick="document.getElementById(\'pflx-access-locked-modal\').remove();" style="padding:10px 24px;background:linear-gradient(135deg,#00d4ff,#7c3aed);color:#fff;border:none;border-radius:10px;font-family:\'Share Tech Mono\',monospace;font-size:12px;font-weight:800;letter-spacing:0.06em;cursor:pointer;">UNDERSTOOD</button>' +
+                        '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px 12px;margin-bottom:20px;font-size:10px;color:rgba(255,255,255,0.4);font-family:\'Share Tech Mono\',monospace;letter-spacing:0.05em;">' +
+                            'Cohort: ' + escapeHtml(String(cohorts)) +
+                        '</div>' +
+                        '<button onclick="document.getElementById(\'pflx-access-locked-modal\').remove();" style="padding:11px 28px;background:linear-gradient(135deg,rgba(239,68,68,0.25),rgba(167,139,250,0.2));color:#fff;border:1px solid rgba(239,68,68,0.4);border-radius:10px;font-family:\'Orbitron\',sans-serif;font-size:12px;font-weight:800;letter-spacing:0.12em;cursor:pointer;">UNDERSTOOD</button>' +
                     '</div>';
                 overlay.onclick = function (ev) { if (ev.target === overlay) overlay.remove(); };
                 document.body.appendChild(overlay);
@@ -17961,7 +18041,19 @@
             // exists) but tapping a locked one shows an "Access Locked"
             // modal explaining the host can grant access.
             try {
-                var gatedApps = { xcoin: 'X-Coin', pathways: 'Core Pathways', arena: 'Battle Arena', darkcampus: 'DarkCampus' };
+                // Per spec: every player-facing app participates in the gate.
+                // Home is always reachable so a denied player can never get
+                // stranded outside the platform. Settings stays reachable so
+                // they can see their cohort assignment.
+                var gatedApps = {
+                    'xcoin': 'X-Coin',
+                    'pathways': 'Core Pathways',
+                    'arena': 'Battle Arena',
+                    'darkcampus': 'DarkCampus',
+                    'portfolio': 'My Portfolio Development',
+                    'ai-center': 'AI Center',
+                    'mission-control': 'Mission Control'
+                };
                 if (gatedApps[viewName] && typeof pflxPlayerCanAccessApp === 'function' && !pflxPlayerCanAccessApp(viewName)) {
                     pflxShowAccessLocked(viewName, gatedApps[viewName]);
                     return;
