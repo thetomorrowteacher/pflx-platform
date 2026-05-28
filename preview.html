@@ -8395,6 +8395,17 @@
                                         <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Description</label>
                                         <textarea id="mc-project-desc" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;min-height:60px;box-sizing:border-box;font-family:'Jura',sans-serif;" placeholder="Description..."></textarea>
                                     </div>
+                                    <!-- Subtask checklist: host adds checklist items, each with label + optional URL.
+                                         Player ticks them off on the card. Mirrors the Task subtask pattern.
+                                         Schema: project.subtasks = [{id,label,link,completed,completedAt,completedBy}]. -->
+                                    <div style="margin-bottom:12px;padding:14px;background:rgba(10,18,40,0.35);border:1px solid rgba(255,255,255,0.06);border-radius:10px;">
+                                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                                            <label style="font-size:11px;color:rgba(0,212,255,0.85);text-transform:uppercase;letter-spacing:0.06em;font-weight:700;">Subtasks (Checklist)</label>
+                                            <button type="button" class="mc-btn" style="padding:4px 10px;font-size:11px;background:rgba(0,212,255,0.12);color:#00d4ff;border:1px solid rgba(0,212,255,0.4);" onclick="mcAddProjectSubtaskRow()">+ Add Item</button>
+                                        </div>
+                                        <div id="mc-project-subtasks-list" style="display:flex;flex-direction:column;gap:6px;"></div>
+                                        <div id="mc-project-subtasks-empty" style="font-size:11px;color:rgba(255,255,255,0.3);text-align:center;padding:8px;font-style:italic;">No checklist items yet — click <strong>+ Add Item</strong> to break this project into steps.</div>
+                                    </div>
                                     <!-- Same Tracking Mode pattern as Tasks. Monitored projects move through
                                          the four FLP phases over their duration (Engagement → Development →
                                          Enhancement → Fulfillment) and surface urgency colors in list views. -->
@@ -22280,6 +22291,20 @@
                     (t.status === 'approved'
                         ? '<div style="padding:6px 12px;font-size:11px;background:rgba(34,197,94,0.05);color:#22c55e;border:1px dashed rgba(34,197,94,0.35);border-radius:8px;flex:1;min-width:90px;text-align:center;letter-spacing:0.04em;font-weight:700;">✓ COMPLETED</div>'
                         : '') +
+                    // Convert-to-Job — only shown if the current viewer is
+                    // permitted (role-based admin OR Manager+ on a team project).
+                    // If the task was already converted, we show a tagged label
+                    // instead of the button so the host can see the link.
+                    (function () {
+                        if (t.convertedToJobId) {
+                            return '<div style="padding:6px 12px;font-size:11px;background:rgba(245,200,66,0.08);color:#f5c842;border:1px dashed rgba(245,200,66,0.35);border-radius:8px;flex:1;min-width:100px;text-align:center;letter-spacing:0.03em;font-weight:700;" title="Already posted as Job ' + escapeHtml(String(t.convertedToJobId)) + '">📌 POSTED AS JOB</div>';
+                        }
+                        try {
+                            var perm = (typeof pflxCanConvertTaskToJob === 'function') ? pflxCanConvertTaskToJob(t) : { allowed: false };
+                            if (!perm.allowed) return '';
+                            return '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(245,200,66,0.12);color:#f5c842;border:1px solid rgba(245,200,66,0.4);border-radius:8px;cursor:pointer;flex:1;min-width:100px;font-weight:700;" onclick="pflxConvertTaskToJobUI(' + JSON.stringify(t.id) + ')" title="Post this task to the Job Board for hire">📋 Convert to Job</button>';
+                        } catch (e) { return ''; }
+                    })() +
                     '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:60px;" onclick="mcEditTask(' + realIndex + ')">Edit</button>' +
                     '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:60px;" onclick="mcDeleteTask(' + realIndex + ')">Delete</button>' +
                     '</div>' +
@@ -23379,6 +23404,215 @@
             return false;
         };
 
+        // ── Project Subtask Editor (host side) ────────────────────────────
+        // Mirrors the Task subtask editor — same {id,label,link,completed}
+        // schema, same row markup, same id-stable completion preservation on
+        // save. Kept as a separate set of functions so the two forms can be
+        // open in parallel without DOM id collisions.
+        function _mcRenderProjectSubtaskEditorRows(subtasks) {
+            var host = document.getElementById('mc-project-subtasks-list');
+            var empty = document.getElementById('mc-project-subtasks-empty');
+            if (!host) return;
+            subtasks = subtasks || [];
+            if (subtasks.length === 0) {
+                host.innerHTML = '';
+                if (empty) empty.style.display = 'block';
+                return;
+            }
+            if (empty) empty.style.display = 'none';
+            host.innerHTML = subtasks.map(function (s, i) {
+                var sid = (s.id || ('pst-' + Date.now() + '-' + i)).replace(/"/g, '');
+                return '<div class="mc-project-subtask-row" data-sid="' + escapeHtml(sid) + '" style="display:grid;grid-template-columns:1fr 1fr auto;gap:6px;align-items:center;">' +
+                    '<input type="text" class="mc-project-subtask-label" data-sid="' + escapeHtml(sid) + '" placeholder="Step label" value="' + escapeHtml(s.label || '') + '" style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px 8px;border-radius:5px;font-size:12px;">' +
+                    '<input type="url" class="mc-project-subtask-link" data-sid="' + escapeHtml(sid) + '" placeholder="Optional link (https://…)" value="' + escapeHtml(s.link || '') + '" style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px 8px;border-radius:5px;font-size:12px;">' +
+                    '<button type="button" class="mc-btn" style="padding:6px 10px;font-size:11px;background:rgba(239,68,68,0.10);color:#ef4444;border:1px solid rgba(239,68,68,0.35);" onclick="mcRemoveProjectSubtaskRow(' + JSON.stringify(sid) + ')">✕</button>' +
+                '</div>';
+            }).join('');
+        }
+
+        function _mcReadProjectSubtaskRows() {
+            var out = [];
+            document.querySelectorAll('#mc-project-subtasks-list .mc-project-subtask-row').forEach(function (row) {
+                var sid = row.getAttribute('data-sid');
+                var labelEl = row.querySelector('.mc-project-subtask-label');
+                var linkEl  = row.querySelector('.mc-project-subtask-link');
+                var label = (labelEl ? labelEl.value : '').trim();
+                if (!label) return; // skip empty rows
+                out.push({
+                    id: sid,
+                    label: label,
+                    link: (linkEl ? linkEl.value : '').trim(),
+                    // completed state is re-merged in mcSaveProjectForm so
+                    // player ticks aren't reset on edit.
+                    completed: false
+                });
+            });
+            return out;
+        }
+
+        window.mcAddProjectSubtaskRow = function () {
+            var current = _mcReadProjectSubtaskRows();
+            current.push({ id: 'pst-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5), label: '', link: '', completed: false });
+            _mcRenderProjectSubtaskEditorRows(current);
+            var rows = document.querySelectorAll('#mc-project-subtasks-list .mc-project-subtask-label');
+            if (rows.length) rows[rows.length - 1].focus();
+        };
+
+        window.mcRemoveProjectSubtaskRow = function (sid) {
+            var current = _mcReadProjectSubtaskRows().filter(function (s) { return s.id !== sid; });
+            _mcRenderProjectSubtaskEditorRows(current);
+        };
+
+        // ── Task ↔ Job Conversion (with role/rank gating) ─────────────────
+        // Who can convert a task into a Job Board posting?
+        //   1. Role-based admins: master host, host, instructor, coach, teacher.
+        //      Always allowed — they own the job board for the cohort.
+        //   2. Rank-based: Evo rank Manager (level 4) or higher — but ONLY when
+        //      the task belongs to a project tagged as co-op or team. (Team is
+        //      inferred from p.coopMode === 'coop' OR p.team.length > 0.) This
+        //      matches the "project admin controls" pattern: a senior player
+        //      inside a team-style project can break work out as a hireable job
+        //      for someone else in the cohort to pick up.
+        //
+        // Returns { allowed, reason, project } so callers can render a tooltip
+        // explaining why a button is hidden / disabled.
+        function _pflxFindProjectForTask(taskId) {
+            if (!Array.isArray(mcProjects)) return null;
+            for (var i = 0; i < mcProjects.length; i++) {
+                var p = mcProjects[i];
+                if (Array.isArray(p.taskIds) && p.taskIds.indexOf(taskId) !== -1) return p;
+            }
+            return null;
+        }
+
+        window.pflxCanConvertTaskToJob = function (task) {
+            if (!task) return { allowed: false, reason: 'No task' };
+            // Role-based check first — these roles can always convert.
+            var roleStr = String((window.activeSession && activeSession.role) || '').toLowerCase();
+            var isStaff = /master|admin|host|teacher|instructor|coach/.test(roleStr) || window.pflxRole === 'host';
+            var project = _pflxFindProjectForTask(task.id);
+            if (isStaff) {
+                return { allowed: true, reason: 'staff', project: project };
+            }
+            // Rank-based check — Manager (4) or higher, AND the task lives in a
+            // co-op / team project.
+            var level = (typeof getPlayerLevel === 'function') ? getPlayerLevel() : 1;
+            if (level < 4) {
+                return { allowed: false, reason: 'Requires Manager rank or higher', project: project };
+            }
+            if (!project) {
+                return { allowed: false, reason: 'Task is not part of a project', project: null };
+            }
+            var isTeam = project.coopMode === 'coop' || (Array.isArray(project.team) && project.team.length > 0);
+            if (!isTeam) {
+                return { allowed: false, reason: 'Project must be tagged co-op or team', project: project };
+            }
+            return { allowed: true, reason: 'rank+team-project', project: project };
+        };
+
+        // Convert a task into a Job Board entry. The new job links back to the
+        // source task via job.sourceTaskId; the task gets job.id stored on
+        // task.convertedToJobId so the round-trip (when a player is hired) can
+        // re-link the auto-created task back. Both records are persisted +
+        // re-rendered. Returns the new job, or null on failure.
+        window.pflxConvertTaskToJob = function (taskId) {
+            if (!Array.isArray(mcTasks)) return null;
+            var task = null, taskIndex = -1;
+            for (var i = 0; i < mcTasks.length; i++) {
+                if (mcTasks[i].id === taskId) { task = mcTasks[i]; taskIndex = i; break; }
+            }
+            if (!task) { try { pflxPlaySfx('error'); } catch (e) {} alert('Task not found.'); return null; }
+            var perm = pflxCanConvertTaskToJob(task);
+            if (!perm.allowed) {
+                try { pflxPlaySfx('error'); } catch (e) {}
+                alert('You can\'t convert this task: ' + perm.reason);
+                return null;
+            }
+            if (task.convertedToJobId) {
+                if (!confirm('This task was already converted to a job. Create a duplicate posting?')) return null;
+            }
+            // Build the job record, mirroring the existing mcSaveJobForm schema.
+            var nowIso = new Date().toISOString().split('T')[0];
+            var jobId = 'job-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+            var project = perm.project;
+            var newJob = {
+                id: jobId,
+                title: task.title || 'Untitled job',
+                description: task.description || '',
+                xcReward: task.totalXc || task.xcReward || 0,
+                slots: 1,
+                status: 'Open',
+                checkpoint: task.roundId || (project ? project.checkpointId : '') || '',
+                startDate: nowIso,
+                endDate: task.dueDate || '',
+                cohorts: project && Array.isArray(project.cohortIds) ? project.cohortIds.slice() : [],
+                claimedBy: '',
+                applicants: [],
+                hired: [],
+                generatedProjectId: project ? project.id : '',
+                // Provenance: how the round trip happens. When a player is hired
+                // for this job, the existing auto-create path in mcSaveJobForm
+                // will spawn a task; we tag that task with backFromJobId so we
+                // can recognize it later.
+                sourceTaskId: task.id,
+                sourceProjectId: project ? project.id : '',
+                convertedBy: (window.activeSession && (activeSession.brand || activeSession.name)) || 'unknown',
+                convertedAt: Date.now(),
+                createdAt: nowIso
+            };
+            mcJobs.push(newJob);
+            // Tag the source task so the UI can show it as "posted as job" and
+            // we avoid double-conversion. The task itself stays in place — host
+            // can decide whether to keep it or delete after hiring.
+            task.convertedToJobId = jobId;
+            task.convertedAt = Date.now();
+            try {
+                mcSaveData('jobs');
+                mcSaveData('tasks');
+            } catch (e) {}
+            try { pflxPlaySfx('save'); } catch (e) {}
+            try { if (typeof mcRenderTasks === 'function') mcRenderTasks(); } catch (e) {}
+            try { if (typeof mcRenderJobs === 'function') mcRenderJobs(); } catch (e) {}
+            try {
+                if (typeof pflxSyncBus !== 'undefined') {
+                    pflxSyncBus.publish('mc:jobs', { action: 'create', job: newJob, fromTask: task.id });
+                }
+            } catch (e) {}
+            try { mcBroadcastToApps && mcBroadcastToApps('job_updated', { action: 'create', source: 'task-convert' }); } catch (e) {}
+            alert('Posted to Job Board: ' + newJob.title);
+            return newJob;
+        };
+
+        // UI wrapper called from the task card button. Confirms before posting.
+        window.pflxConvertTaskToJobUI = function (taskId) {
+            if (!Array.isArray(mcTasks)) return;
+            var task = mcTasks.find(function (t) { return t.id === taskId; });
+            if (!task) return;
+            if (!confirm('Post "' + (task.title || 'this task') + '" to the Job Board?\n\nIt will appear as a job other cohort members can apply for. The original task stays in place until you delete it.')) return;
+            pflxConvertTaskToJob(taskId);
+        };
+
+        // Player-side toggle for project subtasks. Mirrors pflxToggleTaskSubtaskItem.
+        window.pflxToggleProjectSubtaskItem = function (projectId, subtaskId) {
+            if (!Array.isArray(mcProjects)) return false;
+            for (var pi = 0; pi < mcProjects.length; pi++) {
+                if (mcProjects[pi].id !== projectId) continue;
+                var list = mcProjects[pi].subtasks || [];
+                for (var i = 0; i < list.length; i++) {
+                    if (list[i].id === subtaskId) {
+                        list[i].completed = !list[i].completed;
+                        list[i].completedAt = list[i].completed ? Date.now() : null;
+                        list[i].completedBy = list[i].completed ? ((window.activeSession && (activeSession.brand || activeSession.name)) || 'unknown') : null;
+                        try { mcSaveData('projects'); } catch (e) {}
+                        try { if (typeof mcRenderProjects === 'function') mcRenderProjects(); } catch (e) {}
+                        return list[i].completed;
+                    }
+                }
+                return false;
+            }
+            return false;
+        };
+
         // ── Task Reward Total ──────────────────────────────────────────────
         // The task's reward XC is the BASE XC (mc-task-xc) PLUS the sum of XC
         // values on every currently-checked digital badge. Updates live as
@@ -23685,6 +23919,38 @@
                     pFlpPill = '<div style="margin-top:12px;padding:8px 12px;background:rgba(255,255,255,0.03);border:1px dashed rgba(255,255,255,0.12);border-radius:8px;font-size:10px;color:rgba(255,255,255,0.45);text-align:center;letter-spacing:0.04em;">⏱ FLP MONITORING — awaiting player start</div>';
                 }
 
+                // Subtask checklist — player ticks items off. Same look as task checklist.
+                var pSubtasksHtml = '';
+                if (Array.isArray(p.subtasks) && p.subtasks.length > 0) {
+                    var pDone = p.subtasks.filter(function (s) { return s.completed; }).length;
+                    var pTot = p.subtasks.length;
+                    var pPct = pTot > 0 ? Math.round((pDone / pTot) * 100) : 0;
+                    var pPctColor = pPct === 100 ? '#22c55e' : pPct > 50 ? '#f5c842' : '#00d4ff';
+                    pSubtasksHtml = '<div style="margin-top:12px;padding:10px 12px;background:rgba(0,212,255,0.04);border:1px solid rgba(0,212,255,0.18);border-radius:8px;">' +
+                        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+                            '<div style="font-family:Orbitron,sans-serif;font-size:10px;font-weight:800;color:#00d4ff;letter-spacing:0.06em;">CHECKLIST</div>' +
+                            '<div style="font-size:10px;color:' + pPctColor + ';font-family:monospace;font-weight:700;">' + pDone + ' / ' + pTot + ' (' + pPct + '%)</div>' +
+                        '</div>' +
+                        '<div style="width:100%;height:4px;background:rgba(0,212,255,0.08);border-radius:2px;margin-bottom:10px;overflow:hidden;">' +
+                            '<div style="width:' + pPct + '%;height:100%;background:' + pPctColor + ';border-radius:2px;transition:width 0.3s ease;"></div>' +
+                        '</div>' +
+                        '<div style="display:flex;flex-direction:column;gap:5px;">' +
+                        p.subtasks.map(function (s) {
+                            var pLabelStyle = s.completed
+                                ? 'color:rgba(255,255,255,0.45);text-decoration:line-through;'
+                                : 'color:#e0e6ff;';
+                            return '<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0;">' +
+                                '<input type="checkbox" ' + (s.completed ? 'checked' : '') + ' onchange="pflxToggleProjectSubtaskItem(' + JSON.stringify(p.id) + ',' + JSON.stringify(s.id) + ')" style="accent-color:#00d4ff;cursor:pointer;flex-shrink:0;">' +
+                                '<span style="' + pLabelStyle + 'flex:1;">' + escapeHtml(s.label || 'Step') + '</span>' +
+                                (s.link
+                                    ? '<a href="' + escapeHtml(s.link) + '" target="_blank" rel="noopener" title="Open link" style="color:#00d4ff;text-decoration:none;font-size:14px;flex-shrink:0;">🔗</a>'
+                                    : '') +
+                            '</div>';
+                        }).join('') +
+                        '</div>' +
+                    '</div>';
+                }
+
                 // Submissions summary — counts per phase, shown only when at least one submission exists.
                 var pSubmissionsSummary = '';
                 if (p.phaseSubmissions) {
@@ -23712,6 +23978,8 @@
                     '<div style="font-size:12px;color:rgba(255,255,255,0.5);line-height:1.5;margin-bottom:12px;">' + escapeHtml(p.description || '') + '</div>' +
                     // FLP phase indicator
                     pFlpPill +
+                    // Subtask checklist (player-side ticks)
+                    pSubtasksHtml +
                     // Submissions summary
                     pSubmissionsSummary +
                     // Progress panel
@@ -23823,6 +24091,9 @@
                 var el;
                 el = document.getElementById('mc-project-title'); if (el) el.value = p.name || '';
                 el = document.getElementById('mc-project-desc'); if (el) el.value = p.description || '';
+                // Subtask checklist — restore prior items including completion state
+                // so the editor can preserve it on save.
+                _mcRenderProjectSubtaskEditorRows(Array.isArray(p.subtasks) ? p.subtasks : []);
                 // FLP Tracking Mode — defaults to monitoring for legacy projects.
                 var ptMode = p.flpTracking || 'monitoring';
                 var ptRadio = document.querySelector('input[name="mc-project-tracking"][value="' + ptMode + '"]');
@@ -23885,6 +24156,8 @@
                 ['mc-project-title','mc-project-desc','mc-project-team','mc-project-link','mc-project-objectives','mc-project-deliverables'].forEach(function(id) {
                     var el = document.getElementById(id); if (el) el.value = '';
                 });
+                // Clear the subtask editor for new projects.
+                _mcRenderProjectSubtaskEditorRows([]);
                 var el;
                 el = document.getElementById('mc-project-status'); if (el) el.value = 'planning';
                 el = document.getElementById('mc-project-budget'); if (el) el.value = 0;
@@ -23946,6 +24219,20 @@
                 // monitoring = task moves through E→D→Enh→F over its duration with
                 // urgency colors from pflxComputeFlpStatus().
                 flpTracking: (document.querySelector('input[name="mc-project-tracking"]:checked') || {}).value || 'monitoring',
+                // Subtasks (host-authored checklist) — same merge pattern as tasks so
+                // player ticks aren't reset when the host edits unrelated items.
+                subtasks: (function () {
+                    var rows = _mcReadProjectSubtaskRows();
+                    if (mcProjectEditIndex >= 0 && mcProjects[mcProjectEditIndex] && Array.isArray(mcProjects[mcProjectEditIndex].subtasks)) {
+                        var prior = {};
+                        mcProjects[mcProjectEditIndex].subtasks.forEach(function (s) { prior[s.id] = s; });
+                        rows.forEach(function (r) {
+                            var p = prior[r.id];
+                            if (p) { r.completed = !!p.completed; r.completedAt = p.completedAt || null; r.completedBy = p.completedBy || null; }
+                        });
+                    }
+                    return rows;
+                })(),
                 budget: parseInt(document.getElementById('mc-project-budget')?.value || '0', 10),
                 team: team,
                 checkpointId: document.getElementById('mc-project-checkpoint')?.value || '',
@@ -26927,7 +27214,14 @@
                             priority: 'Normal',
                             dueDate: savedJob.endDate || '',
                             createdAt: new Date().toISOString().split('T')[0],
-                            completedAt: ''
+                            completedAt: '',
+                            // Close the round-trip when this job originated
+                            // from a converted task: the hired player's auto-
+                            // created task points back to the original via
+                            // backFromJobId + originTaskId so the lineage is
+                            // visible in the UI ("hired from task X").
+                            backFromJobId: savedJob.id,
+                            originTaskId: savedJob.sourceTaskId || ''
                         });
                     }
                 });
