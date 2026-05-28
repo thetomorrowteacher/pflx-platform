@@ -7955,6 +7955,40 @@
                                             <input type="url" id="mc-cp-link" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:10px;border-radius:8px;font-size:13px;box-sizing:border-box;" placeholder="https://...">
                                         </div>
                                     </div>
+                                    <!-- Tier Variants — per-tier deadline + XC overrides.
+                                         Schema: cp.tierVariants = { starter:{endDate,xc}, novice:{...}, pro:{...} }.
+                                         Player Portal merges variant onto base when rendering for the
+                                         player's active tier. Empty cells fall through to the base values
+                                         above so a host only needs to fill the tiers they want to vary.
+                                         Toggle the block open with the chevron — collapsed by default to
+                                         keep the form compact for hosts not using tier variants. -->
+                                    <details id="mc-cp-tier-variants-block" style="margin-bottom:14px;background:rgba(10,18,40,0.35);border:1px solid rgba(0,212,255,0.15);border-radius:10px;padding:0;">
+                                        <summary style="cursor:pointer;padding:12px 16px;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:800;color:rgba(0,212,255,0.85);letter-spacing:0.12em;text-transform:uppercase;list-style:none;display:flex;align-items:center;gap:10px;">
+                                            <span style="font-size:14px;">🎚</span> Tier Variants <span style="color:rgba(255,255,255,0.4);font-weight:400;font-size:10px;letter-spacing:0.04em;text-transform:none;">— optional deadline + XC overrides per tier</span>
+                                        </summary>
+                                        <div style="padding:0 16px 14px;">
+                                            <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:10px;line-height:1.5;">
+                                                Leave a cell blank to fall through to the base values above. Players see the variant matching their picked tier — Starter typically gets more time and lower reward, Pro less time and higher reward.
+                                            </div>
+                                            <div style="display:grid;grid-template-columns:90px 1fr 1fr;gap:8px 12px;align-items:center;">
+                                                <div></div>
+                                                <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:0.08em;text-transform:uppercase;">Deadline</div>
+                                                <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:0.08em;text-transform:uppercase;">XC Reward</div>
+                                                <!-- Starter -->
+                                                <div style="display:flex;align-items:center;gap:6px;"><span style="background:rgba(167,139,250,0.2);color:#a78bfa;padding:3px 8px;border-radius:8px;font-family:'Orbitron',sans-serif;font-size:9px;font-weight:800;letter-spacing:0.1em;border:1px solid rgba(167,139,250,0.4);">STARTER</span></div>
+                                                <input type="date" id="mc-cp-tier-starter-end" style="background:rgba(10,18,40,0.7);border:1px solid rgba(167,139,250,0.2);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;">
+                                                <input type="number" id="mc-cp-tier-starter-xc"  min="0" step="50" placeholder="(base XC)" style="background:rgba(10,18,40,0.7);border:1px solid rgba(167,139,250,0.2);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;">
+                                                <!-- Novice -->
+                                                <div style="display:flex;align-items:center;gap:6px;"><span style="background:rgba(0,212,255,0.2);color:#00d4ff;padding:3px 8px;border-radius:8px;font-family:'Orbitron',sans-serif;font-size:9px;font-weight:800;letter-spacing:0.1em;border:1px solid rgba(0,212,255,0.4);">NOVICE</span></div>
+                                                <input type="date" id="mc-cp-tier-novice-end" style="background:rgba(10,18,40,0.7);border:1px solid rgba(0,212,255,0.2);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;">
+                                                <input type="number" id="mc-cp-tier-novice-xc"  min="0" step="50" placeholder="(base XC)" style="background:rgba(10,18,40,0.7);border:1px solid rgba(0,212,255,0.2);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;">
+                                                <!-- Pro -->
+                                                <div style="display:flex;align-items:center;gap:6px;"><span style="background:rgba(245,200,66,0.2);color:#f5c842;padding:3px 8px;border-radius:8px;font-family:'Orbitron',sans-serif;font-size:9px;font-weight:800;letter-spacing:0.1em;border:1px solid rgba(245,200,66,0.4);">PRO</span></div>
+                                                <input type="date" id="mc-cp-tier-pro-end" style="background:rgba(10,18,40,0.7);border:1px solid rgba(245,200,66,0.2);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;">
+                                                <input type="number" id="mc-cp-tier-pro-xc"  min="0" step="50" placeholder="(base XC)" style="background:rgba(10,18,40,0.7);border:1px solid rgba(245,200,66,0.2);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;">
+                                            </div>
+                                        </div>
+                                    </details>
                                     <!-- Assign To (Cohorts + Groups) -->
                                     <div style="margin-bottom:14px;">
                                         <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">Assign To (Cohorts & Groups)</label>
@@ -19885,8 +19919,13 @@
         }
         function ppGetCheckpoints() {
             try {
-                if (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) return mcCheckpoints.slice();
-                return JSON.parse(localStorage.getItem('pflx_mc_checkpoints') || localStorage.getItem('pflx_checkpoints') || '[]');
+                var raw;
+                if (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) raw = mcCheckpoints.slice();
+                else raw = JSON.parse(localStorage.getItem('pflx_mc_checkpoints') || localStorage.getItem('pflx_checkpoints') || '[]');
+                // Pipe each cp through the tier-variant merge so all Player
+                // Portal renders see the right endDate / xc / xcReward for
+                // the active tier. Base record is untouched.
+                return (raw || []).map(function (cp) { return pflxApplyTierVariant(cp); });
             } catch(e) { return []; }
         }
         function ppGetTasks() {
@@ -20373,6 +20412,45 @@
         }
 
         // ── CHECKPOINTS LIST ──
+        // ── Tier variant resolution ──────────────────────────────────────
+        // Resolve the active player's tier (URL → localStorage → 'novice')
+        // and merge any cp.tierVariants[<tier>] onto the base checkpoint
+        // record so downstream renders see the right endDate / xc / etc.
+        // Variants are non-destructive: missing keys fall through to the
+        // base values. Used by ppGetCheckpoints and the home hero.
+        function _ppPlayerTier() {
+            try {
+                var qp = new URLSearchParams(window.location.search);
+                var fromQp = qp.get('tier');
+                if (fromQp === 'starter' || fromQp === 'novice' || fromQp === 'pro') return fromQp;
+            } catch (e) {}
+            try {
+                var stored = localStorage.getItem('pflx_player_tier');
+                if (stored === 'starter' || stored === 'novice' || stored === 'pro') return stored;
+            } catch (e) {}
+            return 'novice';
+        }
+        window._ppPlayerTier = _ppPlayerTier;
+
+        function pflxApplyTierVariant(cp) {
+            if (!cp || !cp.tierVariants) return cp;
+            var tier = _ppPlayerTier();
+            var v = cp.tierVariants[tier];
+            if (!v) return cp;
+            // Shallow merge — only known override fields take effect. Return a
+            // copy so we don't mutate the canonical mcCheckpoints record.
+            var out = Object.assign({}, cp);
+            if (v.endDate) out.endDate = v.endDate;
+            if (v.xc !== undefined && v.xc !== null) {
+                out.xc = v.xc;
+                out.xcReward = v.xc;
+            }
+            out._tierResolved = tier;
+            out._tierBase = { endDate: cp.endDate, xc: cp.xc || cp.xcReward };
+            return out;
+        }
+        window.pflxApplyTierVariant = pflxApplyTierVariant;
+
         // ── Shared banner block ──────────────────────────────────────────
         // One markup pattern, used by checkpoint / project / task detail
         // headers. Returns '' when no banner image is provided. Matches the
@@ -22154,6 +22232,22 @@
             document.getElementById('mc-cp-link').value = cp ? (cp.link || '') : '';
             document.getElementById('mc-cp-xc').value = cp ? (cp.xcReward || 0) : 0;
 
+            // Tier variants — repopulate from cp.tierVariants. Open the
+            // disclosure block automatically when any variant is set so the
+            // host can see it without clicking around.
+            (function () {
+                var variants = (cp && cp.tierVariants) || {};
+                ['starter','novice','pro'].forEach(function (t) {
+                    var v = variants[t] || {};
+                    var endEl = document.getElementById('mc-cp-tier-' + t + '-end');
+                    var xcEl  = document.getElementById('mc-cp-tier-' + t + '-xc');
+                    if (endEl) endEl.value = v.endDate || '';
+                    if (xcEl)  xcEl.value  = (v.xc !== undefined && v.xc !== null) ? v.xc : '';
+                });
+                var block = document.getElementById('mc-cp-tier-variants-block');
+                if (block) block.open = Object.keys(variants).length > 0;
+            })();
+
             // Badge picker — load selected badges from checkpoint
             mcCPSelectedBadges = (cp && cp.rewardBadges && Array.isArray(cp.rewardBadges))
                 ? cp.rewardBadges.map(function(b) {
@@ -22346,6 +22440,28 @@
 
             var xcReward = parseInt(document.getElementById('mc-cp-xc')?.value || '0') || 0;
 
+            // Read tier variants — only persist a tier object if at least one
+            // override is filled. Empty fields fall through to base values.
+            function _readTierVariant(tier) {
+                var endEl = document.getElementById('mc-cp-tier-' + tier + '-end');
+                var xcEl  = document.getElementById('mc-cp-tier-' + tier + '-xc');
+                var endV = endEl ? endEl.value.trim() : '';
+                var xcV  = xcEl  ? xcEl.value.trim()  : '';
+                if (!endV && !xcV) return null;
+                var out = {};
+                if (endV) out.endDate = endV;
+                if (xcV !== '') {
+                    var parsed = parseInt(xcV, 10);
+                    if (!isNaN(parsed)) out.xc = parsed;
+                }
+                return Object.keys(out).length ? out : null;
+            }
+            var tierVariants = {};
+            ['starter','novice','pro'].forEach(function (t) {
+                var v = _readTierVariant(t);
+                if (v) tierVariants[t] = v;
+            });
+
             var obj = {
                 id: mcCPEditIndex >= 0 ? mcCheckpoints[mcCPEditIndex].id : 'cp-' + Date.now(),
                 name: name,
@@ -22362,6 +22478,9 @@
                 jobIds: jobIds,
                 rewardBadges: rewardBadges,
                 xcReward: xcReward,
+                // Only emit the field when at least one tier has overrides so
+                // legacy checkpoints don't get an empty object.
+                tierVariants: Object.keys(tierVariants).length ? tierVariants : undefined,
                 createdBy: activeSession ? activeSession.brand : 'host'
             };
 
