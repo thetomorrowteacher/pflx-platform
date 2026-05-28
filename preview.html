@@ -20209,6 +20209,45 @@
         }
 
         // ── CHECKPOINTS LIST ──
+        // ── Shared banner block ──────────────────────────────────────────
+        // One markup pattern, used by checkpoint / project / task detail
+        // headers. Returns '' when no banner image is provided. Matches the
+        // host card look: gradient fade, inset accent glow, big title with
+        // text shadow, optional right-side status pill.
+        //   opts.image      — bannerImage URL (required to render)
+        //   opts.title      — displayed over the banner
+        //   opts.height     — px height (default 180)
+        //   opts.accent     — "r,g,b" tint (default cyan)
+        //   opts.pill       — { label, color } for the right-side pill (optional)
+        //   opts.kicker     — small caption above title (e.g. "FROM PROJECT") (optional)
+        //   opts.titleFont  — font-family override (default Orbitron)
+        function ppBannerHeader(opts) {
+            opts = opts || {};
+            if (!opts.image) return '';
+            var h = opts.height || 180;
+            var accent = opts.accent || '0,212,255';
+            var titleFont = opts.titleFont || "'Orbitron',sans-serif";
+            var pillHtml = '';
+            if (opts.pill && opts.pill.label) {
+                var pc = opts.pill.color || '34,197,94';
+                pillHtml = '<span style="background:rgba(' + pc + ',0.2);color:rgb(' + pc + ');padding:5px 12px;border-radius:14px;font-size:11px;font-weight:700;border:1px solid rgba(' + pc + ',0.5);backdrop-filter:blur(8px);text-transform:uppercase;letter-spacing:0.08em;white-space:nowrap;">' + escapeHtml(opts.pill.label) + '</span>';
+            }
+            var kickerHtml = opts.kicker
+                ? '<div style="font-family:\'Share Tech Mono\',monospace;font-size:10px;color:rgba(255,255,255,0.75);letter-spacing:0.18em;text-shadow:0 2px 8px rgba(0,0,0,0.8);margin-bottom:4px;text-transform:uppercase;">' + escapeHtml(opts.kicker) + '</div>'
+                : '';
+            return '<div style="position:relative;height:' + h + 'px;overflow:hidden;">' +
+                '<img src="' + escapeHtml(opts.image) + '" style="width:100%;height:100%;object-fit:cover;display:block;filter:saturate(1.15) brightness(1.05);">' +
+                '<div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(10,10,15,0) 0%, rgba(22,22,31,0.45) 55%, rgba(22,22,31,0.95) 100%);"></div>' +
+                '<div style="position:absolute;inset:0;box-shadow:inset 0 0 80px rgba(' + accent + ',0.22);pointer-events:none;"></div>' +
+                '<div style="position:absolute;left:22px;right:22px;bottom:16px;display:flex;justify-content:space-between;align-items:flex-end;gap:12px;">' +
+                    '<div>' + kickerHtml +
+                        '<div style="font-family:' + titleFont + ';font-size:22px;font-weight:800;color:#ffffff;text-shadow:0 2px 12px rgba(0,0,0,0.9), 0 0 14px rgba(' + accent + ',0.35);letter-spacing:0.04em;">' + escapeHtml(opts.title || '') + '</div>' +
+                    '</div>' +
+                    pillHtml +
+                '</div>' +
+            '</div>';
+        }
+
         function ppRenderCheckpoints(el) {
             var checkpoints = ppGetCheckpoints();
             var html = ppBreadcrumb([{ label: 'Home', view: 'home' }, { label: 'Checkpoints', view: 'checkpoints' }]);
@@ -20520,15 +20559,29 @@
             crumb.push({ label: proj.name || proj.title || 'Project', view: 'project-detail' });
 
             var html = ppBreadcrumb(crumb);
-            html += '<div class="mc-card" style="padding:20px;margin-bottom:16px;border-left:3px solid #a78bfa;">' +
-                '<div style="font-family:\'Rajdhani\',sans-serif;font-size:22px;font-weight:900;color:#e0e6ff;">📁 ' + escapeHtml(proj.name || proj.title || 'Project') + '</div>' +
-                (proj.description ? '<div style="font-size:13px;color:rgba(255,255,255,0.65);margin-top:6px;line-height:1.6;">' + escapeHtml(proj.description) + '</div>' : '') +
+            // Header — banner-aware. Project bannerImage gets the hero treatment
+            // (matches checkpoint detail). Falls back to the original text-only
+            // header for projects with no banner set.
+            var projBanner = ppBannerHeader({
+                image: proj.bannerImage,
+                title: proj.name || proj.title || 'Project',
+                accent: '167,139,250',
+                titleFont: "'Rajdhani',sans-serif",
+                kicker: '📁 PROJECT'
+            });
+            html += '<div class="mc-card" style="padding:0;margin-bottom:16px;border-left:3px solid #a78bfa;overflow:hidden;">' +
+                projBanner +
+                '<div style="padding:' + (projBanner ? '18px 22px 20px' : '20px') + ';">' +
+                (projBanner
+                    ? ''
+                    : '<div style="font-family:\'Rajdhani\',sans-serif;font-size:22px;font-weight:900;color:#e0e6ff;">📁 ' + escapeHtml(proj.name || proj.title || 'Project') + '</div>') +
+                (proj.description ? '<div style="font-size:13px;color:rgba(255,255,255,0.65);margin-top:' + (projBanner ? '0' : '6px') + ';line-height:1.6;">' + escapeHtml(proj.description) + '</div>' : '') +
                 '<div style="display:flex;gap:14px;margin-top:14px;align-items:center;flex-wrap:wrap;">' +
                 (proj.xcRewardPool ? '<span style="font-family:\'Share Tech Mono\',monospace;font-size:13px;color:#f5c842;">⚡ ' + proj.xcRewardPool + ' XC pool</span>' : '') +
                 (proj.dueDate ? '<span style="font-size:11px;color:rgba(255,255,255,0.5);">📅 Due ' + escapeHtml(proj.dueDate) + '</span>' : '') +
                 '</div>' +
                 '<div style="margin-top:14px;">' + ppProgressBar(pct, '#a78bfa') + '<div style="margin-top:6px;font-size:11px;color:rgba(255,255,255,0.4);">' + pct + '% · ' + done + '/' + tasks.length + ' tasks completed</div></div>' +
-                '</div>';
+                '</div></div>';
 
             if (!tasks.length) {
                 html += '<div class="mc-card" style="text-align:center;padding:30px;color:rgba(255,255,255,0.3);">No tasks in this project yet.</div>';
@@ -20621,17 +20674,38 @@
             var pct = checklist.length ? Math.round((checked / checklist.length) * 100) :
                       (task.status === 'approved' ? 100 : task.status === 'submitted' ? 60 : 0);
 
-            // Header card
+            // Header card — banner-aware. Tasks themselves don't carry a
+            // bannerImage, so we surface the closest parent's banner for
+            // visual context: project first (matches the cohort's project
+            // identity), then checkpoint. Falls back to the plain title row
+            // when no parent banner exists.
             var html = ppBreadcrumb(crumb);
-            html += '<div class="mc-card" style="padding:22px 24px;margin-bottom:18px;border-left:3px solid #00d4ff;">' +
-                '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:10px;">' +
-                '<div style="font-family:\'Rajdhani\',sans-serif;font-size:24px;font-weight:900;color:#e0e6ff;">📋 ' + escapeHtml(task.title || task.name || 'Task') + '</div>' +
-                statusBadge + '</div>' +
+            var bannerSrc = (parentProj && parentProj.bannerImage) ? parentProj.bannerImage
+                          : (parentCp   && parentCp.bannerImage)   ? parentCp.bannerImage
+                          : '';
+            var bannerKicker = (parentProj && parentProj.bannerImage) ? ('PROJECT · ' + (parentProj.name || parentProj.title || ''))
+                              : (parentCp && parentCp.bannerImage)    ? ('CHECKPOINT · ' + (parentCp.name || ''))
+                              : '';
+            var taskBanner = ppBannerHeader({
+                image: bannerSrc,
+                title: task.title || task.name || 'Task',
+                accent: '0,212,255',
+                titleFont: "'Rajdhani',sans-serif",
+                kicker: bannerKicker
+            });
+            html += '<div class="mc-card" style="padding:0;margin-bottom:18px;border-left:3px solid #00d4ff;overflow:hidden;">' +
+                taskBanner +
+                '<div style="padding:' + (taskBanner ? '18px 24px 22px' : '22px 24px') + ';">' +
+                (taskBanner
+                    ? '<div style="display:flex;justify-content:flex-end;margin-bottom:10px;">' + statusBadge + '</div>'
+                    : '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:10px;">' +
+                        '<div style="font-family:\'Rajdhani\',sans-serif;font-size:24px;font-weight:900;color:#e0e6ff;">📋 ' + escapeHtml(task.title || task.name || 'Task') + '</div>' +
+                        statusBadge + '</div>') +
                 (task.description ? '<div style="font-size:13px;color:rgba(255,255,255,0.7);line-height:1.7;margin-bottom:14px;">' + escapeHtml(task.description) + '</div>' : '') +
                 '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">' + (deadlineHtml || '') + '</div>' +
                 rewardHtml +
                 '<div style="margin-top:18px;">' + ppProgressBar(pct, '#00d4ff') + '<div style="margin-top:6px;font-size:11px;color:rgba(255,255,255,0.4);">' + pct + '% complete' + (checklist.length ? ' · ' + checked + '/' + checklist.length + ' checked' : '') + '</div></div>' +
-                '</div>';
+                '</div></div>';
 
             // Host-provided reference links
             if (Array.isArray(task.links) && task.links.length) {
