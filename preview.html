@@ -22260,12 +22260,43 @@
                 return;
             }
 
-            // Apply grid layout to container
-            list.style.display = 'grid';
-            list.style.gridTemplateColumns = 'repeat(auto-fill, minmax(380px, 1fr))';
-            list.style.gap = '20px';
+            // List is rendered as stacked FLP-phase sections — each section
+            // header introduces its own internal grid. Reset any container
+            // grid set by the previous (non-grouped) render.
+            list.style.display = '';
+            list.style.gridTemplateColumns = '';
+            list.style.gap = '';
 
-            list.innerHTML = filtered.map(function(t, i) {
+            // Bucket each task by where it sits in its lifecycle:
+            //   engagement / development / enhancement / fulfillment — monitored, started
+            //   not-started — monitored but no startedAt yet
+            //   bypass — flpTracking !== 'monitoring'
+            //   completed — status approved (overrides phase so done work stays together)
+            function _mcFlpBucketForTask(t) {
+                if (t.status === 'approved' || t.completed) return 'completed';
+                if (t.flpTracking !== 'monitoring') return 'bypass';
+                if (!t.startedAt) return 'not-started';
+                try {
+                    var st = pflxComputeFlpStatus(t);
+                    if (st && st.phase) return st.phase;
+                } catch (e) {}
+                return 'engagement';
+            }
+            var BUCKET_META = {
+                engagement:    { label: 'Engagement',  emoji: '🎯', rgb: '34,197,94',   desc: 'Onboarding, context, planning. Should be moving briskly.' },
+                development:   { label: 'Development', emoji: '🛠',  rgb: '0,212,255',   desc: 'Core build phase. Most time lives here.' },
+                enhancement:   { label: 'Enhancement', emoji: '🪶', rgb: '245,200,66',  desc: 'Peer review, polish, iteration on feedback.' },
+                fulfillment:   { label: 'Fulfillment', emoji: '🏁', rgb: '239,68,68',   desc: 'Final submission window — wrap and ship.' },
+                'not-started': { label: 'Not Started', emoji: '⏱',  rgb: '167,139,250', desc: 'Monitored tasks awaiting player start.' },
+                bypass:        { label: 'Bypass',      emoji: '📂', rgb: '156,163,175', desc: 'Simple tasks without phase tracking.' },
+                completed:     { label: 'Completed',   emoji: '✓',  rgb: '34,197,94',   desc: 'Approved and closed out.' }
+            };
+            var BUCKET_ORDER = ['engagement','development','enhancement','fulfillment','not-started','bypass','completed'];
+
+            // Render each card with the original inline closure (kept verbatim
+            // so the card markup stays in one place). The closure must return
+            // the card HTML string — do NOT change to forEach.
+            var __taskCards = filtered.map(function(t, i) {
                 var realIndex = mcTasks.indexOf(t);
 
                 // Status badge colors
@@ -22429,7 +22460,35 @@
                     '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:60px;" onclick="mcDeleteTask(' + realIndex + ')">Delete</button>' +
                     '</div>' +
                     '</div>';
-            }).join('');
+            });
+
+            // Bucket the rendered cards by FLP phase, then emit a section per
+            // non-empty bucket. Empty buckets are skipped so the surface stays
+            // compact when only one or two phases have work.
+            var __bucketed = {};
+            BUCKET_ORDER.forEach(function (k) { __bucketed[k] = []; });
+            filtered.forEach(function (t, idx) {
+                var b = _mcFlpBucketForTask(t);
+                (__bucketed[b] || __bucketed.bypass).push(__taskCards[idx]);
+            });
+            var __outHtml = '';
+            BUCKET_ORDER.forEach(function (k) {
+                var arr = __bucketed[k];
+                if (!arr.length) return;
+                var meta = BUCKET_META[k];
+                __outHtml +=
+                    '<div style="margin: 14px 0 12px 0;display:flex;align-items:center;gap:14px;padding:10px 14px;background:linear-gradient(90deg, rgba(' + meta.rgb + ',0.12), rgba(' + meta.rgb + ',0.02));border-left:3px solid rgba(' + meta.rgb + ',0.85);border-radius:8px;">' +
+                        '<div style="display:flex;align-items:baseline;gap:10px;">' +
+                            '<span style="font-family:Orbitron,sans-serif;font-size:13px;font-weight:800;color:rgba(' + meta.rgb + ',1);letter-spacing:0.12em;text-transform:uppercase;">' + meta.emoji + ' ' + meta.label + '</span>' +
+                            '<span style="font-family:monospace;font-size:11px;color:rgba(255,255,255,0.45);">' + arr.length + ' ' + (arr.length === 1 ? 'task' : 'tasks') + '</span>' +
+                        '</div>' +
+                        '<div style="flex:1;font-size:11px;color:rgba(255,255,255,0.4);line-height:1.4;">' + escapeHtml(meta.desc) + '</div>' +
+                    '</div>' +
+                    '<div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(380px, 1fr));gap:20px;margin-bottom:24px;">' +
+                        arr.join('') +
+                    '</div>';
+            });
+            list.innerHTML = __outHtml;
             // Render player submission view
             mcRenderPlayerTasks();
         }
