@@ -6044,7 +6044,10 @@
                         </div>
                         <div style="flex:1;min-width:0;">
                             <div id="pd-name" style="font-family:'Orbitron',sans-serif;font-size:13px;font-weight:800;color:#e0e6ff;letter-spacing:0.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</div>
-                            <div id="pd-role" style="font-size:10px;font-weight:700;color:rgba(255,255,255,0.45);letter-spacing:0.1em;margin-top:2px;text-transform:uppercase;">—</div>
+                            <div style="display:flex;align-items:center;gap:6px;margin-top:3px;flex-wrap:wrap;">
+                                <div id="pd-role" style="font-size:10px;font-weight:700;color:rgba(255,255,255,0.45);letter-spacing:0.1em;text-transform:uppercase;">—</div>
+                                <span id="pd-tier" style="font-family:'Orbitron',sans-serif;font-size:9px;font-weight:800;padding:2px 7px;border-radius:8px;letter-spacing:0.12em;text-transform:uppercase;background:rgba(0,212,255,0.18);color:#00d4ff;border:1px solid rgba(0,212,255,0.4);">NOVICE</span>
+                            </div>
                         </div>
                     </div>
                     <!-- Stat row: XC / Badges / Level -->
@@ -10779,6 +10782,7 @@
                                         <button class="hmc-btn-sm hmc-btn-ghost" id="hmc-detail-freeze-btn">🧊 Freeze Account</button>
                                         <button class="hmc-btn-sm hmc-btn-ghost" id="hmc-detail-reset-pin-btn">🔑 Reset PIN</button>
                                         <button class="hmc-btn-sm hmc-btn-ghost" id="hmc-detail-save-slots-btn" onclick="(function(){ var pid = document.getElementById('hmc-player-detail')?.dataset?.playerId; if (pid) pflxOpenPlayerSaveSlots(pid); })()">💾 Save Slots</button>
+                                        <button class="hmc-btn-sm hmc-btn-ghost" id="hmc-detail-tier-history-btn" onclick="(function(){ var pid = document.getElementById('hmc-player-detail')?.dataset?.playerId; if (pid) pflxOpenTierHistory(pid); })()">🎚 Tier History</button>
                                     </div>
                                 </div>
                             </div>
@@ -14861,6 +14865,7 @@
                 <div><span style="color:#6a7290;font-size:11px;">COHORT</span><br><span style="color:#b0b8d4;">${player.cohort || '—'}</span></div>
                 <div><span style="color:#6a7290;font-size:11px;">X-COIN</span><br><span style="color:var(--gold);font-family:'Orbitron',sans-serif;font-size:16px;">${(player.xc || 0).toLocaleString()}</span></div>
                 <div><span style="color:#6a7290;font-size:11px;">RANK</span><br><span style="color:#e0e6ff;">${rank.icon} ${rank.name} (L${rank.level})</span></div>
+                <div><span style="color:#6a7290;font-size:11px;">TIER</span><br>${pflxTierPillHTML(player.tier || 'novice', { size: 'lg' })} <button onclick="pflxHostChangePlayerTier('${player.id}')" style="background:none;border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.5);padding:3px 8px;border-radius:6px;font-size:10px;cursor:pointer;margin-left:6px;">Change</button></div>
                 <div><span style="color:#6a7290;font-size:11px;">STATUS</span><br><span style="color:${player.claimed ? 'var(--green)' : '#8a92b0'};">${player.claimed ? '● Claimed' : '○ Pending'}</span></div>
                 <div><span style="color:#6a7290;font-size:11px;">NEXT RANK</span><br><span style="color:#b0b8d4;">${nextRank ? `${nextRank.icon} ${nextRank.name} @ ${nextRank.xcUnlock.toLocaleString()} XC` : 'MAX RANK'}</span></div>
             `;
@@ -39609,7 +39614,47 @@ RESPONSE RULES:
                 var xcEl = document.getElementById('pd-xc'); if (xcEl) xcEl.textContent = (xc || 0).toLocaleString();
                 var bdgEl = document.getElementById('pd-badges'); if (bdgEl) bdgEl.textContent = badges || 0;
                 var rkEl = document.getElementById('pd-rank'); if (rkEl) rkEl.textContent = rankLabel;
+                // Tier badge — prefer the player record then the launch
+                // overlay localStorage choice, fall back to novice.
+                var tier = (p && p.tier) || (function () {
+                    try {
+                        var stored = localStorage.getItem('pflx_player_tier');
+                        if (stored === 'starter' || stored === 'novice' || stored === 'pro') return stored;
+                    } catch (e) {}
+                    return 'novice';
+                })();
+                var tierEl = document.getElementById('pd-tier');
+                if (tierEl) {
+                    var meta = pflxTierMeta(tier);
+                    tierEl.textContent = meta.label.toUpperCase();
+                    tierEl.style.background = 'rgba(' + meta.rgb + ',0.18)';
+                    tierEl.style.color = 'rgb(' + meta.rgb + ')';
+                    tierEl.style.borderColor = 'rgba(' + meta.rgb + ',0.4)';
+                }
             } catch (e) { console.warn('[profile dropdown] render failed', e); }
+        };
+
+        // Single source of truth for tier visual metadata. Used everywhere
+        // a tier badge is rendered: quick-profile dropdown, MC player
+        // detail, leaderboard segments, etc.
+        window.pflxTierMeta = function (tier) {
+            var key = (tier || 'novice').toLowerCase();
+            var map = {
+                starter: { label: 'Starter', rgb: '167,139,250' },
+                novice:  { label: 'Novice',  rgb: '0,212,255' },
+                pro:     { label: 'Pro',     rgb: '245,200,66' }
+            };
+            return map[key] || map.novice;
+        };
+
+        // Compact tier pill HTML for inline use anywhere.
+        window.pflxTierPillHTML = function (tier, opts) {
+            opts = opts || {};
+            var m = pflxTierMeta(tier);
+            var size = opts.size || 'sm';
+            var fs = size === 'lg' ? '11px' : '9px';
+            var pad = size === 'lg' ? '4px 12px' : '3px 8px';
+            return '<span style="font-family:Orbitron,sans-serif;font-size:' + fs + ';font-weight:800;padding:' + pad + ';border-radius:8px;letter-spacing:0.12em;text-transform:uppercase;background:rgba(' + m.rgb + ',0.18);color:rgb(' + m.rgb + ');border:1px solid rgba(' + m.rgb + ',0.4);">' + m.label.toUpperCase() + '</span>';
         };
 
         window.pflxCloseProfileDropdown = function () {
@@ -45960,6 +46005,92 @@ RESPONSE RULES:
             // boot-time Supabase work.
             setTimeout(function () { try { pflxLoadCloudSavesGlobal(); } catch (e) {} }, 800);
         })();
+
+        // ── Host: change a player's tier ──────────────────────────────────
+        // Prompt the host to pick a new tier for the player, append to
+        // tierHistory, persist, broadcast across apps. Also writes to the
+        // cloud audit row pflx_tier_history.
+        window.pflxHostChangePlayerTier = function (playerId) {
+            if (!playerId) return;
+            var p = mcPlayers.find(function (pl) { return pl.id === playerId; });
+            if (!p) { alert('Player not found.'); return; }
+            var picked = prompt('Set tier for ' + (p.brand || p.name) + ' (starter / novice / pro):', p.tier || 'novice');
+            if (!picked) return;
+            picked = picked.trim().toLowerCase();
+            if (['starter','novice','pro'].indexOf(picked) === -1) { alert('Tier must be starter, novice, or pro.'); return; }
+            if (picked === (p.tier || 'novice')) return;
+            var prevTier = p.tier || 'novice';
+            if (!Array.isArray(p.tierHistory)) p.tierHistory = [];
+            p.tierHistory.push({
+                tier: picked,
+                from: prevTier,
+                ts: new Date().toISOString(),
+                source: 'host-manual',
+                changedBy: (window.activeSession && (activeSession.brand || activeSession.name)) || 'host'
+            });
+            if (p.tierHistory.length > 50) p.tierHistory = p.tierHistory.slice(p.tierHistory.length - 50);
+            p.tier = picked;
+            try { mcSaveData('players'); } catch (e) {}
+            try { hmcShowPlayerDetail(playerId); } catch (e) {}
+            try { mcRenderPlayers && mcRenderPlayers(); } catch (e) {}
+            // Best-effort cloud audit log
+            try {
+                var sb = (typeof pflxSupabase === 'function') ? pflxSupabase() : null;
+                if (sb) {
+                    sb.from('app_data').select('data').eq('key', 'pflx_tier_history').maybeSingle().then(function (res) {
+                        var cur = (res && res.data && Array.isArray(res.data.data)) ? res.data.data : [];
+                        cur.push({ playerId: playerId, from: prevTier, to: picked, source: 'host-manual', ts: new Date().toISOString() });
+                        if (cur.length > 2000) cur = cur.slice(cur.length - 2000);
+                        sb.from('app_data').upsert({ key: 'pflx_tier_history', data: cur, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+                    });
+                }
+            } catch (e) {}
+            try { pflxShowSaveToast && pflxShowSaveToast('Tier set to ' + picked.toUpperCase(), 'success'); } catch (e) {}
+        };
+
+        // ── Player Tier History modal ─────────────────────────────────────
+        window.pflxOpenTierHistory = function (playerId) {
+            if (!playerId) return;
+            var p = mcPlayers.find(function (pl) { return pl.id === playerId; });
+            if (!p) { alert('Player not found.'); return; }
+            var existing = document.getElementById('pflx-tier-history-modal');
+            if (existing) existing.remove();
+            var history = Array.isArray(p.tierHistory) ? p.tierHistory.slice().reverse() : [];
+            var modal = document.createElement('div');
+            modal.id = 'pflx-tier-history-modal';
+            modal.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(3,5,12,0.78);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
+            var bodyHtml = history.length === 0
+                ? '<div style="padding:40px;text-align:center;color:rgba(255,255,255,0.4);"><div style="font-size:32px;margin-bottom:10px;">📭</div><div style="font-size:13px;">No tier changes recorded yet.</div><div style="font-size:11px;color:rgba(255,255,255,0.3);margin-top:6px;">Once this player flips their tier in the launch picker or a host changes it, the audit log will populate here.</div></div>'
+                : '<div style="position:relative;padding-left:18px;border-left:2px solid rgba(0,212,255,0.35);">' +
+                    history.map(function (h) {
+                        var when = h.ts ? new Date(h.ts).toLocaleString() : '—';
+                        var m = pflxTierMeta(h.tier);
+                        return '<div style="position:relative;padding:10px 0 10px 14px;">' +
+                            '<div style="position:absolute;left:-23px;top:14px;width:10px;height:10px;border-radius:50%;background:rgb(' + m.rgb + ');box-shadow:0 0 10px rgba(' + m.rgb + ',0.6);"></div>' +
+                            '<div style="font-family:monospace;font-size:10px;color:rgba(255,255,255,0.45);">' + when + '</div>' +
+                            '<div style="display:flex;align-items:center;gap:8px;margin-top:4px;">' +
+                                (h.from ? pflxTierPillHTML(h.from) + '<span style="color:rgba(255,255,255,0.35);">→</span>' : '') +
+                                pflxTierPillHTML(h.tier) +
+                                '<span style="font-size:10px;color:rgba(255,255,255,0.4);font-family:monospace;margin-left:6px;">' + escapeHtml(h.source || 'unknown') + '</span>' +
+                            '</div>' +
+                            (h.changedBy ? '<div style="font-size:10px;color:rgba(255,255,255,0.45);margin-top:3px;">by <b>' + escapeHtml(String(h.changedBy)) + '</b></div>' : '') +
+                        '</div>';
+                    }).join('') +
+                  '</div>';
+            modal.innerHTML =
+                '<div style="background:linear-gradient(180deg, rgba(22,22,31,0.95), rgba(15,15,22,0.95));border:1px solid rgba(0,212,255,0.25);border-radius:16px;width:min(640px, 92vw);max-height:86vh;display:flex;flex-direction:column;box-shadow:0 24px 60px rgba(0,0,0,0.6);">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;padding:18px 22px;border-bottom:1px solid rgba(255,255,255,0.06);">' +
+                        '<div>' +
+                            '<div style="font-family:Orbitron,sans-serif;font-size:13px;font-weight:800;color:#00d4ff;letter-spacing:0.12em;">🎚 TIER HISTORY</div>' +
+                            '<div style="font-family:monospace;font-size:11px;color:rgba(255,255,255,0.4);margin-top:3px;">' + escapeHtml(p.brand || p.name) + ' · current: ' + escapeHtml(String(p.tier || 'novice').toUpperCase()) + '</div>' +
+                        '</div>' +
+                        '<button style="background:none;border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.7);width:32px;height:32px;border-radius:6px;font-size:16px;cursor:pointer;" onclick="document.getElementById(\'pflx-tier-history-modal\').remove()">×</button>' +
+                    '</div>' +
+                    '<div style="padding:20px 22px;overflow-y:auto;flex:1;">' + bodyHtml + '</div>' +
+                '</div>';
+            modal.addEventListener('click', function (e) { if (e.target === modal) modal.remove(); });
+            document.body.appendChild(modal);
+        };
 
         // ── Player Save Slot Timeline ─────────────────────────────────────
         // Host-side viewer for a player's module_saves history. Pulls every
