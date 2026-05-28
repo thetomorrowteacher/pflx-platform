@@ -24036,12 +24036,36 @@
                 return;
             }
 
-            // Apply grid layout to container
-            list.style.display = 'grid';
-            list.style.gridTemplateColumns = 'repeat(auto-fill, minmax(380px, 1fr))';
-            list.style.gap = '20px';
+            // Stack sections — each phase section has its own internal grid.
+            list.style.display = '';
+            list.style.gridTemplateColumns = '';
+            list.style.gap = '';
 
-            list.innerHTML = mcProjects.map(function(p, i) {
+            // Same bucketing model as Tasks: monitored phases first, then
+            // Not Started, Bypass, Completed. Projects use status === 'completed'
+            // as the done signal (vs task.status === 'approved').
+            function _mcFlpBucketForProject(p) {
+                if (p.status === 'completed') return 'completed';
+                if (p.flpTracking !== 'monitoring') return 'bypass';
+                if (!p.startedAt) return 'not-started';
+                try {
+                    var st = pflxComputeFlpStatus({ flpTracking: p.flpTracking, startedAt: p.startedAt, dueDate: p.dueDate || p.endDate || p.deadline });
+                    if (st && st.phase) return st.phase;
+                } catch (e) {}
+                return 'engagement';
+            }
+            var PROJ_BUCKET_META = {
+                engagement:    { label: 'Engagement',  emoji: '🎯', rgb: '34,197,94',   desc: 'Onboarding, context, planning. Should be moving briskly.' },
+                development:   { label: 'Development', emoji: '🛠',  rgb: '0,212,255',   desc: 'Core build phase. Most time lives here.' },
+                enhancement:   { label: 'Enhancement', emoji: '🪶', rgb: '245,200,66',  desc: 'Peer review, polish, iteration on feedback.' },
+                fulfillment:   { label: 'Fulfillment', emoji: '🏁', rgb: '239,68,68',   desc: 'Final submission window — wrap and ship.' },
+                'not-started': { label: 'Not Started', emoji: '⏱',  rgb: '167,139,250', desc: 'Monitored projects awaiting player start.' },
+                bypass:        { label: 'Bypass',      emoji: '📂', rgb: '156,163,175', desc: 'Simple projects without phase tracking.' },
+                completed:     { label: 'Completed',   emoji: '✓',  rgb: '34,197,94',   desc: 'Completed and closed out.' }
+            };
+            var PROJ_BUCKET_ORDER = ['engagement','development','enhancement','fulfillment','not-started','bypass','completed'];
+
+            var __projectCards = mcProjects.map(function(p, i) {
                 // Status badge colors
                 var statusColors = p.status === 'planning' ? { bg:'rgba(245,165,0,0.1)', text:'#f5a500' }
                     : p.status === 'in_progress' ? { bg:'rgba(0,212,255,0.1)', text:'#00d4ff' }
@@ -24185,7 +24209,33 @@
                     '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:60px;" onclick="mcDeleteProject(' + i + ')">Delete</button>' +
                     '</div>' +
                     '</div>';
-            }).join('');
+            });
+
+            // Bucket the rendered cards by FLP phase, same pattern as Tasks.
+            var __projBuckets = {};
+            PROJ_BUCKET_ORDER.forEach(function (k) { __projBuckets[k] = []; });
+            mcProjects.forEach(function (p, idx) {
+                var b = _mcFlpBucketForProject(p);
+                (__projBuckets[b] || __projBuckets.bypass).push(__projectCards[idx]);
+            });
+            var __projOut = '';
+            PROJ_BUCKET_ORDER.forEach(function (k) {
+                var arr = __projBuckets[k];
+                if (!arr.length) return;
+                var meta = PROJ_BUCKET_META[k];
+                __projOut +=
+                    '<div style="margin: 14px 0 12px 0;display:flex;align-items:center;gap:14px;padding:10px 14px;background:linear-gradient(90deg, rgba(' + meta.rgb + ',0.12), rgba(' + meta.rgb + ',0.02));border-left:3px solid rgba(' + meta.rgb + ',0.85);border-radius:8px;">' +
+                        '<div style="display:flex;align-items:baseline;gap:10px;">' +
+                            '<span style="font-family:Orbitron,sans-serif;font-size:13px;font-weight:800;color:rgba(' + meta.rgb + ',1);letter-spacing:0.12em;text-transform:uppercase;">' + meta.emoji + ' ' + meta.label + '</span>' +
+                            '<span style="font-family:monospace;font-size:11px;color:rgba(255,255,255,0.45);">' + arr.length + ' ' + (arr.length === 1 ? 'project' : 'projects') + '</span>' +
+                        '</div>' +
+                        '<div style="flex:1;font-size:11px;color:rgba(255,255,255,0.4);line-height:1.4;">' + escapeHtml(meta.desc) + '</div>' +
+                    '</div>' +
+                    '<div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(380px, 1fr));gap:20px;margin-bottom:24px;">' +
+                        arr.join('') +
+                    '</div>';
+            });
+            list.innerHTML = __projOut;
         }
 
         var mcProjectEditIndex = -1;
