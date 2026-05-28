@@ -20243,12 +20243,39 @@
                 });
                 var cpDone = cpTasks.filter(function(t) { return t.completed || t.status === 'approved'; }).length;
 
-                html += '<div style="background:' + bgGrad + ';border:1px solid ' + borderColor + ';border-radius:14px;padding:18px;margin-bottom:12px;cursor:pointer;transition:all 0.2s;" onclick="ppNav(\'checkpoint-detail\',{id:\'' + (cp.id || '') + '\'})" onmouseenter="this.style.transform=\'translateY(-2px)\'" onmouseleave="this.style.transform=\'\'">';
+                // Outer card. overflow:hidden so the banner image can be flush
+                // against the top-left/top-right corners.
+                html += '<div style="background:' + bgGrad + ';border:1px solid ' + borderColor + ';border-radius:14px;padding:0;margin-bottom:12px;cursor:pointer;transition:all 0.2s;overflow:hidden;" onclick="ppNav(\'checkpoint-detail\',{id:\'' + (cp.id || '') + '\'})" onmouseenter="this.style.transform=\'translateY(-2px)\'" onmouseleave="this.style.transform=\'\'">';
 
-                if (isActive) html += '<div style="display:inline-block;background:rgba(34,197,94,0.15);color:#22c55e;font-size:9px;font-weight:700;padding:3px 8px;border-radius:6px;letter-spacing:1px;margin-bottom:10px;">● ACTIVE NOW</div>';
+                // Banner image (same source field as the host card). Falls back
+                // to a plain title header when no banner is set so legacy
+                // checkpoints don't render as a blank gradient block.
+                var ppAccentRgb = isActive ? '34,197,94' : cp.status === 'upcoming' ? '79,142,247' : '167,139,250';
+                if (cp.bannerImage) {
+                    html += '<div style="position:relative;height:130px;overflow:hidden;">' +
+                        '<img src="' + escapeHtml(cp.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;display:block;filter:saturate(1.15) brightness(1.05);">' +
+                        '<div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(10,10,15,0) 0%, rgba(22,22,31,0.45) 55%, rgba(22,22,31,0.95) 100%);"></div>' +
+                        '<div style="position:absolute;inset:0;box-shadow:inset 0 0 60px rgba(' + ppAccentRgb + ',0.22);pointer-events:none;"></div>' +
+                        '<div style="position:absolute;left:16px;right:16px;bottom:12px;display:flex;justify-content:space-between;align-items:flex-end;gap:12px;">' +
+                            '<div style="font-family:\'Rajdhani\',sans-serif;font-size:18px;font-weight:900;color:#ffffff;text-shadow:0 2px 12px rgba(0,0,0,0.9), 0 0 14px rgba(' + ppAccentRgb + ',0.30);letter-spacing:0.02em;">' + escapeHtml(cp.name || 'Checkpoint') + '</div>' +
+                            (isActive
+                                ? '<span style="background:rgba(34,197,94,0.2);color:#22c55e;padding:4px 10px;border-radius:12px;font-size:10px;font-weight:700;border:1px solid rgba(34,197,94,0.5);backdrop-filter:blur(8px);text-transform:uppercase;letter-spacing:0.08em;white-space:nowrap;">● ACTIVE NOW</span>'
+                                : '') +
+                        '</div>' +
+                    '</div>';
+                }
+
+                // Card body — padded. Skip the redundant title when the banner
+                // already shows it.
+                html += '<div style="padding:18px;">';
+
+                if (!cp.bannerImage && isActive) html += '<div style="display:inline-block;background:rgba(34,197,94,0.15);color:#22c55e;font-size:9px;font-weight:700;padding:3px 8px;border-radius:6px;letter-spacing:1px;margin-bottom:10px;">● ACTIVE NOW</div>';
 
                 html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">' +
-                    '<div><div style="font-family:\'Rajdhani\',sans-serif;font-size:18px;font-weight:900;color:#e0e6ff;">' + escapeHtml(cp.name || 'Checkpoint') + '</div>' +
+                    '<div>' +
+                    (cp.bannerImage
+                        ? ''
+                        : '<div style="font-family:\'Rajdhani\',sans-serif;font-size:18px;font-weight:900;color:#e0e6ff;">' + escapeHtml(cp.name || 'Checkpoint') + '</div>') +
                     (cp.description ? '<div style="font-size:12px;color:#8a92b0;margin-top:4px;max-width:400px;">' + escapeHtml(cp.description).substring(0, 100) + '</div>' : '') + '</div>' +
                     '<div style="text-align:right;">' +
                     (cp.xc ? '<div style="font-family:\'Share Tech Mono\',monospace;font-size:14px;color:#f5c842;font-weight:700;">' + cp.xc + ' XC</div>' : '') +
@@ -20265,7 +20292,8 @@
                         (cp.endDate ? '<span>End: ' + escapeHtml(cp.endDate) + '</span>' : '') + '</div>';
                 }
 
-                html += '</div>';
+                // Close padded body, then the outer card.
+                html += '</div></div>';
             });
 
             el.innerHTML = html;
@@ -20290,10 +20318,27 @@
             var pct = cp.progress || 0;
             var isActive = cp.status === 'active' || cp.status === 'current';
 
-            // Header
-            html += '<div style="background:linear-gradient(135deg,rgba(245,200,66,0.06),rgba(10,18,40,0.4));border:1px solid rgba(245,200,66,0.15);border-radius:16px;padding:24px;margin-bottom:20px;">';
-            if (isActive) html += '<div style="display:inline-block;background:rgba(34,197,94,0.15);color:#22c55e;font-size:9px;font-weight:700;padding:3px 8px;border-radius:6px;letter-spacing:1px;margin-bottom:10px;">● ACTIVE</div>';
-            html += '<div style="font-family:\'Orbitron\',sans-serif;font-size:18px;font-weight:700;color:#f5c842;letter-spacing:1px;margin-bottom:6px;">' + escapeHtml(cp.name || 'Checkpoint') + '</div>';
+            // Header — same banner pattern as the host card and the list view.
+            // overflow:hidden so the image hugs the top corners; padding lives
+            // inside the body wrapper below.
+            html += '<div style="background:linear-gradient(135deg,rgba(245,200,66,0.06),rgba(10,18,40,0.4));border:1px solid rgba(245,200,66,0.15);border-radius:16px;margin-bottom:20px;overflow:hidden;">';
+            var ppDetailAccentRgb = isActive ? '34,197,94' : '245,200,66';
+            if (cp.bannerImage) {
+                html += '<div style="position:relative;height:200px;overflow:hidden;">' +
+                    '<img src="' + escapeHtml(cp.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;display:block;filter:saturate(1.15) brightness(1.05);">' +
+                    '<div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(10,10,15,0) 0%, rgba(22,22,31,0.45) 55%, rgba(22,22,31,0.95) 100%);"></div>' +
+                    '<div style="position:absolute;inset:0;box-shadow:inset 0 0 80px rgba(' + ppDetailAccentRgb + ',0.22);pointer-events:none;"></div>' +
+                    '<div style="position:absolute;left:22px;right:22px;bottom:16px;display:flex;justify-content:space-between;align-items:flex-end;gap:12px;">' +
+                        '<div style="font-family:\'Orbitron\',sans-serif;font-size:22px;font-weight:800;color:#ffffff;text-shadow:0 2px 12px rgba(0,0,0,0.9), 0 0 14px rgba(' + ppDetailAccentRgb + ',0.35);letter-spacing:0.04em;">' + escapeHtml(cp.name || 'Checkpoint') + '</div>' +
+                        (isActive
+                            ? '<span style="background:rgba(34,197,94,0.2);color:#22c55e;padding:5px 12px;border-radius:14px;font-size:11px;font-weight:700;border:1px solid rgba(34,197,94,0.5);backdrop-filter:blur(8px);text-transform:uppercase;letter-spacing:0.08em;white-space:nowrap;">● ACTIVE</span>'
+                            : '') +
+                    '</div>' +
+                '</div>';
+            }
+            html += '<div style="padding:24px;">';
+            if (!cp.bannerImage && isActive) html += '<div style="display:inline-block;background:rgba(34,197,94,0.15);color:#22c55e;font-size:9px;font-weight:700;padding:3px 8px;border-radius:6px;letter-spacing:1px;margin-bottom:10px;">● ACTIVE</div>';
+            if (!cp.bannerImage) html += '<div style="font-family:\'Orbitron\',sans-serif;font-size:18px;font-weight:700;color:#f5c842;letter-spacing:1px;margin-bottom:6px;">' + escapeHtml(cp.name || 'Checkpoint') + '</div>';
             if (cp.description) html += '<div style="font-size:13px;color:#a0a8c4;line-height:1.6;margin-bottom:14px;">' + escapeHtml(cp.description) + '</div>';
 
             // Stats row
@@ -20312,7 +20357,8 @@
                 html += '<div style="margin-top:12px;padding:10px 14px;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.12);border-radius:8px;font-size:11px;color:#ef4444;">' +
                     '⚠️ Snapshot every ' + cp.snapshotInterval + ' hours after deadline — penalties may apply for incomplete tasks.</div>';
             }
-            html += '</div>';
+            // Close padded body + outer card.
+            html += '</div></div>';
 
             // Tasks & Projects in this checkpoint — match both roundId and
             // checkpointId, and filter to the active player's cohort.
