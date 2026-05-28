@@ -22188,7 +22188,7 @@
                             var n = (t.phaseSubmissions[k] || []).length;
                             return n > 0 ? k.charAt(0).toUpperCase() + ':' + n : '';
                         }).filter(Boolean).join('  ');
-                        tSubmissionsSummary = '<div style="margin-top:10px;padding:6px 10px;background:rgba(0,212,255,0.05);border:1px solid rgba(0,212,255,0.18);border-radius:6px;font-size:10px;color:rgba(0,212,255,0.85);font-family:monospace;letter-spacing:0.04em;">📤 ' + tTotalSubs + ' SUBMISSIONS — ' + tSubCounts + '</div>';
+                        tSubmissionsSummary = '<div style="margin-top:10px;padding:6px 10px;background:rgba(0,212,255,0.05);border:1px solid rgba(0,212,255,0.18);border-radius:6px;font-size:10px;color:rgba(0,212,255,0.85);font-family:monospace;letter-spacing:0.04em;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(0,212,255,0.10)\'" onmouseout="this.style.background=\'rgba(0,212,255,0.05)\'" onclick="pflxOpenSubmissionsModal(' + JSON.stringify('task') + ',' + JSON.stringify(t.id) + ')">📤 ' + tTotalSubs + ' SUBMISSIONS — ' + tSubCounts + ' &nbsp;→ click to review</div>';
                     }
                 }
 
@@ -22953,6 +22953,138 @@
             pflxSubmitProjectPhase(projectId, phase, { description: description, url: url });
         };
 
+        // ── Submissions Modal ───────────────────────────────────────────────
+        // Open by chip click on a task/project card. Shows every submission
+        // grouped by phase with Approve/Reject per submission for the host.
+        function _pflxFindMonitoredItem(kind, id) {
+            return kind === 'project' ? _pflxFindProject(id) : _pflxFindTask(id);
+        }
+        function _pflxItemSaveKind(kind) { return kind === 'project' ? 'projects' : 'tasks'; }
+        function _pflxItemReRender(kind) {
+            try {
+                if (kind === 'project' && typeof mcRenderProjects === 'function') mcRenderProjects();
+                else if (typeof mcRenderTasks === 'function') mcRenderTasks();
+            } catch (e) {}
+        }
+
+        window.pflxOpenSubmissionsModal = function (kind, id) {
+            var found = _pflxFindMonitoredItem(kind, id);
+            if (!found) return;
+            var item = found.task || found.project;
+            var title = item.title || item.name || 'Untitled';
+            document.getElementById('pflx-sub-modal-title').textContent = title;
+            document.getElementById('pflx-sub-modal-sub').textContent =
+                (kind === 'project' ? 'Project' : 'Task') + ' · ' + (item.flpTracking === 'monitoring' ? 'FLP-monitored' : 'Bypass') +
+                (item.startedAt ? ' · Started ' + new Date(item.startedAt).toLocaleDateString() : '');
+            // Cache the (kind, id) on the modal so approve/reject can find back.
+            var modal = document.getElementById('pflx-submissions-modal');
+            modal.setAttribute('data-kind', kind);
+            modal.setAttribute('data-id', id);
+            pflxRenderSubmissionsModalBody(kind, id);
+            modal.style.display = 'flex';
+        };
+
+        window.pflxCloseSubmissionsModal = function () {
+            var modal = document.getElementById('pflx-submissions-modal');
+            if (modal) modal.style.display = 'none';
+        };
+
+        function pflxRenderSubmissionsModalBody(kind, id) {
+            var found = _pflxFindMonitoredItem(kind, id);
+            if (!found) return;
+            var item = found.task || found.project;
+            var body = document.getElementById('pflx-sub-modal-body');
+            if (!body) return;
+            var subs = item.phaseSubmissions || { engagement: [], development: [], enhancement: [], fulfillment: [] };
+            var phases = ['engagement','development','enhancement','fulfillment'];
+            var cfg = pflxGetFlpConfig();
+            var phaseColor = { engagement: '#00d4ff', development: '#a78bfa', enhancement: '#f5c842', fulfillment: '#22c55e' };
+            var statusColor = { pending: '#f5a500', approved: '#22c55e', rejected: '#ef4444' };
+            var html = '';
+            phases.forEach(function (phase) {
+                var list = subs[phase] || [];
+                var col = phaseColor[phase];
+                var phaseLabel = cfg[phase].name;
+                html += '<div style="margin-bottom:18px;">' +
+                    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid ' + col + '30;">' +
+                        '<div style="width:8px;height:8px;border-radius:50%;background:' + col + ';"></div>' +
+                        '<div style="font-family:Orbitron,sans-serif;font-size:11px;font-weight:800;color:' + col + ';letter-spacing:0.06em;text-transform:uppercase;">' + escapeHtml(phaseLabel) + (phase === 'enhancement' ? ' — PEER REVIEW' : phase === 'fulfillment' ? ' — FINAL' : '') + '</div>' +
+                        '<div style="margin-left:auto;font-size:10px;color:rgba(255,255,255,0.45);font-family:monospace;">' + list.length + ' submission' + (list.length === 1 ? '' : 's') + '</div>' +
+                    '</div>';
+                if (list.length === 0) {
+                    html += '<div style="padding:10px;font-size:11px;color:rgba(255,255,255,0.3);font-style:italic;background:rgba(255,255,255,0.02);border-radius:6px;text-align:center;">No submissions for this phase yet.</div>';
+                } else {
+                    list.forEach(function (s) {
+                        var sc = statusColor[s.status] || '#888';
+                        var when = s.submittedAt ? new Date(s.submittedAt).toLocaleString() : '';
+                        html += '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:12px;margin-bottom:8px;">' +
+                            '<div style="display:flex;justify-content:space-between;gap:8px;font-size:10px;color:rgba(255,255,255,0.5);margin-bottom:8px;">' +
+                                '<div>📤 ' + escapeHtml(s.submittedBy || 'unknown') + ' · ' + escapeHtml(when) + '</div>' +
+                                '<div style="color:' + sc + ';font-weight:700;text-transform:uppercase;letter-spacing:0.06em;">' + escapeHtml(s.status || 'pending') + '</div>' +
+                            '</div>' +
+                            '<div style="font-size:12px;color:#e0e6ff;line-height:1.5;margin-bottom:8px;white-space:pre-wrap;">' + escapeHtml(s.description || '') + '</div>' +
+                            (s.url ? '<div style="font-size:11px;margin-bottom:8px;"><a href="' + escapeHtml(s.url) + '" target="_blank" rel="noopener" style="color:#00d4ff;text-decoration:underline;">🔗 ' + escapeHtml(s.url) + '</a></div>' : '') +
+                            (s.hostNote ? '<div style="font-size:11px;color:rgba(255,255,255,0.6);background:rgba(0,0,0,0.2);border-left:2px solid ' + sc + ';padding:6px 8px;margin-bottom:8px;font-style:italic;">Host note: ' + escapeHtml(s.hostNote) + '</div>' : '') +
+                            (s.status === 'pending' ?
+                                '<div style="display:flex;gap:8px;">' +
+                                    '<button style="flex:1;padding:6px 12px;font-size:11px;background:rgba(34,197,94,0.12);color:#22c55e;border:1px solid rgba(34,197,94,0.4);border-radius:6px;cursor:pointer;font-weight:700;" onclick="pflxApproveSubmissionUI(' + JSON.stringify(s.id) + ')">✓ Approve</button>' +
+                                    '<button style="flex:1;padding:6px 12px;font-size:11px;background:rgba(239,68,68,0.12);color:#ef4444;border:1px solid rgba(239,68,68,0.4);border-radius:6px;cursor:pointer;font-weight:700;" onclick="pflxRejectSubmissionUI(' + JSON.stringify(s.id) + ')">✗ Reject</button>' +
+                                '</div>'
+                            : '') +
+                        '</div>';
+                    });
+                }
+                html += '</div>';
+            });
+            body.innerHTML = html;
+        }
+        window.pflxRenderSubmissionsModalBody = pflxRenderSubmissionsModalBody;
+
+        // Approve / reject actions — find the submission by id across all phases,
+        // flip its status, optionally attach a host note, persist, re-render.
+        function _pflxUpdateSubmissionStatus(submissionId, newStatus, hostNote) {
+            var modal = document.getElementById('pflx-submissions-modal');
+            var kind = modal.getAttribute('data-kind') || 'task';
+            var id   = modal.getAttribute('data-id');
+            var found = _pflxFindMonitoredItem(kind, id);
+            if (!found) return false;
+            var item = found.task || found.project;
+            var subs = item.phaseSubmissions || {};
+            var phases = ['engagement','development','enhancement','fulfillment'];
+            var target = null;
+            for (var i = 0; i < phases.length && !target; i++) {
+                var list = subs[phases[i]] || [];
+                for (var j = 0; j < list.length; j++) {
+                    if (list[j].id === submissionId) { target = list[j]; break; }
+                }
+            }
+            if (!target) return false;
+            target.status = newStatus;
+            target.reviewedAt = Date.now();
+            target.reviewedBy = (window.activeSession && (activeSession.brand || activeSession.name)) || 'host';
+            if (hostNote) target.hostNote = hostNote;
+            try { mcSaveData(_pflxItemSaveKind(kind)); } catch (e) {}
+            pflxRenderSubmissionsModalBody(kind, id);
+            _pflxItemReRender(kind);
+            return true;
+        }
+
+        window.pflxApproveSubmissionUI = function (submissionId) {
+            var note = prompt('Optional approval note (leave blank to approve as-is):', '');
+            if (note === null) return;
+            _pflxUpdateSubmissionStatus(submissionId, 'approved', (note || '').trim());
+            try { pflxPlaySfx('approve'); } catch (e) {}
+        };
+
+        window.pflxRejectSubmissionUI = function (submissionId) {
+            var note = prompt('Reason for rejection (sent to the player):', '');
+            if (note === null) return;
+            note = (note || '').trim();
+            if (!note) { alert('A reason is required when rejecting.'); return; }
+            _pflxUpdateSubmissionStatus(submissionId, 'rejected', note);
+            try { pflxPlaySfx('reject'); } catch (e) {}
+        };
+
         window.pflxSubmitTaskPhaseUI = function (taskId) {
             var found = _pflxFindTask(taskId);
             if (!found) return;
@@ -23416,7 +23548,7 @@
                             var n = (p.phaseSubmissions[k] || []).length;
                             return n > 0 ? k.charAt(0).toUpperCase() + ':' + n : '';
                         }).filter(Boolean).join('  ');
-                        pSubmissionsSummary = '<div style="margin-top:10px;padding:6px 10px;background:rgba(0,212,255,0.05);border:1px solid rgba(0,212,255,0.18);border-radius:6px;font-size:10px;color:rgba(0,212,255,0.85);font-family:monospace;letter-spacing:0.04em;">📤 ' + totalSubs + ' SUBMISSIONS — ' + subCounts + '</div>';
+                        pSubmissionsSummary = '<div style="margin-top:10px;padding:6px 10px;background:rgba(0,212,255,0.05);border:1px solid rgba(0,212,255,0.18);border-radius:6px;font-size:10px;color:rgba(0,212,255,0.85);font-family:monospace;letter-spacing:0.04em;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(0,212,255,0.10)\'" onmouseout="this.style.background=\'rgba(0,212,255,0.05)\'" onclick="pflxOpenSubmissionsModal(' + JSON.stringify('project') + ',' + JSON.stringify(p.id) + ')">📤 ' + totalSubs + ' SUBMISSIONS — ' + subCounts + ' &nbsp;→ click to review</div>';
                     }
                 }
 
@@ -42504,6 +42636,23 @@ RESPONSE RULES:
             };
         })();
     </script>
+
+    <!-- FLP PHASE SUBMISSIONS MODAL — opened when host clicks a submissions chip
+         on a task or project card. Lists each submission grouped by phase with
+         Approve/Reject buttons per submission. Populated by pflxOpenSubmissionsModal. -->
+    <div id="pflx-submissions-modal" style="position:fixed;inset:0;background:rgba(8,14,32,0.92);display:none;align-items:flex-start;justify-content:center;z-index:10002;backdrop-filter:blur(10px);padding:40px 16px;overflow-y:auto;" onclick="if(event.target===this)pflxCloseSubmissionsModal()">
+        <div style="background:linear-gradient(180deg,rgba(15,22,42,0.98),rgba(10,16,32,0.98));border:1px solid rgba(0,212,255,0.25);border-radius:18px;max-width:720px;width:100%;max-height:none;padding:28px;box-shadow:0 0 60px rgba(0,212,255,0.15);">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,0.08);">
+                <div>
+                    <div style="font-family:Orbitron,sans-serif;font-size:12px;font-weight:800;color:#00d4ff;letter-spacing:0.08em;text-transform:uppercase;">FLP Submissions</div>
+                    <div id="pflx-sub-modal-title" style="font-size:20px;font-weight:800;color:#f0f0ff;margin-top:4px;">—</div>
+                    <div id="pflx-sub-modal-sub" style="font-size:11px;color:rgba(255,255,255,0.45);margin-top:4px;">—</div>
+                </div>
+                <button onclick="pflxCloseSubmissionsModal()" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:#e0e6ff;font-size:18px;width:32px;height:32px;border-radius:8px;cursor:pointer;flex-shrink:0;">×</button>
+            </div>
+            <div id="pflx-sub-modal-body"></div>
+        </div>
+    </div>
 
     <!-- TASK SUBMISSION MODAL -->
     <div id="mc-submit-modal" style="position:fixed;inset:0;background:rgba(8,14,32,0.97);display:none;align-items:center;justify-content:center;z-index:10000;backdrop-filter:blur(8px);">
