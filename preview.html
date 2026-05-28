@@ -27641,6 +27641,51 @@
                     applicantsPanel += '</div>';
                 }
 
+                // ── Lineage panel ─────────────────────────────────────
+                // A job can carry provenance both ways:
+                //   ← source — j.sourceTaskId pointing back to the task this
+                //     job was created from (set by pflxConvertTaskToJob)
+                //   → hires  — tasks auto-created when a player was hired,
+                //     identified by task.backFromJobId === j.id
+                // Render both directions as inline chips so the host can
+                // walk the chain from any view.
+                var lineagePanel = '';
+                var srcTask = j.sourceTaskId && Array.isArray(mcTasks)
+                    ? mcTasks.find(function (t) { return t.id === j.sourceTaskId; })
+                    : null;
+                var hireTasks = Array.isArray(mcTasks)
+                    ? mcTasks.filter(function (t) { return t.backFromJobId === j.id; })
+                    : [];
+                if (srcTask || hireTasks.length) {
+                    lineagePanel = '<div style="margin-top:10px;padding:10px 12px;background:rgba(245,200,66,0.04);border:1px solid rgba(245,200,66,0.18);border-radius:10px;">' +
+                        '<div style="font-family:Orbitron,sans-serif;font-size:9px;font-weight:800;color:rgba(245,200,66,0.85);letter-spacing:0.12em;margin-bottom:8px;text-transform:uppercase;">🔗 LINEAGE</div>' +
+                        '<div style="display:flex;flex-direction:column;gap:5px;">';
+                    if (srcTask) {
+                        var srcIdx = mcTasks.indexOf(srcTask);
+                        lineagePanel += '<div onclick="event.stopPropagation();mcEditTask(' + srcIdx + ')" title="Open source task" style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:rgba(0,212,255,0.05);border:1px solid rgba(0,212,255,0.2);border-radius:6px;cursor:pointer;font-size:11px;">' +
+                            '<span style="color:rgba(0,212,255,0.85);font-weight:700;letter-spacing:0.04em;flex-shrink:0;">← FROM TASK</span>' +
+                            '<span style="color:#e0e6ff;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(srcTask.title || 'Untitled task') + '</span>' +
+                            (srcTask.convertedAt ? '<span style="color:rgba(255,255,255,0.4);font-family:monospace;font-size:10px;flex-shrink:0;">' + new Date(srcTask.convertedAt).toLocaleDateString() + '</span>' : '') +
+                        '</div>';
+                    } else if (j.sourceTaskId) {
+                        // Source task referenced but missing — likely deleted.
+                        lineagePanel += '<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:rgba(255,255,255,0.02);border:1px dashed rgba(255,255,255,0.12);border-radius:6px;font-size:11px;color:rgba(255,255,255,0.4);font-style:italic;">' +
+                            '<span style="flex-shrink:0;">← FROM TASK</span>' +
+                            '<span>(source task no longer exists)</span>' +
+                        '</div>';
+                    }
+                    hireTasks.forEach(function (ht) {
+                        var htIdx = mcJobs.indexOf; // unused; keep linter quiet
+                        var realHtIdx = mcTasks.indexOf(ht);
+                        lineagePanel += '<div onclick="event.stopPropagation();mcEditTask(' + realHtIdx + ')" title="Open hire task" style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:rgba(34,197,94,0.05);border:1px solid rgba(34,197,94,0.2);border-radius:6px;cursor:pointer;font-size:11px;">' +
+                            '<span style="color:rgba(34,197,94,0.85);font-weight:700;letter-spacing:0.04em;flex-shrink:0;">→ HIRE TASK</span>' +
+                            '<span style="color:#e0e6ff;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(ht.title || 'Untitled') + '</span>' +
+                            (ht.playerId ? '<span style="color:rgba(167,139,250,0.85);font-family:monospace;font-size:10px;flex-shrink:0;">' + escapeHtml(String(ht.playerId)) + '</span>' : '') +
+                        '</div>';
+                    });
+                    lineagePanel += '</div></div>';
+                }
+
                 return '<div style="background:rgba(22,22,31,0.6);border:1px solid rgba(255,255,255,0.06);border-radius:20px;padding:20px;display:flex;flex-direction:column;">' +
                     // Icon + Title + Status
                     '<div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:12px;">' +
@@ -27652,6 +27697,8 @@
                     '</div>' +
                     // Description
                     '<div style="font-size:12px;color:rgba(255,255,255,0.5);line-height:1.5;margin-bottom:12px;">' + escapeHtml(j.description || '') + '</div>' +
+                    // Lineage chain
+                    lineagePanel +
                     // Applicants panel (if applicable)
                     applicantsPanel +
                     // Metadata pills
