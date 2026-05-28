@@ -20051,6 +20051,135 @@
                 '<div style="font-family:\'Jura\',sans-serif;font-size:11px;color:#6a7290;letter-spacing:1px;">' + escapeHtml(cohort) + ' · ' + xc.toLocaleString() + ' XC</div>' +
                 '</div></div>';
 
+            // ── Active checkpoint hero + Next Up strip ────────────────────
+            // Surface the active checkpoint front and center with its banner,
+            // a phase pill computed from start/end dates, and a horizontal
+            // strip of the player's most urgent tasks. Skip cleanly if there
+            // is no active checkpoint (rendered card chrome resumes below).
+            if (activeCp) {
+                // Phase pill — treat the checkpoint as an FLP-monitored item:
+                // synthesize startedAt/dueDate from its dates so we can reuse
+                // pflxComputeFlpStatus for color + phase label.
+                var heroFlp = null;
+                try {
+                    heroFlp = pflxComputeFlpStatus({
+                        flpTracking: 'monitoring',
+                        startedAt: activeCp.startDate || activeCp.startedAt,
+                        dueDate: activeCp.endDate || activeCp.deadline || activeCp.dueDate
+                    });
+                } catch (e) {}
+
+                var heroPill = '';
+                if (heroFlp) {
+                    var heroRgb = { green:'34,197,94', yellow:'245,200,66', red:'239,68,68' }[heroFlp.color] || '255,255,255';
+                    heroPill = { label: heroFlp.phaseName, color: heroRgb };
+                }
+
+                // Tasks under this checkpoint that haven't been finished. Used
+                // both for the count and to assemble the Next Up strip.
+                var cpTasks = tasks.filter(function (t) {
+                    return ppItemInCheckpoint(t, activeCp.id) && !(t.completed || t.status === 'approved');
+                });
+
+                // FLP-priority sort: tasks furthest along the lifecycle surface
+                // first (Fulfillment → Enhancement → Development → Engagement →
+                // not-started). Inside a phase, earlier dueDate wins. Bypass
+                // tasks fall to the end since they don't have urgency tracking.
+                var PHASE_RANK = { fulfillment:0, enhancement:1, development:2, engagement:3, 'not-started':4, bypass:5 };
+                function _phaseFor(t) {
+                    if (t.flpTracking !== 'monitoring') return 'bypass';
+                    if (!t.startedAt) return 'not-started';
+                    try {
+                        var st = pflxComputeFlpStatus(t);
+                        if (st && st.phase) return st.phase;
+                    } catch (e) {}
+                    return 'engagement';
+                }
+                var sortedTasks = cpTasks.slice().sort(function (a, b) {
+                    var pa = PHASE_RANK[_phaseFor(a)] !== undefined ? PHASE_RANK[_phaseFor(a)] : 99;
+                    var pb = PHASE_RANK[_phaseFor(b)] !== undefined ? PHASE_RANK[_phaseFor(b)] : 99;
+                    if (pa !== pb) return pa - pb;
+                    var da = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
+                    var db = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
+                    return da - db;
+                });
+                var nextUp = sortedTasks.slice(0, 4);
+
+                // Hero card. Banner-aware (uses cp.bannerImage when set, same
+                // helper as the checkpoint detail view) so the player sees the
+                // same visual identity the host configured.
+                var heroBanner = ppBannerHeader({
+                    image: activeCp.bannerImage,
+                    title: activeCp.name || 'Active Checkpoint',
+                    accent: heroPill ? heroPill.color : '0,212,255',
+                    pill: heroPill,
+                    kicker: '● ACTIVE CHECKPOINT'
+                });
+
+                html += '<div style="background:linear-gradient(180deg, rgba(22,22,31,0.7), rgba(22,22,31,0.4));border:1px solid ' + (heroPill ? ('rgba(' + heroPill.color + ',0.35)') : 'rgba(0,212,255,0.25)') + ';border-radius:16px;margin-bottom:20px;overflow:hidden;cursor:pointer;transition:transform 0.2s ease, box-shadow 0.2s ease;" onclick="ppNav(\'checkpoint-detail\',{id:\'' + (activeCp.id || '') + '\'})" onmouseover="this.style.transform=\'translateY(-2px)\';this.style.boxShadow=\'0 0 24px ' + (heroPill ? ('rgba(' + heroPill.color + ',0.18)') : 'rgba(0,212,255,0.18)') + '\';" onmouseout="this.style.transform=\'translateY(0)\';this.style.boxShadow=\'none\';">' +
+                    heroBanner;
+
+                // If there was no banner image, render a compact text-only
+                // header so we still announce the checkpoint clearly.
+                if (!heroBanner) {
+                    var ttRgb = heroPill ? heroPill.color : '0,212,255';
+                    html += '<div style="padding:18px 22px 0;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">' +
+                        '<div>' +
+                            '<div style="font-family:\'Share Tech Mono\',monospace;font-size:10px;color:rgba(255,255,255,0.65);letter-spacing:0.18em;margin-bottom:4px;text-transform:uppercase;">● ACTIVE CHECKPOINT</div>' +
+                            '<div style="font-family:\'Orbitron\',sans-serif;font-size:20px;font-weight:800;color:#f0f0ff;text-shadow:0 0 12px rgba(' + ttRgb + ',0.3);">' + escapeHtml(activeCp.name || 'Checkpoint') + '</div>' +
+                        '</div>' +
+                        (heroPill
+                            ? '<span style="background:rgba(' + heroPill.color + ',0.18);color:rgb(' + heroPill.color + ');padding:5px 12px;border-radius:14px;font-size:11px;font-weight:700;border:1px solid rgba(' + heroPill.color + ',0.4);text-transform:uppercase;letter-spacing:0.08em;">' + escapeHtml(heroPill.label) + '</span>'
+                            : '') +
+                    '</div>';
+                }
+
+                // Body — short description + Next Up strip.
+                html += '<div style="padding:14px 22px 18px;">';
+                if (activeCp.description) {
+                    html += '<div style="font-size:12px;color:#a0a8c4;line-height:1.55;margin-bottom:12px;">' + escapeHtml(String(activeCp.description).substring(0, 160)) + (activeCp.description.length > 160 ? '…' : '') + '</div>';
+                }
+
+                if (nextUp.length === 0) {
+                    html += '<div style="padding:14px;background:rgba(34,197,94,0.05);border:1px dashed rgba(34,197,94,0.25);border-radius:10px;color:#22c55e;font-size:12px;text-align:center;letter-spacing:0.04em;font-weight:600;">✓ Nothing waiting — you\'re all caught up.</div>';
+                } else {
+                    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
+                        '<div style="font-family:\'Orbitron\',sans-serif;font-size:10px;font-weight:800;color:rgba(255,255,255,0.5);letter-spacing:0.14em;">▶ NEXT UP</div>' +
+                        '<div style="font-family:monospace;font-size:10px;color:rgba(255,255,255,0.35);">' + cpTasks.length + ' open in this checkpoint</div>' +
+                    '</div>' +
+                    '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(170px, 1fr));gap:8px;">';
+                    nextUp.forEach(function (t) {
+                        var ph = _phaseFor(t);
+                        var phMeta = {
+                            engagement:  { rgb: '34,197,94',  label: 'Engagement' },
+                            development: { rgb: '0,212,255',  label: 'Development' },
+                            enhancement: { rgb: '245,200,66', label: 'Enhancement' },
+                            fulfillment: { rgb: '239,68,68',  label: 'Fulfillment' },
+                            'not-started':{ rgb: '167,139,250', label: 'Not Started' },
+                            bypass:      { rgb: '156,163,175', label: '—' }
+                        }[ph] || { rgb: '156,163,175', label: '—' };
+                        var daysHtml = '';
+                        if (t.dueDate) {
+                            var dl = Math.ceil((new Date(t.dueDate).getTime() - Date.now()) / 86400000);
+                            var dCol = dl < 0 ? '#ef4444' : dl <= 2 ? '#f59e0b' : 'rgba(255,255,255,0.55)';
+                            var dTxt = dl < 0 ? Math.abs(dl) + 'd overdue' : dl === 0 ? 'Due today' : dl + 'd left';
+                            daysHtml = '<div style="font-family:monospace;font-size:10px;color:' + dCol + ';">' + dTxt + '</div>';
+                        }
+                        html += '<div onclick="event.stopPropagation();ppNav(\'task-detail\',{id:\'' + (t.id || '') + '\'})" style="background:rgba(' + phMeta.rgb + ',0.05);border:1px solid rgba(' + phMeta.rgb + ',0.25);border-left:3px solid rgba(' + phMeta.rgb + ',0.85);border-radius:8px;padding:10px 12px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(' + phMeta.rgb + ',0.10)\'" onmouseout="this.style.background=\'rgba(' + phMeta.rgb + ',0.05)\'">' +
+                            '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px;margin-bottom:4px;">' +
+                                '<div style="font-family:Orbitron,sans-serif;font-size:9px;font-weight:800;color:rgba(' + phMeta.rgb + ',1);letter-spacing:0.08em;text-transform:uppercase;">' + phMeta.label + '</div>' +
+                                (t.xcReward || t.xc ? '<div style="font-family:monospace;font-size:10px;color:#f5c842;font-weight:700;">' + (t.xcReward || t.xc) + ' XC</div>' : '') +
+                            '</div>' +
+                            '<div style="font-size:12px;color:#e0e6ff;font-weight:600;line-height:1.3;margin-bottom:4px;">' + escapeHtml(String(t.title || t.name || 'Task').substring(0, 60)) + '</div>' +
+                            daysHtml +
+                        '</div>';
+                    });
+                    html += '</div>';
+                }
+
+                html += '</div></div>';
+            }
+
             // ── Quick stats row ──
             html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px;">';
             var qStats = [
