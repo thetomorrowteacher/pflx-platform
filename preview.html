@@ -22178,6 +22178,20 @@
                     flpPill = '<div style="margin-top:12px;padding:8px 12px;background:rgba(255,255,255,0.03);border:1px dashed rgba(255,255,255,0.12);border-radius:8px;font-size:10px;color:rgba(255,255,255,0.45);text-align:center;letter-spacing:0.04em;">⏱ FLP MONITORING — awaiting player start</div>';
                 }
 
+                // Submissions summary — counts per phase, shown when at least one exists.
+                var tSubmissionsSummary = '';
+                if (t.phaseSubmissions) {
+                    var tTotalSubs = ['engagement','development','enhancement','fulfillment']
+                        .reduce(function (acc, k) { return acc + ((t.phaseSubmissions[k] || []).length); }, 0);
+                    if (tTotalSubs > 0) {
+                        var tSubCounts = ['engagement','development','enhancement','fulfillment'].map(function (k) {
+                            var n = (t.phaseSubmissions[k] || []).length;
+                            return n > 0 ? k.charAt(0).toUpperCase() + ':' + n : '';
+                        }).filter(Boolean).join('  ');
+                        tSubmissionsSummary = '<div style="margin-top:10px;padding:6px 10px;background:rgba(0,212,255,0.05);border:1px solid rgba(0,212,255,0.18);border-radius:6px;font-size:10px;color:rgba(0,212,255,0.85);font-family:monospace;letter-spacing:0.04em;">📤 ' + tTotalSubs + ' SUBMISSIONS — ' + tSubCounts + '</div>';
+                    }
+                }
+
                 return '<div style="background:rgba(22,22,31,0.6);border:1px solid rgba(255,255,255,0.06);border-radius:20px;padding:20px;display:flex;flex-direction:column;">' +
                     // Icon + Title + Status
                     '<div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:12px;">' +
@@ -22191,6 +22205,8 @@
                     '<div style="font-size:12px;color:rgba(255,255,255,0.5);line-height:1.5;margin-bottom:12px;">' + escapeHtml(t.description || '') + '</div>' +
                     // FLP phase indicator (between description and submission panel)
                     flpPill +
+                    // Submissions summary (E:1 D:2 Enh:1 F:0 style)
+                    tSubmissionsSummary +
                     // Submission panel (if submitted)
                     submissionPanel +
                     // Metadata pills
@@ -22824,6 +22840,68 @@
             return p.subtaskCompletions[childId];
         };
 
+        // ── Project lifecycle (mirrors task lifecycle) ──────────────────────
+        function _pflxFindProject(projectId) {
+            if (typeof mcProjects === 'undefined' || !Array.isArray(mcProjects)) return null;
+            for (var i = 0; i < mcProjects.length; i++) {
+                if (mcProjects[i] && mcProjects[i].id === projectId) return { project: mcProjects[i], index: i };
+            }
+            return null;
+        }
+
+        window.pflxStartProject = function (projectId) {
+            var found = _pflxFindProject(projectId);
+            if (!found) return false;
+            var p = found.project;
+            if (p.flpTracking !== 'monitoring') return false;
+            if (p.startedAt) return false;
+            p.startedAt = Date.now();
+            if (p.status === 'planning' || !p.status) p.status = 'in_progress';
+            if (!p.phaseSubmissions) {
+                p.phaseSubmissions = { engagement: [], development: [], enhancement: [], fulfillment: [] };
+            }
+            try { mcSaveData('projects'); } catch (e) {}
+            try {
+                var who = (window.activeSession && (activeSession.brand || activeSession.name)) || 'A player';
+                if (typeof pflxToast === 'function') pflxToast('▶ ' + who + ' started project: ' + (p.name || 'Untitled'), 'info');
+            } catch (e) {}
+            try { if (typeof mcRenderProjects === 'function') mcRenderProjects(); } catch (e) {}
+            return true;
+        };
+
+        window.pflxSubmitProjectPhase = function (projectId, phase, content) {
+            var validPhases = ['engagement','development','enhancement','fulfillment'];
+            if (validPhases.indexOf(phase) < 0) return false;
+            var found = _pflxFindProject(projectId);
+            if (!found) return false;
+            var p = found.project;
+            if (!p.phaseSubmissions) {
+                p.phaseSubmissions = { engagement: [], development: [], enhancement: [], fulfillment: [] };
+            }
+            var sub = {
+                id: 'sub-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+                phase: phase,
+                description: (content && content.description) || '',
+                url:         (content && content.url) || '',
+                fileName:    (content && content.fileName) || '',
+                fileData:    (content && content.fileData) || '',
+                submittedAt: Date.now(),
+                submittedBy: (window.activeSession && (activeSession.brand || activeSession.name)) || 'unknown',
+                submittedById: (window.activeSession && activeSession.id) || '',
+                status: 'pending'
+            };
+            p.phaseSubmissions[phase].push(sub);
+            if (phase === 'fulfillment') p.status = 'completed';
+            try { mcSaveData('projects'); } catch (e) {}
+            try {
+                if (typeof pflxToast === 'function') {
+                    pflxToast('📤 ' + sub.submittedBy + ' submitted ' + phase + ' for project: ' + (p.name || 'Untitled'), 'info');
+                }
+            } catch (e) {}
+            try { if (typeof mcRenderProjects === 'function') mcRenderProjects(); } catch (e) {}
+            return sub;
+        };
+
         // ── UI wrappers around the lifecycle actions ────────────────────────
         // Small prompt-based UI for now; richer modal can replace these later.
         window.pflxStartTaskUI = function (taskId) {
@@ -22837,6 +22915,42 @@
             var ok = confirm('Start "' + (t.title || 'Untitled') + '"?\n\nFLP monitoring will begin now. Your host will be notified.\n\nDeadline: ' + t.dueDate);
             if (!ok) return;
             pflxStartTask(taskId);
+        };
+
+        window.pflxStartProjectUI = function (projectId) {
+            var found = _pflxFindProject(projectId);
+            if (!found) return;
+            var p = found.project;
+            // Projects might use endDate / dueDate / createdAt — try several.
+            var deadline = p.dueDate || p.endDate || p.deadline || '';
+            if (!deadline) {
+                alert('This project has no end date set — host must set one before it can be started.');
+                return;
+            }
+            var ok = confirm('Start project "' + (p.name || 'Untitled') + '"?\n\nFLP monitoring will begin now.\n\nDeadline: ' + deadline);
+            if (!ok) return;
+            pflxStartProject(projectId);
+        };
+
+        window.pflxSubmitProjectPhaseUI = function (projectId) {
+            var found = _pflxFindProject(projectId);
+            if (!found) return;
+            var p = found.project;
+            // pflxComputeFlpStatus needs dueDate — fall back to endDate.
+            var compatItem = { flpTracking: p.flpTracking, startedAt: p.startedAt, dueDate: p.dueDate || p.endDate || p.deadline };
+            var status = pflxComputeFlpStatus(compatItem);
+            var phase = status ? status.phase : 'fulfillment';
+            var phaseName = status ? status.phaseName : 'Fulfillment';
+            var promptLabel = (phase === 'enhancement') ? 'Submit for Peer Review — describe what you want feedback on:'
+                            : (phase === 'fulfillment') ? 'Submit FINAL project work — describe what you delivered:'
+                            : 'Submit ' + phaseName + ' update for project — describe what you accomplished:';
+            var description = prompt(promptLabel, '');
+            if (description === null) return;
+            description = (description || '').trim();
+            if (!description) { alert('A description is required.'); return; }
+            var url = prompt('Optional — link to your work (Google Doc / Drive / website / etc.). Leave blank if none.', '');
+            url = (url || '').trim();
+            pflxSubmitProjectPhase(projectId, phase, { description: description, url: url });
         };
 
         window.pflxSubmitTaskPhaseUI = function (taskId) {
@@ -23272,6 +23386,40 @@
                     iconBox = '<div style="font-size:28px;">🎬</div>';
                 }
 
+                // FLP phase status — projects use endDate/dueDate as deadline; adapt for the helper.
+                var pStatus = null;
+                try {
+                    pStatus = pflxComputeFlpStatus({ flpTracking: p.flpTracking, startedAt: p.startedAt, dueDate: p.dueDate || p.endDate || p.deadline });
+                } catch (e) {}
+                var pFlpPill = '';
+                if (pStatus) {
+                    var pPillColor = { green:'34,197,94', yellow:'245,200,66', red:'239,68,68' }[pStatus.color] || '255,255,255';
+                    pFlpPill = '<div style="margin-top:12px;padding:10px 12px;background:rgba(' + pPillColor + ',0.08);border:1px solid rgba(' + pPillColor + ',0.35);border-left:3px solid rgba(' + pPillColor + ',0.8);border-radius:8px;">' +
+                        '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">' +
+                            '<div style="font-family:Orbitron,sans-serif;font-size:10px;font-weight:800;color:rgba(' + pPillColor + ',1);letter-spacing:0.08em;">' + pStatus.phaseName.toUpperCase() + '</div>' +
+                            '<div style="font-size:9px;color:rgba(255,255,255,0.4);font-family:monospace;">' + Math.round(pStatus.elapsedPct * 100) + '% elapsed</div>' +
+                        '</div>' +
+                        '<div style="font-size:11px;color:rgba(255,255,255,0.7);margin-top:4px;font-weight:600;">' + escapeHtml(pStatus.message) + '</div>' +
+                        '<div style="font-size:10px;color:rgba(255,255,255,0.45);margin-top:5px;line-height:1.4;">' + escapeHtml(pStatus.phaseDescription) + '</div>' +
+                    '</div>';
+                } else if (p.flpTracking === 'monitoring' && !p.startedAt) {
+                    pFlpPill = '<div style="margin-top:12px;padding:8px 12px;background:rgba(255,255,255,0.03);border:1px dashed rgba(255,255,255,0.12);border-radius:8px;font-size:10px;color:rgba(255,255,255,0.45);text-align:center;letter-spacing:0.04em;">⏱ FLP MONITORING — awaiting player start</div>';
+                }
+
+                // Submissions summary — counts per phase, shown only when at least one submission exists.
+                var pSubmissionsSummary = '';
+                if (p.phaseSubmissions) {
+                    var totalSubs = ['engagement','development','enhancement','fulfillment']
+                        .reduce(function (acc, k) { return acc + ((p.phaseSubmissions[k] || []).length); }, 0);
+                    if (totalSubs > 0) {
+                        var subCounts = ['engagement','development','enhancement','fulfillment'].map(function (k) {
+                            var n = (p.phaseSubmissions[k] || []).length;
+                            return n > 0 ? k.charAt(0).toUpperCase() + ':' + n : '';
+                        }).filter(Boolean).join('  ');
+                        pSubmissionsSummary = '<div style="margin-top:10px;padding:6px 10px;background:rgba(0,212,255,0.05);border:1px solid rgba(0,212,255,0.18);border-radius:6px;font-size:10px;color:rgba(0,212,255,0.85);font-family:monospace;letter-spacing:0.04em;">📤 ' + totalSubs + ' SUBMISSIONS — ' + subCounts + '</div>';
+                    }
+                }
+
                 return '<div style="background:rgba(22,22,31,0.6);border:1px solid rgba(255,255,255,0.06);border-radius:20px;padding:20px;display:flex;flex-direction:column;">' +
                     // Icon + Title + Status
                     '<div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:12px;">' +
@@ -23283,6 +23431,10 @@
                     '</div>' +
                     // Description
                     '<div style="font-size:12px;color:rgba(255,255,255,0.5);line-height:1.5;margin-bottom:12px;">' + escapeHtml(p.description || '') + '</div>' +
+                    // FLP phase indicator
+                    pFlpPill +
+                    // Submissions summary
+                    pSubmissionsSummary +
                     // Progress panel
                     progressPanel +
                     // Metadata pills
@@ -23292,10 +23444,19 @@
                     (p.team && p.team.length ? '<span style="background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.5);font-size:10px;padding:4px 8px;border-radius:6px;">👥 ' + p.team.length + ' member' + (p.team.length !== 1 ? 's' : '') + '</span>' : '') +
                     (p.createdAt ? '<span style="background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.5);font-size:10px;padding:4px 8px;border-radius:6px;">📅 ' + p.createdAt + '</span>' : '') +
                     '</div>' +
-                    // Action buttons
+                    // Action buttons — lifecycle-aware, same pattern as tasks.
                     '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:auto;padding-top:12px;border-top:1px solid rgba(255,255,255,0.04);">' +
-                    '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:70px;" onclick="mcEditProject(' + i + ')">Edit</button>' +
-                    '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:70px;" onclick="mcDeleteProject(' + i + ')">Delete</button>' +
+                    (p.flpTracking === 'monitoring' && !p.startedAt
+                        ? '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(0,212,255,0.15);color:#00d4ff;border:1px solid rgba(0,212,255,0.45);border-radius:8px;cursor:pointer;flex:1;min-width:90px;font-weight:700;" onclick="pflxStartProjectUI(' + JSON.stringify(p.id) + ')">▶ Start Project</button>'
+                        : '') +
+                    (p.flpTracking === 'monitoring' && p.startedAt && p.status !== 'completed'
+                        ? '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(245,200,66,0.12);color:#f5c842;border:1px solid rgba(245,200,66,0.4);border-radius:8px;cursor:pointer;flex:1;min-width:90px;font-weight:700;" onclick="pflxSubmitProjectPhaseUI(' + JSON.stringify(p.id) + ')">📤 Submit ' + (pStatus ? pStatus.phaseName : 'Work') + '</button>'
+                        : '') +
+                    (p.status === 'completed'
+                        ? '<div style="padding:6px 12px;font-size:11px;background:rgba(34,197,94,0.05);color:#22c55e;border:1px dashed rgba(34,197,94,0.35);border-radius:8px;flex:1;min-width:90px;text-align:center;letter-spacing:0.04em;font-weight:700;">✓ COMPLETED</div>'
+                        : '') +
+                    '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:60px;" onclick="mcEditProject(' + i + ')">Edit</button>' +
+                    '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:60px;" onclick="mcDeleteProject(' + i + ')">Delete</button>' +
                     '</div>' +
                     '</div>';
             }).join('');
