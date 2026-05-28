@@ -8042,26 +8042,43 @@
                                             </select>
                                         </div>
                                     </div>
-                                    <!-- FLP (Future Learning Protocol) phase + objective. Phase is
-                                         required for new tasks; objective is optional finer crosswalk.
-                                         Phase choice drives objective dropdown via mcTaskOnPhaseChange. -->
-                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
-                                        <div>
-                                            <label style="display:block;font-size:11px;color:rgba(0,212,255,0.7);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;">FLP Phase</label>
-                                            <select id="mc-task-flx-phase" onchange="mcTaskOnPhaseChange()" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(0,212,255,0.25);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
-                                                <option value="">Select phase…</option>
-                                                <option value="engagement">Engagement (Connection)</option>
-                                                <option value="development">Development (Ideation + Creation)</option>
-                                                <option value="enhancement">Enhancement (Reflection)</option>
-                                                <option value="fulfillment">Fulfillment (Production)</option>
-                                                <option value="bypass">— Bypass (no FLP tagging)</option>
-                                            </select>
+                                    <!-- FLP (Future Learning Protocol) section.
+                                         Tracking Mode is the binary lifecycle switch:
+                                           - bypass     → no progress monitoring; task is simple done/not-done
+                                           - monitoring → uses startedAt + dueDate to drive urgency colors
+                                                          (green/yellow/red) and lifecycle (start → submit → approved).
+                                         When monitoring is on, Phase + Objective tags become relevant for
+                                         organizing the list views; when bypass, they're hidden / ignored. -->
+                                    <div style="margin-bottom:12px;padding:14px;background:rgba(0,212,255,0.04);border:1px solid rgba(0,212,255,0.18);border-radius:10px;">
+                                        <label style="display:block;font-size:11px;color:rgba(0,212,255,0.85);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.06em;font-weight:700;">Tracking Mode</label>
+                                        <div style="display:flex;gap:8px;margin-bottom:10px;">
+                                            <label style="flex:1;display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(10,18,40,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:8px;cursor:pointer;font-size:12px;">
+                                                <input type="radio" name="mc-task-tracking" value="bypass" onchange="mcTaskOnTrackingChange()" style="accent-color:#6b7280;">
+                                                <span><strong>Bypass</strong> <span style="color:rgba(255,255,255,0.45);font-size:11px;">— simple task, no urgency tracking</span></span>
+                                            </label>
+                                            <label style="flex:1;display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(10,18,40,0.6);border:1px solid rgba(0,212,255,0.25);border-radius:8px;cursor:pointer;font-size:12px;">
+                                                <input type="radio" name="mc-task-tracking" value="monitoring" onchange="mcTaskOnTrackingChange()" checked style="accent-color:#00d4ff;">
+                                                <span><strong style="color:#00d4ff;">FLP Progress Monitoring</strong> <span style="color:rgba(255,255,255,0.45);font-size:11px;">— green/yellow/red urgency by duration</span></span>
+                                            </label>
                                         </div>
-                                        <div>
-                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">FLX Objective</label>
-                                            <select id="mc-task-flx-objective" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
-                                                <option value="">— (none)</option>
-                                            </select>
+                                        <!-- Phase + objective shown only when monitoring is on. -->
+                                        <div id="mc-task-flx-fields" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                                            <div>
+                                                <label style="display:block;font-size:11px;color:rgba(255,255,255,0.55);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;">FLP Phase</label>
+                                                <select id="mc-task-flx-phase" onchange="mcTaskOnPhaseChange()" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(0,212,255,0.25);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                                    <option value="">Select phase…</option>
+                                                    <option value="engagement">Engagement (Connection)</option>
+                                                    <option value="development">Development (Ideation + Creation)</option>
+                                                    <option value="enhancement">Enhancement (Reflection)</option>
+                                                    <option value="fulfillment">Fulfillment (Production)</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">FLX Objective</label>
+                                                <select id="mc-task-flx-objective" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                                    <option value="">— (none)</option>
+                                                </select>
+                                            </div>
                                         </div>
                                     </div>
                                     <div style="margin-bottom:12px;">
@@ -22399,7 +22416,12 @@
                 var el;
                 el = document.getElementById('mc-task-title'); if (el) el.value = t.title || '';
                 el = document.getElementById('mc-task-category'); if (el) el.value = t.category || '';
-                // FLP fields — phase first (populates objective options), then objective.
+                // Tracking mode (defaults to monitoring for legacy tasks without the flag).
+                var trackingMode = t.flpTracking || 'monitoring';
+                var trackingRadio = document.querySelector('input[name="mc-task-tracking"][value="' + trackingMode + '"]');
+                if (trackingRadio) trackingRadio.checked = true;
+                mcTaskOnTrackingChange();
+                // FLP phase + objective — only meaningful when monitoring is on.
                 el = document.getElementById('mc-task-flx-phase'); if (el) el.value = t.flxPhase || '';
                 mcTaskOnPhaseChange();
                 el = document.getElementById('mc-task-flx-objective'); if (el) el.value = t.flxObjective || '';
@@ -22500,7 +22522,10 @@
                 el = document.getElementById('mc-task-session-code'); if (el) el.value = '';
                 el = document.getElementById('mc-task-dc-channel'); if (el) el.checked = true;
                 el = document.getElementById('mc-task-xbot-enabled'); if (el) el.checked = true;
-                // Reset FLP fields for new task
+                // Reset FLP fields for new task — default to FLP Monitoring on
+                var defaultRadio = document.querySelector('input[name="mc-task-tracking"][value="monitoring"]');
+                if (defaultRadio) defaultRadio.checked = true;
+                mcTaskOnTrackingChange();
                 el = document.getElementById('mc-task-flx-phase'); if (el) el.value = '';
                 mcTaskOnPhaseChange();
             }
@@ -22564,6 +22589,17 @@
         }
         window.mcTaskOnPhaseChange = mcTaskOnPhaseChange;
 
+        // Show or hide the FLP phase + objective row when tracking mode flips.
+        // Bypass mode: collapse the fields (phase/objective are irrelevant).
+        // Monitoring mode: reveal them so host can tag the task into a phase.
+        function mcTaskOnTrackingChange() {
+            var modeEl = document.querySelector('input[name="mc-task-tracking"]:checked');
+            var mode = modeEl ? modeEl.value : 'monitoring';
+            var fields = document.getElementById('mc-task-flx-fields');
+            if (fields) fields.style.display = (mode === 'bypass') ? 'none' : 'grid';
+        }
+        window.mcTaskOnTrackingChange = mcTaskOnTrackingChange;
+
         // ── Task Reward Total ──────────────────────────────────────────────
         // The task's reward XC is the BASE XC (mc-task-xc) PLUS the sum of XC
         // values on every currently-checked digital badge. Updates live as
@@ -22600,10 +22636,13 @@
                 title: title,
                 description: document.getElementById('mc-task-desc')?.value || '',
                 category: document.getElementById('mc-task-category')?.value || '',
-                // FLP framework tagging — phase is the FLP strand the task lives in.
-                // 'bypass' explicitly opts out of FLP grouping (UI shows in "Bypass" bucket).
-                // Empty string = untagged (UI shows in "Uncategorized" until host tags).
-                // flxObjective is optional fine-grained crosswalk per MODULE_STRUCTURE §3.
+                // FLP tracking mode is the binary lifecycle switch (see form).
+                // 'bypass' = simple task, no urgency tracking. 'monitoring' = urgency
+                // colors driven by startedAt + dueDate (set when player clicks Start).
+                flpTracking: (document.querySelector('input[name="mc-task-tracking"]:checked') || {}).value || 'monitoring',
+                // FLP phase + objective — used by list views to group monitored tasks
+                // by strand and report against the standards crosswalk. Ignored when
+                // flpTracking === 'bypass'.
                 flxPhase: document.getElementById('mc-task-flx-phase')?.value || '',
                 flxObjective: document.getElementById('mc-task-flx-objective')?.value || '',
                 // Live total XC = base + sum(checked badge XC). Stored at save time
