@@ -27730,6 +27730,84 @@
         function mcLBTab() { /* no-op: leaderboard lives in X-Coin */ }
         function mcRenderLeaderboard() { /* no-op: leaderboard lives in X-Coin */ }
 
+        // ── Tier-aware leaderboard ────────────────────────────────────────
+        // Sorts mcPlayers (or PLAYERS) into 3 tier buckets and returns the
+        // top N per tier. Reusable by the home widget, the DC slash command,
+        // X-Coin (via postMessage), and the host modal below.
+        window.pflxLeaderboardByTier = function (n) {
+            n = n || 10;
+            var pool = (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) ? mcPlayers
+                     : (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) ? PLAYERS
+                     : [];
+            // Only "real" players — skip hosts/admins so the leaderboard isn't dominated by staff XC.
+            var players = pool.filter(function (p) {
+                var role = String((p && p.role) || '').toLowerCase();
+                return !/admin|host|teacher|instructor|master/.test(role);
+            });
+            function topInTier(tier) {
+                return players
+                    .filter(function (p) { return (p.tier || 'novice') === tier; })
+                    .sort(function (a, b) { return (b.xc || 0) - (a.xc || 0); })
+                    .slice(0, n);
+            }
+            return {
+                starter: topInTier('starter'),
+                novice:  topInTier('novice'),
+                pro:     topInTier('pro')
+            };
+        };
+
+        // Host-side modal: 3-column tier-aware leaderboard. Opened from the
+        // home dashboard widget below or from a host-only slash command.
+        window.pflxOpenTierLeaderboard = function () {
+            var existing = document.getElementById('pflx-tier-leaderboard-modal');
+            if (existing) existing.remove();
+            var data = pflxLeaderboardByTier(10);
+            var viewer = (window.activeSession && activeSession.tier) || 'novice';
+            function column(tier) {
+                var meta = pflxTierMeta(tier);
+                var rows = (data[tier] || []);
+                var isViewer = (tier === viewer);
+                var rowsHtml = rows.length === 0
+                    ? '<div style="padding:14px;text-align:center;color:rgba(255,255,255,0.3);font-size:11px;font-style:italic;">No players in this tier yet</div>'
+                    : rows.map(function (p, i) {
+                        var medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1) + '.';
+                        return '<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:' + (i < 3 ? 'rgba(' + meta.rgb + ',0.06)' : 'rgba(255,255,255,0.02)') + ';border-radius:6px;margin-bottom:4px;">' +
+                            '<span style="font-size:13px;width:24px;text-align:center;font-weight:700;color:rgba(' + meta.rgb + ',1);">' + medal + '</span>' +
+                            '<span style="flex:1;font-size:12px;color:#e0e6ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(p.brand || p.name || '?') + '</span>' +
+                            '<span style="font-family:monospace;font-size:11px;color:#f5c842;font-weight:700;">' + (p.xc || 0).toLocaleString() + '</span>' +
+                        '</div>';
+                    }).join('');
+                return '<div style="flex:1;min-width:200px;background:rgba(' + meta.rgb + ',0.03);border:1px solid rgba(' + meta.rgb + ',0.2);' + (isViewer ? 'border-width:2px;box-shadow:0 0 18px rgba(' + meta.rgb + ',0.2);' : '') + 'border-radius:12px;padding:14px;">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
+                        pflxTierPillHTML(tier, { size: 'lg' }) +
+                        '<span style="font-family:monospace;font-size:10px;color:rgba(255,255,255,0.4);">' + rows.length + ' shown</span>' +
+                    '</div>' +
+                    rowsHtml +
+                '</div>';
+            }
+            var modal = document.createElement('div');
+            modal.id = 'pflx-tier-leaderboard-modal';
+            modal.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(3,5,12,0.78);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
+            modal.innerHTML =
+                '<div style="background:linear-gradient(180deg, rgba(22,22,31,0.96), rgba(15,15,22,0.96));border:1px solid rgba(0,212,255,0.25);border-radius:16px;width:min(900px, 94vw);max-height:88vh;display:flex;flex-direction:column;box-shadow:0 24px 60px rgba(0,0,0,0.6);">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;padding:18px 22px;border-bottom:1px solid rgba(255,255,255,0.06);">' +
+                        '<div>' +
+                            '<div style="font-family:Orbitron,sans-serif;font-size:13px;font-weight:800;color:#00d4ff;letter-spacing:0.12em;">🏆 LEADERBOARD BY TIER</div>' +
+                            '<div style="font-family:monospace;font-size:11px;color:rgba(255,255,255,0.4);margin-top:3px;">competing within your tier is the fair comparison · highlight = your tier</div>' +
+                        '</div>' +
+                        '<button style="background:none;border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.7);width:32px;height:32px;border-radius:6px;font-size:16px;cursor:pointer;" onclick="document.getElementById(\'pflx-tier-leaderboard-modal\').remove()">×</button>' +
+                    '</div>' +
+                    '<div style="padding:18px 22px;overflow-y:auto;flex:1;display:flex;gap:14px;flex-wrap:wrap;">' +
+                        column('starter') +
+                        column('novice') +
+                        column('pro') +
+                    '</div>' +
+                '</div>';
+            modal.addEventListener('click', function (e) { if (e.target === modal) modal.remove(); });
+            document.body.appendChild(modal);
+        };
+
         // ── Digital Badge Management ─────────────────────────────────
         function mcBadgeTab(filter) {
             mcBadgeFilter = filter;
@@ -44534,8 +44612,23 @@ RESPONSE RULES:
             }
             if (text === '/leaderboard') {
                 if (typeof PLAYERS !== 'undefined') {
+                    // Default to the viewer's own tier — competing within
+                    // your own tier is the fair comparison.
+                    var viewerTier = (window.activeSession && activeSession.tier) ||
+                                     ((function(){ try { var s = localStorage.getItem('pflx_player_tier'); return (s==='starter'||s==='novice'||s==='pro') ? s : 'novice'; } catch(e){ return 'novice'; } })());
+                    var sameTier = PLAYERS.filter(p => p.role==='player' && (p.tier || 'novice') === viewerTier)
+                                          .sort((a,b)=>(b.xc||0)-(a.xc||0)).slice(0,5);
+                    var lines = sameTier.length
+                        ? sameTier.map((p,i) => `${i+1}. ${p.brand||p.name} (${(p.xc||0).toLocaleString()})`).join(' · ')
+                        : 'no one in your tier yet';
+                    dcQcAddBotMsg('🏆 Top 5 ' + viewerTier.toUpperCase() + ': ' + lines + ' — type /leaderboard all to compare across tiers');
+                }
+                ta.value = ''; return;
+            }
+            if (text === '/leaderboard all') {
+                if (typeof PLAYERS !== 'undefined') {
                     const top = PLAYERS.filter(p => p.role==='player').sort((a,b)=>(b.xc||0)-(a.xc||0)).slice(0,5);
-                    dcQcAddBotMsg('🏆 Top 5: ' + top.map((p,i) => `${i+1}. ${p.brand||p.name} (${(p.xc||0).toLocaleString()})`).join(' · '));
+                    dcQcAddBotMsg('🏆 Top 5 (all tiers): ' + top.map((p,i) => `${i+1}. ${p.brand||p.name} [${(p.tier||'novice').toUpperCase()}] (${(p.xc||0).toLocaleString()})`).join(' · '));
                 }
                 ta.value = ''; return;
             }
