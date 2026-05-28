@@ -19188,6 +19188,29 @@
                 var msg = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
                 if (!msg || !msg.type) return;
 
+                // Tier change announced by pathway.html or any other tier-aware
+                // surface. Append to the player's tierHistory and persist via
+                // the existing player save path so the audit log survives
+                // session boundaries.
+                if (msg.type === 'pflx_tier_change' && msg.playerId && msg.to) {
+                    var tp = mcPlayers.find(function (pl) { return pl.id === msg.playerId; });
+                    if (tp) {
+                        if (!Array.isArray(tp.tierHistory)) tp.tierHistory = [];
+                        // Cap history at 50 to keep player rows lean.
+                        tp.tierHistory.push({
+                            tier: msg.to,
+                            from: msg.from || null,
+                            ts: msg.ts || new Date().toISOString(),
+                            source: msg.source || 'unknown',
+                            changedBy: msg.changedBy || msg.playerId
+                        });
+                        if (tp.tierHistory.length > 50) tp.tierHistory = tp.tierHistory.slice(tp.tierHistory.length - 50);
+                        tp.tier = msg.to;
+                        try { mcSaveData('players'); } catch (e) {}
+                        try { if (typeof mcRenderPlayers === 'function') mcRenderPlayers(); } catch (e) {}
+                    }
+                }
+
                 // Battle Arena results
                 // X-Coin awards/revokes badges → propagate into mcPlayers.badges so
                 // every Console surface (Player Management, leaderboards, ranks,
