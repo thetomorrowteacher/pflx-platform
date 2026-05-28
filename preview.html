@@ -8117,6 +8117,34 @@
                                         <div id="mc-task-subtasks-list" style="display:flex;flex-direction:column;gap:6px;"></div>
                                         <div id="mc-task-subtasks-empty" style="font-size:11px;color:rgba(255,255,255,0.3);text-align:center;padding:8px;font-style:italic;">No checklist items yet — click <strong>+ Add Item</strong> to break this task into steps.</div>
                                     </div>
+                                    <!-- Tier Variants — same pattern as Checkpoints. Optional dueDate +
+                                         xcReward overrides per tier. Empty cells fall through to the
+                                         base values. Collapsed by default; auto-opens on edit when
+                                         any variant exists. Schema: task.tierVariants = { starter:{dueDate,xcReward}, novice:{...}, pro:{...} }. -->
+                                    <details id="mc-task-tier-variants-block" style="margin-bottom:12px;background:rgba(10,18,40,0.35);border:1px solid rgba(0,212,255,0.15);border-radius:10px;padding:0;">
+                                        <summary style="cursor:pointer;padding:12px 16px;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:800;color:rgba(0,212,255,0.85);letter-spacing:0.12em;text-transform:uppercase;list-style:none;display:flex;align-items:center;gap:10px;">
+                                            <span style="font-size:14px;">🎚</span> Tier Variants <span style="color:rgba(255,255,255,0.4);font-weight:400;font-size:10px;letter-spacing:0.04em;text-transform:none;">— optional due date + XC overrides per tier</span>
+                                        </summary>
+                                        <div style="padding:0 16px 14px;">
+                                            <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:10px;line-height:1.5;">
+                                                Players see the variant matching their picked tier — Starter typically gets more time and lower reward, Pro less time and higher reward. Leave a cell blank to fall through to the base values above.
+                                            </div>
+                                            <div style="display:grid;grid-template-columns:90px 1fr 1fr;gap:8px 12px;align-items:center;">
+                                                <div></div>
+                                                <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:0.08em;text-transform:uppercase;">Due Date</div>
+                                                <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:0.08em;text-transform:uppercase;">XC Reward</div>
+                                                <div style="display:flex;align-items:center;gap:6px;"><span style="background:rgba(167,139,250,0.2);color:#a78bfa;padding:3px 8px;border-radius:8px;font-family:'Orbitron',sans-serif;font-size:9px;font-weight:800;letter-spacing:0.1em;border:1px solid rgba(167,139,250,0.4);">STARTER</span></div>
+                                                <input type="date" id="mc-task-tier-starter-due" style="background:rgba(10,18,40,0.7);border:1px solid rgba(167,139,250,0.2);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;">
+                                                <input type="number" id="mc-task-tier-starter-xc"  min="0" step="10" placeholder="(base XC)" style="background:rgba(10,18,40,0.7);border:1px solid rgba(167,139,250,0.2);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;">
+                                                <div style="display:flex;align-items:center;gap:6px;"><span style="background:rgba(0,212,255,0.2);color:#00d4ff;padding:3px 8px;border-radius:8px;font-family:'Orbitron',sans-serif;font-size:9px;font-weight:800;letter-spacing:0.1em;border:1px solid rgba(0,212,255,0.4);">NOVICE</span></div>
+                                                <input type="date" id="mc-task-tier-novice-due" style="background:rgba(10,18,40,0.7);border:1px solid rgba(0,212,255,0.2);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;">
+                                                <input type="number" id="mc-task-tier-novice-xc"  min="0" step="10" placeholder="(base XC)" style="background:rgba(10,18,40,0.7);border:1px solid rgba(0,212,255,0.2);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;">
+                                                <div style="display:flex;align-items:center;gap:6px;"><span style="background:rgba(245,200,66,0.2);color:#f5c842;padding:3px 8px;border-radius:8px;font-family:'Orbitron',sans-serif;font-size:9px;font-weight:800;letter-spacing:0.1em;border:1px solid rgba(245,200,66,0.4);">PRO</span></div>
+                                                <input type="date" id="mc-task-tier-pro-due" style="background:rgba(10,18,40,0.7);border:1px solid rgba(245,200,66,0.2);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;">
+                                                <input type="number" id="mc-task-tier-pro-xc"  min="0" step="10" placeholder="(base XC)" style="background:rgba(10,18,40,0.7);border:1px solid rgba(245,200,66,0.2);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;">
+                                            </div>
+                                        </div>
+                                    </details>
                                     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;">
                                         <div>
                                             <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Checkpoint</label>
@@ -19930,8 +19958,13 @@
         }
         function ppGetTasks() {
             try {
-                if (typeof mcTasks !== 'undefined' && Array.isArray(mcTasks)) return mcTasks.slice();
-                return JSON.parse(localStorage.getItem('pflx_mc_tasks') || localStorage.getItem('pflx_tasks') || '[]');
+                var raw;
+                if (typeof mcTasks !== 'undefined' && Array.isArray(mcTasks)) raw = mcTasks.slice();
+                else raw = JSON.parse(localStorage.getItem('pflx_mc_tasks') || localStorage.getItem('pflx_tasks') || '[]');
+                // Pipe each task through the tier-variant merge so all Player
+                // Portal renders + FLP urgency math see the right dueDate and
+                // xcReward for the active tier. Base record is untouched.
+                return (raw || []).map(function (t) { return pflxApplyTaskTierVariant(t); });
             } catch(e) { return []; }
         }
         function ppGetJobs() {
@@ -20450,6 +20483,33 @@
             return out;
         }
         window.pflxApplyTierVariant = pflxApplyTierVariant;
+
+        // Task variant — same idea but task fields are slightly different.
+        // Override-able: dueDate, xcReward. The base totalXc is preserved
+        // when no variant matches; when one does, we also update totalXc so
+        // FLP and reward chips reflect the tier-specific reward.
+        function pflxApplyTaskTierVariant(task) {
+            if (!task || !task.tierVariants) return task;
+            var tier = _ppPlayerTier();
+            var v = task.tierVariants[tier];
+            if (!v) return task;
+            var out = Object.assign({}, task);
+            if (v.dueDate)   out.dueDate = v.dueDate;
+            if (v.xcReward !== undefined && v.xcReward !== null) {
+                out.xcReward = v.xcReward;
+                // Refresh totalXc to keep card totals consistent. Badge XC
+                // (sum of selected rewards) is preserved if present, else 0.
+                var badgeXc = 0;
+                if (typeof task.totalXc === 'number' && typeof task.xcReward === 'number') {
+                    badgeXc = Math.max(0, task.totalXc - task.xcReward);
+                }
+                out.totalXc = v.xcReward + badgeXc;
+            }
+            out._tierResolved = tier;
+            out._tierBase = { dueDate: task.dueDate, xcReward: task.xcReward, totalXc: task.totalXc };
+            return out;
+        }
+        window.pflxApplyTaskTierVariant = pflxApplyTaskTierVariant;
 
         // ── Shared banner block ──────────────────────────────────────────
         // One markup pattern, used by checkpoint / project / task detail
@@ -23034,6 +23094,20 @@
                 mcTaskOnTrackingChange();
                 // Subtasks (checklist) — render existing rows from t.subtasks.
                 _mcRenderSubtaskEditorRows(t.subtasks || []);
+                // Tier variants — populate the disclosure block and auto-open
+                // it when any variant is set, mirroring the checkpoint form.
+                (function () {
+                    var variants = t.tierVariants || {};
+                    ['starter','novice','pro'].forEach(function (tt) {
+                        var v = variants[tt] || {};
+                        var dueEl = document.getElementById('mc-task-tier-' + tt + '-due');
+                        var xcEl  = document.getElementById('mc-task-tier-' + tt + '-xc');
+                        if (dueEl) dueEl.value = v.dueDate || '';
+                        if (xcEl)  xcEl.value  = (v.xcReward !== undefined && v.xcReward !== null) ? v.xcReward : '';
+                    });
+                    var block = document.getElementById('mc-task-tier-variants-block');
+                    if (block) block.open = Object.keys(variants).length > 0;
+                })();
                 el = document.getElementById('mc-task-desc'); if (el) el.value = t.description || '';
                 el = document.getElementById('mc-task-checkpoint'); if (el) el.value = t.roundId || '';
                 el = document.getElementById('mc-task-xc'); if (el) el.value = t.xcReward || 50;
@@ -23137,6 +23211,15 @@
                 mcTaskOnTrackingChange();
                 // Clear subtasks list for new task.
                 _mcRenderSubtaskEditorRows([]);
+                // Clear tier variant inputs for new task.
+                ['starter','novice','pro'].forEach(function (tt) {
+                    var dueEl = document.getElementById('mc-task-tier-' + tt + '-due');
+                    var xcEl  = document.getElementById('mc-task-tier-' + tt + '-xc');
+                    if (dueEl) dueEl.value = '';
+                    if (xcEl)  xcEl.value  = '';
+                });
+                var tvBlock = document.getElementById('mc-task-tier-variants-block');
+                if (tvBlock) tvBlock.open = false;
             }
             // Recompute the live XC total (base + selected badges) after every load/reset
             try { mcTaskRecalcRewardTotal(); } catch (e) {}
@@ -24136,6 +24219,28 @@
                 // Live total XC = base + sum(checked badge XC). Stored at save time
                 // so list views can render the full reward without re-summing.
                 totalXc: (function () { try { return mcTaskRecalcRewardTotal().total; } catch (e) { return 0; } })(),
+                // Per-tier overrides. Same shape as cp.tierVariants. Only the
+                // tiers with at least one filled cell get persisted so legacy
+                // tasks stay clean.
+                tierVariants: (function () {
+                    function readRow(tier) {
+                        var dueEl = document.getElementById('mc-task-tier-' + tier + '-due');
+                        var xcEl  = document.getElementById('mc-task-tier-' + tier + '-xc');
+                        var dueV = dueEl ? dueEl.value.trim() : '';
+                        var xcV  = xcEl  ? xcEl.value.trim()  : '';
+                        if (!dueV && !xcV) return null;
+                        var out = {};
+                        if (dueV) out.dueDate = dueV;
+                        if (xcV !== '') {
+                            var parsed = parseInt(xcV, 10);
+                            if (!isNaN(parsed)) out.xcReward = parsed;
+                        }
+                        return Object.keys(out).length ? out : null;
+                    }
+                    var v = {};
+                    ['starter','novice','pro'].forEach(function (t) { var r = readRow(t); if (r) v[t] = r; });
+                    return Object.keys(v).length ? v : undefined;
+                })(),
                 roundId: document.getElementById('mc-task-checkpoint')?.value || '',
                 xcReward: parseInt(document.getElementById('mc-task-xc')?.value || '50', 10),
                 dueDate: document.getElementById('mc-task-due')?.value || '',
