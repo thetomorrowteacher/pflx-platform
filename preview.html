@@ -10686,6 +10686,7 @@
                                         <button class="hmc-btn-sm hmc-btn-purple" id="hmc-detail-promote-btn">⬆ Promote</button>
                                         <button class="hmc-btn-sm hmc-btn-ghost" id="hmc-detail-freeze-btn">🧊 Freeze Account</button>
                                         <button class="hmc-btn-sm hmc-btn-ghost" id="hmc-detail-reset-pin-btn">🔑 Reset PIN</button>
+                                        <button class="hmc-btn-sm hmc-btn-ghost" id="hmc-detail-save-slots-btn" onclick="(function(){ var pid = document.getElementById('hmc-player-detail')?.dataset?.playerId; if (pid) pflxOpenPlayerSaveSlots(pid); })()">💾 Save Slots</button>
                                     </div>
                                 </div>
                             </div>
@@ -14696,6 +14697,9 @@
             const nextRank = getNextRank(rank);
 
             title.textContent = `${player.brand || player.name} — Player Profile`;
+            // Stash playerId on the panel so the Save Slots button can read it
+            // without having to thread the value through global state.
+            detail.dataset.playerId = player.id;
             grid.innerHTML = `
                 <div><span style="color:#6a7290;font-size:11px;">NAME</span><br><span style="color:#e0e6ff;">${player.name}</span></div>
                 <div><span style="color:#6a7290;font-size:11px;">BRAND</span><br><span style="color:var(--cyan);font-weight:700;">${player.brand || '—'}</span></div>
@@ -45518,6 +45522,120 @@ RESPONSE RULES:
                 }, 80);
                 return true;
             } catch (e) { return false; }
+        };
+
+        // ── Player Save Slot Timeline ─────────────────────────────────────
+        // Host-side viewer for a player's module_saves history. Pulls every
+        // row matching player_id from Supabase, groups them by (node_id, tier),
+        // and renders each row's _history array as a timeline of snapshots.
+        // pathway.html stamps each pflx_mod_save with { ts, summary, state }
+        // and caps the array at 12 entries so the JSONB row stays small.
+        //
+        // Read-only — no writes. Closing the modal restores the page state.
+        window.pflxOpenPlayerSaveSlots = function (playerId) {
+            if (!playerId) { alert('No player selected.'); return; }
+            // Inject a one-shot modal into the body. We tear it down on close
+            // so reopening starts fresh with a clean fetch.
+            var modal = document.getElementById('pflx-save-slots-modal');
+            if (modal) modal.remove();
+            modal = document.createElement('div');
+            modal.id = 'pflx-save-slots-modal';
+            modal.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(3,5,12,0.78);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
+            modal.innerHTML =
+                '<div style="background:linear-gradient(180deg, rgba(22,22,31,0.95), rgba(15,15,22,0.95));border:1px solid rgba(0,212,255,0.25);border-radius:16px;width:min(900px, 92vw);max-height:86vh;display:flex;flex-direction:column;box-shadow:0 24px 60px rgba(0,0,0,0.6), 0 0 40px rgba(0,212,255,0.10);">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;padding:18px 22px;border-bottom:1px solid rgba(255,255,255,0.06);">' +
+                        '<div>' +
+                            '<div style="font-family:Orbitron,sans-serif;font-size:13px;font-weight:800;color:#00d4ff;letter-spacing:0.12em;">💾 SAVE SLOT TIMELINE</div>' +
+                            '<div style="font-family:monospace;font-size:11px;color:rgba(255,255,255,0.4);margin-top:3px;">player_id: ' + escapeHtml(playerId) + '</div>' +
+                        '</div>' +
+                        '<button style="background:none;border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.7);width:32px;height:32px;border-radius:6px;font-size:16px;cursor:pointer;" onclick="document.getElementById(\'pflx-save-slots-modal\').remove()">×</button>' +
+                    '</div>' +
+                    '<div id="pflx-save-slots-body" style="padding:20px 22px;overflow-y:auto;flex:1;">' +
+                        '<div style="text-align:center;color:rgba(255,255,255,0.5);font-size:13px;padding:40px 0;">⏳ Loading save slots from cloud…</div>' +
+                    '</div>' +
+                '</div>';
+            document.body.appendChild(modal);
+
+            // Click outside closes the modal — consistent with other PFLX modals.
+            modal.addEventListener('click', function (e) {
+                if (e.target === modal) modal.remove();
+            });
+
+            var sb = (typeof pflxSupabase === 'function') ? pflxSupabase() : null;
+            if (!sb) {
+                document.getElementById('pflx-save-slots-body').innerHTML =
+                    '<div style="padding:30px;text-align:center;color:#ef4444;font-size:13px;">Supabase client unavailable. Save Slots needs the cloud client to be initialized.</div>';
+                return;
+            }
+
+            sb.from('module_saves')
+                .select('node_id, module_id, tier, save_state, updated_at, created_at')
+                .eq('player_id', playerId)
+                .order('updated_at', { ascending: false })
+                .then(function (res) {
+                    var body = document.getElementById('pflx-save-slots-body');
+                    if (!body) return;
+                    if (res && res.error) {
+                        body.innerHTML = '<div style="padding:30px;text-align:center;color:#ef4444;font-size:13px;">Error loading save slots: ' + escapeHtml(res.error.message || 'unknown') + '</div>';
+                        return;
+                    }
+                    var rows = (res && res.data) || [];
+                    if (rows.length === 0) {
+                        body.innerHTML =
+                            '<div style="padding:40px;text-align:center;color:rgba(255,255,255,0.4);">' +
+                                '<div style="font-size:32px;margin-bottom:10px;">📭</div>' +
+                                '<div style="font-family:Orbitron,sans-serif;font-size:12px;letter-spacing:0.12em;color:rgba(255,255,255,0.5);">NO SAVE SLOTS YET</div>' +
+                                '<div style="font-size:12px;color:rgba(255,255,255,0.35);margin-top:6px;">This player hasn\'t saved any module progress to the cloud yet. Cloud saves require <code>?cloudSaves=1</code> on the pathway URL.</div>' +
+                            '</div>';
+                        return;
+                    }
+                    // Render: one card per (node_id, tier) row, each with the
+                    // _history timeline if present, else just the single state.
+                    var TIER_RGB = { starter: '167,139,250', novice: '0,212,255', pro: '245,200,66' };
+                    body.innerHTML = rows.map(function (r) {
+                        var st = r.save_state || {};
+                        var history = Array.isArray(st._history) ? st._history.slice().reverse() : [];
+                        var tierRgb = TIER_RGB[r.tier] || '156,163,175';
+                        var nodeLabel = r.node_id || '(unknown node)';
+                        var updatedAt = r.updated_at ? new Date(r.updated_at).toLocaleString() : '—';
+                        var stateKeys = Object.keys(st).filter(function (k) { return k !== '_history' && k !== '_updatedAt'; }).length;
+                        var historyHtml = '';
+                        if (history.length === 0) {
+                            historyHtml = '<div style="padding:10px 14px;background:rgba(255,255,255,0.02);border:1px dashed rgba(255,255,255,0.1);border-radius:8px;font-size:11px;color:rgba(255,255,255,0.4);text-align:center;font-style:italic;">No timeline yet — older saves were made before history tracking landed. New saves will populate this.</div>';
+                        } else {
+                            historyHtml = '<div style="position:relative;padding-left:18px;border-left:2px solid rgba(' + tierRgb + ',0.35);">' +
+                                history.map(function (h, idx) {
+                                    var when = h.ts ? new Date(h.ts).toLocaleString() : '—';
+                                    return '<div style="position:relative;padding:8px 0 8px 14px;">' +
+                                        '<div style="position:absolute;left:-23px;top:12px;width:10px;height:10px;border-radius:50%;background:rgba(' + tierRgb + ',1);box-shadow:0 0 8px rgba(' + tierRgb + ',0.5);"></div>' +
+                                        '<div style="font-family:monospace;font-size:10px;color:rgba(255,255,255,0.45);">' + when + '</div>' +
+                                        '<div style="font-size:12px;color:#e0e6ff;margin-top:2px;">' + escapeHtml(h.summary || 'saved') + '</div>' +
+                                    '</div>';
+                                }).join('') +
+                            '</div>';
+                        }
+                        return '<div style="background:rgba(10,18,40,0.45);border:1px solid rgba(' + tierRgb + ',0.30);border-left:3px solid rgba(' + tierRgb + ',0.85);border-radius:12px;padding:16px 18px;margin-bottom:14px;">' +
+                            '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;flex-wrap:wrap;">' +
+                                '<div style="min-width:0;flex:1;">' +
+                                    '<div style="font-family:Rajdhani,sans-serif;font-size:16px;font-weight:800;color:#f0f0ff;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;">' + escapeHtml(nodeLabel) + '</div>' +
+                                    '<div style="font-family:monospace;font-size:10px;color:rgba(255,255,255,0.4);margin-top:3px;">module: ' + escapeHtml(r.module_id || nodeLabel) + '</div>' +
+                                '</div>' +
+                                '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">' +
+                                    '<span style="background:rgba(' + tierRgb + ',0.18);color:rgb(' + tierRgb + ');padding:3px 10px;border-radius:10px;font-family:Orbitron,sans-serif;font-size:10px;font-weight:800;letter-spacing:0.12em;border:1px solid rgba(' + tierRgb + ',0.4);text-transform:uppercase;">' + escapeHtml(r.tier || '—') + '</span>' +
+                                    '<div style="font-family:monospace;font-size:10px;color:rgba(255,255,255,0.5);">' + history.length + ' snapshots</div>' +
+                                '</div>' +
+                            '</div>' +
+                            '<div style="display:flex;gap:14px;font-size:11px;color:rgba(255,255,255,0.55);margin-bottom:12px;flex-wrap:wrap;">' +
+                                '<div><span style="color:rgba(255,255,255,0.35);">Updated:</span> <span style="font-family:monospace;color:#00d4ff;">' + updatedAt + '</span></div>' +
+                                '<div><span style="color:rgba(255,255,255,0.35);">State keys:</span> <span style="font-family:monospace;color:#a78bfa;">' + stateKeys + '</span></div>' +
+                            '</div>' +
+                            historyHtml +
+                        '</div>';
+                    }).join('');
+                }, function (err) {
+                    var body = document.getElementById('pflx-save-slots-body');
+                    if (body) body.innerHTML = '<div style="padding:30px;text-align:center;color:#ef4444;font-size:13px;">Cloud fetch rejected: ' + escapeHtml(String(err && err.message || err)) + '</div>';
+                });
         };
 
         window.pflxOpenPlayerManager = function () {
