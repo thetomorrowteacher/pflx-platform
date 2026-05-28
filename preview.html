@@ -8073,6 +8073,16 @@
                                         <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Description</label>
                                         <textarea id="mc-task-desc" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;min-height:60px;box-sizing:border-box;font-family:'Jura',sans-serif;" placeholder="Description..."></textarea>
                                     </div>
+                                    <!-- Subtask checklist: host adds checklist items, each with label + optional URL.
+                                         Player ticks them off on the card. Schema: task.subtasks = [{id,label,link,completed}]. -->
+                                    <div style="margin-bottom:12px;padding:14px;background:rgba(10,18,40,0.35);border:1px solid rgba(255,255,255,0.06);border-radius:10px;">
+                                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                                            <label style="font-size:11px;color:rgba(0,212,255,0.85);text-transform:uppercase;letter-spacing:0.06em;font-weight:700;">Subtasks (Checklist)</label>
+                                            <button type="button" class="mc-btn" style="padding:4px 10px;font-size:11px;background:rgba(0,212,255,0.12);color:#00d4ff;border:1px solid rgba(0,212,255,0.4);" onclick="mcAddSubtaskRow()">+ Add Item</button>
+                                        </div>
+                                        <div id="mc-task-subtasks-list" style="display:flex;flex-direction:column;gap:6px;"></div>
+                                        <div id="mc-task-subtasks-empty" style="font-size:11px;color:rgba(255,255,255,0.3);text-align:center;padding:8px;font-style:italic;">No checklist items yet — click <strong>+ Add Item</strong> to break this task into steps.</div>
+                                    </div>
                                     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;">
                                         <div>
                                             <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Checkpoint</label>
@@ -22178,6 +22188,39 @@
                     flpPill = '<div style="margin-top:12px;padding:8px 12px;background:rgba(255,255,255,0.03);border:1px dashed rgba(255,255,255,0.12);border-radius:8px;font-size:10px;color:rgba(255,255,255,0.45);text-align:center;letter-spacing:0.04em;">⏱ FLP MONITORING — awaiting player start</div>';
                 }
 
+                // Subtask checklist — player ticks items off. Shows N / M completed.
+                // Each item with a link gets an external link icon next to it.
+                var subtasksHtml = '';
+                if (Array.isArray(t.subtasks) && t.subtasks.length > 0) {
+                    var done = t.subtasks.filter(function (s) { return s.completed; }).length;
+                    var tot = t.subtasks.length;
+                    var pct = tot > 0 ? Math.round((done / tot) * 100) : 0;
+                    var pctColor = pct === 100 ? '#22c55e' : pct > 50 ? '#f5c842' : '#00d4ff';
+                    subtasksHtml = '<div style="margin-top:12px;padding:10px 12px;background:rgba(0,212,255,0.04);border:1px solid rgba(0,212,255,0.18);border-radius:8px;">' +
+                        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+                            '<div style="font-family:Orbitron,sans-serif;font-size:10px;font-weight:800;color:#00d4ff;letter-spacing:0.06em;">CHECKLIST</div>' +
+                            '<div style="font-size:10px;color:' + pctColor + ';font-family:monospace;font-weight:700;">' + done + ' / ' + tot + ' (' + pct + '%)</div>' +
+                        '</div>' +
+                        '<div style="width:100%;height:4px;background:rgba(0,212,255,0.08);border-radius:2px;margin-bottom:10px;overflow:hidden;">' +
+                            '<div style="width:' + pct + '%;height:100%;background:' + pctColor + ';border-radius:2px;transition:width 0.3s ease;"></div>' +
+                        '</div>' +
+                        '<div style="display:flex;flex-direction:column;gap:5px;">' +
+                        t.subtasks.map(function (s) {
+                            var labelStyle = s.completed
+                                ? 'color:rgba(255,255,255,0.45);text-decoration:line-through;'
+                                : 'color:#e0e6ff;';
+                            return '<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0;">' +
+                                '<input type="checkbox" ' + (s.completed ? 'checked' : '') + ' onchange="pflxToggleTaskSubtaskItem(' + JSON.stringify(t.id) + ',' + JSON.stringify(s.id) + ')" style="accent-color:#00d4ff;cursor:pointer;flex-shrink:0;">' +
+                                '<span style="' + labelStyle + 'flex:1;">' + escapeHtml(s.label || 'Step') + '</span>' +
+                                (s.link
+                                    ? '<a href="' + escapeHtml(s.link) + '" target="_blank" rel="noopener" title="Open link" style="color:#00d4ff;text-decoration:none;font-size:14px;flex-shrink:0;">🔗</a>'
+                                    : '') +
+                            '</div>';
+                        }).join('') +
+                        '</div>' +
+                    '</div>';
+                }
+
                 // Submissions summary — counts per phase, shown when at least one exists.
                 var tSubmissionsSummary = '';
                 if (t.phaseSubmissions) {
@@ -22205,6 +22248,8 @@
                     '<div style="font-size:12px;color:rgba(255,255,255,0.5);line-height:1.5;margin-bottom:12px;">' + escapeHtml(t.description || '') + '</div>' +
                     // FLP phase indicator (between description and submission panel)
                     flpPill +
+                    // Subtask checklist — host-authored steps the player ticks off
+                    subtasksHtml +
                     // Submissions summary (E:1 D:2 Enh:1 F:0 style)
                     tSubmissionsSummary +
                     // Submission panel (if submitted)
@@ -22500,6 +22545,8 @@
                 var trackingRadio = document.querySelector('input[name="mc-task-tracking"][value="' + trackingMode + '"]');
                 if (trackingRadio) trackingRadio.checked = true;
                 mcTaskOnTrackingChange();
+                // Subtasks (checklist) — render existing rows from t.subtasks.
+                _mcRenderSubtaskEditorRows(t.subtasks || []);
                 el = document.getElementById('mc-task-desc'); if (el) el.value = t.description || '';
                 el = document.getElementById('mc-task-checkpoint'); if (el) el.value = t.roundId || '';
                 el = document.getElementById('mc-task-xc'); if (el) el.value = t.xcReward || 50;
@@ -22601,6 +22648,8 @@
                 var defaultRadio = document.querySelector('input[name="mc-task-tracking"][value="monitoring"]');
                 if (defaultRadio) defaultRadio.checked = true;
                 mcTaskOnTrackingChange();
+                // Clear subtasks list for new task.
+                _mcRenderSubtaskEditorRows([]);
             }
             // Recompute the live XC total (base + selected badges) after every load/reset
             try { mcTaskRecalcRewardTotal(); } catch (e) {}
@@ -23248,6 +23297,88 @@
         }
         window.mcTaskOnTrackingChange = mcTaskOnTrackingChange;
 
+        // ── Subtask Editor (host side) ────────────────────────────────────
+        // Add/remove/edit checklist rows inside the task form. Each row has a
+        // label input + URL input + delete button. Save reads all rows into
+        // task.subtasks. Each item has stable id so completion state persists
+        // when other items are reordered.
+        function _mcRenderSubtaskEditorRows(subtasks) {
+            var host = document.getElementById('mc-task-subtasks-list');
+            var empty = document.getElementById('mc-task-subtasks-empty');
+            if (!host) return;
+            subtasks = subtasks || [];
+            if (subtasks.length === 0) {
+                host.innerHTML = '';
+                if (empty) empty.style.display = 'block';
+                return;
+            }
+            if (empty) empty.style.display = 'none';
+            host.innerHTML = subtasks.map(function (s, i) {
+                var sid = (s.id || ('st-' + Date.now() + '-' + i)).replace(/"/g, '');
+                return '<div class="mc-subtask-row" data-sid="' + escapeHtml(sid) + '" style="display:grid;grid-template-columns:1fr 1fr auto;gap:6px;align-items:center;">' +
+                    '<input type="text" class="mc-subtask-label" data-sid="' + escapeHtml(sid) + '" placeholder="Step label" value="' + escapeHtml(s.label || '') + '" style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px 8px;border-radius:5px;font-size:12px;">' +
+                    '<input type="url" class="mc-subtask-link" data-sid="' + escapeHtml(sid) + '" placeholder="Optional link (https://…)" value="' + escapeHtml(s.link || '') + '" style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px 8px;border-radius:5px;font-size:12px;">' +
+                    '<button type="button" class="mc-btn" style="padding:6px 10px;font-size:11px;background:rgba(239,68,68,0.10);color:#ef4444;border:1px solid rgba(239,68,68,0.35);" onclick="mcRemoveSubtaskRow(' + JSON.stringify(sid) + ')">✕</button>' +
+                '</div>';
+            }).join('');
+        }
+
+        // In-form working state — the rendered rows are the source of truth on save.
+        function _mcReadSubtaskRows() {
+            var out = [];
+            document.querySelectorAll('#mc-task-subtasks-list .mc-subtask-row').forEach(function (row) {
+                var sid = row.getAttribute('data-sid');
+                var labelEl = row.querySelector('.mc-subtask-label');
+                var linkEl  = row.querySelector('.mc-subtask-link');
+                var label = (labelEl ? labelEl.value : '').trim();
+                if (!label) return; // skip empty rows
+                out.push({
+                    id: sid,
+                    label: label,
+                    link: (linkEl ? linkEl.value : '').trim(),
+                    // completed state is preserved from the previous load — we
+                    // re-merge in mcSaveTaskForm so toggles don't clear on edit.
+                    completed: false
+                });
+            });
+            return out;
+        }
+
+        window.mcAddSubtaskRow = function () {
+            var current = _mcReadSubtaskRows();
+            current.push({ id: 'st-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5), label: '', link: '', completed: false });
+            _mcRenderSubtaskEditorRows(current);
+            // Focus the new label
+            var rows = document.querySelectorAll('#mc-task-subtasks-list .mc-subtask-label');
+            if (rows.length) rows[rows.length - 1].focus();
+        };
+
+        window.mcRemoveSubtaskRow = function (sid) {
+            var current = _mcReadSubtaskRows().filter(function (s) { return s.id !== sid; });
+            _mcRenderSubtaskEditorRows(current);
+        };
+
+        // ── Subtask toggle (player side) ──────────────────────────────────
+        // Player ticks a checkbox on the card. Flip completed flag, persist,
+        // re-render. Card shows progress (N/M completed).
+        window.pflxToggleTaskSubtaskItem = function (taskId, subtaskId) {
+            var found = _pflxFindTask(taskId);
+            if (!found) return false;
+            var t = found.task;
+            var list = t.subtasks || [];
+            for (var i = 0; i < list.length; i++) {
+                if (list[i].id === subtaskId) {
+                    list[i].completed = !list[i].completed;
+                    list[i].completedAt = list[i].completed ? Date.now() : null;
+                    list[i].completedBy = list[i].completed ? ((window.activeSession && (activeSession.brand || activeSession.name)) || 'unknown') : null;
+                    try { mcSaveData('tasks'); } catch (e) {}
+                    try { if (typeof mcRenderTasks === 'function') mcRenderTasks(); } catch (e) {}
+                    return list[i].completed;
+                }
+            }
+            return false;
+        };
+
         // ── Task Reward Total ──────────────────────────────────────────────
         // The task's reward XC is the BASE XC (mc-task-xc) PLUS the sum of XC
         // values on every currently-checked digital badge. Updates live as
@@ -23290,6 +23421,22 @@
                 // its duration; current phase + urgency color are computed live
                 // from startedAt + dueDate against the global FLP phase config.
                 flpTracking: (document.querySelector('input[name="mc-task-tracking"]:checked') || {}).value || 'monitoring',
+                // Subtasks (host-authored checklist). _mcReadSubtaskRows returns
+                // fresh objects with completed=false; we merge in the prior
+                // completed state per matching id so player ticks aren't reset
+                // when the host edits an unrelated item.
+                subtasks: (function () {
+                    var rows = _mcReadSubtaskRows();
+                    if (mcTaskEditIndex >= 0 && mcTasks[mcTaskEditIndex] && Array.isArray(mcTasks[mcTaskEditIndex].subtasks)) {
+                        var prior = {};
+                        mcTasks[mcTaskEditIndex].subtasks.forEach(function (s) { prior[s.id] = s; });
+                        rows.forEach(function (r) {
+                            var p = prior[r.id];
+                            if (p) { r.completed = !!p.completed; r.completedAt = p.completedAt || null; r.completedBy = p.completedBy || null; }
+                        });
+                    }
+                    return rows;
+                })(),
                 // Live total XC = base + sum(checked badge XC). Stored at save time
                 // so list views can render the full reward without re-summing.
                 totalXc: (function () { try { return mcTaskRecalcRewardTotal().total; } catch (e) { return 0; } })(),
