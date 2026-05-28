@@ -11539,9 +11539,31 @@
                                 <div class="settings-label">Music Engine</div>
                                 <div class="settings-value">PFLXMusicEngine v1.0</div>
                             </div>
-                            <div class="settings-row" style="border: none;">
+                            <div class="settings-row">
                                 <div class="settings-label">Build</div>
                                 <div class="settings-value" style="color: #8a92b0; font-family: 'Share Tech Mono', monospace; font-size: 12px;">v1.0.0-BETA · 2026.04</div>
+                            </div>
+                            <!--
+                                Global cloud module saves toggle. When ON, the
+                                pathway portal's per-module saves write to the
+                                Supabase module_saves table in addition to
+                                localStorage (async-mirror, never blocks the
+                                iframe). Persists to Supabase app_data so all
+                                client devices pick it up at their next boot.
+                            -->
+                            <div class="settings-row" style="border: none;">
+                                <div class="settings-label">
+                                    Cloud Module Saves
+                                    <div style="font-size: 10px; color: rgba(255,255,255,0.4); margin-top: 4px; max-width: 360px;">When on, module progress syncs to <code>module_saves</code> across devices (player×node×tier). Async-mirror — no playback lag.</div>
+                                </div>
+                                <div class="settings-value" style="display:flex;align-items:center;gap:10px;">
+                                    <label style="position:relative;display:inline-block;width:46px;height:24px;cursor:pointer;">
+                                        <input type="checkbox" id="pflx-cloud-saves-toggle" onchange="pflxToggleCloudSavesGlobal(this.checked)" style="opacity:0;width:0;height:0;">
+                                        <span id="pflx-cloud-saves-track" style="position:absolute;inset:0;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15);border-radius:999px;transition:all 0.2s;"></span>
+                                        <span id="pflx-cloud-saves-thumb" style="position:absolute;left:2px;top:2px;width:18px;height:18px;background:#e0e6ff;border-radius:50%;transition:all 0.2s;"></span>
+                                    </label>
+                                    <span id="pflx-cloud-saves-state" style="font-family: 'Share Tech Mono', monospace; font-size: 11px; color: rgba(255,255,255,0.4);">OFF</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -45523,6 +45545,82 @@ RESPONSE RULES:
                 return true;
             } catch (e) { return false; }
         };
+
+        // ── Global Cloud Module Saves toggle ──────────────────────────────
+        // Host-controlled flag stored in Supabase app_data so all client
+        // devices pick it up. pathway.html reads it at boot (async, with
+        // budget) and OR's it with the URL/localStorage flag — so a host can
+        // flip cloud saves on globally without anyone needing the URL param.
+        // Local mirror in localStorage keeps the toggle responsive on this
+        // device immediately (no Supabase round-trip needed to render the
+        // toggle position).
+        window.pflxLoadCloudSavesGlobal = function () {
+            try {
+                var sb = (typeof pflxSupabase === 'function') ? pflxSupabase() : null;
+                if (!sb) return;
+                sb.from('app_data').select('data').eq('key', 'pflx_cloud_saves_global').maybeSingle()
+                    .then(function (res) {
+                        if (res && res.error) { console.warn('[cloud-saves-global] read error', res.error); return; }
+                        var enabled = !!(res && res.data && (res.data.data === true || res.data.data === 'true' || (res.data.data && res.data.data.enabled === true)));
+                        try { localStorage.setItem('pflx_cloud_saves_global', enabled ? '1' : '0'); } catch (e) {}
+                        try { localStorage.setItem('pflx_cloud_saves', enabled ? '1' : '0'); } catch (e) {}
+                        var cb = document.getElementById('pflx-cloud-saves-toggle');
+                        if (cb) { cb.checked = enabled; _pflxCloudSavesPaint(enabled); }
+                    });
+            } catch (e) { console.warn('[cloud-saves-global] load threw', e); }
+        };
+
+        function _pflxCloudSavesPaint(on) {
+            var track = document.getElementById('pflx-cloud-saves-track');
+            var thumb = document.getElementById('pflx-cloud-saves-thumb');
+            var state = document.getElementById('pflx-cloud-saves-state');
+            if (track) {
+                track.style.background = on ? 'linear-gradient(90deg, rgba(0,212,255,0.85), rgba(167,139,250,0.85))' : 'rgba(255,255,255,0.1)';
+                track.style.borderColor = on ? 'rgba(0,212,255,0.6)' : 'rgba(255,255,255,0.15)';
+            }
+            if (thumb) thumb.style.transform = on ? 'translateX(22px)' : 'translateX(0)';
+            if (state) { state.textContent = on ? 'ON' : 'OFF'; state.style.color = on ? '#00d4ff' : 'rgba(255,255,255,0.4)'; }
+        }
+
+        window.pflxToggleCloudSavesGlobal = function (enabled) {
+            enabled = !!enabled;
+            _pflxCloudSavesPaint(enabled);
+            // Local mirror — picked up by pathway.html on this device immediately.
+            try { localStorage.setItem('pflx_cloud_saves_global', enabled ? '1' : '0'); } catch (e) {}
+            try { localStorage.setItem('pflx_cloud_saves', enabled ? '1' : '0'); } catch (e) {}
+            // Push to Supabase so other devices read it on their next boot.
+            try {
+                var sb = (typeof pflxSupabase === 'function') ? pflxSupabase() : null;
+                if (!sb) {
+                    try { pflxShowSaveToast && pflxShowSaveToast('Cloud client unavailable — saved locally only', 'warn'); } catch (e) {}
+                    return;
+                }
+                sb.from('app_data').upsert(
+                    { key: 'pflx_cloud_saves_global', data: { enabled: enabled, updatedAt: new Date().toISOString() }, updated_at: new Date().toISOString() },
+                    { onConflict: 'key' }
+                ).then(function (res) {
+                    if (res && res.error) {
+                        console.warn('[cloud-saves-global] upsert error', res.error);
+                        try { pflxShowSaveToast && pflxShowSaveToast('Cloud save failed — local only', 'error'); } catch (e) {}
+                    } else {
+                        try { pflxShowSaveToast && pflxShowSaveToast('Cloud module saves ' + (enabled ? 'ENABLED' : 'DISABLED') + ' globally', 'success'); } catch (e) {}
+                    }
+                });
+            } catch (e) { console.warn('[cloud-saves-global] toggle threw', e); }
+        };
+
+        // On page boot, paint the toggle from localStorage cache (snappy), then
+        // refresh from Supabase to catch updates from other devices.
+        (function () {
+            try {
+                var cached = localStorage.getItem('pflx_cloud_saves_global') === '1';
+                var cb = document.getElementById('pflx-cloud-saves-toggle');
+                if (cb) { cb.checked = cached; _pflxCloudSavesPaint(cached); }
+            } catch (e) {}
+            // Defer the cloud refresh by 800ms so it doesn't race with other
+            // boot-time Supabase work.
+            setTimeout(function () { try { pflxLoadCloudSavesGlobal(); } catch (e) {} }, 800);
+        })();
 
         // ── Player Save Slot Timeline ─────────────────────────────────────
         // Host-side viewer for a player's module_saves history. Pulls every
