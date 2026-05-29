@@ -13,6 +13,30 @@
     <link rel="icon" type="image/png" href="public/PFLX Core Flat 6.png?v=1">
     <link rel="shortcut icon" type="image/png" href="public/PFLX Core Flat 6.png?v=1">
     <link rel="apple-touch-icon" href="public/PFLX Core Flat 6.png?v=1">
+    <!--
+      PWA Phase 1 — installable shell.
+      Browsers see this manifest and offer an "Install PFLX" prompt
+      (Chrome/Edge auto, Safari via Share → Add to Home Screen). Once
+      installed PFLX opens in its own window, no browser chrome, with
+      the PFLX logo on dock/home screen.
+    -->
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#00d4ff">
+    <!-- iOS Safari standalone tweaks: title shown under the home-screen
+         icon, status bar tinted to match the loading background, and
+         the legacy "apple-mobile-web-app-capable" flag so Safari knows
+         to launch in standalone mode (newer iOS reads it from the
+         manifest above too but this keeps older devices happy). -->
+    <meta name="apple-mobile-web-app-title" content="PFLX">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <!-- Apple touch icon sizes — Safari picks the closest match for the
+         device. Same source PNG since it's already high resolution. -->
+    <link rel="apple-touch-icon" sizes="180x180" href="public/PFLX Core Flat 6.png?v=1">
+    <link rel="apple-touch-icon" sizes="167x167" href="public/PFLX Core Flat 6.png?v=1">
+    <link rel="apple-touch-icon" sizes="152x152" href="public/PFLX Core Flat 6.png?v=1">
+    <link rel="apple-touch-icon" sizes="120x120" href="public/PFLX Core Flat 6.png?v=1">
     <!-- Supabase JS client — used by the published-portfolio public view to fetch
          portfolio data by brand slug from the shared app_data table, and by the
          publish flow to upsert directly (no longer dependent on the X-Coin iframe
@@ -47689,6 +47713,123 @@ RESPONSE RULES:
                 '</select></label>';
         }
         function shake(id) { var el = document.getElementById(id); if (el && typeof shakeEl === 'function') shakeEl(el); }
+    })();
+    </script>
+
+    <!-- ── PWA install hint ────────────────────────────────────────────
+         Detects whether the browser supports the install API (Chrome,
+         Edge, Android Chrome). If yes, surfaces an Install PFLX button
+         the first time a player visits. On iOS Safari (which doesn't
+         support the install API), shows custom copy explaining the
+         Share → Add to Home Screen route. Dismissals stick in
+         localStorage so we never nag a player who said no.
+         No service worker yet — Phase 2.
+    ──────────────────────────────────────────────────────────────────── -->
+    <div id="pflx-pwa-install" style="display:none;position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:99999;background:linear-gradient(135deg,rgba(13,17,23,0.96),rgba(20,25,35,0.96));border:1px solid rgba(0,212,255,0.4);border-radius:14px;padding:12px 16px;display:none;flex-direction:row;align-items:center;gap:12px;box-shadow:0 12px 40px rgba(0,0,0,0.6), 0 0 24px rgba(0,212,255,0.18);max-width:92vw;font-family:Jura,sans-serif;color:#e0e6ff;">
+        <img src="public/PFLX Core Flat 6.png?v=1" alt="" style="width:32px;height:32px;border-radius:8px;flex-shrink:0;">
+        <div style="flex:1;min-width:0;">
+            <div id="pflx-pwa-title" style="font-family:Orbitron,sans-serif;font-size:11px;font-weight:800;color:#00d4ff;letter-spacing:0.12em;margin-bottom:2px;">INSTALL PFLX</div>
+            <div id="pflx-pwa-body" style="font-size:11px;color:rgba(255,255,255,0.7);line-height:1.4;">Get the full-screen app on your home screen.</div>
+        </div>
+        <button id="pflx-pwa-install-btn" style="background:linear-gradient(90deg,#00d4ff,#7c3aed);color:#fff;border:none;padding:8px 14px;border-radius:8px;font-family:Orbitron,sans-serif;font-size:11px;font-weight:800;letter-spacing:0.08em;cursor:pointer;flex-shrink:0;display:none;">INSTALL</button>
+        <button id="pflx-pwa-dismiss-btn" style="background:none;border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.5);width:28px;height:28px;border-radius:6px;font-size:14px;cursor:pointer;flex-shrink:0;">×</button>
+    </div>
+    <script>
+    (function () {
+        var DISMISS_KEY = 'pflx_pwa_install_dismissed';
+        var SHOWN_KEY   = 'pflx_pwa_install_shown_at';
+        var hint   = document.getElementById('pflx-pwa-install');
+        var btn    = document.getElementById('pflx-pwa-install-btn');
+        var dismissBtn = document.getElementById('pflx-pwa-dismiss-btn');
+        var body   = document.getElementById('pflx-pwa-body');
+        var title  = document.getElementById('pflx-pwa-title');
+        if (!hint) return;
+        var deferredPrompt = null;
+
+        // Detect already-installed states. matchMedia standalone catches
+        // PWA launches on most browsers; navigator.standalone is the iOS
+        // Safari legacy flag. If we're already running standalone, never
+        // show the hint.
+        function isStandalone() {
+            try {
+                if (window.matchMedia('(display-mode: standalone)').matches) return true;
+                if (window.navigator.standalone === true) return true;
+            } catch (e) {}
+            return false;
+        }
+        var isIos = /iPhone|iPad|iPod/.test(navigator.userAgent || '') && !window.MSStream;
+        var dismissed = false;
+        try { dismissed = localStorage.getItem(DISMISS_KEY) === '1'; } catch (e) {}
+
+        function showHint(useIosCopy) {
+            if (dismissed || isStandalone()) return;
+            if (useIosCopy) {
+                title.textContent = 'ADD PFLX TO HOME SCREEN';
+                body.innerHTML = 'Tap <b style="color:#00d4ff;">Share</b> → <b style="color:#00d4ff;">Add to Home Screen</b> for the full-screen app.';
+                btn.style.display = 'none';
+            } else {
+                title.textContent = 'INSTALL PFLX';
+                body.textContent = 'Get the full-screen app on your home screen.';
+                btn.style.display = 'inline-block';
+            }
+            hint.style.display = 'flex';
+            try { localStorage.setItem(SHOWN_KEY, String(Date.now())); } catch (e) {}
+        }
+
+        function hideHint(persistDismiss) {
+            hint.style.display = 'none';
+            if (persistDismiss) {
+                try { localStorage.setItem(DISMISS_KEY, '1'); } catch (e) {}
+            }
+        }
+
+        // Chrome / Edge / Android Chrome path: the beforeinstallprompt
+        // event fires when the browser thinks the user is eligible to
+        // install. We stash the event and reveal the Install button.
+        window.addEventListener('beforeinstallprompt', function (e) {
+            try { e.preventDefault(); } catch (er) {}
+            deferredPrompt = e;
+            // Wait a beat so we don't pop in front of the loading screen.
+            setTimeout(function () { showHint(false); }, 2500);
+        });
+
+        btn.addEventListener('click', function () {
+            if (!deferredPrompt) return;
+            try {
+                deferredPrompt.prompt();
+                deferredPrompt.userChoice.then(function (choice) {
+                    if (choice && choice.outcome === 'accepted') {
+                        hideHint(true);
+                    } else {
+                        hideHint(false);
+                    }
+                    deferredPrompt = null;
+                });
+            } catch (e) {
+                hideHint(false);
+            }
+        });
+
+        dismissBtn.addEventListener('click', function () { hideHint(true); });
+
+        // iOS Safari path: no install API, so we surface the
+        // Share → Add to Home Screen instructions. Only fire once
+        // every 14 days so we don't pester someone who's chosen not
+        // to install.
+        window.addEventListener('load', function () {
+            try {
+                if (!isIos || isStandalone()) return;
+                var lastShown = parseInt(localStorage.getItem(SHOWN_KEY) || '0', 10);
+                if (Date.now() - lastShown < 14 * 24 * 3600 * 1000) return;
+                setTimeout(function () { showHint(true); }, 3500);
+            } catch (e) {}
+        });
+
+        // Successful install → log + clean up.
+        window.addEventListener('appinstalled', function () {
+            try { localStorage.setItem(DISMISS_KEY, '1'); } catch (e) {}
+            hideHint(false);
+        });
     })();
     </script>
 </body>
