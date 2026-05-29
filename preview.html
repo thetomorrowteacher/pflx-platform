@@ -14983,8 +14983,12 @@
             if (modeSelect) modeSelect.value = galleryDisplayMode;
             preview.innerHTML = loadingGallery.map(function(img, i) {
                 var name = img.split('/').pop().replace(/\.[^.]+$/, '').substring(0, 25);
+                // Same cache-bust as the live loading screen so the host
+                // gallery preview also shows the freshly-replaced bytes.
+                var sep = img.indexOf('?') === -1 ? '?' : '&';
+                var srcv = img + sep + 'v=' + PFLX_LOADING_IMG_VERSION;
                 return '<div class="hmc-gallery-item">' +
-                    '<img src="' + img + '" class="hmc-gallery-thumb" alt="' + name + '" onerror="this.style.display=\'none\'" title="' + name + '" style="width:100%;height:80px;object-fit:cover;display:block;">' +
+                    '<img src="' + srcv + '" class="hmc-gallery-thumb" alt="' + name + '" onerror="this.style.display=\'none\'" title="' + name + '" style="width:100%;height:80px;object-fit:cover;display:block;">' +
                     '<button class="hmc-gallery-delete" onclick="removeLoadingImage(' + i + ')" title="Delete">&times;</button>' +
                 '</div>';
             }).join('');
@@ -15034,10 +15038,22 @@
         }
 
         // ── Host Controls: Loading Gallery ──
-        // Bump this whenever loading screen images are replaced. The query
-        // string busts the browser/CDN cache so users see the new images
-        // immediately without hard-refreshing.
-        const PFLX_LOADING_IMG_VERSION = '20260528b';
+        // Daily-rotating cache-bust. Computes a YYYYMMDD stamp at script-load
+        // time so every day's first visit fetches fresh image bytes; within
+        // the same day, the CDN/browser still caches normally. Solves the
+        // "I replaced the image file but the browser shows the old one"
+        // problem without nuking the cache permanently.
+        // For an immediate force, bump PFLX_LOADING_IMG_FORCE.
+        const PFLX_LOADING_IMG_FORCE = '4';
+        const PFLX_LOADING_IMG_VERSION = (function () {
+            try {
+                var d = new Date();
+                var yyyy = d.getFullYear();
+                var mm = String(d.getMonth() + 1).padStart(2, '0');
+                var dd = String(d.getDate()).padStart(2, '0');
+                return yyyy + mm + dd + '-' + PFLX_LOADING_IMG_FORCE;
+            } catch (e) { return PFLX_LOADING_IMG_FORCE; }
+        })();
         const loadingGallery = [
             'public/Loading Screen Images/20241102_consumer-overload-emerges-from-the-instantaneous-a_U0.webp',
             'public/Loading Screen Images/20240719_sitting-at-a-corporate-business-table-in-the-year-_U0 (1).webp',
