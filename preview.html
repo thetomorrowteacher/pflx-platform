@@ -18713,8 +18713,14 @@
                 mcSessions = JSON.parse(localStorage.getItem('pflx_mc_sessions') || '[]');
             } catch(e) { console.warn('[MC] Data load error', e); }
 
-            // If no MC data yet, try to seed from PLAYERS array
-            if (mcPlayers.length === 0 && typeof PLAYERS !== 'undefined') {
+            // Seed-on-empty — ONLY if this device has never been seeded before.
+            // Once the seed has run we set pflx_mc_seeded so subsequent empty
+            // states (e.g. host deleted everyone) STAY empty instead of
+            // resurrecting the mock player set. This was the bug that made
+            // X-Coin keep showing 94 mocks after MC deletes.
+            var __everSeeded = false;
+            try { __everSeeded = localStorage.getItem('pflx_mc_seeded') === '1'; } catch (e) {}
+            if (mcPlayers.length === 0 && !__everSeeded && typeof PLAYERS !== 'undefined') {
                 mcPlayers = PLAYERS.map(function(p) {
                     return {
                         id: p.id, name: p.name, brand: p.brand, email: p.email,
@@ -18725,6 +18731,11 @@
                     };
                 });
                 mcSaveData('players');
+                try { localStorage.setItem('pflx_mc_seeded', '1'); } catch (e) {}
+            } else if (mcPlayers.length > 0 && !__everSeeded) {
+                // Existing-install upgrade — mark as already seeded so we never
+                // re-seed after a host clears the list.
+                try { localStorage.setItem('pflx_mc_seeded', '1'); } catch (e) {}
             }
 
             // Seed cohort groups from existing cohorts if empty
@@ -46603,6 +46614,76 @@ RESPONSE RULES:
         }
         window.pflxPersistPlayers = persistPlayers;
 
+        // ── Cross-app player delete ───────────────────────────────────────
+        // The host-side Player Management array (PLAYERS) and the Mission
+        // Control mcPlayers array were drifting apart on delete — PLAYERS
+        // got the splice, mcPlayers didn't, so MC kept re-syncing the
+        // "deleted" player to Supabase under both pflx_mc_players and
+        // users (X-Coin reads users → showed the ghost). This helper:
+        //   1. Removes from mcPlayers (in-memory + localStorage)
+        //   2. Pushes the trimmed list to both cloud rows so X-Coin's
+        //      next read sees the deletion immediately
+        //   3. Broadcasts pflx_player_deleted to every iframe so sub-apps
+        //      can drop the row from their local caches without waiting
+        //      for the cloud roundtrip
+        //   4. Deletes the per-id row in the dedicated players table that
+        //      _pflxFlushCloudPersist uses
+        window.pflxDeletePlayerFully = function (playerId, playerBrand) {
+            if (!playerId && !playerBrand) return;
+            // 1) Remove from mcPlayers in-memory.
+            if (Array.isArray(window.mcPlayers)) {
+                var before = mcPlayers.length;
+                mcPlayers = mcPlayers.filter(function (p) {
+                    if (!p) return false;
+                    if (playerId && p.id === playerId) return false;
+                    if (playerBrand && p.brand === playerBrand) return false;
+                    return true;
+                });
+                if (before !== mcPlayers.length) {
+                    try { mcSaveData('players'); } catch (e) {}
+                }
+            }
+            // 2) Push trimmed list to cloud users row (X-Coin's source).
+            try {
+                var sb = (typeof pflxSupabase === 'function') ? pflxSupabase() : null;
+                if (sb && Array.isArray(window.mcPlayers)) {
+                    sb.from('app_data').upsert({
+                        key: 'users',
+                        data: mcPlayers,
+                        updated_at: new Date().toISOString()
+                    }, { onConflict: 'key' }).then(function (r) {
+                        if (r && r.error) console.warn('[delete-mirror] users upsert', r.error);
+                    });
+                }
+            } catch (e) { console.warn('[delete-mirror] users push', e); }
+            // 3) Broadcast across iframes so sub-apps drop the row now.
+            try {
+                var iframes = document.querySelectorAll('iframe[data-app], iframe[src*="xcoin"], iframe[src*="arena"], iframe[src*="darkcampus"]');
+                iframes.forEach(function (f) {
+                    try {
+                        f.contentWindow.postMessage({
+                            type: 'pflx_player_deleted',
+                            playerId: playerId || null,
+                            brand: playerBrand || null,
+                            ts: Date.now()
+                        }, '*');
+                    } catch (e) {}
+                });
+            } catch (e) {}
+            // 4) Best-effort: delete dedicated per-id row if the persist
+            //    flow uses one. Schema: app_data keyed on player_<id>.
+            try {
+                var sb2 = (typeof pflxSupabase === 'function') ? pflxSupabase() : null;
+                if (sb2 && playerId) {
+                    sb2.from('app_data').delete().eq('key', 'player_' + playerId).then(function (r) {
+                        if (r && r.error && r.error.code !== 'PGRST116') {
+                            console.warn('[delete-mirror] per-id delete', r.error);
+                        }
+                    });
+                }
+            } catch (e) {}
+        };
+
         // ── Broadcast a player change to all iframes + active session ──
         function broadcastPlayerChange(player) {
             if (!player) return;
@@ -47472,6 +47553,11 @@ RESPONSE RULES:
                         if (i >= 0) PLAYERS.splice(i, 1);
                         if (p.brand) delete BRANDS[p.brand];
                         persistPlayers();
+                        // ── Mirror the delete into mcPlayers + every cloud key
+                        // that downstream apps read from. Without this, X-Coin
+                        // and Mission Control kept showing the deleted player
+                        // because mcPlayers / users cloud row still had them.
+                        try { pflxDeletePlayerFully(p.id, p.brand); } catch (e) { console.warn('[delete] mirror failed', e); }
                         // Clear any active filter/search so the new/edited row is immediately visible
                         try {
                             var s = document.getElementById('hmc-player-search');  if (s) s.value = '';
