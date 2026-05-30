@@ -13040,13 +13040,16 @@
             return ORGANIZATIONS[cohort.org] || null;
         }
 
-        // Players database — synced from X-Coin / Supabase (94 players)
+        // Players database — admins live here permanently. Real player
+        // roster is hydrated from localStorage + cloud at boot via
+        // hydratePlayers below. Test-data mock players were stripped on
+        // 2026-05-29 so the host's Player Management deletes are durable.
         const PLAYERS = [
             { id: 'admin-0', brand: 'PrototypeFLX', pin: '0000', name: 'PrototypeFLX', email: 'host@prototypeflx.com', cohort: 'N/A', role: 'admin', claimed: true, xc: Infinity, rankOverride: 'Master Admin', godTier: true },
             { id: 'admin-1', brand: 'TheTomorrowTeacher', pin: '1111', name: 'Mr. Johnson', email: 'ennisjohnsonjr@thetomorrowteacher.org', cohort: 'N/A', role: 'admin', claimed: true, xc: 0 },
-            { id: 'player-1', brand: 'PixelProphet', pin: '3847', name: 'Alex Rivera', email: 'alex.rivera@school.edu', cohort: 'Cohort 2', role: 'player', claimed: true, xc: 1850 },
-            { id: 'player-2', brand: 'MotionMaster', pin: '5291', name: 'Jordan Lee', email: 'jordan.lee@school.edu', cohort: 'Cohort 3', role: 'player', claimed: false, xc: 2900 },
-            { id: 'player-3', brand: 'CodeCrafter', pin: '7063', name: 'Sam Chen', email: 'sam.chen@school.edu', cohort: 'Cohort 2', role: 'player', claimed: false, xc: 450 },
+            // Removed: player-1 PixelProphet Alex Rivera, player-2 MotionMaster Jordan Lee,
+            // player-3 CodeCrafter Sam Chen — they were test mocks and kept resurrecting
+            // on every page load even after host deletes.
             { id: 'player-import-1774891628714-0', brand: 'Aurora', pin: '4645', name: 'Aadhya Khanna', email: 'aadhyakhanna@prototypeflx.com', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
             { id: 'player-import-1774891628716-1', brand: 'Barnie', pin: '4112', name: 'Aarna Nagory', email: 'anagory.30@asdubai.org', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
             { id: 'player-import-1774891628716-2', brand: 'MetaLink', pin: '8727', name: 'Abdullah Haddad', email: 'ahaddad.31@asdubai.org', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
@@ -45542,6 +45545,15 @@ RESPONSE RULES:
         var PLAYERS_KEY   = 'pflx_players_local_v1';
         var ACTIVE_BRAND  = 'pflx_active_brand';
 
+        // SENTINEL — set the moment any host action touches the player
+        // list (delete, add, edit, claim). Once stamped, hydratePlayers
+        // treats localStorage as the AUTHORITATIVE source — it CLEARS
+        // the hardcoded PLAYERS contents (except the always-keep admins)
+        // and rebuilds from saved data. Before the sentinel exists we
+        // keep the legacy MERGE behavior so fresh installs still see the
+        // bootstrap admins + any seeded roster.
+        var PLAYERS_AUTHORITATIVE_KEY = 'pflx_players_authoritative_v1';
+
         function hydratePlayers() {
             try {
                 if (typeof PLAYERS === 'undefined' || typeof BRANDS === 'undefined') return false;
@@ -45549,6 +45561,38 @@ RESPONSE RULES:
                 if (!raw) return true;
                 var saved = JSON.parse(raw);
                 if (!Array.isArray(saved)) return true;
+                var authoritative = false;
+                try { authoritative = localStorage.getItem(PLAYERS_AUTHORITATIVE_KEY) === '1'; } catch (e) {}
+
+                if (authoritative) {
+                    // AUTHORITATIVE mode — saved list wins. Keep admin
+                    // records that MUST exist (role admin/host with the
+                    // canonical seed ids) because hosts shouldn't be able
+                    // to lock themselves out by deleting their own row.
+                    var keepIds = { 'admin-0': 1, 'admin-1': 1 };
+                    for (var i = PLAYERS.length - 1; i >= 0; i--) {
+                        if (!keepIds[PLAYERS[i].id]) PLAYERS.splice(i, 1);
+                    }
+                    // Clear BRANDS of any non-admin entries so deletes
+                    // really do free up the brand.
+                    try {
+                        Object.keys(BRANDS || {}).forEach(function (b) {
+                            var stillPresent = PLAYERS.find(function (x) { return x.brand && x.brand.toUpperCase() === b.toUpperCase(); });
+                            if (!stillPresent) delete BRANDS[b];
+                        });
+                    } catch (e) {}
+                    // Now hydrate from saved.
+                    saved.forEach(function (p) {
+                        if (!p || !p.brand) return;
+                        var existing = PLAYERS.find(function (x) { return x.id === p.id || (x.brand && x.brand.toUpperCase() === (p.brand || '').toUpperCase()); });
+                        if (existing) { Object.assign(existing, p); } else { PLAYERS.push(p); }
+                        if (p.pin) BRANDS[p.brand] = p.pin;
+                    });
+                    return true;
+                }
+
+                // Legacy MERGE mode for first-time installs that haven't
+                // touched the roster yet.
                 saved.forEach(function (p) {
                     if (!p || !p.brand) return;
                     var existing = PLAYERS.find(function (x) { return x.id === p.id || (x.brand && x.brand.toUpperCase() === (p.brand || '').toUpperCase()); });
@@ -46605,6 +46649,10 @@ RESPONSE RULES:
                     return clone;
                 });
                 localStorage.setItem(PLAYERS_KEY, JSON.stringify(saved));
+                // Mark the roster as host-managed. From this point on,
+                // hydratePlayers treats localStorage as the source of
+                // truth and clears the hardcoded mock list on every load.
+                try { localStorage.setItem('pflx_players_authoritative_v1', '1'); } catch (e) {}
                 // Enqueue for cloud persist — debounced so a bulk edit doesn't
                 // hammer Supabase with one upsert per character typed.
                 saved.forEach(function (p) { if (p && p.id) _pflxCloudPersistQueue[p.id] = p; });
@@ -46630,6 +46678,21 @@ RESPONSE RULES:
         //      _pflxFlushCloudPersist uses
         window.pflxDeletePlayerFully = function (playerId, playerBrand) {
             if (!playerId && !playerBrand) return;
+            // 0) Remove from the host-side PLAYERS array (the Player
+            // Management UI's source) so the next render also drops it.
+            try {
+                if (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) {
+                    for (var k = PLAYERS.length - 1; k >= 0; k--) {
+                        var pp = PLAYERS[k];
+                        if (!pp) continue;
+                        if (playerId && pp.id === playerId) { PLAYERS.splice(k, 1); continue; }
+                        if (playerBrand && pp.brand === playerBrand) { PLAYERS.splice(k, 1); }
+                    }
+                }
+                if (playerBrand && typeof BRANDS !== 'undefined') { try { delete BRANDS[playerBrand]; } catch (e) {} }
+                // Reuse persistPlayers so the save + sentinel happen.
+                try { if (typeof persistPlayers === 'function') persistPlayers(); } catch (e) {}
+            } catch (e) {}
             // 1) Remove from mcPlayers in-memory.
             if (Array.isArray(window.mcPlayers)) {
                 var before = mcPlayers.length;
