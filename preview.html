@@ -57,6 +57,52 @@
         } catch (e) { console.warn('[PFLX Supabase] init failed', e); }
         return null;
       };
+
+      // ── Generic host-settings cloud sync ──────────────────────────
+      // Any host setting that wants to survive across devices + new
+      // deploys can call pflxCloudKvPush(key, value) to mirror it to
+      // Supabase app_data. pflxCloudKvLoad(key, applyFn) fetches the
+      // saved cloud value on boot and applies it. Both are debounced /
+      // best-effort so they never block UI. Use pflxCloudKvWatch to
+      // also write the value through to localStorage on read so the
+      // next boot starts with the freshest known state.
+      window._pflxKvPushTimers = window._pflxKvPushTimers || {};
+      window.pflxCloudKvPush = function (key, value, opts) {
+        var delay = (opts && opts.debounceMs) || 600;
+        if (window._pflxKvPushTimers[key]) clearTimeout(window._pflxKvPushTimers[key]);
+        window._pflxKvPushTimers[key] = setTimeout(function () {
+          try {
+            var sb = window.pflxSupabase();
+            if (!sb) return;
+            sb.from('app_data').upsert({
+              key: key,
+              data: value,
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'key' }).then(function (r) {
+              if (r && r.error) console.warn('[kv-push] ' + key + ':', r.error);
+            });
+          } catch (e) { console.warn('[kv-push] ' + key + ' threw', e); }
+        }, delay);
+      };
+      window.pflxCloudKvLoad = function (key, applyFn, localStorageKey) {
+        try {
+          var sb = window.pflxSupabase();
+          if (!sb) return;
+          sb.from('app_data').select('data').eq('key', key).maybeSingle()
+            .then(function (res) {
+              if (!res || res.error || !res.data) return;
+              var v = res.data.data;
+              try { applyFn && applyFn(v); } catch (e) { console.warn('[kv-load] applyFn ' + key, e); }
+              // Mirror through to localStorage so the next boot sees
+              // the latest known value without waiting for the network.
+              if (localStorageKey) {
+                try {
+                  localStorage.setItem(localStorageKey, typeof v === 'string' ? v : JSON.stringify(v));
+                } catch (e) {}
+              }
+            });
+        } catch (e) { console.warn('[kv-load] ' + key + ' threw', e); }
+      };
     </script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Share+Tech+Mono&family=Rajdhani:wght@300;400;500;600;700&family=Jura:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
@@ -15117,12 +15163,49 @@
         ];
         // Gallery display mode: 'random', 'sequential', 'shuffle'
         var galleryDisplayMode = localStorage.getItem('pflx_gallery_display_mode') || 'random';
+
+        // ── Persist gallery state to both localStorage AND cloud so a
+        // host's edits survive new deploys and propagate across devices.
+        // Call this after any mutation of loadingGallery or galleryDisplayMode.
+        window.pflxPersistLoadingGallery = function () {
+            try { localStorage.setItem('pflx_loading_gallery', JSON.stringify(loadingGallery)); } catch (e) {}
+            try { localStorage.setItem('pflx_gallery_display_mode', galleryDisplayMode || 'random'); } catch (e) {}
+            try {
+                if (typeof pflxCloudKvPush === 'function') {
+                    pflxCloudKvPush('pflx_loading_gallery', loadingGallery);
+                    pflxCloudKvPush('pflx_gallery_display_mode', galleryDisplayMode || 'random');
+                }
+            } catch (e) {}
+        };
+
+        // Cross-device hydrate — pull host-set gallery state from cloud on
+        // boot. Repaints the host gallery preview if it's open.
+        setTimeout(function () {
+            try {
+                if (typeof pflxCloudKvLoad === 'function') {
+                    pflxCloudKvLoad('pflx_loading_gallery', function (v) {
+                        if (Array.isArray(v) && v.length > 0) {
+                            loadingGallery.length = 0;
+                            v.forEach(function (u) { loadingGallery.push(u); });
+                            try { if (typeof hmcRenderGallery === 'function') hmcRenderGallery(); } catch (e) {}
+                        }
+                    }, 'pflx_loading_gallery');
+                    pflxCloudKvLoad('pflx_gallery_display_mode', function (v) {
+                        if (v === 'random' || v === 'sequential' || v === 'shuffle') {
+                            galleryDisplayMode = v;
+                        }
+                    }, 'pflx_gallery_display_mode');
+                }
+            } catch (e) {}
+        }, 1200);
         var galleryShuffleOrder = [];
         var galleryShuffleIdx = 0;
 
         function setGalleryDisplayMode(mode) {
             galleryDisplayMode = mode;
-            localStorage.setItem('pflx_gallery_display_mode', mode);
+            try { pflxPersistLoadingGallery(); } catch (e) {
+                try { localStorage.setItem('pflx_gallery_display_mode', mode); } catch (er) {}
+            }
             if (mode === 'shuffle') rebuildShuffleOrder();
             pflxToast('Gallery mode: ' + mode, 'success');
         }
@@ -15146,7 +15229,9 @@
             }
             loadingGallery.push(url);
             document.getElementById('loading-img-url').value = '';
-            localStorage.setItem('pflx_loading_gallery', JSON.stringify(loadingGallery));
+            try { pflxPersistLoadingGallery(); } catch (e) {
+                try { localStorage.setItem('pflx_loading_gallery', JSON.stringify(loadingGallery)); } catch (er) {}
+            }
             hmcRenderGallery();
             pflxToast('Image added (' + loadingGallery.length + '/20)', 'success');
         }
@@ -15154,7 +15239,9 @@
         function removeLoadingImage(index) {
             if (index < 0 || index >= loadingGallery.length) return;
             loadingGallery.splice(index, 1);
-            localStorage.setItem('pflx_loading_gallery', JSON.stringify(loadingGallery));
+            try { pflxPersistLoadingGallery(); } catch (e) {
+                try { localStorage.setItem('pflx_loading_gallery', JSON.stringify(loadingGallery)); } catch (er) {}
+            }
             hmcRenderGallery();
             pflxToast('Image removed (' + loadingGallery.length + '/20)', 'success');
         }
@@ -33873,12 +33960,25 @@
             var _ovr = JSON.parse(localStorage.getItem('pflx_app_unlock') || 'null');
             if (_ovr && typeof _ovr === 'object') Object.assign(APP_UNLOCK, _ovr);
           } catch (e) {}
+          // Cross-device cloud sync — fetch any host-set unlock thresholds
+          // from Supabase about a second after boot and re-apply.
+          setTimeout(function () {
+            try {
+              if (typeof pflxCloudKvLoad === 'function') {
+                pflxCloudKvLoad('pflx_app_unlock', function (v) {
+                  if (v && typeof v === 'object') Object.assign(APP_UNLOCK, v);
+                }, 'pflx_app_unlock');
+              }
+            } catch (e) {}
+          }, 1000);
           // Helper: hosts can call this from console to gate / ungate apps
           //   pflxSetAppUnlock('xcoin', 3)   → require Apprentice for X-Coin
           //   pflxSetAppUnlock('xcoin', 1)   → all players can use X-Coin
           window.pflxSetAppUnlock = function (appKey, level) {
             APP_UNLOCK[appKey] = (typeof level === 'number') ? level : 1;
             try { localStorage.setItem('pflx_app_unlock', JSON.stringify(APP_UNLOCK)); } catch (e) {}
+            // Mirror to cloud so it survives a new device or deploy.
+            try { if (typeof pflxCloudKvPush === 'function') pflxCloudKvPush('pflx_app_unlock', APP_UNLOCK); } catch (e) {}
           };
 
           function getPlayerLevel() {
