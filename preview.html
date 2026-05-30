@@ -15526,16 +15526,32 @@
             // Refresh feature groups visibility
             if (app === 'pathways') document.getElementById('feature-group-pathways').style.display = val ? 'block' : 'none';
             if (app === 'arena') document.getElementById('feature-group-arena').style.display = val ? 'block' : 'none';
+            // Auto-save IMMEDIATELY. Toggling used to require also hitting
+            // the separate Save button; if a host toggled and navigated
+            // away the change was silently lost. localStorage write is
+            // synchronous; the cloud push is async + debounced.
+            try { pflxSaveCohortOverrides(); } catch (e) {}
+            try { pflxCloudSyncCohortOverrides(); } catch (e) {}
             // Push the change to any live iframes so the sub-app can self-
-            // block immediately if a player is currently inside. Sub-app
-            // listens for pflx_access_change and either redirects home or
-            // renders its own Access Denied panel.
+            // block immediately if a player is currently inside.
             try { pflxBroadcastAccessChange(app, !!val); } catch (e) {}
+            // Subtle confirmation so the host knows the toggle stuck.
+            try {
+                if (typeof window.pflxShowSaveToast === 'function') {
+                    window.pflxShowSaveToast(
+                        (val ? 'Enabled' : 'Disabled') + ' ' + app + ' for ' + (COHORTS[activeCohortKey].name || activeCohortKey),
+                        'success'
+                    );
+                }
+            } catch (e) {}
         }
 
         function updateCohortFeature(feat, val) {
             if (!activeCohortKey || !COHORTS[activeCohortKey]) return;
             COHORTS[activeCohortKey][feat] = val;
+            // Same auto-save story as updateCohortApp — toggle = save.
+            try { pflxSaveCohortOverrides(); } catch (e) {}
+            try { pflxCloudSyncCohortOverrides(); } catch (e) {}
         }
 
         // ─────────────────────────────────────────────────────────────────
@@ -15571,8 +15587,70 @@
                 localStorage.setItem(PFLX_COHORT_KEY, JSON.stringify(out));
             } catch (e) { console.warn('[cohort] save failed', e); }
         }
-        // Boot-load
+
+        // ── Cloud sync ─────────────────────────────────────────────────
+        // localStorage only persists on this device. For host settings to
+        // survive across machines AND across new deploys, we mirror the
+        // cohort overrides to Supabase under app_data key cohort_overrides.
+        // Writes are debounced to 800ms so a host hammering toggles
+        // doesn't fire one upsert per click.
+        var _pflxCohortCloudTimer = null;
+        function pflxCloudSyncCohortOverrides() {
+            if (_pflxCohortCloudTimer) clearTimeout(_pflxCohortCloudTimer);
+            _pflxCohortCloudTimer = setTimeout(function () {
+                try {
+                    var sb = (typeof pflxSupabase === 'function') ? pflxSupabase() : null;
+                    if (!sb) return;
+                    var raw = localStorage.getItem(PFLX_COHORT_KEY);
+                    if (!raw) return;
+                    var payload = JSON.parse(raw);
+                    sb.from('app_data').upsert({
+                        key: 'cohort_overrides',
+                        data: payload,
+                        updated_at: new Date().toISOString()
+                    }, { onConflict: 'key' }).then(function (r) {
+                        if (r && r.error) console.warn('[cohort] cloud upsert', r.error);
+                    });
+                } catch (e) { console.warn('[cohort] cloud sync threw', e); }
+            }, 800);
+        }
+
+        function pflxCloudLoadCohortOverrides() {
+            try {
+                var sb = (typeof pflxSupabase === 'function') ? pflxSupabase() : null;
+                if (!sb) return;
+                sb.from('app_data')
+                    .select('data, updated_at')
+                    .eq('key', 'cohort_overrides')
+                    .maybeSingle()
+                    .then(function (res) {
+                        if (!res || res.error || !res.data) return;
+                        var cloud = res.data.data || {};
+                        // Merge cloud into in-memory COHORTS using the same
+                        // rule as the local load — cloud wins for any keys
+                        // it sets, base COHORTS defaults survive otherwise.
+                        Object.keys(cloud).forEach(function (k) {
+                            if (COHORTS[k]) Object.assign(COHORTS[k], cloud[k]);
+                        });
+                        // Also write through to localStorage so the next
+                        // boot can hydrate fast without waiting for the
+                        // network round-trip again.
+                        try { localStorage.setItem(PFLX_COHORT_KEY, JSON.stringify(cloud)); } catch (e) {}
+                        // If a cohort-manager is currently open, repaint.
+                        try {
+                            if (typeof loadCohortSettings === 'function' && window.activeCohortKey) {
+                                loadCohortSettings(window.activeCohortKey);
+                            }
+                        } catch (e) {}
+                    });
+            } catch (e) { console.warn('[cohort] cloud load threw', e); }
+        }
+
+        // Boot — local first (fast), then cloud (cross-device truth).
         try { pflxLoadCohortOverrides(); } catch (e) {}
+        // Defer the cloud fetch slightly so it doesn't race with other
+        // boot-time Supabase reads.
+        setTimeout(function () { try { pflxCloudLoadCohortOverrides(); } catch (e) {} }, 600);
 
         function saveCohortSettings() {
             if (!activeCohortKey) return;
