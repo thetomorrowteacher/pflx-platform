@@ -6128,10 +6128,7 @@
                         </div>
                         <div style="flex:1;min-width:0;">
                             <div id="pd-name" style="font-family:'Orbitron',sans-serif;font-size:13px;font-weight:800;color:#e0e6ff;letter-spacing:0.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</div>
-                            <div style="display:flex;align-items:center;gap:6px;margin-top:3px;flex-wrap:wrap;">
-                                <div id="pd-role" style="font-size:10px;font-weight:700;color:rgba(255,255,255,0.45);letter-spacing:0.1em;text-transform:uppercase;">—</div>
-                                <span id="pd-tier" style="font-family:'Orbitron',sans-serif;font-size:9px;font-weight:800;padding:2px 7px;border-radius:8px;letter-spacing:0.12em;text-transform:uppercase;background:rgba(0,212,255,0.18);color:#00d4ff;border:1px solid rgba(0,212,255,0.4);">NOVICE</span>
-                            </div>
+                            <div id="pd-role" style="font-size:10px;font-weight:700;color:rgba(255,255,255,0.45);letter-spacing:0.1em;margin-top:3px;text-transform:uppercase;">—</div>
                         </div>
                     </div>
                     <!-- Stat row: XC / Badges / Level -->
@@ -6149,8 +6146,25 @@
                             <div style="font-size:8px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.08em;margin-top:3px;">RANK</div>
                         </div>
                     </div>
-                    <!-- Actions -->
+                    <!-- Actions —
+                         My Wallet     → X-Coin player wallet view
+                         My Tasks      → MC Tasks tab
+                         Leaderboard   → X-Coin master leaderboard
+                         View Portfolio + Sign Out keep their slots at the bottom.
+                    -->
                     <div style="display:flex;flex-direction:column;gap:6px;margin-top:14px;">
+                        <button onclick="pflxOpenWalletShortcut()"
+                                style="width:100%;padding:9px 10px;background:rgba(245,200,66,0.08);border:1px solid rgba(245,200,66,0.3);color:#f5c842;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.06em;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+                            <span style="font-size:13px;">💰</span> MY WALLET
+                        </button>
+                        <button onclick="pflxOpenTasksShortcut()"
+                                style="width:100%;padding:9px 10px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.3);color:#22c55e;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.06em;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+                            <span style="font-size:13px;">📋</span> MY TASKS
+                        </button>
+                        <button onclick="pflxOpenLeaderboardShortcut()"
+                                style="width:100%;padding:9px 10px;background:rgba(167,139,250,0.08);border:1px solid rgba(167,139,250,0.3);color:#a78bfa;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.06em;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+                            <span style="font-size:13px;">🏆</span> LEADERBOARD
+                        </button>
                         <button onclick="pflxCloseProfileDropdown();pflxOpenPortfolioShortcut();"
                                 style="width:100%;padding:9px 10px;background:rgba(0,240,255,0.08);border:1px solid rgba(0,240,255,0.25);color:#00f0ff;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.06em;border-radius:8px;cursor:pointer;">
                             VIEW PORTFOLIO
@@ -39912,6 +39926,79 @@ RESPONSE RULES:
             } catch (e) { console.warn('[portfolio] shortcut nav failed', e); }
         };
 
+        // ── Quick-profile dropdown shortcuts ──────────────────────────────
+        // Each closes the dropdown then navigates to the target app. When
+        // the sub-app has finished loading, we postMessage a pflx_navigate
+        // hint so it can deep-link to the right sub-view (wallet inside
+        // X-Coin, master leaderboard inside X-Coin, etc). Sub-apps that
+        // don't listen for this message just land on their home and the
+        // player taps the matching sidebar item — still saves a step.
+        function _pflxQueueIframeHint(viewName, hint) {
+            try {
+                var attempts = 0;
+                var tick = function () {
+                    attempts++;
+                    var f = document.querySelector('iframe[data-app="' + viewName + '"]');
+                    if (!f) f = document.querySelector('iframe[src*="' + viewName + '"]');
+                    if (f && f.contentWindow) {
+                        try { f.contentWindow.postMessage(hint, '*'); } catch (e) {}
+                    }
+                    // Keep retrying for ~6s so we catch the iframe even if
+                    // it's still booting + setting up its postMessage listener.
+                    if (attempts < 30) setTimeout(tick, 200);
+                };
+                setTimeout(tick, 400);
+            } catch (e) {}
+        }
+
+        window.pflxOpenWalletShortcut = function () {
+            try { pflxCloseProfileDropdown(); } catch (e) {}
+            try {
+                if (typeof navigateTo === 'function') navigateTo('xcoin');
+                _pflxQueueIframeHint('xcoin', {
+                    type: 'pflx_navigate',
+                    target: 'wallet',
+                    fallback: 'home',
+                    source: 'quick-profile',
+                    ts: Date.now()
+                });
+            } catch (e) { console.warn('[wallet] shortcut nav failed', e); }
+        };
+
+        window.pflxOpenTasksShortcut = function () {
+            try { pflxCloseProfileDropdown(); } catch (e) {}
+            try {
+                if (typeof navigateTo === 'function') navigateTo('mission-control');
+                // MC lives in the parent shell, not an iframe — switch the
+                // active tab once the view is mounted. mcNav is the canonical
+                // tab switcher; fall back to a click on the tab button if
+                // mcNav isn't available for some reason.
+                setTimeout(function () {
+                    try {
+                        if (typeof mcNav === 'function') mcNav('tasks');
+                        else {
+                            var btn = document.querySelector('.mc-nav-btn[data-mc="tasks"]');
+                            if (btn && typeof btn.click === 'function') btn.click();
+                        }
+                    } catch (e) {}
+                }, 250);
+            } catch (e) { console.warn('[tasks] shortcut nav failed', e); }
+        };
+
+        window.pflxOpenLeaderboardShortcut = function () {
+            try { pflxCloseProfileDropdown(); } catch (e) {}
+            try {
+                if (typeof navigateTo === 'function') navigateTo('xcoin');
+                _pflxQueueIframeHint('xcoin', {
+                    type: 'pflx_navigate',
+                    target: 'master-leaderboard',
+                    fallback: 'home',
+                    source: 'quick-profile',
+                    ts: Date.now()
+                });
+            } catch (e) { console.warn('[leaderboard] shortcut nav failed', e); }
+        };
+
         // ── Quick Profile Dropdown ────────────────────────────────────
         // Replaces the old "click toolbar avatar → /portfolio" navigation.
         // Toggles a dropdown anchored to .toolbar-profile showing key player
@@ -39946,23 +40033,8 @@ RESPONSE RULES:
                 var xcEl = document.getElementById('pd-xc'); if (xcEl) xcEl.textContent = (xc || 0).toLocaleString();
                 var bdgEl = document.getElementById('pd-badges'); if (bdgEl) bdgEl.textContent = badges || 0;
                 var rkEl = document.getElementById('pd-rank'); if (rkEl) rkEl.textContent = rankLabel;
-                // Tier badge — prefer the player record then the launch
-                // overlay localStorage choice, fall back to novice.
-                var tier = (p && p.tier) || (function () {
-                    try {
-                        var stored = localStorage.getItem('pflx_player_tier');
-                        if (stored === 'starter' || stored === 'novice' || stored === 'pro') return stored;
-                    } catch (e) {}
-                    return 'novice';
-                })();
-                var tierEl = document.getElementById('pd-tier');
-                if (tierEl) {
-                    var meta = pflxTierMeta(tier);
-                    tierEl.textContent = meta.label.toUpperCase();
-                    tierEl.style.background = 'rgba(' + meta.rgb + ',0.18)';
-                    tierEl.style.color = 'rgb(' + meta.rgb + ')';
-                    tierEl.style.borderColor = 'rgba(' + meta.rgb + ',0.4)';
-                }
+                // Tier pill removed from this header — the picker on the
+                // node detail panel is now the canonical surface for tier.
             } catch (e) { console.warn('[profile dropdown] render failed', e); }
         };
 
