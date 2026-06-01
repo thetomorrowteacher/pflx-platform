@@ -13276,9 +13276,9 @@
         // Active session — populated on login, used for SSO passthrough
         let activeSession = null;
 
-        function buildAppURL(appKey) {
-            if (!activeSession) return APP_BASE_URLS[appKey] || '#';
-            const base = APP_BASE_URLS[appKey];
+        function buildAppURL(appKey, subPath) {
+            if (!activeSession) return (APP_BASE_URLS[appKey] || '#') + (subPath || '');
+            const base = APP_BASE_URLS[appKey] + (subPath || '');
             // Resolve the player's tier (URL → localStorage → 'novice') and
             // the comma-separated list of apps the player is allowed into.
             // Sub-apps read these from the SSO URL to (a) render with the
@@ -39927,42 +39927,61 @@ RESPONSE RULES:
         };
 
         // ── Quick-profile dropdown shortcuts ──────────────────────────────
-        // Each closes the dropdown then navigates to the target app. When
-        // the sub-app has finished loading, we postMessage a pflx_navigate
-        // hint so it can deep-link to the right sub-view (wallet inside
-        // X-Coin, master leaderboard inside X-Coin, etc). Sub-apps that
-        // don't listen for this message just land on their home and the
-        // player taps the matching sidebar item — still saves a step.
-        function _pflxQueueIframeHint(viewName, hint) {
-            try {
-                var attempts = 0;
-                var tick = function () {
-                    attempts++;
-                    var f = document.querySelector('iframe[data-app="' + viewName + '"]');
-                    if (!f) f = document.querySelector('iframe[src*="' + viewName + '"]');
-                    if (f && f.contentWindow) {
-                        try { f.contentWindow.postMessage(hint, '*'); } catch (e) {}
+        // Deep-link directly to the right sub-page by overriding the iframe
+        // src with a path. Works without any sub-app changes since the
+        // iframe is just loading a real URL.
+        //
+        // X-Coin player-facing routes (confirmed against the deployed app):
+        //   /player/wallet          ← My Wallet
+        //   /player/leaderboard     ← player view leaderboard
+        //   /admin/leaderboard      ← Master Leaderboard (host view)
+        //
+        // For hosts viewing the Master Leaderboard we hit the admin route.
+        // Players go to /player/leaderboard.
+        function _pflxDeepLinkToApp(appKey, subPath) {
+            if (typeof navigateTo !== 'function') return;
+            // 1) Trigger the normal navigation flow (loading screen etc).
+            navigateTo(appKey);
+            // 2) Override the iframe URL to the deep path. The platform's
+            // iframe injection sets src to the base URL; we replace it
+            // with the deep URL once the iframe element is in the DOM.
+            //    Retries for ~3s so we win the race against iframe creation.
+            var deepUrl = (typeof buildAppURL === 'function')
+                ? buildAppURL(appKey, subPath)
+                : (APP_BASE_URLS[appKey] || '') + (subPath || '');
+            var attempts = 0;
+            var tick = function () {
+                attempts++;
+                var f = document.querySelector('iframe[data-app="' + appKey + '"]');
+                if (!f) f = document.querySelector('iframe[src*="' + appKey + '"]');
+                if (f) {
+                    // Only override if we're not already on the right path.
+                    var current = f.src || '';
+                    if (current.indexOf(subPath) === -1) {
+                        f.src = deepUrl;
                     }
-                    // Keep retrying for ~6s so we catch the iframe even if
-                    // it's still booting + setting up its postMessage listener.
-                    if (attempts < 30) setTimeout(tick, 200);
-                };
-                setTimeout(tick, 400);
+                    return;
+                }
+                if (attempts < 15) setTimeout(tick, 200);
+            };
+            setTimeout(tick, 250);
+        }
+
+        function _pflxRoleIsHost() {
+            try {
+                var r = String((window.activeSession && activeSession.role) || '').toLowerCase();
+                if (/admin|host|teacher|instructor|master/.test(r)) return true;
+                if (window.pflxRole === 'host') return true;
             } catch (e) {}
+            return false;
         }
 
         window.pflxOpenWalletShortcut = function () {
             try { pflxCloseProfileDropdown(); } catch (e) {}
-            try {
-                if (typeof navigateTo === 'function') navigateTo('xcoin');
-                _pflxQueueIframeHint('xcoin', {
-                    type: 'pflx_navigate',
-                    target: 'wallet',
-                    fallback: 'home',
-                    source: 'quick-profile',
-                    ts: Date.now()
-                });
-            } catch (e) { console.warn('[wallet] shortcut nav failed', e); }
+            // Hosts don't have a player wallet — open the admin economy page
+            // which is the closest equivalent (totals, balances, awards).
+            var path = _pflxRoleIsHost() ? '/admin/economy' : '/player/wallet';
+            _pflxDeepLinkToApp('xcoin', path);
         };
 
         window.pflxOpenTasksShortcut = function () {
@@ -39987,16 +40006,9 @@ RESPONSE RULES:
 
         window.pflxOpenLeaderboardShortcut = function () {
             try { pflxCloseProfileDropdown(); } catch (e) {}
-            try {
-                if (typeof navigateTo === 'function') navigateTo('xcoin');
-                _pflxQueueIframeHint('xcoin', {
-                    type: 'pflx_navigate',
-                    target: 'master-leaderboard',
-                    fallback: 'home',
-                    source: 'quick-profile',
-                    ts: Date.now()
-                });
-            } catch (e) { console.warn('[leaderboard] shortcut nav failed', e); }
+            // Hosts hit the admin master leaderboard; players hit theirs.
+            var path = _pflxRoleIsHost() ? '/admin/leaderboard' : '/player/leaderboard';
+            _pflxDeepLinkToApp('xcoin', path);
         };
 
         // ── Quick Profile Dropdown ────────────────────────────────────
