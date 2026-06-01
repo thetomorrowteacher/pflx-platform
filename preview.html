@@ -15890,25 +15890,44 @@
         }
         window.pflxShowAccessLocked = pflxShowAccessLocked;
 
-        // Subtle visual hint — dim a toolbar tile slightly if the active
-        // player can't access it. The tile stays clickable (so they get the
-        // explanation when they tap), it just looks less inviting.
+        // Toolbar tile gating — track which tiles the active player can
+        // access via a data attribute so the navigateTo handler can still
+        // show the Access Denied modal on click. We deliberately do NOT
+        // telegraph the locked state on hover or with a dim/grayscale
+        // styling — per host request, the player only finds out via the
+        // Access Denied modal when they tap the tile. And the Master Host
+        // (and any other admin/host/instructor role) gets no visual hint
+        // because pflxPlayerCanAccessApp returns true for those roles.
+        //
+        // We also hard-strip any stale " — locked for your cohort" string
+        // that earlier builds may have appended to btn.title, so a host
+        // who was briefly mis-gated during boot doesn't keep the tooltip.
         function pflxApplyCohortGatingToToolbar() {
             try {
                 var gated = ['xcoin', 'pathways', 'arena', 'darkcampus'];
                 gated.forEach(function (k) {
                     var btn = document.querySelector('.nav-btn[data-view="' + k + '"]');
                     if (!btn) return;
+                    // Scrub any legacy "— locked for your cohort" tail that
+                    // may have been baked in by older builds before this fix.
+                    try {
+                        if (btn.title && btn.title.indexOf('locked for your cohort') !== -1) {
+                            btn.title = btn.title.replace(/\s*[—-]?\s*locked for your cohort/gi, '').trim();
+                        }
+                    } catch (e) {}
                     var ok = (typeof pflxPlayerCanAccessApp === 'function') ? pflxPlayerCanAccessApp(k) : true;
+                    // Always reset visual state — no dim, no grayscale, no
+                    // tooltip giveaway. The locked state is only revealed
+                    // on click via pflxShowAccessLocked.
+                    btn.style.opacity = '';
+                    btn.style.filter = '';
                     if (ok) {
-                        btn.style.opacity = '';
-                        btn.style.filter = '';
                         btn.removeAttribute('data-pflx-locked');
                     } else {
-                        btn.style.opacity = '0.45';
-                        btn.style.filter = 'grayscale(0.6)';
+                        // Keep the attribute so click handlers / CSS rules
+                        // that may want to react can still see the state,
+                        // but no visual or text hint is rendered.
                         btn.setAttribute('data-pflx-locked', '1');
-                        btn.title = (btn.title || '') + ' — locked for your cohort';
                     }
                 });
             } catch (e) {}
