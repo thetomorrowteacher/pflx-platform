@@ -6475,9 +6475,26 @@
                         <div class="login-step active" id="step-login">
                             <div class="login-panel">
                                 <div class="login-panel-label">Select Your Brand</div>
-                                <select class="brand-select" id="brand-select"><option value="">Select your brand name...</option></select>
-                                <input type="password" class="pin-input" id="pin-input" placeholder="••••" maxlength="4">
+                                <!--
+                                  Brand input is a typeable text field bound to a
+                                  <datalist> of every claimed brand. The native
+                                  datalist gives free autocomplete as the player
+                                  types so they don't have to scroll through a
+                                  long dropdown. populateBrandSelect now fills
+                                  both the datalist options and a hidden mirror
+                                  for back-compat with code that reads .value.
+                                -->
+                                <input type="text" class="brand-select" id="brand-select" placeholder="Select or type your brand name…" autocomplete="off" list="brand-datalist" spellcheck="false">
+                                <datalist id="brand-datalist"></datalist>
+                                <input type="password" class="pin-input" id="pin-input" placeholder="••••" maxlength="4" autocomplete="current-password">
                                 <button class="login-btn" id="login-btn">Login</button>
+                                <div id="login-remember-row" style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;font-family:'Jura',sans-serif;font-size:10px;color:rgba(255,255,255,0.45);">
+                                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                                        <input type="checkbox" id="login-remember" checked style="accent-color:var(--cyan);">
+                                        Keep me signed in on this device
+                                    </label>
+                                    <a href="#" id="login-forget-me" style="color:rgba(255,255,255,0.35);text-decoration:none;font-size:9px;letter-spacing:0.06em;">Forget me</a>
+                                </div>
                                 <div class="login-divider">New Player?</div>
                                 <button class="login-btn-outline" id="goto-claim-btn">Claim Player Account</button>
                                 <button class="login-btn-outline" id="goto-email-signup-btn" style="margin-top:8px; border-color:rgba(0,240,255,0.25); color:var(--cyan);">Sign Up with Email</button>
@@ -13246,15 +13263,41 @@
             return PLAYERS.find(p => p.brand && p.brand.toUpperCase() === brand.toUpperCase());
         }
         function populateBrandSelect() {
-            const sel = document.getElementById('brand-select');
-            sel.innerHTML = '<option value="">Select your brand name...</option>';
-            // Show ALL players with brands — imported students log in with their assigned brand + PIN
-            PLAYERS.filter(p => p.brand).sort((a, b) => a.brand.localeCompare(b.brand)).forEach(p => {
-                const opt = document.createElement('option');
-                opt.value = p.brand;
-                opt.textContent = p.brand;
-                sel.appendChild(opt);
-            });
+            // The brand input is now a <input type="text" list="brand-datalist">
+            // for typeable autocomplete. We fill the matching <datalist>
+            // with one <option> per claimed brand. The native browser
+            // dropdown does substring filtering for free as the player
+            // types. We also keep the imported-brand-select (still a
+            // <select>) populated for the claim flow.
+            try {
+                var dl = document.getElementById('brand-datalist');
+                if (dl) {
+                    dl.innerHTML = '';
+                    PLAYERS.filter(function (p) { return p && p.brand; })
+                        .sort(function (a, b) { return a.brand.localeCompare(b.brand); })
+                        .forEach(function (p) {
+                            var opt = document.createElement('option');
+                            opt.value = p.brand;
+                            dl.appendChild(opt);
+                        });
+                }
+            } catch (e) {}
+            // Imported-brand-select on the claim flow stayed as a <select>;
+            // keep populating it the same way.
+            try {
+                var imp = document.getElementById('imported-brand-select');
+                if (imp && imp.tagName === 'SELECT') {
+                    imp.innerHTML = '<option value="">Select your brand name...</option>';
+                    PLAYERS.filter(function (p) { return p && p.brand; })
+                        .sort(function (a, b) { return a.brand.localeCompare(b.brand); })
+                        .forEach(function (p) {
+                            var opt = document.createElement('option');
+                            opt.value = p.brand;
+                            opt.textContent = p.brand;
+                            imp.appendChild(opt);
+                        });
+                }
+            } catch (e) {}
         }
 
         const SEASON_DATA = [
@@ -16021,14 +16064,69 @@
             } catch (e) {}
 
             // === STEP 1: Existing player login ===
+            // Remember-me — restore prior brand + PIN on this device so the
+            // player can just hit LOGIN. Stored in localStorage under
+            // pflx_remember_v1 as { brand, pin, ts }. The Keep-me-signed-in
+            // checkbox controls whether successful logins write back.
+            // Forget-me clears the row.
+            (function () {
+                try {
+                    var raw = localStorage.getItem('pflx_remember_v1');
+                    if (!raw) return;
+                    var saved = JSON.parse(raw);
+                    if (!saved || !saved.brand) return;
+                    var brandEl = document.getElementById('brand-select');
+                    var pinEl = document.getElementById('pin-input');
+                    if (brandEl) brandEl.value = saved.brand;
+                    if (pinEl && saved.pin) pinEl.value = saved.pin;
+                    var rm = document.getElementById('login-remember');
+                    if (rm) rm.checked = true;
+                } catch (e) {}
+            })();
+
             document.getElementById('login-btn').addEventListener('click', () => {
-                const brand = document.getElementById('brand-select').value;
+                const brand = document.getElementById('brand-select').value.trim();
                 const pin = document.getElementById('pin-input').value;
                 if (!brand) { shakeEl(document.getElementById('brand-select')); return; }
-                if (BRANDS[brand] === pin) { loginUser(brand); }
+                if (BRANDS[brand] === pin) {
+                    // Persist credentials when Keep-me-signed-in is checked.
+                    // Stored locally only — never sent anywhere. 4-digit PIN
+                    // scoped to this device, same security profile as any
+                    // browser-remembered password.
+                    try {
+                        var keepEl = document.getElementById('login-remember');
+                        if (keepEl && keepEl.checked) {
+                            localStorage.setItem('pflx_remember_v1', JSON.stringify({
+                                brand: brand, pin: pin, ts: Date.now()
+                            }));
+                        } else {
+                            localStorage.removeItem('pflx_remember_v1');
+                        }
+                    } catch (e) {}
+                    loginUser(brand);
+                }
                 else { shakeEl(document.getElementById('pin-input')); document.getElementById('pin-input').value = ''; }
             });
             document.getElementById('pin-input').addEventListener('keypress', e => { if (e.key === 'Enter') document.getElementById('login-btn').click(); });
+
+            // Forget-me — wipe the remembered brand + PIN and clear the
+            // inputs so the next visitor on this device starts fresh.
+            try {
+                var forgetLink = document.getElementById('login-forget-me');
+                if (forgetLink) {
+                    forgetLink.addEventListener('click', function (ev) {
+                        ev.preventDefault();
+                        try { localStorage.removeItem('pflx_remember_v1'); } catch (e) {}
+                        var b = document.getElementById('brand-select');
+                        var p = document.getElementById('pin-input');
+                        if (b) b.value = '';
+                        if (p) p.value = '';
+                        if (b) b.focus();
+                        var rm = document.getElementById('login-remember');
+                        if (rm) rm.checked = true;
+                    });
+                }
+            } catch (e) {}
 
             // Go to claim
             document.getElementById('goto-claim-btn').addEventListener('click', () => showStep('step-claim-email'));
@@ -46697,6 +46795,11 @@ RESPONSE RULES:
                 window.pflxIdentityClear();
                 sessionStorage.removeItem('pflx_mimic_stash_v1');
                 sessionStorage.removeItem('pflx_mimic_active_v1');
+                // Also clear the remember-me row so the next visitor on
+                // this device starts at a clean login form. If we left
+                // it in place, signing out and reloading would auto-fill
+                // the previous player's credentials and feel broken.
+                try { localStorage.removeItem('pflx_remember_v1'); } catch (e) {}
                 window.location.reload();
             } catch (e) { console.warn('[identity] signOut failed', e); }
         };
