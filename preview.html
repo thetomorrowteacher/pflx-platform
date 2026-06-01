@@ -15721,42 +15721,67 @@
             }, 800);
         }
 
+        // Promise-based readiness gate. Resolves once cohort_overrides has
+        // been pulled from Supabase (or after a 2.5s timeout). navigateTo
+        // can await this before evaluating pflxPlayerCanAccessApp so a
+        // player who clicks DarkCampus right after page load doesn't slip
+        // through the gate before the cloud override "off for DD Core 3"
+        // has landed.
+        var _pflxCohortReadyResolve;
+        window.pflxCohortAccessReady = new Promise(function (resolve) { _pflxCohortReadyResolve = resolve; });
+        // Hard timeout so we never block forever if Supabase is down.
+        setTimeout(function () { try { _pflxCohortReadyResolve && _pflxCohortReadyResolve('timeout'); } catch (e) {} }, 2500);
+
         function pflxCloudLoadCohortOverrides() {
             try {
                 var sb = (typeof pflxSupabase === 'function') ? pflxSupabase() : null;
-                if (!sb) return;
+                if (!sb) {
+                    // Resolve immediately so navigateTo doesn't hang
+                    // when Supabase isn't initialized.
+                    try { _pflxCohortReadyResolve && _pflxCohortReadyResolve('no-client'); } catch (e) {}
+                    return;
+                }
                 sb.from('app_data')
                     .select('data, updated_at')
                     .eq('key', 'cohort_overrides')
                     .maybeSingle()
                     .then(function (res) {
-                        if (!res || res.error || !res.data) return;
-                        var cloud = res.data.data || {};
-                        // Merge cloud into in-memory COHORTS using the same
-                        // rule as the local load — cloud wins for any keys
-                        // it sets, base COHORTS defaults survive otherwise.
-                        Object.keys(cloud).forEach(function (k) {
-                            if (COHORTS[k]) Object.assign(COHORTS[k], cloud[k]);
-                        });
-                        // Also write through to localStorage so the next
-                        // boot can hydrate fast without waiting for the
-                        // network round-trip again.
-                        try { localStorage.setItem(PFLX_COHORT_KEY, JSON.stringify(cloud)); } catch (e) {}
-                        // If a cohort-manager is currently open, repaint.
                         try {
-                            if (typeof loadCohortSettings === 'function' && window.activeCohortKey) {
-                                loadCohortSettings(window.activeCohortKey);
+                            if (res && !res.error && res.data) {
+                                var cloud = res.data.data || {};
+                                Object.keys(cloud).forEach(function (k) {
+                                    if (COHORTS[k]) Object.assign(COHORTS[k], cloud[k]);
+                                });
+                                try { localStorage.setItem(PFLX_COHORT_KEY, JSON.stringify(cloud)); } catch (e) {}
+                                try {
+                                    if (typeof loadCohortSettings === 'function' && window.activeCohortKey) {
+                                        loadCohortSettings(window.activeCohortKey);
+                                    }
+                                } catch (e) {}
                             }
-                        } catch (e) {}
+                        } finally {
+                            // Resolve regardless of outcome so navigateTo
+                            // proceeds with whatever data we have (cloud +
+                            // localStorage merged, or just localStorage).
+                            try { _pflxCohortReadyResolve && _pflxCohortReadyResolve('loaded'); } catch (e) {}
+                        }
+                    }, function (err) {
+                        console.warn('[cohort] cloud load rejected', err);
+                        try { _pflxCohortReadyResolve && _pflxCohortReadyResolve('error'); } catch (e) {}
                     });
-            } catch (e) { console.warn('[cohort] cloud load threw', e); }
+            } catch (e) {
+                console.warn('[cohort] cloud load threw', e);
+                try { _pflxCohortReadyResolve && _pflxCohortReadyResolve('threw'); } catch (er) {}
+            }
         }
 
         // Boot — local first (fast), then cloud (cross-device truth).
         try { pflxLoadCohortOverrides(); } catch (e) {}
-        // Defer the cloud fetch slightly so it doesn't race with other
-        // boot-time Supabase reads.
-        setTimeout(function () { try { pflxCloudLoadCohortOverrides(); } catch (e) {} }, 600);
+        // Fire the cloud fetch as soon as possible so the readiness gate
+        // resolves before the player can click an app tile. The previous
+        // 600ms defer caused a race where a denied DarkCampus tile would
+        // grant access if clicked before cloud overrides loaded.
+        setTimeout(function () { try { pflxCloudLoadCohortOverrides(); } catch (e) {} }, 50);
 
         function saveCohortSettings() {
             if (!activeCohortKey) return;
@@ -18303,9 +18328,34 @@
                     'ai-center': 'AI Center',
                     'mission-control': 'Mission Control'
                 };
-                if (gatedApps[viewName] && typeof pflxPlayerCanAccessApp === 'function' && !pflxPlayerCanAccessApp(viewName)) {
-                    pflxShowAccessLocked(viewName, gatedApps[viewName]);
-                    return;
+                if (gatedApps[viewName] && typeof pflxPlayerCanAccessApp === 'function') {
+                    // Defer the navigation until cohort overrides have
+                    // landed from Supabase. Without this the player can
+                    // tap a gated tile in the first ~600ms after boot
+                    // (before cloud data arrives) and slip past the gate.
+                    // The promise has a 2.5s timeout so a flaky network
+                    // never blocks the platform forever.
+                    if (window.pflxCohortAccessReady && typeof window.pflxCohortAccessReady.then === 'function') {
+                        // Already pending or resolved — wait for it.
+                        window.pflxCohortAccessReady.then(function () {
+                            if (!pflxPlayerCanAccessApp(viewName)) {
+                                pflxShowAccessLocked(viewName, gatedApps[viewName]);
+                            } else {
+                                // Re-enter navigateTo with the gate now passing.
+                                // We replace pflxCohortAccessReady with an
+                                // already-resolved one so this branch becomes
+                                // a no-op on the recursive call.
+                                window.pflxCohortAccessReady = Promise.resolve('ready');
+                                navigateTo(viewName);
+                            }
+                        });
+                        return;
+                    }
+                    // Promise gone (replaced after first pass) — synchronous check.
+                    if (!pflxPlayerCanAccessApp(viewName)) {
+                        pflxShowAccessLocked(viewName, gatedApps[viewName]);
+                        return;
+                    }
                 }
             } catch (e) {}
 
