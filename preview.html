@@ -17640,12 +17640,16 @@
             if (!grid) return;
             // Tile order — Mission Control first (host request), the rest
             // follow in launch order. AI Center deliberately omitted.
+            // iconScale is a per-app multiplier applied to the visual size
+            // of the icon. Most logos have similar effective coverage but
+            // the Battle Arena PNG has more internal whitespace, so we
+            // bump it up so it visually matches the others.
             var apps = [
-                { key: 'mission-control',name: 'Mission Control', icon: 'public/Mission Control Icon.png',    accent: '#ef4444', desc: 'Your tasks, projects, checkpoints, and progress in one command center.' },
-                { key: 'xcoin',          name: 'X-Coin',          icon: 'public/xcoin-logo.png',              accent: '#f5c842', desc: 'Wallet, badges, leaderboard, and the economy that rewards everything you do.' },
-                { key: 'pathways',       name: 'Core Pathways',   icon: 'public/Core Pathway Main Icon.png',  accent: '#a78bfa', desc: 'Self-paced learning modules. Pick a tier, complete checkpoints, earn XC.' },
-                { key: 'arena',          name: 'Battle Arena',    icon: 'public/Battle Arena.png',            accent: '#00d4ff', desc: 'Compete head-to-head in skill battles. Wager XC. Climb the ladder.' },
-                { key: 'darkcampus',     name: 'DarkCampus',      icon: 'public/DarkCampus Logo 1.png',       accent: '#22c55e', desc: 'Chat with peers, post in channels, jump into voice rooms. The social hub.' }
+                { key: 'mission-control',name: 'Mission Control', icon: 'public/Mission Control Icon.png',    accent: '#ef4444', iconScale: 1.0,  desc: 'Your tasks, projects, checkpoints, and progress in one command center.' },
+                { key: 'xcoin',          name: 'X-Coin',          icon: 'public/xcoin-logo.png',              accent: '#f5c842', iconScale: 1.0,  desc: 'Wallet, badges, leaderboard, and the economy that rewards everything you do.' },
+                { key: 'pathways',       name: 'Core Pathways',   icon: 'public/Core Pathway Main Icon.png',  accent: '#a78bfa', iconScale: 1.0,  desc: 'Self-paced learning modules. Pick a tier, complete checkpoints, earn XC.' },
+                { key: 'arena',          name: 'Battle Arena',    icon: 'public/Battle Arena.png',            accent: '#00d4ff', iconScale: 1.22, desc: 'Compete head-to-head in skill battles. Wager XC. Climb the ladder.' },
+                { key: 'darkcampus',     name: 'DarkCampus',      icon: 'public/DarkCampus Logo 1.png',       accent: '#22c55e', iconScale: 1.0,  desc: 'Chat with peers, post in channels, jump into voice rooms. The social hub.' }
             ];
             grid.innerHTML = '';
             apps.forEach(function (app) {
@@ -17661,8 +17665,15 @@
                     'background:linear-gradient(160deg,rgba(255,255,255,0.03),rgba(0,0,0,0.25));' +
                     'border:1px solid ' + app.accent + '30;color:#e0e6ff;' +
                     'transition:transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;';
+                // Per-app icon scale — Battle Arena's PNG has whitespace
+                // around the logo so we transform-scale it up to look
+                // visually comparable to the other icons at the same
+                // bounding box. The wrapper keeps the layout box stable.
+                var _scale = app.iconScale || 1.0;
                 tile.innerHTML =
-                    '<img src="' + app.icon + '" alt="' + escapeHtml(app.name) + '" style="width:104px;height:104px;object-fit:contain;filter:drop-shadow(0 4px 16px ' + app.accent + '66);">' +
+                    '<div style="width:104px;height:104px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
+                        '<img src="' + app.icon + '" alt="' + escapeHtml(app.name) + '" style="width:104px;height:104px;object-fit:contain;transform:scale(' + _scale + ');filter:drop-shadow(0 4px 16px ' + app.accent + '66);">' +
+                    '</div>' +
                     '<div style="font-family:\'Orbitron\',sans-serif;font-size:13px;font-weight:800;letter-spacing:0.12em;color:#e0e6ff;text-transform:uppercase;">' + escapeHtml(app.name) + '</div>' +
                     '<div class="pflx-app-hub-desc" style="position:absolute;left:10px;right:10px;bottom:10px;font-family:\'Jura\',sans-serif;font-size:11px;line-height:1.4;color:rgba(224,230,255,0.92);background:rgba(5,8,16,0.92);border:1px solid ' + app.accent + '55;border-radius:10px;padding:8px 10px;opacity:0;transform:translateY(4px);pointer-events:none;transition:opacity 0.15s ease, transform 0.15s ease;">' + escapeHtml(app.desc) + '</div>';
                 tile.onmouseenter = function () {
@@ -17689,15 +17700,47 @@
 
         // ─────────────────────────────────────────────────────────────────
         // Home Job Board — surfaces up to 5 open jobs from MC. Each row
-        // is clickable and deep-links to the Player Portal job board.
-        // Replaces the old Goals card per host spec.
+        // is clickable and deep-links to the Player Portal job board with
+        // the specific job scrolled-into-view + briefly highlighted so the
+        // player lands directly on the Apply button. Idempotent: reuses
+        // a known body element by id, so repeated refresh calls swap the
+        // contents rather than appending a new body each time.
         // ─────────────────────────────────────────────────────────────────
         function pflxRenderHomeJobBoard() {
-            var container = document.createElement('div');
+            // Reuse the dedicated body if it already exists, otherwise mint a
+            // fresh one. This is the same idempotent pattern renderDeadlines
+            // uses for .deadlines-list. Without it, a refresh that fires
+            // before the initial render finishes can stack multiple bodies
+            // inside #home-jobboard-card — which is what produced the
+            // "No open jobs right now" placeholder appearing five times
+            // followed by the mock job list.
+            var container = document.getElementById('home-jobboard-body');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'home-jobboard-body';
+            }
             container.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
+            container.innerHTML = '';
 
             var jobs = [];
             try { jobs = (typeof ppGetJobs === 'function') ? (ppGetJobs() || []) : []; } catch (e) {}
+
+            // Defensive mock blocklist — the original demo seed shipped
+            // with these exact titles. If they reappear via a stale
+            // cache or a sub-app pushing back stale data, we drop them
+            // at the renderer instead of showing fake opportunities.
+            // Host can add a real job with the same title; we only
+            // exclude when the createdAt is missing or the id starts
+            // with 'job-demo' / 'job-seed' (legacy markers).
+            var _MOCK_TITLES = ['Class Social Media Manager', 'Peer Tutor — Adobe Creative Cloud'];
+            jobs = jobs.filter(function (j) {
+                if (!j) return false;
+                var title = String(j.title || j.name || '').trim();
+                var idStr = String(j.id || '');
+                var looksMock = _MOCK_TITLES.indexOf(title) !== -1
+                             && (!j.createdAt || idStr.indexOf('job-demo') === 0 || idStr.indexOf('job-seed') === 0);
+                return !looksMock;
+            });
 
             // Filter to "open" jobs the player could feasibly take. Jobs
             // can use either status='open' or no status at all (legacy).
@@ -17760,10 +17803,13 @@
                     row.style.transform = '';
                     row.style.background = 'rgba(245,200,66,0.04)';
                 };
+                // Deep-link with focus: pass the job id so the Player
+                // Portal job board can scroll the target row into view
+                // and pulse-highlight it.
                 row.onclick = function () {
                     try {
                         if (typeof window.switchToView === 'function') window.switchToView('mc');
-                        if (typeof ppNav === 'function') ppNav('jobs');
+                        if (typeof ppNav === 'function') ppNav('jobs', { id: j.id });
                     } catch (e) {}
                 };
                 container.appendChild(row);
@@ -18724,16 +18770,25 @@
                                 pflxShowAccessLocked(viewName, gatedApps[viewName]);
                             } else {
                                 // Re-enter navigateTo with the gate now passing.
-                                // We replace pflxCohortAccessReady with an
-                                // already-resolved one so this branch becomes
-                                // a no-op on the recursive call.
-                                window.pflxCohortAccessReady = Promise.resolve('ready');
+                                // CRITICAL: the sentinel MUST be a non-thenable
+                                // value, otherwise the recursive call below
+                                // sees a thenable again and enters this same
+                                // branch, scheduling another microtask that
+                                // does the same thing. That's an infinite
+                                // microtask chain — JS runs all microtasks
+                                // before yielding to the browser, so the page
+                                // freezes ("Page Unresponsive"). A plain
+                                // string sentinel has no `.then`, so the
+                                // recursive call falls through to the sync
+                                // check below and proceeds normally.
+                                window.pflxCohortAccessReady = 'ready';
                                 navigateTo(viewName);
                             }
                         });
                         return;
                     }
-                    // Promise gone (replaced after first pass) — synchronous check.
+                    // Promise gone (replaced after first pass with the 'ready'
+                    // sentinel) — synchronous check.
                     if (!pflxPlayerCanAccessApp(viewName)) {
                         pflxShowAccessLocked(viewName, gatedApps[viewName]);
                         return;
@@ -21647,7 +21702,10 @@
                 }
                 var hired = job.hired || false;
                 var borderCol = hired ? 'rgba(34,197,94,0.25)' : 'rgba(167,139,250,0.15)';
-                html += '<div style="background:rgba(255,255,255,0.02);border:1px solid ' + borderCol + ';border-radius:14px;padding:18px;margin-bottom:10px;">';
+                // data-job-row carries the id so the Home Base deep-link
+                // (ppNav('jobs', { id })) can scroll the matching row into
+                // view and pulse-highlight it after this render lands.
+                html += '<div data-job-row="' + escapeHtml(String(job.id || '')) + '" style="background:rgba(255,255,255,0.02);border:1px solid ' + borderCol + ';border-radius:14px;padding:18px;margin-bottom:10px;transition:box-shadow 0.3s ease, border-color 0.3s ease;">';
 
                 if (hired) html += '<div style="display:inline-block;background:rgba(34,197,94,0.15);color:#22c55e;font-size:9px;font-weight:700;padding:3px 8px;border-radius:6px;letter-spacing:1px;margin-bottom:8px;">✓ HIRED — ASSIGNED AS TASK</div>';
 
@@ -21670,6 +21728,30 @@
             });
 
             el.innerHTML = html;
+
+            // If we got here via a deep-link with a specific job id (Home
+            // Base Job Board card click), scroll that row into view and
+            // pulse a brief highlight so the player lands directly on the
+            // job they tapped. We use a short setTimeout so the layout
+            // settles before scrollIntoView fires.
+            try {
+                var focusId = (window._ppDetailData || {}).id;
+                if (focusId) {
+                    setTimeout(function () {
+                        var row = el.querySelector('[data-job-row="' + String(focusId).replace(/"/g, '') + '"]');
+                        if (!row) return;
+                        try { row.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { row.scrollIntoView(); }
+                        var origShadow = row.style.boxShadow;
+                        var origBorder = row.style.borderColor;
+                        row.style.boxShadow = '0 0 0 2px rgba(167,139,250,0.7), 0 0 32px rgba(167,139,250,0.45)';
+                        row.style.borderColor = 'rgba(167,139,250,0.8)';
+                        setTimeout(function () {
+                            row.style.boxShadow = origShadow;
+                            row.style.borderColor = origBorder;
+                        }, 1800);
+                    }, 60);
+                }
+            } catch (e) {}
         }
 
         // ── PROJECT DETAIL — drill-in from a checkpoint or My Projects list ──
