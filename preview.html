@@ -16914,15 +16914,37 @@
                 if (p1 !== p2) { shakeEl(document.getElementById('final-pin-2')); document.getElementById('final-pin-2').value = ''; return; }
                 // Register player — give them a stable ID, mark onboarded, and persist so a
                 // refresh doesn't lose them (the in-memory PLAYERS array is reseeded each load).
+                // Hardened against admin-escalation: the system role is normalized through
+                // normalizeRole (which only produces player/instructor/host/admin from a
+                // known input list — never anything godTier-flavored) and the human-facing
+                // label is kept in roleDisplay. Any dangerous fields are explicitly nulled
+                // so a malformed newPlayerData payload can't sneak rankOverride or godTier
+                // onto a fresh signup. Fix landed alongside the Sphinx Link Master Admin bug.
+                const _rawSignupRole = newPlayerData.role || 'Student';
+                const _ALLOWED_DISPLAY_ROLES = ['Student','Creator','Educator','Explorer'];
+                const _safeDisplayRole = _ALLOWED_DISPLAY_ROLES.indexOf(_rawSignupRole) >= 0 ? _rawSignupRole : 'Student';
                 const newPlayer = {
                     id: (newPlayerData.isImported && newPlayerData.importedPlayer && newPlayerData.importedPlayer.id)
                         ? newPlayerData.importedPlayer.id
                         : 'player-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
                     brand: newPlayerData.brandName, pin: p1, name: newPlayerData.fullName,
-                    email: newPlayerData.email, cohort: newPlayerData.cohort, role: newPlayerData.role || 'Student',
+                    email: newPlayerData.email, cohort: newPlayerData.cohort,
+                    // Force system role to 'player' via normalizeRole — even if the
+                    // onboarding picker gets manipulated to set role to 'admin' or
+                    // 'host', normalizeRole only honors that for a closed set of
+                    // values none of which Student/Creator/Educator/Explorer match.
+                    role: (typeof normalizeRole === 'function') ? normalizeRole(_safeDisplayRole) : 'player',
+                    roleDisplay: _safeDisplayRole,
                     slogan: newPlayerData.slogan, interests: newPlayerData.interests, claimed: true,
                     onboardingComplete: true,
                     xc: 0, totalXcoin: 0, digitalBadges: 0, level: 1,
+                    // Explicit nullification of rank-override and god-tier fields.
+                    // A fresh signup should ALWAYS start as the lowest rank with no
+                    // ability to overwrite the rank ladder. Hosts can still promote
+                    // someone later via the Player Manager.
+                    rankOverride: null,
+                    godTier: false,
+                    evoRank: 1,
                     updatedAt: Date.now()
                 };
                 // If imported, update existing record
