@@ -17945,11 +17945,47 @@
             } catch (e) {}
         });
         window.pflxRefreshHomePanels = pflxRefreshHomePanels;
-        // Refresh whenever MC tasks/checkpoints mutate or the player record changes.
+        // ── Live refresh wiring for Home Base panels ─────────────────────
+        // The old wiring only listened on the cross-tab `storage` event,
+        // which fires only when ANOTHER tab writes to localStorage. Mutations
+        // inside the same tab (host edits a task, posts a job, toggles
+        // cohort access, etc.) wouldn't fire it, so My Tasks / Job Board /
+        // App Hub would stay stale until the next full Home navigation.
+        //
+        // The four signals below cover every same-tab mutation path:
+        //   • pflx_player_changed         — PLAYERS / mcPlayers updates, XC
+        //                                   grants, role flips, badge awards
+        //   • pflx-cohort-settings-changed — host toggles cohort access
+        //                                   (changes whether App Hub tiles
+        //                                   are reachable / which jobs apply)
+        //   • pflx-identity-changed        — active session swap
+        //   • pflx_mc_data_changed         — broadcast emitted by mcSaveData
+        //                                   so any view can listen for jobs
+        //                                   / tasks / checkpoints / projects
+        //                                   write-throughs
+        // Plus the existing cross-tab `storage` listener for multi-tab parity.
+        //
+        // We coalesce calls into a single rAF frame so a burst of mutations
+        // (common during a save round-trip) only triggers one repaint.
         try {
+            var _hbRefreshPending = false;
+            function _hbScheduleRefresh() {
+                if (_hbRefreshPending) return;
+                _hbRefreshPending = true;
+                var run = function () { _hbRefreshPending = false; try { pflxRefreshHomePanels(); } catch (e) {} };
+                if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(run);
+                else setTimeout(run, 16);
+            }
+            window.addEventListener('pflx_player_changed',           _hbScheduleRefresh);
+            window.addEventListener('pflx-cohort-settings-changed',  _hbScheduleRefresh);
+            window.addEventListener('pflx-identity-changed',         _hbScheduleRefresh);
+            window.addEventListener('pflx_mc_data_changed',          _hbScheduleRefresh);
+            // Cross-tab storage event — original behavior, preserved so the
+            // host can have MC open in tab A and the player home in tab B
+            // and see updates flow across.
             window.addEventListener('storage', function (ev) {
                 if (ev && (String(ev.key || '').indexOf('pflx_mc_') === 0 || ev.key === 'pflx_players_local_v1')) {
-                    pflxRefreshHomePanels();
+                    _hbScheduleRefresh();
                 }
             });
         } catch (e) {}
@@ -19438,10 +19474,21 @@
                     window.PflxDataBus.mc.changed(canonical);
                 }
             } catch (e) {}
-            // Same-tab refresh for the player Home panels (Deadlines / Recent
-            // Activity / Goals) — they read live from mcTasks / mcCheckpoints /
-            // PLAYERS so they pick up the change immediately.
+            // Same-tab refresh for the player Home panels (My Tasks / Job
+            // Board / App Hub) — they read live from mcTasks / mcProjects /
+            // mcCheckpoints / mcJobs / PLAYERS so they pick up the change
+            // immediately. Comment text updated post Home-Base cleanup;
+            // Recent Activity / Goals panels no longer exist.
             try { if (typeof pflxRefreshHomePanels === 'function') pflxRefreshHomePanels(); } catch (e) {}
+            // Single canonical event for any consumer that wants to subscribe
+            // to "MC data changed" without having to bind each individual
+            // signal. The detail carries the saved collection name so
+            // listeners can short-circuit when they don't care about it.
+            try {
+                window.dispatchEvent(new CustomEvent('pflx_mc_data_changed', {
+                    detail: { type: type || 'all' }
+                }));
+            } catch (e) {}
         }
 
         // Push data to X-Coin app for Supabase persistence
