@@ -6077,10 +6077,18 @@
                     <div class="status-value" id="toolbar-xc">0</div>
                     <div class="status-bar"><div class="status-bar-fill" id="toolbar-xc-bar" style="width:0%"></div></div>
                 </div>
+                <!--
+                  Toolbar slot 2 — was Checkpoint % (already surfaced as
+                  progress bars inside Mission Control + Pathways). Now
+                  shows the player's current X-Coin leaderboard position,
+                  which is the headline number players actually care about.
+                  The bar fills proportionally to percentile so top players
+                  see a near-full bar.
+                -->
                 <div class="status-item">
-                    <div class="status-label">CHECKPOINT</div>
-                    <div class="status-value" id="toolbar-checkpoint">0%</div>
-                    <div class="status-bar"><div class="status-bar-fill" id="toolbar-checkpoint-bar" style="width:0%"></div></div>
+                    <div class="status-label">POSITION</div>
+                    <div class="status-value" id="toolbar-position">—</div>
+                    <div class="status-bar"><div class="status-bar-fill" id="toolbar-position-bar" style="width:0%"></div></div>
                 </div>
                 <div class="status-item">
                     <div class="status-label">RANK</div>
@@ -6170,18 +6178,19 @@
                             VIEW PORTFOLIO
                         </button>
                         <!--
-                          Settings + Sound — moved out of the toolbar into the
-                          dropdown to declutter the top bar. Settings opens the
-                          main Settings view via navigateTo. Sound shows the
+                          Sound + Settings — moved out of the toolbar into the
+                          dropdown to declutter the top bar. Sound shows the
                           existing #se-player-panel audio controls overlay.
+                          Settings opens the main Settings view via navigateTo.
+                          Sound sits above Settings per host layout request.
                         -->
-                        <button onclick="pflxCloseProfileDropdown();if(typeof navigateTo==='function'){navigateTo('settings');}"
-                                style="width:100%;padding:9px 10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.12);color:#c8cee6;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.06em;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
-                            <span style="font-size:13px;">⚙</span> SETTINGS
-                        </button>
                         <button onclick="pflxCloseProfileDropdown();if(typeof seTogglePlayerPanel==='function'){seTogglePlayerPanel();}"
                                 style="width:100%;padding:9px 10px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.25);color:#22c55e;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.06em;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
                             <span style="font-size:13px;">♫</span> SOUND
+                        </button>
+                        <button onclick="pflxCloseProfileDropdown();if(typeof navigateTo==='function'){navigateTo('settings');}"
+                                style="width:100%;padding:9px 10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.12);color:#c8cee6;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.06em;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+                            <span style="font-size:13px;">⚙</span> SETTINGS
                         </button>
                         <button onclick="pflxCloseProfileDropdown();if(typeof window.pflxSignOut==='function')window.pflxSignOut();"
                                 style="width:100%;padding:9px 10px;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.25);color:#ef4444;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.06em;border-radius:8px;cursor:pointer;">
@@ -13516,12 +13525,49 @@
             const xcBar = document.getElementById('toolbar-xc-bar');
             if (xcBar) xcBar.style.width = xcPct + '%';
 
-            // Checkpoint progress
-            const cpPct = activeSession.checkpointProgress || 0;
-            const cpEl = document.getElementById('toolbar-checkpoint');
-            if (cpEl) cpEl.textContent = cpPct + '%';
-            const cpBar = document.getElementById('toolbar-checkpoint-bar');
-            if (cpBar) cpBar.style.width = cpPct + '%';
+            // Leaderboard Position — derived live from PLAYERS by sorting
+            // on totalXcoin (lifetime XC). Hosts/admins are excluded from
+            // the ranking; for them the indicator stays as "—" because
+            // they don't compete on the leaderboard.
+            try {
+                var posInfo = (function () {
+                    var roster = (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) ? PLAYERS.slice() : [];
+                    roster = roster.filter(function (p) {
+                        if (!p) return false;
+                        var r = String(p.role || '').toLowerCase();
+                        return r !== 'admin' && r !== 'host' && !/master\s*host/.test(r);
+                    });
+                    if (!roster.length) return { pos: 0, total: 0 };
+                    roster.sort(function (a, b) {
+                        return (b.totalXcoin || b.xc || 0) - (a.totalXcoin || a.xc || 0);
+                    });
+                    var s = activeSession || {};
+                    var myId = s.id, myBrand = s.brand;
+                    for (var i = 0; i < roster.length; i++) {
+                        if ((myId && roster[i].id === myId) || (myBrand && roster[i].brand === myBrand)) {
+                            return { pos: i + 1, total: roster.length };
+                        }
+                    }
+                    return { pos: 0, total: roster.length };
+                })();
+                var posEl = document.getElementById('toolbar-position');
+                var posBar = document.getElementById('toolbar-position-bar');
+                var roleLc = String(activeSession.role || '').toLowerCase();
+                var isStaff = /admin|host|teacher|instructor|master/.test(roleLc);
+                if (posEl) {
+                    if (isStaff)               posEl.textContent = '—';
+                    else if (posInfo.pos > 0)  posEl.textContent = '#' + posInfo.pos + (posInfo.total ? ' / ' + posInfo.total : '');
+                    else                       posEl.textContent = '—';
+                }
+                if (posBar) {
+                    // Top of leaderboard = full bar. Bottom = ~5%. Hosts = 0.
+                    var fill = 0;
+                    if (!isStaff && posInfo.pos > 0 && posInfo.total > 0) {
+                        fill = Math.max(5, Math.round(((posInfo.total - posInfo.pos + 1) / posInfo.total) * 100));
+                    }
+                    posBar.style.width = fill + '%';
+                }
+            } catch (e) {}
 
             // Rank
             const rankEl = document.getElementById('toolbar-rank');
@@ -17592,28 +17638,33 @@
         function pflxRenderHomeAppHub() {
             var grid = document.getElementById('home-app-hub-grid');
             if (!grid) return;
+            // Tile order — Mission Control first (host request), the rest
+            // follow in launch order. AI Center deliberately omitted.
             var apps = [
+                { key: 'mission-control',name: 'Mission Control', icon: 'public/Mission Control Icon.png',    accent: '#ef4444', desc: 'Your tasks, projects, checkpoints, and progress in one command center.' },
                 { key: 'xcoin',          name: 'X-Coin',          icon: 'public/xcoin-logo.png',              accent: '#f5c842', desc: 'Wallet, badges, leaderboard, and the economy that rewards everything you do.' },
                 { key: 'pathways',       name: 'Core Pathways',   icon: 'public/Core Pathway Main Icon.png',  accent: '#a78bfa', desc: 'Self-paced learning modules. Pick a tier, complete checkpoints, earn XC.' },
                 { key: 'arena',          name: 'Battle Arena',    icon: 'public/Battle Arena.png',            accent: '#00d4ff', desc: 'Compete head-to-head in skill battles. Wager XC. Climb the ladder.' },
-                { key: 'darkcampus',     name: 'DarkCampus',      icon: 'public/DarkCampus Logo 1.png',       accent: '#22c55e', desc: 'Chat with peers, post in channels, jump into voice rooms. The social hub.' },
-                { key: 'mission-control',name: 'Mission Control', icon: 'public/Mission Control Icon.png',    accent: '#ef4444', desc: 'Your tasks, projects, checkpoints, and progress in one command center.' }
+                { key: 'darkcampus',     name: 'DarkCampus',      icon: 'public/DarkCampus Logo 1.png',       accent: '#22c55e', desc: 'Chat with peers, post in channels, jump into voice rooms. The social hub.' }
             ];
             grid.innerHTML = '';
             apps.forEach(function (app) {
                 var tile = document.createElement('button');
                 tile.type = 'button';
                 tile.title = app.desc; // native tooltip fallback
+                // Tile sizing: roomier padding, taller min-height, and a
+                // significantly larger icon so the launcher feels like
+                // the primary surface of Home Base instead of a chip row.
                 tile.style.cssText =
-                    'position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;' +
-                    'padding:16px 12px;border-radius:14px;cursor:pointer;text-align:center;min-height:140px;' +
+                    'position:relative;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:14px;' +
+                    'padding:24px 16px 18px;border-radius:16px;cursor:pointer;text-align:center;min-height:200px;' +
                     'background:linear-gradient(160deg,rgba(255,255,255,0.03),rgba(0,0,0,0.25));' +
                     'border:1px solid ' + app.accent + '30;color:#e0e6ff;' +
                     'transition:transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;';
                 tile.innerHTML =
-                    '<img src="' + app.icon + '" alt="' + escapeHtml(app.name) + '" style="width:56px;height:56px;object-fit:contain;filter:drop-shadow(0 2px 10px ' + app.accent + '55);">' +
-                    '<div style="font-family:\'Orbitron\',sans-serif;font-size:11px;font-weight:800;letter-spacing:0.1em;color:#e0e6ff;text-transform:uppercase;">' + escapeHtml(app.name) + '</div>' +
-                    '<div class="pflx-app-hub-desc" style="position:absolute;left:8px;right:8px;bottom:8px;font-family:\'Jura\',sans-serif;font-size:10px;line-height:1.35;color:rgba(224,230,255,0.85);background:rgba(5,8,16,0.88);border:1px solid ' + app.accent + '40;border-radius:8px;padding:6px 8px;opacity:0;transform:translateY(4px);pointer-events:none;transition:opacity 0.15s ease, transform 0.15s ease;">' + escapeHtml(app.desc) + '</div>';
+                    '<img src="' + app.icon + '" alt="' + escapeHtml(app.name) + '" style="width:104px;height:104px;object-fit:contain;filter:drop-shadow(0 4px 16px ' + app.accent + '66);">' +
+                    '<div style="font-family:\'Orbitron\',sans-serif;font-size:13px;font-weight:800;letter-spacing:0.12em;color:#e0e6ff;text-transform:uppercase;">' + escapeHtml(app.name) + '</div>' +
+                    '<div class="pflx-app-hub-desc" style="position:absolute;left:10px;right:10px;bottom:10px;font-family:\'Jura\',sans-serif;font-size:11px;line-height:1.4;color:rgba(224,230,255,0.92);background:rgba(5,8,16,0.92);border:1px solid ' + app.accent + '55;border-radius:10px;padding:8px 10px;opacity:0;transform:translateY(4px);pointer-events:none;transition:opacity 0.15s ease, transform 0.15s ease;">' + escapeHtml(app.desc) + '</div>';
                 tile.onmouseenter = function () {
                     tile.style.transform = 'translateY(-2px)';
                     tile.style.boxShadow = '0 10px 28px ' + app.accent + '33';
@@ -18967,6 +19018,20 @@
         let mcAnnouncements = [];
         let mcBadges = [];
         let mcJobs = [];
+        // One-shot job-board purge — wipes any mock/demo jobs left behind in
+        // localStorage and the Supabase app_data row from earlier builds.
+        // Sentinel: pflx_jobs_purged_v1. Once set, never runs again.
+        // Host can still add new jobs through MC; only the seed list dies.
+        try {
+            if (!localStorage.getItem('pflx_jobs_purged_v1')) {
+                localStorage.setItem('pflx_mc_jobs', JSON.stringify([]));
+                localStorage.setItem('pflx_jobs', JSON.stringify([])); // legacy key
+                localStorage.setItem('pflx_jobs_purged_v1', String(Date.now()));
+                // mcSaveData('jobs') gets called after mcJobs is loaded, so the
+                // cloud row sync happens via the normal save path. We don't
+                // need to call it here — load completes first.
+            }
+        } catch (e) {}
         let mcPitches = [];
         let mcStudios = [];
         let mcCohortGroups = [];
@@ -42687,6 +42752,26 @@ RESPONSE RULES:
             `;
             dashboard.appendChild(playerHeader);
 
+            // ── App Hub ── Big-tile launcher. Pinned right under the
+            // player header so it always occupies the top of Home Base.
+            // grid-column:1/-1 makes it span the full grid width so the
+            // following cards (Briefing / My Tasks / Job Board) flow into
+            // a clean row beneath. AI Center intentionally excluded —
+            // host request. Tile order is set in pflxRenderHomeAppHub.
+            try {
+                const hubCard = document.createElement('div');
+                hubCard.className = 'dashboard-card';
+                hubCard.id = 'home-app-hub';
+                hubCard.style.cssText = 'grid-column:1 / -1;background:linear-gradient(135deg,rgba(0,240,255,0.04),rgba(10,18,40,0.6));border-color:rgba(0,240,255,0.18);';
+                hubCard.innerHTML =
+                    '<h3 style="color:var(--cyan);margin:0 0 14px;display:flex;align-items:center;gap:8px;font-family:\'Orbitron\',sans-serif;font-size:13px;letter-spacing:0.12em;">' +
+                        '<span style="font-size:18px;">🚀</span> Launch Apps' +
+                    '</h3>' +
+                    '<div id="home-app-hub-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;"></div>';
+                dashboard.appendChild(hubCard);
+                pflxRenderHomeAppHub();
+            } catch (e) { console.warn('[home-app-hub] render error', e); }
+
             // ── X-Bot Status Briefing (typing animation + TTS) ──
             const briefingCard = document.createElement('div');
             briefingCard.className = 'dashboard-card';
@@ -42780,24 +42865,9 @@ RESPONSE RULES:
                 }
             } catch (e) {}
 
-            // ── App Hub ── Larger, hover-described tile picker sitting just
-            // above X-Bot Briefing / My Tasks / Job Board. Replaces both the
-            // old small "App Links" tray at the bottom and the redundant
-            // bottom Investment / Projects / Season Progress cards.
-            // AI Center is intentionally excluded — host request.
-            try {
-                const hubCard = document.createElement('div');
-                hubCard.className = 'dashboard-card';
-                hubCard.id = 'home-app-hub';
-                hubCard.style.cssText = 'grid-column:1 / -1;background:linear-gradient(135deg,rgba(0,240,255,0.04),rgba(10,18,40,0.6));border-color:rgba(0,240,255,0.18);';
-                hubCard.innerHTML =
-                    '<h3 style="color:var(--cyan);margin:0 0 14px;display:flex;align-items:center;gap:8px;font-family:\'Orbitron\',sans-serif;font-size:13px;letter-spacing:0.12em;">' +
-                        '<span style="font-size:16px;">🚀</span> Launch Apps' +
-                    '</h3>' +
-                    '<div id="home-app-hub-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;"></div>';
-                dashboard.appendChild(hubCard);
-                pflxRenderHomeAppHub();
-            } catch (e) { console.warn('[home-app-hub] render error', e); }
+            // App Hub now appended above (right under the player header)
+            // so it sits as the top row of Home Base. See the block right
+            // after dashboard.appendChild(playerHeader).
 
             // ── My Tasks ── (formerly "Deadlines"). Urgency-coded items:
             //   red + slow flash  → overdue
