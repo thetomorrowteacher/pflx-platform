@@ -17734,16 +17734,60 @@
                 row.onmouseenter = function () { row.style.transform = 'translateX(2px)'; };
                 row.onmouseleave = function () { row.style.transform = ''; };
 
-                // Deep-link: route by kind to the right MC Player Portal view.
+                // Deep-link router. The function previously referenced was
+                // window.switchToView which doesn't exist in this codebase —
+                // navigation to a top-level view goes through navigateTo.
+                // We branch by role:
+                //   • host/admin → land on MC, switch to the right tab
+                //     (checkpoints / projects / tasks), then call the
+                //     host-side mcEdit* opener for the matching index.
+                //   • player    → land on MC, then ppNav into the Player
+                //     Portal detail view for that item.
+                // Both paths give the user one tap from Home Base to the
+                // exact thing they clicked.
                 row.onclick = function () {
                     try {
-                        if (typeof window.switchToView === 'function') window.switchToView('mc');
-                        if (typeof ppNav === 'function') {
-                            if (t.kind === 'project')         ppNav('project-detail',    { id: t.id });
-                            else if (t.kind === 'checkpoint') ppNav('checkpoint-detail', { id: t.id });
-                            else                              ppNav('task-detail',       { id: t.id });
+                        // Always navigate to Mission Control first.
+                        if (typeof navigateTo === 'function') {
+                            navigateTo('mission-control');
                         }
-                    } catch (e) {}
+                        var roleLc = String((window.activeSession || {}).role || '').toLowerCase();
+                        var isStaff = /admin|host|teacher|instructor|master/.test(roleLc)
+                                    || window.pflxRole === 'host';
+
+                        // Defer the rest a microtask so the MC view's iframe /
+                        // panel has a chance to mount before we try to open
+                        // a detail inside it.
+                        setTimeout(function () {
+                            try {
+                                if (isStaff) {
+                                    // Host path — find the index in the live MC
+                                    // arrays, switch to the right tab, then open
+                                    // the edit form for that index.
+                                    if (t.kind === 'project') {
+                                        if (typeof mcNav === 'function') mcNav('projects');
+                                        var pidx = (typeof mcProjects !== 'undefined') ? mcProjects.findIndex(function (p) { return p && p.id === t.id; }) : -1;
+                                        if (pidx >= 0 && typeof mcEditProject === 'function') mcEditProject(pidx);
+                                    } else if (t.kind === 'checkpoint') {
+                                        if (typeof mcNav === 'function') mcNav('checkpoints');
+                                        var cidx = (typeof mcCheckpoints !== 'undefined') ? mcCheckpoints.findIndex(function (c) { return c && c.id === t.id; }) : -1;
+                                        if (cidx >= 0 && typeof mcEditCheckpoint === 'function') mcEditCheckpoint(cidx);
+                                    } else {
+                                        if (typeof mcNav === 'function') mcNav('tasks');
+                                        var tidx = (typeof mcTasks !== 'undefined') ? mcTasks.findIndex(function (x) { return x && x.id === t.id; }) : -1;
+                                        if (tidx >= 0 && typeof mcEditTask === 'function') mcEditTask(tidx);
+                                    }
+                                } else {
+                                    // Player path — Player Portal detail views.
+                                    if (typeof ppNav === 'function') {
+                                        if (t.kind === 'project')         ppNav('project-detail',    { id: t.id });
+                                        else if (t.kind === 'checkpoint') ppNav('checkpoint-detail', { id: t.id });
+                                        else                              ppNav('task-detail',       { id: t.id });
+                                    }
+                                }
+                            } catch (e) { console.warn('[my-tasks click]', e); }
+                        }, 80);
+                    } catch (e) { console.warn('[my-tasks click outer]', e); }
                 };
                 container.appendChild(row);
             });
@@ -17925,14 +17969,28 @@
                     row.style.transform = '';
                     row.style.background = 'rgba(245,200,66,0.04)';
                 };
-                // Deep-link with focus: pass the job id so the Player
-                // Portal job board can scroll the target row into view
-                // and pulse-highlight it.
+                // Deep-link with focus: navigate to Mission Control, then
+                // for players land on the Player Portal job board with the
+                // specific job scrolled into view; for hosts land on the
+                // MC Job Board tab so they can edit the posting. The old
+                // code referenced window.switchToView which doesn't exist
+                // — navigateTo is the actual top-level view router.
                 row.onclick = function () {
                     try {
-                        if (typeof window.switchToView === 'function') window.switchToView('mc');
-                        if (typeof ppNav === 'function') ppNav('jobs', { id: j.id });
-                    } catch (e) {}
+                        if (typeof navigateTo === 'function') navigateTo('mission-control');
+                        var roleLc = String((window.activeSession || {}).role || '').toLowerCase();
+                        var isStaff = /admin|host|teacher|instructor|master/.test(roleLc)
+                                    || window.pflxRole === 'host';
+                        setTimeout(function () {
+                            try {
+                                if (isStaff) {
+                                    if (typeof mcNav === 'function') mcNav('jobboard');
+                                } else if (typeof ppNav === 'function') {
+                                    ppNav('jobs', { id: j.id });
+                                }
+                            } catch (e) { console.warn('[home job click]', e); }
+                        }, 80);
+                    } catch (e) { console.warn('[home job click outer]', e); }
                 };
                 container.appendChild(row);
             });
@@ -18384,9 +18442,11 @@
                     '<div class="project-name">' + escapeHtml(name) + '</div>' +
                     (desc ? '<div style="font-size: 11px; color: #8a92b0; margin-top: 5px;">' + escapeHtml(String(desc).substring(0, 80)) + '</div>' : '');
                 card.onclick = function () {
-                    // Drill into the MC project-detail view
+                    // Drill into the MC project-detail view. navigateTo is
+                    // the real router; switchToView was a phantom reference
+                    // that silently no-op'd and made the click feel broken.
                     try {
-                        if (typeof window.switchToView === 'function') window.switchToView('mc');
+                        if (typeof navigateTo === 'function') navigateTo('mission-control');
                         if (typeof ppNav === 'function') ppNav('project-detail', { id: proj.id });
                     } catch (e) {}
                 };
@@ -18411,7 +18471,7 @@
                     return;
                 }
                 try {
-                    if (typeof window.switchToView === 'function') window.switchToView('mc');
+                    if (typeof navigateTo === 'function') navigateTo('mission-control');
                     if (typeof ppNav === 'function') ppNav('home');
                 } catch (e) {}
             };
