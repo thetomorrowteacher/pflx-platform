@@ -18637,6 +18637,38 @@
                 this.bar = document.getElementById('pflx-loading-bar');
                 this.text = document.getElementById('pflx-loading-text');
                 this.tip = document.getElementById('pflx-loading-tip');
+
+                // ── Keyboard guard ─────────────────────────────────────
+                // While the loading screen is .active, the player should
+                // not be able to trigger ANY underlying action via the
+                // keyboard. Without this, pressing Space activates the
+                // tile that still has focus from the prior click (or the
+                // briefing replay button, or any other recently focused
+                // control), which causes the "scene change + click-out"
+                // behavior the host reported: the page navigates while
+                // the loading screen is still mid-load, the bar's
+                // setTimeout never fires hide(), and the loading SFX +
+                // music keep playing under the new view.
+                //
+                // We attach a single document-level keydown listener in
+                // capture phase. When the screen is active, we swallow
+                // Space, Enter, and the arrow/Tab keys before any other
+                // handler runs. preventDefault stops form/button
+                // activation; stopPropagation keeps the event off any
+                // bubbling shortcut handler downstream.
+                if (!this._kbGuardInstalled) {
+                    var self = this;
+                    document.addEventListener('keydown', function (ev) {
+                        if (!self.screen || !self.screen.classList.contains('active')) return;
+                        var k = ev.key;
+                        if (k === ' ' || k === 'Spacebar' || k === 'Enter' || k === 'Tab' ||
+                            k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight') {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                        }
+                    }, true);
+                    this._kbGuardInstalled = true;
+                }
             },
 
             show(viewName, duration) {
@@ -18654,6 +18686,17 @@
 
                 // Show one gallery image for the entire load (no rotation)
                 this.showSingleGalleryImage();
+
+                // Defocus whatever the player most recently clicked so the
+                // keydown guard above has nothing to swallow in the first
+                // place. Belt-and-suspenders pair with the document-level
+                // listener — covers any race where the listener was
+                // attached after a keypress was already queued.
+                try {
+                    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+                        document.activeElement.blur();
+                    }
+                } catch (e) {}
 
                 this.screen.classList.add('active');
 
