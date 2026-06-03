@@ -13408,12 +13408,23 @@
                     }
                 });
             } catch (e) {}
+            // Brand fallback chain — a fresh self-signup may not have a
+            // resolved brand yet when the iframe URL is built. Falling
+            // back to name → id → "Player" guarantees the SSO param is
+            // never empty, which keeps sub-app iframe guards from
+            // trapping the player on a "Syncing with Platform" spinner
+            // because the brand check returned empty string.
+            var safeBrand = activeSession.brand
+                         || activeSession.brandName
+                         || activeSession.name
+                         || activeSession.id
+                         || 'Player';
             const params = new URLSearchParams({
                 sso: 'pflx',
-                user: activeSession.name,
-                brand: activeSession.brand,
+                user: activeSession.name || safeBrand,
+                brand: safeBrand,
                 xc: String(activeSession.xc || 0),
-                pin: activeSession.pin,
+                pin: activeSession.pin || '',
                 role: activeSession.role || 'Student',
                 cohort: activeSession.cohort || 'PlayerPool',
                 tier: tier,
