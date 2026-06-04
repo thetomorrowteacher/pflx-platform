@@ -15983,29 +15983,36 @@
                 else if (s.cohort) cohorts = String(s.cohort).split(/\s*,\s*/);
                 if (!cohorts.length) cohorts = ['PlayerPool'];
                 // ── Org → Cohort cascade ──
-                // For each cohort the player belongs to:
-                //   resolved = cohort.apps[app]                  (if set)
-                //              ?? org_of_cohort.apps[app]        (master default)
-                //              ?? true                           (open by default)
-                // Union rule: if ANY cohort resolves to true, the player has
-                // access. So a multi-cohort player only loses access when EVERY
-                // cohort they're in (with org cascade applied) denies it.
+                // resolveCohortApp returns one of three states:
+                //   false → explicit deny in cohort or org
+                //   true  → explicit allow in cohort or org
+                //   null  → no setting; treat as open by default
+                //
+                // Deny-wins rule: if ANY cohort the player belongs to has
+                // an explicit deny (either at the cohort level or its
+                // parent org), the player is denied. This matches host
+                // intuition — turning off DarkCampus for "DD Core 3"
+                // means players in DD Core 3 lose access even if they
+                // also happen to be in PlayerPool (which is open by
+                // default). The previous union rule was the opposite
+                // and made cohort-level "off" toggles ineffective for
+                // multi-cohort players.
                 function resolveCohortApp(cohortName) {
                     var c = COHORTS[cohortName] || COHORTS['PlayerPool'];
                     if (c && c.apps && c.apps[appKey] === false) return false;
                     if (c && c.apps && c.apps[appKey] === true)  return true;
-                    // Cohort didn't set it — fall through to the org
                     var orgKey = c && c.org;
                     if (orgKey && ORGANIZATIONS[orgKey] && ORGANIZATIONS[orgKey].apps) {
                         if (ORGANIZATIONS[orgKey].apps[appKey] === false) return false;
                         if (ORGANIZATIONS[orgKey].apps[appKey] === true)  return true;
                     }
-                    return true; // open by default when neither sets a value
+                    return null; // no explicit setting at cohort or org level
                 }
                 for (var i = 0; i < cohorts.length; i++) {
-                    if (resolveCohortApp(cohorts[i])) return true;
+                    if (resolveCohortApp(cohorts[i]) === false) return false;
                 }
-                return false;
+                // No cohort explicitly denied → allow.
+                return true;
             } catch (e) { return true; }
         }
         window.pflxPlayerCanAccessApp = pflxPlayerCanAccessApp;
