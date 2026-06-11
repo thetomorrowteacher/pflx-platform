@@ -38253,47 +38253,123 @@
             var currentStep = -1; // -1 = welcome, 0+ = spotlight steps
             var isActive = false;
 
-            // ── Step definitions ──
-            var steps = [
+            // ── Step definitions — ROLE-AWARE (June 2026 refresh) ──
+            // Players and hosts get different tours, and steps whose target
+            // element doesn't exist (gated apps, missing cards) are filtered
+            // out at start so the tour never strands on a blank spotlight.
+            var PLAYER_STEPS = [
                 {
                     selector: '.nav-btn[data-view="mission-control"]',
                     title: 'MISSION CONTROL',
-                    body: 'Start here. This is your command center — where you track your tasks, jobs, projects, and checkpoints. Everything you need to do lives here.',
+                    body: 'Your command center. Track your checkpoints, projects, tasks, and the Job Board. When a host assigns you work, this is where it lands.',
                     position: 'below'
                 },
                 {
                     selector: '.nav-btn[data-view="xcoin"]',
                     title: 'X-COIN',
-                    body: 'X-Coins are your experience currency. Earn them by completing tasks, spend them on upgrades, and invest them in your Startup Studio and bartered services.',
+                    body: 'Your experience currency. Earn XC by completing modules, blasting asteroids, and finishing tasks. Spend it in the Marketplace — upgrades, Ship Bay hulls, and Ship Systems for deep-space exploration.',
                     position: 'below'
-                },
-                {
-                    selector: '#toolbar-profile-avatar',
-                    title: 'YOUR PROFILE & BADGES',
-                    body: 'Your digital identity. Earn Primary, Premium, Signature, and Executive badges as you level up. These are your professional credentials.',
-                    position: 'below-left'
                 },
                 {
                     selector: '.nav-btn[data-view="pathways"]',
                     title: 'CORE PATHWAYS',
-                    body: 'Your degree-like learning paths. Pick a Node to start a course, project, or program. Each pathway builds toward mastery in a creative discipline.',
+                    body: 'Your learning universe — literally. Fly your ship through open space, dock at station nodes to start courses and projects, blast asteroid fields for XC, and found your legacy. WASD flies, SHIFT boosts, SPACE fires.',
                     position: 'below'
                 },
                 {
                     selector: '.nav-btn[data-view="arena"]',
                     title: 'BATTLE ARENA',
-                    body: 'Quick games and design challenges to earn XC and build skills fast. Compete with other players, win badges, and climb the leaderboard.',
+                    body: 'Quick games and design challenges to earn XC fast. Compete head-to-head, win badges, climb the leaderboard.',
                     position: 'below'
                 },
                 {
                     selector: '.nav-btn[data-view="darkcampus"]',
                     title: 'DARKCAMPUS',
-                    body: 'Your network hub. Connect with peers, join servers, send messages, and collaborate on projects. Build your professional community here.',
+                    body: 'Your professional network — channels, DMs, and collaborations across cohorts. If it\'s locked for your cohort, raising your Evolution Rank can unlock it.',
                     position: 'below'
+                },
+                {
+                    selector: '#toolbar-profile-avatar',
+                    title: 'YOUR PROFILE & RANK',
+                    body: 'Your digital identity. Click it for your Wallet, Tasks, the Leaderboard, Portfolio, sound, and settings. Earn badges and XC to climb Evolution Ranks — higher ranks unlock better ships and more of the platform.',
+                    position: 'below-left'
+                },
+                {
+                    selector: '#home-mytasks-card',
+                    title: 'MY TASKS & PROPOSALS',
+                    body: 'Everything due, urgency-coded: red is overdue, yellow is close, green is comfortable. And see that 💡 PROPOSE button? Pitch your OWN project or Pathway node — if your host approves a node, you earn residual XC every time another player completes it.',
+                    position: 'below'
+                },
+                {
+                    selector: '#home-jobboard-card',
+                    title: 'JOB BOARD',
+                    body: 'Open jobs posted by your host. Apply, do the work, get paid in XC.',
+                    position: 'below'
+                },
+                {
+                    selector: '#xbot-toggle-tab',
+                    title: 'X-BOT — YOUR AI GUIDE',
+                    body: 'Stuck on anything? X-Bot answers questions about your XC, rank, pathways, and what to do next. It can even help you draft project proposals.',
+                    position: 'below-left'
                 }
             ];
-
+            var HOST_STEPS = [
+                {
+                    selector: '.nav-btn[data-view="mission-control"]',
+                    title: 'MISSION CONTROL — HOST HQ',
+                    body: 'Run everything from here: Checkpoints, Projects, Tasks, the Job Board, and the unified Approvals Queue where module completions, submissions, and player Proposals land for your sign-off.',
+                    position: 'below'
+                },
+                {
+                    selector: '.nav-btn[data-view="xcoin"]',
+                    title: 'X-COIN — THE ECONOMY',
+                    body: 'Badges, the Marketplace, Ship Bay tiers and Ship Systems. You control what XC buys; the Console (PflxDataBus) is the single authority for every XC payout.',
+                    position: 'below'
+                },
+                {
+                    selector: '.nav-btn[data-view="pathways"]',
+                    title: 'CORE PATHWAYS — YOUR CURRICULUM',
+                    body: 'Edit mode lets you place station nodes, set XC rewards, entry requirements, and co-op rules per node. The ⬡ BUILDER button opens the Module Creation Dash — ingest a PPTX or DOCX and it drafts a full FLX module with auto-generated difficulty tiers.',
+                    position: 'below'
+                },
+                {
+                    selector: '.nav-btn[data-view="darkcampus"]',
+                    title: 'DARKCAMPUS + COHORT CONTROL',
+                    body: 'Player networking. You decide who gets it: Settings → Cohort Manager toggles any app per cohort, and the 🏆 Evo Rank Bypass lets mature players earn early access.',
+                    position: 'below'
+                },
+                {
+                    selector: '#home-mytasks-card',
+                    title: 'WHAT PLAYERS SEE',
+                    body: 'This Home Base is the player\'s daily view — tasks with urgency colors, the Job Board, and the 💡 PROPOSE button that feeds your Proposals queue in Mission Control.',
+                    position: 'below'
+                },
+                {
+                    selector: '#toolbar-profile-avatar',
+                    title: 'HOST TOOLS',
+                    body: 'Your profile menu, plus the X-Bot side panel\'s HOST tab: broadcast messages, monitor chats, and MIMIC any player to see the platform exactly as they do.',
+                    position: 'below-left'
+                },
+                {
+                    selector: '#xbot-toggle-tab',
+                    title: 'X-BOT — AI ENGINES',
+                    body: 'X-Bot answers player questions with Claude, Gemini, OpenAI, or a free local model. Set server-side keys once (Vercel env) and the engines work on every device.',
+                    position: 'below-left'
+                }
+            ];
+            var steps = PLAYER_STEPS;
             var totalSteps = steps.length + 2; // welcome + steps + completion
+            function buildSteps() {
+                var role = String((window.activeSession || {}).role || '').toLowerCase();
+                var isHost = /admin|host|teacher|instructor|master/.test(role);
+                var src = isHost ? HOST_STEPS : PLAYER_STEPS;
+                // drop steps whose target isn't on screen right now
+                steps = src.filter(function (st) {
+                    try { return !!document.querySelector(st.selector); } catch (e) { return false; }
+                });
+                if (!steps.length) steps = src.slice(0, 1);
+                totalSteps = steps.length + 2;
+            }
 
             // ── Render welcome screen ──
             function renderWelcome() {
@@ -38362,7 +38438,9 @@
             function positionSpotlight(stepIdx) {
                 var step = steps[stepIdx];
                 var target = document.querySelector(step.selector);
-                if (!target) return;
+                // target vanished since the tour started (view change, gating)
+                // → skip forward instead of stranding on a stale spotlight
+                if (!target) { window.pflxTutNext(); return; }
 
                 var rect = target.getBoundingClientRect();
                 var pad = 8;
@@ -38471,6 +38549,7 @@
 
             // ── Start / replay ──
             window.pflxTutStart = function() {
+                buildSteps();   // role-aware + presence-filtered every run
                 currentStep = -1;
                 isActive = true;
                 var overlay = document.getElementById('pflx-tutorial-overlay');
