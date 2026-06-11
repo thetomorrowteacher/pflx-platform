@@ -10368,6 +10368,28 @@
                                         </label>
                                     </div>
                                 </div>
+
+                                <!-- ── EVO RANK BYPASS ── platform-wide per-app thresholds.
+                                     A player whose Evolution Rank meets the threshold passes
+                                     a cohort deny for that app — maturity earns access. -->
+                                <div style="margin-top:18px;padding:14px;border:1px solid rgba(245,200,66,0.25);border-radius:10px;background:rgba(245,200,66,0.04);">
+                                    <div style="font-family:'Orbitron',sans-serif;font-size:11px;letter-spacing:1.5px;color:#f5c842;margin-bottom:4px;">🏆 EVO RANK BYPASS</div>
+                                    <p style="font-size:11px;color:#8a92b0;margin:0 0 10px;">Players at or above this Evolution Rank can use the app even when their cohort has it turned off. 0 = no bypass (cohort block is absolute). Applies platform-wide, all cohorts.</p>
+                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;">
+                                        <label style="display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:#e0e6ff;">DarkCampus
+                                            <input type="number" min="0" max="10" id="bypass-rank-darkcampus" onchange="updateRankBypass('darkcampus', this.value)" style="width:64px;background:rgba(10,18,40,0.8);border:1px solid rgba(245,200,66,0.25);color:#f5c842;padding:5px 8px;border-radius:6px;font-family:'Share Tech Mono',monospace;"></label>
+                                        <label style="display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:#e0e6ff;">Battle Arena
+                                            <input type="number" min="0" max="10" id="bypass-rank-arena" onchange="updateRankBypass('arena', this.value)" style="width:64px;background:rgba(10,18,40,0.8);border:1px solid rgba(245,200,66,0.25);color:#f5c842;padding:5px 8px;border-radius:6px;font-family:'Share Tech Mono',monospace;"></label>
+                                        <label style="display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:#e0e6ff;">X-Coin
+                                            <input type="number" min="0" max="10" id="bypass-rank-xcoin" onchange="updateRankBypass('xcoin', this.value)" style="width:64px;background:rgba(10,18,40,0.8);border:1px solid rgba(245,200,66,0.25);color:#f5c842;padding:5px 8px;border-radius:6px;font-family:'Share Tech Mono',monospace;"></label>
+                                        <label style="display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:#e0e6ff;">Core Pathways
+                                            <input type="number" min="0" max="10" id="bypass-rank-pathways" onchange="updateRankBypass('pathways', this.value)" style="width:64px;background:rgba(10,18,40,0.8);border:1px solid rgba(245,200,66,0.25);color:#f5c842;padding:5px 8px;border-radius:6px;font-family:'Share Tech Mono',monospace;"></label>
+                                        <label style="display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:#e0e6ff;">AI Center
+                                            <input type="number" min="0" max="10" id="bypass-rank-ai-center" onchange="updateRankBypass('ai-center', this.value)" style="width:64px;background:rgba(10,18,40,0.8);border:1px solid rgba(245,200,66,0.25);color:#f5c842;padding:5px 8px;border-radius:6px;font-family:'Share Tech Mono',monospace;"></label>
+                                        <label style="display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:#e0e6ff;">My Portfolio
+                                            <input type="number" min="0" max="10" id="bypass-rank-portfolio" onchange="updateRankBypass('portfolio', this.value)" style="width:64px;background:rgba(10,18,40,0.8);border:1px solid rgba(245,200,66,0.25);color:#f5c842;padding:5px 8px;border-radius:6px;font-family:'Share Tech Mono',monospace;"></label>
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Feature Controls -->
@@ -15784,6 +15806,15 @@
             document.getElementById('cohort-app-ai-center').checked = c.apps['ai-center'] !== false;
             document.getElementById('cohort-app-mission-control').checked = c.apps['mission-control'] !== false;
 
+            // Evo Rank bypass thresholds (platform-wide, shown with every cohort)
+            try {
+                var __rb = (window.PFLX_RANK_BYPASS_GET && window.PFLX_RANK_BYPASS_GET()) || {};
+                ['darkcampus', 'arena', 'xcoin', 'pathways', 'ai-center', 'portfolio'].forEach(function (a) {
+                    var el = document.getElementById('bypass-rank-' + a);
+                    if (el) el.value = __rb[a] || 0;
+                });
+            } catch (e) {}
+
             // Feature toggles — set defaults if not yet defined
             const defaults = { pathwayFull: true, pathwaySubmit: true, pathwayLeaderboard: true, arenaFull: true, arenaWager: true, arenaTournament: true, specialChallenges: false, sponsoredProjects: false, internships: false, exclusiveRewards: false };
             // Premium cohorts get premium features on by default
@@ -15835,6 +15866,22 @@
             } catch (e) {}
         }
 
+        // ── EVO RANK BYPASS setter — platform-wide per-app thresholds ──
+        function updateRankBypass(app, val) {
+            try { window.PFLX_RANK_BYPASS_SET(app, val); } catch (e) {}
+            try { pflxSaveCohortOverrides(); } catch (e) {}
+            try { pflxCloudSyncCohortOverrides(); } catch (e) {}
+            try {
+                if (typeof window.pflxShowSaveToast === 'function') {
+                    var n = parseInt(val, 10) || 0;
+                    window.pflxShowSaveToast(n > 0
+                        ? 'Evo Rank ' + n + '+ now bypasses the ' + app + ' cohort block'
+                        : 'Rank bypass removed for ' + app, 'success');
+                }
+            } catch (e) {}
+        }
+        window.updateRankBypass = updateRankBypass;
+
         function updateCohortFeature(feat, val) {
             if (!activeCohortKey || !COHORTS[activeCohortKey]) return;
             COHORTS[activeCohortKey][feat] = val;
@@ -15857,7 +15904,10 @@
                 var raw = localStorage.getItem(PFLX_COHORT_KEY);
                 if (!raw) return;
                 var saved = JSON.parse(raw) || {};
+                // raw map is the gate's source of truth (survives registry drift)
+                try { window.PFLX_COHORT_OVERRIDES_RAW_SET(saved); } catch (e) {}
                 Object.keys(saved).forEach(function (k) {
+                    if (k.charAt(0) === '_') return;   // reserved (__rankBypass)
                     if (COHORTS[k]) Object.assign(COHORTS[k], saved[k]);
                 });
             } catch (e) { console.warn('[cohort] load failed', e); }
@@ -15873,6 +15923,8 @@
                         seasons: !!c.seasons, projects: !!c.projects, internships: !!c.internships
                     };
                 });
+                try { out.__rankBypass = window.PFLX_RANK_BYPASS_GET(); } catch (e) {}
+                try { window.PFLX_COHORT_OVERRIDES_RAW_SET(out); } catch (e) {}
                 localStorage.setItem(PFLX_COHORT_KEY, JSON.stringify(out));
             } catch (e) { console.warn('[cohort] save failed', e); }
         }
@@ -15932,7 +15984,9 @@
                         try {
                             if (res && !res.error && res.data) {
                                 var cloud = res.data.data || {};
+                                try { window.PFLX_COHORT_OVERRIDES_RAW_SET(cloud); } catch (e) {}
                                 Object.keys(cloud).forEach(function (k) {
+                                    if (k.charAt(0) === '_') return;   // reserved (__rankBypass)
                                     if (COHORTS[k]) Object.assign(COHORTS[k], cloud[k]);
                                 });
                                 try { localStorage.setItem(PFLX_COHORT_KEY, JSON.stringify(cloud)); } catch (e) {}
@@ -15947,6 +16001,20 @@
                             // proceeds with whatever data we have (cloud +
                             // localStorage merged, or just localStorage).
                             try { _pflxCohortReadyResolve && _pflxCohortReadyResolve('loaded'); } catch (e) {}
+                            // ── RE-GATE ── overrides just landed. If the
+                            // player is already INSIDE an app their cohort
+                            // denies (they navigated during the boot race,
+                            // or the host flipped the toggle while they were
+                            // in it), kick them out with the modal now.
+                            try { if (typeof pflxApplyCohortGatingToToolbar === 'function') pflxApplyCohortGatingToToolbar(); } catch (e) {}
+                            try {
+                                var cv = window._pflxCurrentGatedView;
+                                if (cv && typeof pflxPlayerCanAccessApp === 'function' && !pflxPlayerCanAccessApp(cv)) {
+                                    pflxShowAccessLocked(cv, cv);
+                                    window._pflxCurrentGatedView = null;
+                                    if (typeof navigateTo === 'function') navigateTo('home');
+                                }
+                            } catch (e) {}
                         }
                     }, function (err) {
                         console.warn('[cohort] cloud load rejected', err);
@@ -15987,12 +16055,74 @@
         }
 
         // ─────────────────────────────────────────────────────────────────
-        // App access — union across the active player's cohorts
+        // App access — HARDENED (June 2026, after the DarkCampus leak)
         // ─────────────────────────────────────────────────────────────────
-        // If a player belongs to multiple cohorts, ANY cohort granting an
-        // app overrides others denying it (most-permissive wins). Hosts
-        // (admin/teacher/master roles) always have full access regardless
-        // of cohort flags.
+        // Two silent fail-open paths existed:
+        //   1. NAME DRIFT — a player whose session cohort string didn't
+        //      EXACTLY match a COHORTS key ("dd core 3", trailing space,
+        //      double space, display-name vs key) fell back to PlayerPool,
+        //      which has no deny → access granted. Resolution is now
+        //      case/whitespace-insensitive against keys AND display names.
+        //   2. REGISTRY DRIFT — overrides loaded from cloud/localStorage
+        //      were only merged into cohorts already present in this
+        //      build's hard-coded COHORTS registry; a deny saved for a
+        //      cohort missing here was silently dropped. The raw saved map
+        //      (PFLX_COHORT_OVERRIDES_RAW) is now consulted FIRST, so a
+        //      host's deny works even when the cohort object doesn't exist
+        //      in this build.
+        // Plus: EVO RANK BYPASS — a host-set per-app rank threshold lets
+        // mature/high-rank players through a cohort deny.
+        var PFLX_COHORT_OVERRIDES_RAW = {};   // exact saved override map (cloud truth)
+        var PFLX_RANK_BYPASS = {};            // appKey -> min Evo Rank that bypasses a deny (0 = never)
+        // accessors for code that runs before/after this point in the file
+        window.PFLX_COHORT_OVERRIDES_RAW_SET = function (m) {
+            PFLX_COHORT_OVERRIDES_RAW = m || {};
+            // always REPLACE (never keep stale) — a host removing the last
+            // bypass produces a map with no __rankBypass, which must clear it
+            PFLX_RANK_BYPASS = (m && m.__rankBypass) || {};
+        };
+        window.PFLX_RANK_BYPASS_GET = function () { return PFLX_RANK_BYPASS; };
+        window.PFLX_RANK_BYPASS_SET = function (app, lvl) {
+            lvl = parseInt(lvl, 10) || 0;
+            if (lvl > 0) PFLX_RANK_BYPASS[app] = lvl; else delete PFLX_RANK_BYPASS[app];
+        };
+        // the boot-time local load ran before these vars existed — re-read
+        // localStorage now so the raw map is populated from second zero
+        try {
+            var __pflxOvrBoot = JSON.parse(localStorage.getItem(PFLX_COHORT_KEY) || 'null');
+            if (__pflxOvrBoot) {
+                PFLX_COHORT_OVERRIDES_RAW = __pflxOvrBoot;
+                PFLX_RANK_BYPASS = __pflxOvrBoot.__rankBypass || {};
+            }
+        } catch (e) {}
+        function pflxNormCohortName(s) { return String(s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+        function pflxCohortByName(name) {
+            if (COHORTS[name]) return COHORTS[name];
+            var n = pflxNormCohortName(name);
+            var keys = Object.keys(COHORTS);
+            for (var i = 0; i < keys.length; i++) {
+                if (pflxNormCohortName(keys[i]) === n || pflxNormCohortName(COHORTS[keys[i]].name || '') === n) return COHORTS[keys[i]];
+            }
+            return null;
+        }
+        function pflxOverrideByName(name) {
+            if (PFLX_COHORT_OVERRIDES_RAW[name]) return PFLX_COHORT_OVERRIDES_RAW[name];
+            var n = pflxNormCohortName(name);
+            var keys = Object.keys(PFLX_COHORT_OVERRIDES_RAW);
+            for (var i = 0; i < keys.length; i++) {
+                if (keys[i].charAt(0) === '_') continue;   // reserved keys (__rankBypass)
+                if (pflxNormCohortName(keys[i]) === n) return PFLX_COHORT_OVERRIDES_RAW[keys[i]];
+            }
+            return null;
+        }
+        function pflxPlayerEvoRank() {
+            var s = window.activeSession || {};
+            var lvl = 0;
+            try { lvl = (typeof getRankForXC === 'function') ? ((getRankForXC(s.totalXcoin || s.xc || 0) || {}).level || 0) : 0; } catch (e) {}
+            try { var er = parseInt(s.evoRank, 10) || 0; if (er > lvl) lvl = er; } catch (e) {}
+            return lvl;
+        }
+        window.pflxPlayerEvoRank = pflxPlayerEvoRank;
         function pflxPlayerCanAccessApp(appKey) {
             try {
                 if (!appKey) return true;
@@ -16022,7 +16152,15 @@
                 // and made cohort-level "off" toggles ineffective for
                 // multi-cohort players.
                 function resolveCohortApp(cohortName) {
-                    var c = COHORTS[cohortName] || COHORTS['PlayerPool'];
+                    // 1) the raw saved override map is the source of truth —
+                    //    it works even when this build's COHORTS registry
+                    //    doesn't contain the cohort (registry drift)
+                    var ov = pflxOverrideByName(cohortName);
+                    if (ov && ov.apps && ov.apps[appKey] === false) return false;
+                    if (ov && ov.apps && ov.apps[appKey] === true)  return true;
+                    // 2) the in-memory cohort object (normalized lookup —
+                    //    name drift like "dd core 3" still resolves)
+                    var c = pflxCohortByName(cohortName) || COHORTS['PlayerPool'];
                     if (c && c.apps && c.apps[appKey] === false) return false;
                     if (c && c.apps && c.apps[appKey] === true)  return true;
                     var orgKey = c && c.org;
@@ -16032,12 +16170,17 @@
                     }
                     return null; // no explicit setting at cohort or org level
                 }
+                var denied = false;
                 for (var i = 0; i < cohorts.length; i++) {
-                    if (resolveCohortApp(cohorts[i]) === false) return false;
+                    if (resolveCohortApp(cohorts[i]) === false) { denied = true; break; }
                 }
-                // No cohort explicitly denied → allow.
-                return true;
-            } catch (e) { return true; }
+                if (!denied) return true;
+                // ── EVO RANK BYPASS ── a host-set threshold lets players
+                // who've proven themselves through a cohort deny.
+                var need = parseInt(PFLX_RANK_BYPASS[appKey], 10) || 0;
+                if (need > 0 && pflxPlayerEvoRank() >= need) return true;
+                return false;
+            } catch (e) { console.warn('[access] gate error (fail-open)', e); return true; }
         }
         window.pflxPlayerCanAccessApp = pflxPlayerCanAccessApp;
 
@@ -16069,6 +16212,18 @@
                             '<div style="margin-bottom:4px;color:rgba(239,68,68,0.85);font-weight:700;">RESTRICTED APP</div>' +
                             escapeHtml(appLabel || appKey) +
                         '</div>' +
+                        (function () {
+                            // Evo Rank bypass hint — give the player a path forward
+                            try {
+                                var need = parseInt((window.PFLX_RANK_BYPASS_GET ? window.PFLX_RANK_BYPASS_GET() : {})[appKey], 10) || 0;
+                                if (need > 0) {
+                                    var have = (typeof pflxPlayerEvoRank === 'function') ? pflxPlayerEvoRank() : 0;
+                                    return '<div style="margin:0 0 16px;padding:10px 14px;background:rgba(245,200,66,0.06);border:1px solid rgba(245,200,66,0.25);border-radius:10px;font-size:11px;color:rgba(245,200,66,0.85);font-family:\'Share Tech Mono\',monospace;letter-spacing:0.05em;">' +
+                                        '🏆 Reach <b>Evolution Rank ' + need + '</b> to unlock this app early (you are Rank ' + have + ').</div>';
+                                }
+                            } catch (e) {}
+                            return '';
+                        })() +
                         '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px 12px;margin-bottom:20px;font-size:10px;color:rgba(255,255,255,0.4);font-family:\'Share Tech Mono\',monospace;letter-spacing:0.05em;">' +
                             'Cohort: ' + escapeHtml(String(cohorts)) +
                         '</div>' +
@@ -19076,6 +19231,13 @@
                         return;
                     }
                 }
+            } catch (e) {}
+
+            // Track which gated app the player is in so the cloud-override
+            // re-gate can kick them out if a deny lands after entry.
+            try {
+                var __gatedSet = { 'xcoin': 1, 'pathways': 1, 'arena': 1, 'darkcampus': 1, 'portfolio': 1, 'ai-center': 1, 'mission-control': 1 };
+                window._pflxCurrentGatedView = __gatedSet[viewName] ? viewName : null;
             } catch (e) {}
 
             // When admin opens MC in Player View, allow it but auto-show player dash
