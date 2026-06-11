@@ -9196,6 +9196,7 @@
                                 <p class="mc-page-desc">Review player-submitted proposals — new projects to add to a checkpoint, or new modules/nodes to add to a Pathway. Approve to push into the work queue.</p>
                                 <div class="mc-subtabs" id="mc-pitch-tabs">
                                     <button class="mc-subtab active" data-mc-pitch="pending" onclick="mcPitchTab('pending')">Pending Review</button>
+                                    <button class="mc-subtab" data-mc-pitch="returned" onclick="mcPitchTab('returned')">Returned</button>
                                     <button class="mc-subtab" data-mc-pitch="approved" onclick="mcPitchTab('approved')">Approved</button>
                                     <button class="mc-subtab" data-mc-pitch="rejected" onclick="mcPitchTab('rejected')">Rejected</button>
                                     <button class="mc-subtab" data-mc-pitch="all" onclick="mcPitchTab('all')">All</button>
@@ -29595,24 +29596,249 @@
                 return mcPitchFilter === 'all' || p.status === mcPitchFilter;
             });
 
-            list.innerHTML = filtered.length === 0 ? '<div style="color:rgba(255,255,255,0.25);font-size:13px;">No pitches submitted yet.</div>' :
-                filtered.map(function(p, i) {
-                    var sc = p.status === 'pending' ? { text:'#f5c842', label:'PENDING' } : p.status === 'approved' ? { text:'#22c55e', label:'APPROVED' } : { text:'#ef4444', label:'REJECTED' };
+            list.innerHTML = filtered.length === 0 ? '<div style="color:rgba(255,255,255,0.25);font-size:13px;">No proposals here yet. Players submit them from the 💡 PROPOSE button on Home Base.</div>' :
+                filtered.map(function(p) {
+                    var i = mcPitches.indexOf(p);   // act on the REAL index, not the filtered one
+                    var sc = p.status === 'pending' ? { text:'#f5c842', label:'PENDING' }
+                           : p.status === 'approved' ? { text:'#22c55e', label:'APPROVED' }
+                           : p.status === 'returned' ? { text:'#60a5fa', label:'RETURNED' }
+                           : { text:'#ef4444', label:'REJECTED' };
+                    var typeChip = p.type === 'pathway-node'
+                        ? '🛰️ Pathway Node → ' + escapeHtml(p.pathway || '?')
+                        : '📦 MC Project' + (p.checkpointId ? ' → checkpoint ' + escapeHtml(p.checkpointId) : '');
                     return '<div class="mc-card">' +
                         '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">' +
-                        '<div><div style="font-weight:900;color:#f0f0ff;">' + escapeHtml(p.title || 'Untitled Pitch') + '</div>' +
+                        '<div><div style="font-weight:900;color:#f0f0ff;">' + escapeHtml(p.title || 'Untitled Proposal') + '</div>' +
                         '<div style="font-size:11px;color:rgba(255,255,255,0.4);">by ' + escapeHtml(p.submittedBy || 'Unknown') + ' · ' + (p.date || '') + '</div></div>' +
                         '<span class="mc-pill" style="color:' + sc.text + ';border-color:' + sc.text + ';">' + sc.label + '</span></div>' +
+                        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">' +
+                            '<span style="font-size:10px;color:rgba(0,240,255,0.7);border:1px solid rgba(0,240,255,0.2);border-radius:999px;padding:2px 9px;">' + typeChip + '</span>' +
+                            (p.suggestedXC ? '<span style="font-size:10px;color:#f5c842;border:1px solid rgba(245,200,66,0.3);border-radius:999px;padding:2px 9px;">⚡ suggests ' + p.suggestedXC + ' XC</span>' : '') +
+                        '</div>' +
                         '<div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:8px;">' + escapeHtml(p.description || '') + '</div>' +
+                        (p.hostNote ? '<div style="font-size:11px;color:rgba(96,165,250,0.8);margin-bottom:8px;">Note sent: ' + escapeHtml(p.hostNote) + '</div>' : '') +
                         (p.status === 'pending' ? '<div style="display:flex;gap:6px;">' +
-                        '<button class="mc-btn mc-btn-green" style="font-size:10px;padding:4px 10px;" onclick="mcApprovePitch(' + i + ')">Approve</button>' +
+                        '<button class="mc-btn mc-btn-green" style="font-size:10px;padding:4px 10px;" onclick="mcApprovePitch(' + i + ')">Approve & Create</button>' +
+                        '<button class="mc-btn" style="font-size:10px;padding:4px 10px;color:#60a5fa;border-color:rgba(96,165,250,0.3);" onclick="mcReturnPitch(' + i + ')">Return for Edits</button>' +
                         '<button class="mc-btn" style="font-size:10px;padding:4px 10px;color:#ef4444;border-color:rgba(239,68,68,0.3);" onclick="mcRejectPitch(' + i + ')">Reject</button></div>' : '') +
                         '</div>';
                 }).join('');
         }
 
-        function mcApprovePitch(i) { pflxPlaySfx('success'); mcPitches[i].status = 'approved'; mcSaveData('pitches'); mcRenderPitches(); }
-        function mcRejectPitch(i) { pflxPlaySfx('error'); mcPitches[i].status = 'rejected'; mcSaveData('pitches'); mcRenderPitches(); }
+        // ═══════════════════════════════════════════════════════════════
+        // PROPOSALS — the full loop (June 2026). Approve now CREATES the
+        // real thing instead of only flipping a status flag:
+        //   type 'project'      → a real MC Project (planning status,
+        //                         proposer on the team)
+        //   type 'pathway-node' → a record in the X-Coin projectPitches
+        //                         collection, which pathway.html already
+        //                         injects as a live node AND pays the
+        //                         creator residual XC on completions
+        // Plus a 'returned' state with a host note so players can revise.
+        // ═══════════════════════════════════════════════════════════════
+        function mcApprovePitch(i) {
+            try {
+                var p = mcPitches[i];
+                if (!p) return;
+                if (p.type === 'pathway-node') {
+                    // write into the proven pitched-node pipeline
+                    var rec = {
+                        id: 'pp-' + (p.id || Date.now()),
+                        title: p.title || 'Pitched Node',
+                        description: p.description || '',
+                        status: 'approved',
+                        pathway: p.pathway || 'professional-entrepreneur',
+                        pathwayNodeId: 'pitched-' + (p.id || Date.now()),
+                        creatorId: p.submitterId || p.submittedBy || '',
+                        xcValue: parseInt(p.suggestedXC, 10) || 0,
+                        residualPercent: 10,
+                        completionCount: 0,
+                        createdAt: new Date().toISOString()
+                    };
+                    p.pathwayNodeId = rec.pathwayNodeId;
+                    var sb = (typeof pflxSupabase === 'function') ? pflxSupabase() : null;
+                    if (sb) {
+                        sb.from('app_data').select('data').eq('key', 'projectPitches').maybeSingle()
+                          .then(function (res) {
+                              var list = (res && res.data && Array.isArray(res.data.data)) ? res.data.data : [];
+                              if (!list.some(function (x) { return x.id === rec.id; })) list.push(rec);
+                              return sb.from('app_data').upsert({ key: 'projectPitches', data: list, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+                          })
+                          .then(function () { try { window.pflxShowSaveToast && window.pflxShowSaveToast('Node pitched into ' + rec.pathway + ' — it appears on the Pathway map', 'success'); } catch (e) {} })
+                          .catch(function (e) { console.warn('[proposals] projectPitches write failed', e); });
+                    }
+                } else {
+                    // default: a real MC Project assigned to the proposer
+                    var proj = {
+                        id: 'proj-' + Date.now(),
+                        name: p.title || 'Proposed Project',
+                        description: p.description || '',
+                        status: 'planning',
+                        flpTracking: 'monitoring',
+                        subtasks: [], budget: 0,
+                        team: [p.submittedBy || 'Unknown'],
+                        checkpointId: p.checkpointId || '',
+                        link: '', taskIds: [], rewardBadges: [], cohortIds: [],
+                        skillLevel: 'beginner', learningObjectives: '', deliverables: '',
+                        bannerImage: '',
+                        createdAt: new Date().toISOString().split('T')[0],
+                        nodeType: 'project', coopMode: 'solo', maxPlayers: 4,
+                        sessionCode: '', dcChannelEnabled: false, xbotEnabled: false,
+                        coopPlayers: [],
+                        fromProposalId: p.id || '',
+                        xcReward: parseInt(p.suggestedXC, 10) || 0
+                    };
+                    mcProjects.push(proj);
+                    p.createdProjectId = proj.id;
+                    mcSaveData('projects');
+                    try { if (typeof pflxSyncBus !== 'undefined') pflxSyncBus.publish('mc:projects', { action: 'create', project: proj }); } catch (e) {}
+                    try { window.pflxShowSaveToast && window.pflxShowSaveToast('Project created from proposal — see Projects', 'success'); } catch (e) {}
+                }
+                pflxPlaySfx('success');
+                p.status = 'approved';
+                p.decidedAt = new Date().toISOString();
+                mcSaveData('pitches');
+                mcRenderPitches();
+            } catch (e) { console.warn('[proposals] approve failed', e); }
+        }
+        function mcRejectPitch(i) {
+            var note = prompt('Optional note to the player (why it was rejected):', '');
+            pflxPlaySfx('error');
+            mcPitches[i].status = 'rejected';
+            mcPitches[i].hostNote = (note || '').trim();
+            mcPitches[i].decidedAt = new Date().toISOString();
+            mcSaveData('pitches');
+            mcRenderPitches();
+        }
+        function mcReturnPitch(i) {
+            var note = prompt('What should the player revise before resubmitting?', '');
+            if (note === null) return;
+            pflxPlaySfx('click');
+            mcPitches[i].status = 'returned';
+            mcPitches[i].hostNote = (note || '').trim();
+            mcPitches[i].decidedAt = new Date().toISOString();
+            mcSaveData('pitches');
+            mcRenderPitches();
+        }
+        window.mcReturnPitch = mcReturnPitch;
+
+        // ── Player-side: Propose modal + My Proposals status list ──
+        var PFLX_PATHWAY_OPTIONS = [
+            ['professional-entrepreneur', 'Professional Entrepreneur'], ['content-creator', 'Content Creator'],
+            ['digital-artist', 'Digital Artist'], ['3d-modeler', '3D Modeler'],
+            ['cs-ai-specialist', 'CS/AI Specialist'], ['sound-designer', 'Sound Designer'],
+            ['game-designer', 'Game Designer'], ['industrial-designer', 'Industrial Designer']
+        ];
+        var _pflxProposeEditId = null;
+        function pflxOpenProposeModal() {
+            try { mcLoadData(); } catch (e) {}
+            var old = document.getElementById('pflx-propose-modal');
+            if (old) old.remove();
+            _pflxProposeEditId = null;
+            var s = window.activeSession || {};
+            var cpOpts = '<option value="">— None / host decides —</option>';
+            try { (mcCheckpoints || []).forEach(function (c) { cpOpts += '<option value="' + escapeHtml(c.id || '') + '">' + escapeHtml(c.name || c.title || c.id || '') + '</option>'; }); } catch (e) {}
+            var pwOpts = PFLX_PATHWAY_OPTIONS.map(function (o) { return '<option value="' + o[0] + '">' + o[1] + '</option>'; }).join('');
+            var overlay = document.createElement('div');
+            overlay.id = 'pflx-propose-modal';
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;z-index:100000;backdrop-filter:blur(8px);overflow-y:auto;';
+            overlay.innerHTML =
+                '<div style="background:linear-gradient(180deg,#12121c,#0a0a14);border:1px solid rgba(245,200,66,0.35);border-radius:18px;padding:26px;max-width:560px;width:92%;max-height:88vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,0.6);">' +
+                    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">' +
+                        '<span style="font-size:24px;">💡</span>' +
+                        '<h2 style="color:#f5c842;margin:0;font-size:18px;font-family:\'Orbitron\',sans-serif;letter-spacing:0.1em;">PROPOSE</h2>' +
+                        '<button onclick="document.getElementById(\'pflx-propose-modal\').remove()" style="margin-left:auto;background:none;border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.5);border-radius:6px;width:28px;height:28px;cursor:pointer;">✕</button></div>' +
+                    '<p style="color:rgba(255,255,255,0.5);font-size:12px;margin:0 0 16px;font-family:\'Jura\',sans-serif;">Pitch a new project — or a new node for a Core Pathway. Your host reviews it; approved Pathway nodes go live on the map and pay you residual XC whenever another player completes them.</p>' +
+                    '<label style="display:block;font-size:11px;color:#8a92b0;margin:10px 0 4px;">I\'M PROPOSING A…</label>' +
+                    '<select id="pp-type" onchange="document.getElementById(\'pp-target-cp\').style.display=this.value===\'project\'?\'block\':\'none\';document.getElementById(\'pp-target-pw\').style.display=this.value===\'project\'?\'none\':\'block\';" style="width:100%;background:rgba(10,18,40,0.8);border:1px solid rgba(245,200,66,0.2);color:#e0e6ff;padding:9px 10px;border-radius:8px;font-size:13px;">' +
+                        '<option value="project">New Project (Mission Control)</option>' +
+                        '<option value="pathway-node">New Node / Module (Core Pathways)</option></select>' +
+                    '<label style="display:block;font-size:11px;color:#8a92b0;margin:10px 0 4px;">TITLE</label>' +
+                    '<input id="pp-title" type="text" placeholder="What are you proposing?" style="width:100%;background:rgba(10,18,40,0.8);border:1px solid rgba(255,255,255,0.1);color:#e0e6ff;padding:9px 10px;border-radius:8px;font-size:13px;box-sizing:border-box;">' +
+                    '<label style="display:block;font-size:11px;color:#8a92b0;margin:10px 0 4px;">DESCRIPTION — what is it, why does it matter, what will players learn or build?</label>' +
+                    '<textarea id="pp-desc" rows="4" style="width:100%;background:rgba(10,18,40,0.8);border:1px solid rgba(255,255,255,0.1);color:#e0e6ff;padding:9px 10px;border-radius:8px;font-size:13px;box-sizing:border-box;font-family:\'Jura\',sans-serif;"></textarea>' +
+                    '<div id="pp-target-cp"><label style="display:block;font-size:11px;color:#8a92b0;margin:10px 0 4px;">TARGET CHECKPOINT</label>' +
+                        '<select id="pp-checkpoint" style="width:100%;background:rgba(10,18,40,0.8);border:1px solid rgba(255,255,255,0.1);color:#e0e6ff;padding:9px 10px;border-radius:8px;font-size:13px;">' + cpOpts + '</select></div>' +
+                    '<div id="pp-target-pw" style="display:none;"><label style="display:block;font-size:11px;color:#8a92b0;margin:10px 0 4px;">TARGET PATHWAY</label>' +
+                        '<select id="pp-pathway" style="width:100%;background:rgba(10,18,40,0.8);border:1px solid rgba(255,255,255,0.1);color:#e0e6ff;padding:9px 10px;border-radius:8px;font-size:13px;">' + pwOpts + '</select></div>' +
+                    '<label style="display:block;font-size:11px;color:#8a92b0;margin:10px 0 4px;">SUGGESTED XC REWARD (host sets the final value)</label>' +
+                    '<input id="pp-xc" type="number" min="0" step="10" placeholder="0" style="width:140px;background:rgba(10,18,40,0.8);border:1px solid rgba(245,200,66,0.2);color:#f5c842;padding:9px 10px;border-radius:8px;font-size:13px;">' +
+                    '<button onclick="pflxSubmitProposal()" id="pp-submit" style="display:block;width:100%;margin-top:16px;padding:12px;background:linear-gradient(135deg,rgba(245,200,66,0.25),rgba(0,240,255,0.15));border:1px solid rgba(245,200,66,0.4);border-radius:10px;color:#f5c842;font-family:\'Orbitron\',sans-serif;font-size:12px;font-weight:800;letter-spacing:0.12em;cursor:pointer;">SUBMIT PROPOSAL</button>' +
+                    '<div id="pp-mine" style="margin-top:20px;"></div>' +
+                '</div>';
+            overlay.onclick = function (ev) { if (ev.target === overlay) overlay.remove(); };
+            document.body.appendChild(overlay);
+            pflxRenderMyProposals();
+        }
+        window.pflxOpenProposeModal = pflxOpenProposeModal;
+
+        function pflxSubmitProposal() {
+            var s = window.activeSession || {};
+            var title = (document.getElementById('pp-title').value || '').trim();
+            var desc = (document.getElementById('pp-desc').value || '').trim();
+            if (!title) { alert('Give your proposal a title.'); return; }
+            if (desc.length < 20) { alert('Add a little more detail — at least a sentence or two so your host can evaluate it.'); return; }
+            try { mcLoadData(); } catch (e) {}
+            var type = document.getElementById('pp-type').value;
+            var existing = _pflxProposeEditId ? mcPitches.find(function (x) { return x.id === _pflxProposeEditId; }) : null;
+            var p = existing || { id: 'prop-' + Date.now().toString(36), createdAt: new Date().toISOString() };
+            p.title = title;
+            p.description = desc;
+            p.type = type;
+            p.checkpointId = type === 'project' ? (document.getElementById('pp-checkpoint').value || '') : '';
+            p.pathway = type === 'pathway-node' ? (document.getElementById('pp-pathway').value || '') : '';
+            p.suggestedXC = parseInt(document.getElementById('pp-xc').value, 10) || 0;
+            p.submittedBy = s.brand || s.name || 'Player';
+            p.submitterId = s.id || s.brand || '';
+            p.date = new Date().toISOString().split('T')[0];
+            p.status = 'pending';
+            p.hostNote = '';
+            if (!existing) mcPitches.push(p);
+            _pflxProposeEditId = null;
+            mcSaveData('pitches');
+            pflxPlaySfx('success');
+            try { window.pflxShowSaveToast && window.pflxShowSaveToast('Proposal submitted — your host will review it', 'success'); } catch (e) {}
+            document.getElementById('pp-title').value = '';
+            document.getElementById('pp-desc').value = '';
+            document.getElementById('pp-xc').value = '';
+            pflxRenderMyProposals();
+        }
+        window.pflxSubmitProposal = pflxSubmitProposal;
+
+        function pflxRenderMyProposals() {
+            var holder = document.getElementById('pp-mine');
+            if (!holder) return;
+            try { mcLoadData(); } catch (e) {}
+            var s = window.activeSession || {};
+            var myId = s.id || s.brand || '';
+            var mine = (mcPitches || []).filter(function (p) { return p.submitterId === myId || p.submittedBy === (s.brand || s.name); });
+            if (!mine.length) { holder.innerHTML = ''; return; }
+            var colors = { pending: '#f5c842', approved: '#22c55e', rejected: '#ef4444', returned: '#60a5fa' };
+            holder.innerHTML = '<div style="font-family:\'Orbitron\',sans-serif;font-size:10px;letter-spacing:1.5px;color:rgba(255,255,255,0.4);margin-bottom:8px;">MY PROPOSALS</div>' +
+                mine.slice().reverse().map(function (p) {
+                    var c = colors[p.status] || '#8a92b0';
+                    return '<div style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:rgba(10,18,40,0.5);">' +
+                        '<div style="display:flex;align-items:center;gap:8px;"><span style="font-size:12px;font-weight:700;color:#e0e6ff;flex:1;">' + escapeHtml(p.title || '') + '</span>' +
+                        '<span style="font-size:9px;font-weight:800;letter-spacing:1px;color:' + c + ';border:1px solid ' + c + ';border-radius:999px;padding:2px 8px;">' + (p.status || '').toUpperCase() + '</span></div>' +
+                        (p.hostNote ? '<div style="font-size:11px;color:rgba(96,165,250,0.85);margin-top:6px;">Host: ' + escapeHtml(p.hostNote) + '</div>' : '') +
+                        (p.status === 'returned' ? '<button onclick="pflxEditProposal(\'' + p.id + '\')" style="margin-top:8px;padding:5px 12px;background:rgba(96,165,250,0.12);border:1px solid rgba(96,165,250,0.4);border-radius:8px;color:#60a5fa;font-size:10px;font-weight:700;letter-spacing:1px;cursor:pointer;">✏️ REVISE & RESUBMIT</button>' : '') +
+                        '</div>';
+                }).join('');
+        }
+        function pflxEditProposal(id) {
+            var p = (mcPitches || []).find(function (x) { return x.id === id; });
+            if (!p) return;
+            _pflxProposeEditId = id;
+            document.getElementById('pp-title').value = p.title || '';
+            document.getElementById('pp-desc').value = p.description || '';
+            document.getElementById('pp-type').value = p.type || 'project';
+            document.getElementById('pp-type').onchange();
+            if (p.type === 'pathway-node') document.getElementById('pp-pathway').value = p.pathway || '';
+            else document.getElementById('pp-checkpoint').value = p.checkpointId || '';
+            document.getElementById('pp-xc').value = p.suggestedXC || '';
+            document.getElementById('pp-submit').textContent = 'RESUBMIT PROPOSAL';
+        }
+        window.pflxEditProposal = pflxEditProposal;
 
         // ── Cohort Groups ────────────────────────────────────────────
         function mcRenderCohortGroups() {
@@ -43572,7 +43798,8 @@ RESPONSE RULES:
             tasksCard.className = 'dashboard-card';
             tasksCard.id = 'home-mytasks-card';
             tasksCard.style.cssText = 'border-color:rgba(239,68,68,0.18);background:linear-gradient(135deg,rgba(239,68,68,0.03),rgba(10,18,40,0.6));';
-            tasksCard.innerHTML = '<h3 style="color:#ef4444;margin:0 0 15px;display:flex;align-items:center;gap:8px;font-family:\'Orbitron\',sans-serif;font-size:13px;letter-spacing:0.12em;"><span style="font-size:16px;">📋</span> My Tasks</h3>';
+            tasksCard.innerHTML = '<h3 style="color:#ef4444;margin:0 0 15px;display:flex;align-items:center;gap:8px;font-family:\'Orbitron\',sans-serif;font-size:13px;letter-spacing:0.12em;"><span style="font-size:16px;">📋</span> My Tasks' +
+                '<button onclick="pflxOpenProposeModal()" title="Propose a new project or Pathway node to your host" style="margin-left:auto;padding:5px 12px;background:rgba(245,200,66,0.1);border:1px solid rgba(245,200,66,0.35);border-radius:8px;color:#f5c842;font-family:\'Orbitron\',sans-serif;font-size:9px;font-weight:700;letter-spacing:1.5px;cursor:pointer;">💡 PROPOSE</button></h3>';
             tasksCard.appendChild(renderDeadlines());
             dashboard.appendChild(tasksCard);
 
