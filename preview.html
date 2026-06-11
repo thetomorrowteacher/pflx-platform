@@ -20417,6 +20417,49 @@
                     }
                 }
 
+                // ── Open Space XC — Core Pathways posts this when a player blasts
+                // an asteroid, salvages a derelict, or intercepts a comet.
+                // INSTANT CREDIT (per Ennis, June 2026): route straight through
+                // PflxDataBus.award so the XC maps directly into the player's
+                // X-Coin account and fans out to the Platform toolbar and every
+                // sub-app for full profile totals. Then ack back to the
+                // Pathways iframe so the CARGO HOLD clears its PENDING figure.
+                if (msg.type === 'pflx_space_xc' && msg.playerId) {
+                    try {
+                        // clamp: space bounties are small — defend the economy
+                        var spaceAmt = Math.max(0, Math.min(200, parseInt(msg.amount, 10) || 0));
+                        if (spaceAmt > 0) {
+                            // resolve the player by id first, brand as fallback
+                            var spacePl = mcPlayers.find(function (p) { return p && (p.id === msg.playerId || p.brand === msg.playerId); });
+                            var spaceId = spacePl ? spacePl.id : msg.playerId;
+                            if (window.PflxDataBus) {
+                                window.PflxDataBus.award(spaceId, {
+                                    xc: spaceAmt,
+                                    source: 'pathways',
+                                    reason: 'space:' + (msg.reason || 'exploration')
+                                });
+                            }
+                            // Mirror into mcPlayers so the MC roster shows the new total
+                            var spaceCanon = window.PflxDataBus ? window.PflxDataBus.get(spaceId) : null;
+                            if (spaceCanon) {
+                                var spaceIdx = mcPlayers.findIndex(function (p) { return p && p.id === spaceId; });
+                                if (spaceIdx >= 0) {
+                                    mcPlayers[spaceIdx] = Object.assign({}, mcPlayers[spaceIdx], {
+                                        xc: spaceCanon.xc, totalXcoin: spaceCanon.totalXcoin
+                                    });
+                                    mcSaveData('players');
+                                }
+                            }
+                            // ack to the sending iframe so PENDING CREDIT clears
+                            try {
+                                if (event.source && event.source.postMessage) {
+                                    event.source.postMessage({ type: 'pflx_space_xc_ack', amount: spaceAmt, playerId: msg.playerId }, '*');
+                                }
+                            } catch (eAck) {}
+                        }
+                    } catch (e) { console.warn('[MC] space XC credit failed', e); }
+                }
+
                 // ── Arena match result — Battle Arena posts this when a player wins.
                 // Routed through PflxDataBus.award so the XC + badge propagate to
                 // every other surface (toolbar, X-Coin home, Pathways card, etc.)
