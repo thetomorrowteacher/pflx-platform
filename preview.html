@@ -123,11 +123,7 @@
         :root {
             --pflx-vh: 1vh;
             --toolbar-height: 64px;
-            /* Bottom ticker removed (Ennis, June 2026) — height zeroed so
-               every view reclaims the strip. The ticker engine still runs
-               dormant; restore by setting 32px + removing the display:none
-               rules on .message-ticker-bar / #message-ticker. */
-            --ticker-height: 0px;
+            --ticker-height: 32px;
             --cyan: #00f0ff;
             --gold: #ffd700;
             --magenta: #ff00ff;
@@ -4484,13 +4480,12 @@
         }
 
         /* MESSAGE TICKER */
-        /* ── BOTTOM NOTIFICATIONS REMOVED (Ennis, June 2026) ──
-           Both the persistent scrolling ticker and the rotating X-Bot
-           status bar were stale/demo data and sat in the way of host
-           panels. Real status lives in MC + X-Bot chat. */
-        .message-ticker-bar { display: none !important; }
+        /* ── X-Bot status POPUP removed (Ennis, June 2026) ──
+           The #message-ticker popup rotated hardcoded demo strings and had
+           to be ✕'d constantly. The persistent ticker bar below STAYS and
+           now carries only real, fresh events (see pflxTickerEngine). */
         #message-ticker { display: none !important; }
-        .message-ticker-bar-disabled {
+        .message-ticker-bar {
             position: fixed;
             bottom: 0;
             left: 0;
@@ -12537,13 +12532,10 @@
             var today = new Date(); today.setHours(0,0,0,0);
             var now = new Date().toISOString();
 
-            // Season/Checkpoint info
-            if (typeof mcSeasons !== 'undefined' && mcSeasons.length > 0) {
-                var activeSeason = mcSeasons.find(function(s) { return s.active || s.status === 'active'; }) || mcSeasons[0];
-                events.push({ icon: '🎮', color: '#00f0ff', text: 'Welcome to PFLX — ' + (activeSeason.name || 'Season 1'), source: 'mc', date: now });
-            } else {
-                events.push({ icon: '🎮', color: '#00f0ff', text: 'Welcome to PFLX — Ready to play', source: 'mc', date: now });
-            }
+            // No filler lines (June 2026): "Welcome to PFLX" and "X-Bot
+            // Alert: System operational" carried no information and made
+            // the whole bar read as demo data. Every line below reflects
+            // a real platform state or a real recent event.
 
             // Active checkpoint
             if (typeof mcCheckpoints !== 'undefined' && mcCheckpoints.length > 0) {
@@ -12591,16 +12583,15 @@
                 }
             } catch(e) {}
 
-            // X-Bot status
-            events.push({ icon: '🤖', color: '#00d4ff', text: 'X-Bot Alert: System operational', source: 'mc', date: now });
-
-            // Leaderboard #1
+            // Leaderboard #1 — only when somebody has actually earned XC
+            // (a "#1 with 0 XC" line is noise, not news)
             if (typeof mcPlayers !== 'undefined' && mcPlayers.length > 0) {
-                var sorted = mcPlayers.slice().sort(function(a,b) { return (b.xc || 0) - (a.xc || 0); });
+                var sorted = mcPlayers.slice().sort(function(a,b) { return (b.totalXcoin || b.xc || 0) - (a.totalXcoin || a.xc || 0); });
                 var leader = sorted[0];
-                if (leader) {
+                var leaderXC = leader ? (leader.totalXcoin || leader.xc || 0) : 0;
+                if (leader && leaderXC > 0) {
                     var name = leader.brand || leader.brandName || leader.name || 'Player';
-                    events.push({ icon: '🏆', color: '#f5c842', text: 'CURRENT #1 — @' + name + ' leads with ' + (leader.xc || 0).toLocaleString() + ' XC', source: 'mc', date: now });
+                    events.push({ icon: '🏆', color: '#f5c842', text: 'CURRENT #1 — @' + name + ' leads with ' + leaderXC.toLocaleString() + ' XC', source: 'mc', date: now });
                 }
             }
 
@@ -12616,12 +12607,21 @@
             var mcEvents = buildMCTickerEvents();
             var allEvents = mcEvents.concat(_xcoinEvents, _arenaEvents, _dcEvents, _pathwayEvents);
 
+            // ── FRESHNESS WINDOW ── timestamped events older than 48h drop
+            // off the bar. State lines (active checkpoint, live stream,
+            // current #1) carry date:now so they always reflect the present.
+            var cutoff = Date.now() - 48 * 3600 * 1000;
+            allEvents = allEvents.filter(function (ev) {
+                var t = new Date(ev.date || 0).getTime();
+                return isFinite(t) && t >= cutoff;
+            });
+
             // Sort by date descending, cap at 50
             allEvents.sort(function(a,b) { return new Date(b.date).getTime() - new Date(a.date).getTime(); });
             allEvents = allEvents.slice(0, 50);
 
             if (allEvents.length === 0) {
-                el.innerHTML = '<span class="ticker-msg">Welcome to PFLX — No events yet</span>';
+                el.innerHTML = '<span class="ticker-msg" style="color:#5c6480;">PFLX LIVE — quiet right now; new XC awards, completions, and announcements appear here as they happen</span>';
                 return;
             }
 
