@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PFLX Mission Control Recovery</title>
+<!--
+  MC DATA RECOVERY PAGE (June 12, 2026).
+  The pflx_mc_* cloud rows (checkpoints, tasks, badges, modifiers,
+  ranks, studios, projects…) were overwritten by a Console session that
+  pushed mock/empty in-memory state. This page reads THIS BROWSER's
+  localStorage copies of every MC collection — WITHOUT loading any
+  platform code, so nothing here can overwrite anything — compares each
+  against the cloud row, and lets you push the local copy up per
+  collection. A snapshot of the current cloud row is saved to a
+  pflx_backup_* key before every restore write.
+
+  Open this page on the device/browser where MC last had the GOOD data,
+  BEFORE opening the Console there (the Console's boot pull overwrites
+  localStorage with cloud data).
+-->
+<style>
+  body { background:#06090d; color:#cfeefe; font-family: -apple-system, 'Segoe UI', sans-serif; max-width: 860px; margin: 40px auto; padding: 0 20px 60px; }
+  h1 { color:#00d4ff; font-size: 22px; letter-spacing: 0.06em; }
+  .card { background:#0a121f; border:1px solid rgba(0,212,255,0.25); border-radius:12px; padding:16px 20px; margin:14px 0; }
+  .ok { color:#34d399; } .warn { color:#f5c842; } .bad { color:#ef4444; } .dim { color:#5a6280; }
+  table { width:100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align:left; padding: 7px 10px; border-bottom: 1px solid rgba(0,212,255,0.1); }
+  th { color:#00d4ff; font-size: 11px; letter-spacing: 0.08em; }
+  button { padding: 8px 18px; border-radius: 8px; border: 1px solid rgba(0,212,255,0.5); background: rgba(0,212,255,0.12); color:#00d4ff; font-size: 12px; font-weight: 700; letter-spacing: 0.05em; cursor: pointer; }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  button.danger { border-color: rgba(245,200,66,0.5); background: rgba(245,200,66,0.1); color:#f5c842; }
+  .small { font-size: 11px; }
+  pre { white-space: pre-wrap; font-size: 11px; color: #8a92b0; max-height: 140px; overflow:auto; }
+</style>
+</head>
+<body>
+<h1>🛟 Mission Control Data Recovery</h1>
+<div class="card" id="intro">
+  Reading this browser's saved Mission Control data… No platform code runs on
+  this page — nothing is written until you click a RESTORE button.
+</div>
+<div class="card">
+  <table id="tbl">
+    <thead><tr><th>COLLECTION</th><th>THIS BROWSER</th><th>CLOUD NOW</th><th>VERDICT</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+<div class="card small dim" id="log"></div>
+<script>
+const SUPABASE_URL = 'https://hyxiagexyptzvetqjmnj.supabase.co';
+const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh5eGlhZ2V4eXB0enZldHFqbW5qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwODM4MTYsImV4cCI6MjA4OTY1OTgxNn0.hqHVlRu775dZfJrKxSFMNEPhANu5EFm7gJpaJ3RnbnY';
+const HDRS = { apikey: ANON, Authorization: 'Bearer ' + ANON, 'Content-Type': 'application/json' };
+
+// Collections at risk (skip players — roster already recovered separately)
+const TYPES = ['checkpoints','tasks','projects','badges','modifiers','pflxranks','studios','seasons','pitches','cohortgroups','gameconfig','onboarding','sessions','announcements','jobs'];
+// Legacy localStorage fallbacks for older builds
+const LEGACY_LS = { checkpoints: 'pflx_checkpoints', tasks: 'pflx_tasks' };
+
+const logEl = document.getElementById('log');
+function log(s) { logEl.innerHTML += s + '<br>'; }
+
+function readLocal(t) {
+  try {
+    let raw = localStorage.getItem('pflx_mc_' + t);
+    if ((!raw || raw === '[]' || raw === 'null') && LEGACY_LS[t]) raw = localStorage.getItem(LEGACY_LS[t]);
+    if (!raw) return null;
+    const v = JSON.parse(raw);
+    return v;
+  } catch (e) { return null; }
+}
+
+function count(v) {
+  if (Array.isArray(v)) return v.length;
+  if (v && typeof v === 'object') return Object.keys(v).length;
+  return v == null ? 0 : 1;
+}
+
+function label(v) {
+  const n = count(v);
+  if (v == null) return '<span class="dim">— none —</span>';
+  const names = Array.isArray(v) ? v.slice(0,3).map(x => (x && (x.title || x.name) || '').slice(0,24)).filter(Boolean).join(', ') : '';
+  return n + ' item' + (n === 1 ? '' : 's') + (names ? ' <span class="dim">(' + names + '…)</span>' : '');
+}
+
+async function cloudGet(key) {
+  const r = await fetch(SUPABASE_URL + '/rest/v1/app_data?key=eq.' + key + '&select=data', { headers: HDRS });
+  if (!r.ok) return null;
+  const rows = await r.json();
+  return rows.length ? rows[0].data : null;
+}
+
+async function cloudPut(key, data) {
+  const r = await fetch(SUPABASE_URL + '/rest/v1/app_data?on_conflict=key', {
+    method: 'POST',
+    headers: { ...HDRS, Prefer: 'resolution=merge-duplicates' },
+    body: JSON.stringify({ key, data, updated_at: new Date().toISOString() }),
+  });
+  return r.ok;
+}
+
+async function restore(t, localVal, btn) {
+  btn.disabled = true; btn.textContent = '⟳ …';
+  const key = 'pflx_mc_' + t;
+  try {
+    // 1. snapshot current cloud row first (recovery rule)
+    const cur = await cloudGet(key);
+    if (cur !== null) {
+      await cloudPut('pflx_backup_' + key + '_2026-06-12_pre-mc-recovery', cur);
+    }
+    // 2. write the canonical MC row ({items, updatedAt} wrapper)
+    const ok1 = await cloudPut(key, { items: localVal, updatedAt: Date.now() });
+    // 3. legacy mirror rows X-Coin reads (raw array, no wrapper)
+    let ok2 = true;
+    if (t === 'checkpoints') ok2 = await cloudPut('checkpoints', localVal);
+    if (t === 'tasks') ok2 = await cloudPut('tasks', localVal);
+    if (t === 'projects') ok2 = await cloudPut('projects', localVal);
+    if (t === 'pflxranks') ok2 = await cloudPut('pflxRanks', localVal);
+    if (ok1 && ok2) { btn.textContent = '✓ RESTORED'; btn.className = ''; btn.style.color = '#34d399'; log('✓ ' + key + ' restored (' + count(localVal) + ' items, cloud snapshot saved)'); }
+    else { btn.textContent = '✗ FAILED'; btn.disabled = false; log('<span class="bad">✗ ' + key + ' write failed</span>'); }
+  } catch (e) {
+    btn.textContent = '✗ FAILED'; btn.disabled = false;
+    log('<span class="bad">✗ ' + key + ': ' + e + '</span>');
+  }
+}
+
+(async function main() {
+  const tbody = document.querySelector('#tbl tbody');
+  let anyGood = false;
+  for (const t of TYPES) {
+    const localVal = readLocal(t);
+    let cloudVal = null;
+    try {
+      cloudVal = await cloudGet('pflx_mc_' + t);
+      if (cloudVal && cloudVal.items !== undefined) cloudVal = cloudVal.items;
+    } catch (e) { /* offline */ }
+
+    const ln = count(localVal), cn = count(cloudVal);
+    let verdict, action = '';
+    if (localVal == null) verdict = '<span class="dim">nothing saved here</span>';
+    else if (ln > cn) { verdict = '<span class="ok">LOCAL IS RICHER — restore?</span>'; action = 'restore'; anyGood = true; }
+    else if (ln === cn) { verdict = '<span class="dim">same size</span>'; action = 'restore'; }
+    else { verdict = '<span class="warn">cloud has more — leave it</span>'; action = 'restore-careful'; }
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td><strong>' + t + '</strong></td><td>' + label(localVal) + '</td><td>' + label(cloudVal) + '</td><td>' + verdict + '</td><td></td>';
+    if (action && localVal != null) {
+      const btn = document.createElement('button');
+      btn.textContent = 'RESTORE ↑';
+      if (action === 'restore-careful') { btn.className = 'danger'; btn.title = 'Cloud currently has MORE items than this browser — only restore if you know the cloud copy is the bad one.'; }
+      btn.onclick = () => restore(t, localVal, btn);
+      tr.lastElementChild.appendChild(btn);
+    }
+    tbody.appendChild(tr);
+  }
+  document.getElementById('intro').innerHTML = anyGood
+    ? '<span class="ok">This browser has MC collections that are richer than the cloud.</span> Review each row and click RESTORE ↑ on the ones that look right (titles shown in grey). A cloud snapshot is saved before every write.'
+    : 'This browser has no MC data richer than the cloud. If another device/browser ran Mission Control before today, open this page THERE (before opening the Console on it).';
+})();
+</script>
+</body>
+</html>

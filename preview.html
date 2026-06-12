@@ -20102,6 +20102,13 @@
         function mcCloudSync(type) {
             var xcoinFrame = document.getElementById('xcoin-frame');
             if (!xcoinFrame || !xcoinFrame.contentWindow) return;
+            // STOMP GUARD — same rules as mcCloudPush: this path persists to
+            // the legacy Supabase keys via the X-Coin iframe, so it must not
+            // run before the boot pull either (June 12 incident).
+            if (!_mcCloudPulledOnce) {
+                console.warn('[MC→X-Coin sync] ✋ blocked — boot pull has not completed yet (' + type + ')');
+                return;
+            }
             var syncMap = {
                 'players': { key: 'users', data: mcPlayers },
                 'checkpoints': { key: 'checkpoints', data: mcCheckpoints },
@@ -20122,16 +20129,23 @@
                 'pflxranks': { key: 'pflxRanks', data: mcPflxRanks },
                 'sessions': { key: 'sessions', data: mcSessions },
             };
-            if (type === 'all') {
-                Object.keys(syncMap).forEach(function(k) {
-                    xcoinFrame.contentWindow.postMessage(JSON.stringify({
-                        type: 'pflx_cloud_save', key: syncMap[k].key, data: syncMap[k].data
-                    }), '*');
-                });
-            } else if (syncMap[type]) {
+            // STOMP GUARD 2 for this path too: empty local data never
+            // overwrites a cloud row that had items at pull time.
+            function _syncOne(k) {
+                var d = syncMap[k].data;
+                var n = Array.isArray(d) ? d.length : (d && typeof d === 'object') ? Object.keys(d).length : 0;
+                if (n === 0 && (_mcCloudBaseline[k] || 0) > 0) {
+                    console.warn('[MC→X-Coin sync] ✋ blocked for "' + k + '" — local copy empty, cloud had ' + _mcCloudBaseline[k] + ' items.');
+                    return;
+                }
                 xcoinFrame.contentWindow.postMessage(JSON.stringify({
-                    type: 'pflx_cloud_save', key: syncMap[type].key, data: syncMap[type].data
+                    type: 'pflx_cloud_save', key: syncMap[k].key, data: d
                 }), '*');
+            }
+            if (type === 'all') {
+                Object.keys(syncMap).forEach(_syncOne);
+            } else if (syncMap[type]) {
+                _syncOne(type);
             }
         }
 
@@ -20151,6 +20165,16 @@
         var _mcApplyingCloud = false;     // true while a cloud pull is writing in
         var _mcCloudQueue = {};
         var _mcCloudTimer = null;
+        // ── STOMP GUARD (added after the June 12 incident: a session with
+        //    mock/empty in-memory state pushed 'all' and wiped the shared
+        //    checkpoints/tasks/badges rows for everyone) ──
+        //  1. No cloud push of any kind until this dashboard completes ONE
+        //     boot pull — stale/mock memory can never race the cloud on
+        //     startup or via Save All Settings.
+        //  2. A collection that is EMPTY locally never overwrites a cloud
+        //     row that had items at pull time (per-type baseline counts).
+        var _mcCloudPulledOnce = false;
+        var _mcCloudBaseline = {};        // type → item count seen at last pull
 
         function _mcCollectionFor(type) {
             switch (type) {
@@ -20246,10 +20270,26 @@
         }
         function mcCloudPush(type) {
             if (_mcApplyingCloud) return;   // don't echo a cloud pull straight back
+            // STOMP GUARD 1 — never push before this dashboard has completed
+            // one boot pull. Memory could still be mock seeds; pushing it
+            // wipes the shared rows for everyone (June 12 incident).
+            if (!_mcCloudPulledOnce) {
+                console.warn('[MC cloud] ✋ push blocked — boot pull has not completed yet (' + type + ')');
+                return;
+            }
             var list = (type === 'all') ? MC_CLOUD_TYPES : [type];
             list.forEach(function (t) {
                 var coll = _mcCollectionFor(t);
-                if (typeof coll !== 'undefined') _mcCloudQueue[t] = coll;
+                if (typeof coll === 'undefined') return;
+                // STOMP GUARD 2 — an empty local collection never overwrites
+                // a cloud row that had items at pull time.
+                var n = Array.isArray(coll) ? coll.length
+                      : (coll && typeof coll === 'object') ? Object.keys(coll).length : 0;
+                if (n === 0 && (_mcCloudBaseline[t] || 0) > 0) {
+                    console.warn('[MC cloud] ✋ push blocked for "' + t + '" — local copy is EMPTY but cloud had ' + _mcCloudBaseline[t] + ' items. Refusing to wipe.');
+                    return;
+                }
+                _mcCloudQueue[t] = coll;
             });
             if (!Object.keys(_mcCloudQueue).length) return;
             if (_mcCloudTimer) clearTimeout(_mcCloudTimer);
@@ -20290,10 +20330,20 @@
                 var changed = [];
                 res.data.forEach(function (row) {
                     if (!row || !row.key) return;
+                    // Record per-type baseline counts for STOMP GUARD 2.
+                    try {
+                        var bt = String(row.key).replace('pflx_mc_', '');
+                        var bi = (row.data && row.data.items !== undefined) ? row.data.items : row.data;
+                        _mcCloudBaseline[bt] = Array.isArray(bi) ? bi.length
+                            : (bi && typeof bi === 'object') ? Object.keys(bi).length : 0;
+                    } catch (e) {}
                     if (_mcIngestCloudRow(row.key, row.data)) {
                         changed.push(String(row.key).replace('pflx_mc_', ''));
                     }
                 });
+                // Pull completed (even with zero rows on a fresh org) —
+                // pushes are now allowed (STOMP GUARD 1).
+                _mcCloudPulledOnce = true;
                 if (changed.length) {
                     console.log('[MC cloud] ✓ pulled', changed.join(', '));
                     _mcAfterCloudChange(changed);
@@ -20325,6 +20375,12 @@
                             if (String(row.key).indexOf('pflx_mc_') !== 0) return;
                             if (_mcIngestCloudRow(row.key, row.data)) {
                                 var t = String(row.key).replace('pflx_mc_', '');
+                                // keep the stomp-guard baseline current
+                                try {
+                                    var ri = (row.data && row.data.items !== undefined) ? row.data.items : row.data;
+                                    _mcCloudBaseline[t] = Array.isArray(ri) ? ri.length
+                                        : (ri && typeof ri === 'object') ? Object.keys(ri).length : 0;
+                                } catch (e) {}
                                 console.log('[MC cloud] ← realtime update:', t);
                                 _mcAfterCloudChange([t]);
                             }
