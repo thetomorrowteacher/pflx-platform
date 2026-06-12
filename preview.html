@@ -10755,6 +10755,7 @@
                             <p style="color: #6a7290; font-size: 13px; margin-bottom: 10px; font-family: 'Jura', sans-serif;">Prototype FLX & TheTomorrowTeacher — tiered access by rank</p>
                             <div style="display:flex;gap:8px;margin-bottom:16px;">
                                 <button class="hmc-btn hmc-btn-green" onclick="hmcSaveAllSettings()" id="hmc-save-all-btn">💾 Save All Settings</button>
+                                <button class="hmc-btn" onclick="pflxCreateSavePoint()" id="hmc-savepoint-btn" style="border-color:rgba(245,200,66,0.5);color:#f5c842;" title="Snapshot EVERY app's cloud data (players, tasks, checkpoints, badges, DarkCampus, X-Coin…) to a downloadable backup file — this becomes the new restore reference.">🛟 Create Save Point</button>
                                 <span id="hmc-save-status" style="color:var(--green);font-family:'Rajdhani',sans-serif;font-size:13px;align-self:center;opacity:0;transition:opacity 0.3s;"></span>
                             </div>
 
@@ -14908,6 +14909,48 @@
             });
             hmcAddBroadcast(hmcLockdownActive ? '🔒 LOCKDOWN ACTIVATED — All apps locked' : '🔓 Lockdown lifted — All apps unlocked');
         }
+
+        // ── Create Save Point — snapshot EVERY app's cloud data ──
+        // All PFLX apps persist to the same Supabase app_data table, so one
+        // snapshot covers Console/MC, X-Coin, Pathways, Arena and DarkCampus.
+        // Downloads a JSON file (same format as the restore backups) and
+        // writes a small pflx_last_savepoint marker row.
+        window.pflxCreateSavePoint = async function () {
+            var btn = document.getElementById('hmc-savepoint-btn');
+            try {
+                var sb = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (!sb) { if (typeof pflxToast === 'function') pflxToast('Cloud not reachable', 'error'); return; }
+                if (btn) { btn.disabled = true; btn.textContent = '🛟 Snapshotting…'; }
+                var rows = [], off = 0;
+                while (true) {
+                    var res = await sb.from('app_data').select('key, data, updated_at').order('key').range(off, off + 49);
+                    if (res.error) throw res.error;
+                    rows = rows.concat(res.data || []);
+                    if (!res.data || res.data.length < 50) break;
+                    off += 50;
+                }
+                var stamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+                var blob = new Blob([JSON.stringify(rows, null, 1)], { type: 'application/json' });
+                var a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'pflx-savepoint-' + stamp + '.json';
+                document.body.appendChild(a); a.click(); a.remove();
+                setTimeout(function () { try { URL.revokeObjectURL(a.href); } catch (e) {} }, 5000);
+                // Small marker row — apps/handoffs can reference the latest save point
+                try {
+                    await sb.from('app_data').upsert({
+                        key: 'pflx_last_savepoint',
+                        data: { at: new Date().toISOString(), rows: rows.length, by: 'host-console' },
+                        updated_at: new Date().toISOString()
+                    }, { onConflict: 'key' });
+                } catch (e) {}
+                if (typeof pflxToast === 'function') pflxToast('🛟 Save point created — ' + rows.length + ' collections downloaded. Keep this file safe; it is the new restore reference.', 'success');
+            } catch (e) {
+                console.warn('[savepoint] failed', e);
+                if (typeof pflxToast === 'function') pflxToast('Save point failed: ' + (e && e.message || e), 'error');
+            }
+            if (btn) { btn.disabled = false; btn.textContent = '🛟 Create Save Point'; }
+        };
 
         // ── Save All Host Settings ──
         function hmcSaveAllSettings() {
