@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PFLX Roster Recovery</title>
+<!--
+  ONE-TIME RECOVERY PAGE (June 2026).
+  The cloud `users` row was restored from the March 31 backup after a
+  bad cleanup query. This browser's localStorage (pflx_mc_players) holds
+  the NEWER roster. This page merges the two — local wins for players it
+  knows, cloud entries missing locally are kept — filters out the three
+  demo accounts (player-1/2/3), shows you the diff, and pushes the merged
+  roster back to the cloud only when you click RESTORE.
+  No platform code runs on this page, so nothing can overwrite anything
+  until you decide.
+-->
+<style>
+  body { background:#06090d; color:#cfeefe; font-family: -apple-system, 'Segoe UI', sans-serif; max-width: 760px; margin: 40px auto; padding: 0 20px; }
+  h1 { color:#00d4ff; font-size: 22px; letter-spacing: 0.06em; }
+  .card { background:#0a121f; border:1px solid rgba(0,212,255,0.25); border-radius:12px; padding:18px 20px; margin:16px 0; }
+  .ok { color:#34d399; } .warn { color:#f5c842; } .bad { color:#ef4444; }
+  button { padding: 12px 28px; border-radius: 10px; border: 1px solid rgba(0,212,255,0.5); background: rgba(0,212,255,0.12); color:#00d4ff; font-size: 14px; font-weight: 700; letter-spacing: 0.08em; cursor: pointer; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  ul { margin: 8px 0; padding-left: 20px; } li { margin: 2px 0; font-size: 13px; }
+  pre { white-space: pre-wrap; font-size: 12px; color: #8a92b0; }
+</style>
+</head>
+<body>
+<h1>🛟 PFLX Roster Recovery</h1>
+<div class="card" id="status">Reading this browser's saved roster…</div>
+<div class="card">
+  <button id="go" disabled>RESTORE MERGED ROSTER TO CLOUD</button>
+  <div id="result" style="margin-top:12px;"></div>
+</div>
+<script>
+const SUPABASE_URL = 'https://hyxiagexyptzvetqjmnj.supabase.co';
+const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh5eGlhZ2V4eXB0enZldHFqbW5qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwODM4MTYsImV4cCI6MjA4OTY1OTgxNn0.hqHVlRu775dZfJrKxSFMNEPhANu5EFm7gJpaJ3RnbnY';
+const DEMO = new Set(['player-1','player-2','player-3']);
+const statusEl = document.getElementById('status');
+const resultEl = document.getElementById('result');
+const goBtn = document.getElementById('go');
+let merged = null;
+
+async function init() {
+  let local = [];
+  try { local = JSON.parse(localStorage.getItem('pflx_mc_players') || '[]'); } catch (e) {}
+  local = (Array.isArray(local) ? local : []).filter(p => p && p.id && !DEMO.has(p.id));
+
+  let cloud = [];
+  try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/app_data?key=eq.users&select=data', {
+      headers: { apikey: ANON, Authorization: 'Bearer ' + ANON } });
+    const rows = await r.json();
+    cloud = (rows[0] && Array.isArray(rows[0].data)) ? rows[0].data : [];
+  } catch (e) {
+    statusEl.innerHTML = '<span class="bad">Could not reach the cloud: ' + e.message + '</span>';
+    return;
+  }
+  cloud = cloud.filter(p => p && p.id && !DEMO.has(p.id));
+
+  const localIds = new Set(local.map(p => p.id));
+  const cloudIds = new Set(cloud.map(p => p.id));
+  const onlyLocal = local.filter(p => !cloudIds.has(p.id));
+  const onlyCloud = cloud.filter(p => !localIds.has(p.id));
+
+  if (!local.length) {
+    statusEl.innerHTML = '<span class="warn">This browser has no saved roster (pflx_mc_players is empty).</span> ' +
+      'Open this page in the browser you normally run the PFLX Console in. The cloud currently holds <b>' + cloud.length + '</b> players.';
+    return;
+  }
+
+  // LOCAL WINS for players both sides know (local is the freshest full
+  // state); cloud-only entries are kept so nothing is lost either way.
+  merged = local.concat(onlyCloud);
+
+  statusEl.innerHTML =
+    '<div class="ok">✓ This browser holds <b>' + local.length + '</b> players · cloud holds <b>' + cloud.length + '</b>.</div>' +
+    (onlyLocal.length ? '<div class="warn" style="margin-top:8px;">Players ONLY in this browser (these are the ones being rescued):</div><ul>' +
+      onlyLocal.map(p => '<li>' + (p.brand || p.brandName || p.name || p.id) + '</li>').join('') + '</ul>' : '<div style="margin-top:8px;">No browser-only players — cloud already has everyone here.</div>') +
+    (onlyCloud.length ? '<div style="margin-top:8px;">Players only in the cloud (kept as-is): ' + onlyCloud.length + '</div>' : '') +
+    '<div style="margin-top:8px;">Merged roster will contain <b>' + merged.length + '</b> players. Demo accounts (player-1/2/3) are excluded.</div>';
+  goBtn.disabled = false;
+}
+
+goBtn.onclick = async () => {
+  goBtn.disabled = true;
+  resultEl.textContent = 'Pushing…';
+  try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/app_data?key=eq.users', {
+      method: 'PATCH',
+      headers: { apikey: ANON, Authorization: 'Bearer ' + ANON,
+                 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify({ data: merged, updated_at: new Date().toISOString() })
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    resultEl.innerHTML = '<span class="ok">✓ Restored ' + merged.length + ' players to the cloud. You can open the PFLX Console normally now.</span>';
+  } catch (e) {
+    resultEl.innerHTML = '<span class="bad">Push failed: ' + e.message + ' — try again.</span>';
+    goBtn.disabled = false;
+  }
+};
+init();
+</script>
+</body>
+</html>
