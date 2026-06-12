@@ -39158,7 +39158,11 @@
             // OR a server-side proxy key.
             availableModels() {
                 const avail = [];
-                if (this.keys.localUrl) avail.push('local');
+                // the 'local' slot = the value engine: a host-configured
+                // OpenAI-compatible URL on THIS device, OR DeepSeek via the
+                // server-side proxy (DEEPSEEK_API_KEY in Vercel env) which
+                // works for EVERY user on every device
+                if (this.keys.localUrl || this.proxy.providers.deepseek) avail.push('local');
                 if (this.keys.claude || this.proxy.providers.anthropic) avail.push('claude');
                 if (this.keys.gemini || this.proxy.providers.gemini) avail.push('gemini');
                 if (this.keys.openai || this.proxy.providers.openai) avail.push('openai');
@@ -39544,6 +39548,11 @@ RESPONSE RULES:
             // is blocked by mixed-content rules, so run the model on the
             // same machine as the browser (or open the Console locally).
             async callLocal(systemPrompt, messages) {
+                // no device-local URL configured → DeepSeek via the proxy
+                // (server-side key, works for all users on all devices)
+                if (!this.keys.localUrl && this.proxy.providers.deepseek) {
+                    return this.callProxy('deepseek', systemPrompt, messages);
+                }
                 let base = (this.keys.localUrl || '').trim().replace(/\/+$/, '');
                 // a pasted API key is not a URL — catch the classic mistake
                 if (!/^https?:\/\//i.test(base)) {
@@ -39851,7 +39860,7 @@ RESPONSE RULES:
             const p = XBOT_AI.proxy;
             if (!p.probed) { el.innerHTML = '<span style="color:#6a7290;">AI PROXY: checking…</span>'; return; }
             if (!p.ok) { el.innerHTML = '<span style="color:#6a7290;">AI PROXY: unreachable</span>'; return; }
-            const on = ['anthropic','openai','gemini'].filter(k => p.providers[k]);
+            const on = ['anthropic','openai','gemini','deepseek'].filter(k => p.providers[k]);
             el.innerHTML = on.length
                 ? `<span style="color:#34d399;">AI PROXY: server-side keys active (${on.join(', ')}) — works on every device, nothing to save here</span>`
                 : '<span style="color:#f97316;">AI PROXY online, no server keys yet — set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY in the pflx-pathway-portal Vercel env</span>';
