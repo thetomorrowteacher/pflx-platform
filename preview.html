@@ -2621,17 +2621,20 @@
         .pflx-tutorial-tooltip-footer {
             padding: 12px 22px 16px; display: flex; align-items: center; justify-content: space-between;
             border-top: 1px solid rgba(0,240,255,0.08);
+            /* dots + 3 buttons can exceed the tooltip width on long tours —
+               wrap the nav row underneath instead of overflowing the card */
+            flex-wrap: wrap; gap: 10px;
         }
         .pflx-tutorial-dots {
-            display: flex; gap: 6px; align-items: center;
+            display: flex; gap: 5px; align-items: center; flex-wrap: wrap; max-width: 100%;
         }
         .pflx-tutorial-dots .dot {
-            width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.15); transition: all 0.3s;
+            width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,0.15); transition: all 0.3s; flex-shrink: 0;
         }
-        .pflx-tutorial-dots .dot.active { background: #00f0ff; box-shadow: 0 0 8px rgba(0,240,255,0.5); width: 10px; height: 10px; }
+        .pflx-tutorial-dots .dot.active { background: #00f0ff; box-shadow: 0 0 8px rgba(0,240,255,0.5); width: 9px; height: 9px; }
         .pflx-tutorial-dots .dot.done { background: rgba(0,240,255,0.4); }
         .pflx-tutorial-nav {
-            display: flex; gap: 8px; align-items: center;
+            display: flex; gap: 8px; align-items: center; margin-left: auto;
         }
         .tut-btn {
             padding: 7px 16px; border-radius: 8px; cursor: pointer; font-family: 'Orbitron', sans-serif;
@@ -38273,7 +38276,7 @@
                 {
                     selector: '.nav-btn[data-view="pathways"]',
                     title: 'CORE PATHWAYS',
-                    body: 'Your learning universe — literally. Fly your ship through open space, dock at station nodes to start courses and projects, blast asteroid fields for XC, and found your legacy. WASD flies, SHIFT boosts, SPACE fires.',
+                    body: 'Your learning universe — literally. Fly your ship through open space, dock at station nodes to start courses and projects, blast asteroid fields for XC. ↑ thrusts forward, steer with your mouse or arrows, SHIFT boosts, SPACE fires.',
                     position: 'below'
                 },
                 {
@@ -38375,6 +38378,9 @@
             function renderWelcome() {
                 var el = document.getElementById('pflx-tutorial-welcome');
                 if (!el) return;
+                // full-screen card → the dim layer is back on duty
+                var dimEl = document.getElementById('pflx-tutorial-dim');
+                if (dimEl) dimEl.style.display = 'block';
                 el.style.display = 'flex';
                 el.innerHTML = '<div class="pflx-tutorial-welcome-card">'
                     + '<img src="public/PFLX Core Flat 6.png" alt="PFLX">'
@@ -38406,6 +38412,9 @@
                 var tip = document.getElementById('pflx-tutorial-tooltip');
                 if (spot) spot.style.display = 'none';
                 if (tip) tip.style.display = 'none';
+                // full-screen card → restore the dim layer
+                var dimEl = document.getElementById('pflx-tutorial-dim');
+                if (dimEl) dimEl.style.display = 'block';
                 el.style.display = 'flex';
                 el.innerHTML = '<div class="pflx-tutorial-welcome-card">'
                     + '<div style="font-size:48px;margin-bottom:12px;">&#x1F3AE;</div>'
@@ -38441,6 +38450,12 @@
                 // target vanished since the tour started (view change, gating)
                 // → skip forward instead of stranding on a stale spotlight
                 if (!target) { window.pflxTutNext(); return; }
+
+                // The spotlight's own 9999px box-shadow IS the dim — the
+                // separate dim layer must hide during spotlight steps or it
+                // darkens the highlighted target too (double-dim bug).
+                var dimEl = document.getElementById('pflx-tutorial-dim');
+                if (dimEl) dimEl.style.display = 'none';
 
                 var rect = target.getBoundingClientRect();
                 var pad = 8;
