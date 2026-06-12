@@ -18275,6 +18275,7 @@
                 }
             } catch (e) {}
             try { renderApprovalsCard(); } catch (e) {}
+            try { _pflxPullApprovalFeeds(); } catch (e) {}
         }
 
         // ─────────────────────────────────────────────────────────────────
@@ -18288,7 +18289,59 @@
         }
         function _pflxSaveRewardRequests(arr) {
             try { localStorage.setItem('pflx_mc_reward_requests', JSON.stringify(arr)); } catch (e) {}
+            // Cloud mirror — the queue used to be localStorage-only, so a
+            // host on another device/browser never saw pending requests.
+            try {
+                var sb = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (sb) sb.from('app_data').upsert(
+                    { key: 'pflx_mc_reward_requests', data: arr, updated_at: new Date().toISOString() },
+                    { onConflict: 'key' }
+                ).then(function () {}, function (e) { console.warn('[approvals] reward-request cloud save failed', e); });
+            } catch (e) {}
         }
+        // ── Cloud approval feeds (X-Coin submissions + trades + reward
+        //    requests) — pulled so the host home card aggregates EVERY app's
+        //    pending items no matter which device/browser produced them. ──
+        var _pflxCloudSubs = [];          // X-Coin 'submissions' row (incl. Pathways node submissions)
+        var _pflxCloudTrades = [];        // X-Coin 'trades' row
+        var _pflxFeedsFetchedAt = 0;
+        function _pflxPullApprovalFeeds(force) {
+            try {
+                if (!force && Date.now() - _pflxFeedsFetchedAt < 15000) return;
+                var sb = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (!sb) return;
+                _pflxFeedsFetchedAt = Date.now();
+                sb.from('app_data').select('key, data').in('key', ['submissions', 'trades', 'pflx_mc_reward_requests'])
+                  .then(function (res) {
+                    if (!res || !res.data) return;
+                    var changed = false;
+                    res.data.forEach(function (row) {
+                        if (!row) return;
+                        if (row.key === 'submissions' && Array.isArray(row.data)) { _pflxCloudSubs = row.data; changed = true; }
+                        if (row.key === 'trades' && Array.isArray(row.data)) { _pflxCloudTrades = row.data; changed = true; }
+                        if (row.key === 'pflx_mc_reward_requests' && Array.isArray(row.data)) {
+                            // merge cloud into local by id — resolved status wins
+                            try {
+                                var local = _pflxLoadRewardRequests();
+                                var byId = {};
+                                local.forEach(function (r) { if (r && r.id) byId[r.id] = r; });
+                                row.data.forEach(function (r) {
+                                    if (!r || !r.id) return;
+                                    var cur = byId[r.id];
+                                    if (!cur || (cur.status === 'pending' && r.status !== 'pending')) byId[r.id] = r;
+                                });
+                                var merged = Object.keys(byId).map(function (k) { return byId[k]; });
+                                merged.sort(function (a, b) { return new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0); });
+                                localStorage.setItem('pflx_mc_reward_requests', JSON.stringify(merged.slice(0, 500)));
+                                changed = true;
+                            } catch (e) {}
+                        }
+                    });
+                    if (changed) { try { renderApprovalsCard(); } catch (e) {} }
+                  }, function (e) { console.warn('[approvals] feed pull failed', e); });
+            } catch (e) {}
+        }
+        window._pflxPullApprovalFeeds = _pflxPullApprovalFeeds;
         function _pflxPlayerBrandById(id) {
             try {
                 if (typeof PLAYERS === 'undefined') return null;
@@ -18341,6 +18394,45 @@
                 }
             } catch (e) {}
 
+            // 3. X-Coin badge submissions + Core Pathways node submissions
+            //    (both live in the shared cloud 'submissions' queue; node
+            //    submissions are tagged with nodeId by pathway.html)
+            try {
+                (_pflxCloudSubs || []).forEach(function (s) {
+                    if (!s || s.status !== 'pending') return;
+                    var isNode = !!s.nodeId;
+                    items.push({
+                        kind: 'coinsub',
+                        id: s.id,
+                        submittedAt: s.submittedAt,
+                        brand: s.brand || _pflxPlayerBrandById(s.playerId) || 'Player',
+                        title: (isNode ? '🛰 Pathways: ' : '🏅 Badge: ') + (s.coinType || 'Digital Badge'),
+                        sub: s.reason || '',
+                        link: s.evidenceUrl || '',
+                        file: ''
+                    });
+                });
+            } catch (e) {}
+
+            // 4. X-Coin peer trades awaiting host approval — settlement
+            //    logic (escrow, both balances, transactions) lives in
+            //    X-Coin, so these deep-link there instead of inline buttons.
+            try {
+                (_pflxCloudTrades || []).forEach(function (t) {
+                    if (!t || t.status !== 'pending') return;
+                    items.push({
+                        kind: 'trade',
+                        id: t.id,
+                        submittedAt: t.createdAt,
+                        brand: _pflxPlayerBrandById(t.fromId) || 'Player',
+                        title: '🔁 Trade: ' + (t.amount || 0).toLocaleString() + ' XC → ' + (_pflxPlayerBrandById(t.toId) || 'Player'),
+                        sub: t.note || '',
+                        link: '',
+                        file: ''
+                    });
+                });
+            } catch (e) {}
+
             // Sort newest-first
             items.sort(function (a, b) {
                 return new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0);
@@ -18355,8 +18447,8 @@
 
             // Render up to 10 — full list lives in MC Approvals tab
             listEl.innerHTML = items.slice(0, 10).map(function (it) {
-                var icon = it.kind === 'reward' ? '🎯' : '📋';
-                var color = it.kind === 'reward' ? '#a78bfa' : '#00d4ff';
+                var icon = it.kind === 'reward' ? '🎯' : it.kind === 'coinsub' ? '🏅' : it.kind === 'trade' ? '🔁' : '📋';
+                var color = it.kind === 'reward' ? '#a78bfa' : it.kind === 'coinsub' ? '#f5c842' : it.kind === 'trade' ? '#3b82f6' : '#00d4ff';
                 var dataKind = it.kind;
                 var dataId = String(it.id || '').replace(/'/g, '');
                 var linkHtml = it.link
@@ -18374,10 +18466,14 @@
                     '</div>' +
                     (it.sub ? '<div style="font-size:12px;color:rgba(255,255,255,0.6);margin-bottom:8px;font-family:\'Jura\',sans-serif;line-height:1.5;">' + escapeHtml(String(it.sub).substring(0, 240)) + '</div>' : '') +
                     (linkHtml || fileHtml ? '<div style="margin-bottom:10px;">' + linkHtml + fileHtml + '</div>' : '') +
-                    '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
-                        '<button onclick="pflxApproveSubmission(\'' + dataKind + '\',\'' + escapeHtml(dataId) + '\')" style="padding:7px 14px;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;border:none;border-radius:6px;font-family:\'Share Tech Mono\',monospace;font-size:11px;font-weight:800;letter-spacing:0.06em;cursor:pointer;">✓ APPROVE</button>' +
-                        '<button onclick="pflxDenySubmission(\'' + dataKind + '\',\'' + escapeHtml(dataId) + '\')" style="padding:7px 14px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.4);color:#ef4444;border-radius:6px;font-family:\'Share Tech Mono\',monospace;font-size:11px;font-weight:700;letter-spacing:0.06em;cursor:pointer;">✗ DENY</button>' +
-                    '</div>' +
+                    (it.kind === 'trade'
+                        ? '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+                            '<button onclick="try{navigateTo(\'xcoin\')}catch(e){}" style="padding:7px 14px;background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.45);color:#6cb2ff;border-radius:6px;font-family:\'Share Tech Mono\',monospace;font-size:11px;font-weight:700;letter-spacing:0.06em;cursor:pointer;">⇲ REVIEW IN X-COIN</button>' +
+                          '</div>'
+                        : '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+                            '<button onclick="pflxApproveSubmission(\'' + dataKind + '\',\'' + escapeHtml(dataId) + '\')" style="padding:7px 14px;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;border:none;border-radius:6px;font-family:\'Share Tech Mono\',monospace;font-size:11px;font-weight:800;letter-spacing:0.06em;cursor:pointer;">✓ APPROVE</button>' +
+                            '<button onclick="pflxDenySubmission(\'' + dataKind + '\',\'' + escapeHtml(dataId) + '\')" style="padding:7px 14px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.4);color:#ef4444;border-radius:6px;font-family:\'Share Tech Mono\',monospace;font-size:11px;font-weight:700;letter-spacing:0.06em;cursor:pointer;">✗ DENY</button>' +
+                          '</div>') +
                 '</div>';
             }).join('');
         }
@@ -18431,10 +18527,70 @@
                             mcApproveTask(idx);
                         }
                     }
+                } else if (kind === 'coinsub') {
+                    // X-Coin badge submission OR Core Pathways node submission
+                    // (shared cloud 'submissions' queue). Mirrors X-Coin's own
+                    // approve: badge count + XC (from the badge catalog) via
+                    // PflxDataBus.award, then the row is saved back so X-Coin's
+                    // admin view shows it as approved too.
+                    _pflxResolveCoinSub(id, 'approved', '');
                 }
                 renderApprovalsCard();
             } catch (e) { console.warn('[approvals] approve failed', e); }
         };
+
+        // Badge catalog lookup: XC value + category key for a badge name.
+        function _pflxCoinDef(coinType) {
+            var out = { xc: 100, category: 'primary' };
+            try {
+                var cats = (typeof mcBadges !== 'undefined' && Array.isArray(mcBadges)) ? mcBadges : [];
+                for (var i = 0; i < cats.length; i++) {
+                    var coins = cats[i].coins || [];
+                    for (var j = 0; j < coins.length; j++) {
+                        if (coins[j].name === coinType) {
+                            if (typeof coins[j].xc === 'number') out.xc = coins[j].xc;
+                            var cn = String(cats[i].name || '').toLowerCase();
+                            if (cn.indexOf('premium') >= 0) out.category = 'premium';
+                            else if (cn.indexOf('executive') >= 0) out.category = 'executive';
+                            else if (cn.indexOf('signature') >= 0) out.category = 'signature';
+                            return out;
+                        }
+                    }
+                }
+            } catch (e) {}
+            return out;
+        }
+
+        function _pflxResolveCoinSub(id, status, note) {
+            var i = (_pflxCloudSubs || []).findIndex(function (s) { return s && s.id === id; });
+            if (i < 0) { if (typeof pflxToast === 'function') pflxToast('Submission not found — it may have been handled in X-Coin', 'info'); return; }
+            var s = _pflxCloudSubs[i];
+            s.status = status;
+            s.reviewedAt = new Date().toISOString();
+            s.feedback = status === 'approved' ? 'Approved by Host (Console)' : (note || 'Rejected by Host (Console)');
+            if (status === 'approved' && window.PflxDataBus && s.playerId) {
+                var def = _pflxCoinDef(s.coinType);
+                window.PflxDataBus.award(s.playerId, {
+                    xc: def.xc * (s.amount || 1),
+                    badge: { id: 'b-sub-' + s.id, name: s.coinType || 'Digital Badge', category: def.category },
+                    source: s.nodeId ? 'pathways' : 'xcoin-submission',
+                    reason: 'submission:' + s.id
+                });
+            }
+            // Persist the whole queue back to the shared cloud row.
+            try {
+                var sb = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (sb) sb.from('app_data').upsert(
+                    { key: 'submissions', data: _pflxCloudSubs, updated_at: new Date().toISOString() },
+                    { onConflict: 'key' }
+                ).then(function () {}, function (e) { console.warn('[approvals] submissions save failed', e); });
+            } catch (e) {}
+            if (typeof pflxToast === 'function') {
+                pflxToast(status === 'approved'
+                    ? '✓ ' + (s.coinType || 'Submission') + ' approved for @' + (s.brand || _pflxPlayerBrandById(s.playerId) || 'player')
+                    : 'Submission rejected', status === 'approved' ? 'success' : 'info');
+            }
+        }
 
         window.pflxDenySubmission = function (kind, id) {
             try {
@@ -18462,6 +18618,8 @@
                             if (typeof pflxToast === 'function') pflxToast('Task submission rejected', 'info');
                         }
                     }
+                } else if (kind === 'coinsub') {
+                    _pflxResolveCoinSub(id, 'rejected', note);
                 }
                 renderApprovalsCard();
             } catch (e) { console.warn('[approvals] deny failed', e); }
@@ -18473,6 +18631,16 @@
                 var m = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
                 if (m && (m.type === 'pflx_reward_request_submitted' || m.type === 'pflx_player_update')) {
                     setTimeout(function () { try { renderApprovalsCard(); } catch (e) {} }, 50);
+                }
+                // Core Pathways node submission — instant card entry + toast
+                // (the cloud row write races this message; dedupe by id).
+                if (m && m.type === 'pflx_node_submission' && m.submission) {
+                    try {
+                        var exists = (_pflxCloudSubs || []).some(function (s) { return s && s.id === m.submission.id; });
+                        if (!exists) _pflxCloudSubs.push(m.submission);
+                        if (typeof pflxToast === 'function') pflxToast('🛰 Pathways submission from @' + (m.submission.brand || 'Player'), 'info');
+                        renderApprovalsCard();
+                    } catch (e) {}
                 }
             } catch (e) {}
         });
@@ -20370,6 +20538,20 @@
                                 if (typeof window.hmcApplyCloudOrgs === 'function' && window.hmcApplyCloudOrgs(row.data)) {
                                     console.log('[MC cloud] ← realtime update: organizations');
                                 }
+                                return;
+                            }
+                            // Approval feeds — keep the host home card live
+                            // when any app writes submissions / trades /
+                            // reward requests from any device.
+                            if (row.key === 'submissions' || row.key === 'trades' || row.key === 'pflx_mc_reward_requests') {
+                                try {
+                                    if (row.key === 'submissions' && Array.isArray(row.data)) _pflxCloudSubs = row.data;
+                                    if (row.key === 'trades' && Array.isArray(row.data)) _pflxCloudTrades = row.data;
+                                    if (row.key === 'pflx_mc_reward_requests' && Array.isArray(row.data)) {
+                                        localStorage.setItem('pflx_mc_reward_requests', JSON.stringify(row.data.slice(0, 500)));
+                                    }
+                                    if (typeof renderApprovalsCard === 'function') renderApprovalsCard();
+                                } catch (e) {}
                                 return;
                             }
                             if (String(row.key).indexOf('pflx_mc_') !== 0) return;
@@ -45730,6 +45912,14 @@ RESPONSE RULES:
                             queue.unshift(msg.request);
                             queue = queue.slice(0, 500);
                             localStorage.setItem('pflx_mc_reward_requests', JSON.stringify(queue));
+                            // Cloud mirror so a host on any other device sees it
+                            try {
+                                var _rrSb = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                                if (_rrSb) _rrSb.from('app_data').upsert(
+                                    { key: 'pflx_mc_reward_requests', data: queue, updated_at: new Date().toISOString() },
+                                    { onConflict: 'key' }
+                                ).then(function () {}, function () {});
+                            } catch (e) {}
                             // Tiny audit log entry on the player record so the
                             // request is visible in their activity stream too.
                             try { logActivity(msg.request.playerId, 'reward_requested', {
