@@ -10609,6 +10609,18 @@
                                     <h3 style="color: var(--cyan); font-family: 'Orbitron', sans-serif; font-size: 13px; letter-spacing: 1.5px; margin-bottom: 6px;">📚 KNOWLEDGE BASE — WHAT X-BOT KNOWS</h3>
                                     <p style="font-size: 12px; color: #8a92b0; margin: 0 0 12px;">Everything you write here becomes X-Bot's authoritative source — your rules, your course details, your policies, your FAQs. With <b style="color:#f5c842;">Strict Grounding</b> on, X-Bot answers <b>only</b> from this text and live player stats; anything not covered gets "I don't have that — ask your host." No model is ever trained on your data; this is prompt grounding, which means you can edit it any time and it applies instantly to every engine (Claude, Gemini, OpenAI, DeepSeek, local).</p>
                                     <textarea id="xbot-kb-text" rows="12" placeholder="Example:&#10;## Class Rules&#10;- Submissions are due Fridays at 3pm.&#10;- DarkCampus is for project communication only.&#10;&#10;## XC Values&#10;- Storyboarding module: 200 XC&#10;- Weekly checkpoint: 100 XC&#10;&#10;## FAQs&#10;Q: How do I rank up?&#10;A: Earn total XC — Rank 2 at 5,000 XC, Rank 3 at 15,000 XC..." style="width: 100%; background: rgba(10,18,40,0.8); border: 1px solid rgba(0,240,255,0.12); color: #e0e6ff; padding: 12px; border-radius: 8px; font-family: 'Rajdhani', sans-serif; font-size: 13px; line-height: 1.5; resize: vertical; box-sizing: border-box;"></textarea>
+                                    <!-- ── THE BRAIN — notebook documents (import your NotebookLM
+                                         exports, markdown, text). X-Bot retrieves the most relevant
+                                         passages per question and answers from them. ── -->
+                                    <div style="margin-top: 16px; padding: 12px; border: 1px solid rgba(139,92,246,0.25); border-radius: 10px; background: rgba(139,92,246,0.04);">
+                                        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                                            <span style="font-family: 'Orbitron', sans-serif; font-size: 11px; letter-spacing: 1.5px; color: #a78bfa;">🧠 BRAIN — NOTEBOOK DOCUMENTS</span>
+                                            <button onclick="document.getElementById('xbot-kb-files').click()" style="margin-left: auto; padding: 7px 16px; background: rgba(139,92,246,0.12); border: 1px solid rgba(139,92,246,0.35); border-radius: 8px; color: #c4b5fd; font-family: 'Orbitron', sans-serif; font-size: 9px; letter-spacing: 1.5px; cursor: pointer;">📥 IMPORT .MD / .TXT FILES</button>
+                                            <input type="file" id="xbot-kb-files" accept=".md,.markdown,.txt" multiple style="display: none;" onchange="xbotImportKBFiles(this)">
+                                        </div>
+                                        <p style="font-size: 11px; color: #8a92b0; margin: 8px 0 10px;">Export your NotebookLM notes (or any docs) as Markdown and import them here — as many as you like. When a player asks something, X-Bot pulls the most relevant passages from across every document into its answer, so the "brain" can be far bigger than any single prompt.</p>
+                                        <div id="xbot-kb-docs" style="display: flex; flex-direction: column; gap: 6px;"></div>
+                                    </div>
                                     <div style="display: flex; align-items: center; gap: 16px; margin-top: 12px; flex-wrap: wrap;">
                                         <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #e0e6ff; cursor: pointer;">
                                             <input type="checkbox" id="xbot-kb-strict" checked style="width: 15px; height: 15px; accent-color: #f5c842;">
@@ -39170,7 +39182,7 @@
             },
 
             // Build the PFLX system prompt with live player context
-            buildSystemPrompt() {
+            buildSystemPrompt(userInput) {
                 const name = activeSession ? activeSession.name : 'Player';
                 const brand = activeSession ? activeSession.brand : 'Unknown';
                 const xc = activeSession ? (activeSession.xc || 0) : 0;
@@ -39426,10 +39438,14 @@ RESPONSE RULES:
                 // entered" without any actual training.
                 let kbBlock = '';
                 try {
-                    if (window.XBOT_KB && XBOT_KB.text && XBOT_KB.text.trim()) {
+                    // BRAIN retrieval: pull the passages most relevant to
+                    // THIS question from across every imported document
+                    var retrieved = (typeof xbotRetrieve === 'function' && userInput) ? xbotRetrieve(userInput, 6000) : '';
+                    if (window.XBOT_KB && ((XBOT_KB.text && XBOT_KB.text.trim()) || retrieved)) {
                         kbBlock = '\n\n══ HOST KNOWLEDGE BASE (AUTHORITATIVE) ══\n'
                             + 'The platform host wrote the following. It OVERRIDES anything else you believe:\n'
-                            + XBOT_KB.text.trim().slice(0, 12000) + '\n';
+                            + (XBOT_KB.text || '').trim().slice(0, 10000) + '\n'
+                            + (retrieved ? '\n══ RELEVANT NOTEBOOK PASSAGES (retrieved for this question) ══\n' + retrieved : '');
                         if (XBOT_KB.strict) {
                             kbBlock += '\nSTRICT GROUNDING MODE IS ON: Answer ONLY using the HOST KNOWLEDGE BASE above and the live player state. '
                                 + 'If the answer is not covered there, say you don\'t have that information and suggest asking the host. '
@@ -39695,7 +39711,7 @@ RESPONSE RULES:
                     return { text: fallback, model: 'static', routed: false };
                 }
 
-                const systemPrompt = this.buildSystemPrompt();
+                const systemPrompt = this.buildSystemPrompt(userInput);
                 const primary = this.pickModel(userInput);
                 const chain = this.getFallbackChain(primary);
 
@@ -39835,10 +39851,13 @@ RESPONSE RULES:
             if (st) st.checked = window.XBOT_KB.strict !== false;
             if (status) {
                 var n = (window.XBOT_KB.text || '').trim().length;
-                status.innerHTML = n
-                    ? '<span style="color:#34d399;">✓ ' + n.toLocaleString() + ' characters loaded — X-Bot is grounded' + (window.XBOT_KB.strict !== false ? ' (STRICT: answers only from this)' : '') + '</span>'
+                var docs = Array.isArray(window.XBOT_KB.docs) ? window.XBOT_KB.docs : [];
+                var dn = docs.reduce(function (a, d) { return a + (d.text || '').length; }, 0);
+                status.innerHTML = (n || dn)
+                    ? '<span style="color:#34d399;">✓ Core: ' + n.toLocaleString() + ' ch · Brain: ' + docs.length + ' document' + (docs.length === 1 ? '' : 's') + ' (' + dn.toLocaleString() + ' ch) — X-Bot is grounded' + (window.XBOT_KB.strict !== false ? ' · STRICT' : '') + '</span>'
                     : '<span style="color:#6a7290;">Empty — X-Bot currently answers from its built-in platform knowledge only.</span>';
             }
+            try { if (typeof xbotRenderKBDocs === 'function') xbotRenderKBDocs(); } catch (e) {}
         }
         function xbotSaveKB() {
             var ta = document.getElementById('xbot-kb-text');
@@ -39852,6 +39871,96 @@ RESPONSE RULES:
         }
         window.xbotSaveKB = xbotSaveKB;
         window.xbotRefreshKBUI = xbotRefreshKBUI;
+
+        // ── BRAIN: notebook documents + per-question retrieval ──────────
+        // Docs (e.g. NotebookLM exports) are stored alongside the core
+        // knowledge text. At question time xbotRetrieve() scores chunks
+        // across every document against the player's question and injects
+        // only the best passages — so the brain scales far beyond what a
+        // single prompt could hold. Caps keep the cloud row sane.
+        var XBOT_KB_DOC_CAP = 80000;      // chars per document
+        var XBOT_KB_TOTAL_CAP = 500000;   // chars across all documents
+        function xbotKBDocs() { return Array.isArray(window.XBOT_KB.docs) ? window.XBOT_KB.docs : (window.XBOT_KB.docs = []); }
+        function xbotKBTotal() { return xbotKBDocs().reduce(function (a, d) { return a + (d.text || '').length; }, 0); }
+        window.xbotImportKBFiles = function (input) {
+            var files = Array.prototype.slice.call(input.files || []);
+            input.value = '';
+            if (!files.length) return;
+            var done = 0;
+            files.forEach(function (f) {
+                var r = new FileReader();
+                r.onload = function () {
+                    var text = String(r.result || '').slice(0, XBOT_KB_DOC_CAP);
+                    if (xbotKBTotal() + text.length > XBOT_KB_TOTAL_CAP) {
+                        alert('Brain is full (' + XBOT_KB_TOTAL_CAP.toLocaleString() + ' character cap). Remove a document before importing "' + f.name + '".');
+                    } else if (text.trim()) {
+                        xbotKBDocs().push({ id: 'doc-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+                            title: f.name.replace(/\.(md|markdown|txt)$/i, ''), text: text });
+                    }
+                    done++;
+                    if (done === files.length) { xbotSaveKB(); xbotRenderKBDocs(); }
+                };
+                r.readAsText(f);
+            });
+        };
+        window.xbotRemoveKBDoc = function (id) {
+            window.XBOT_KB.docs = xbotKBDocs().filter(function (d) { return d.id !== id; });
+            xbotSaveKB(); xbotRenderKBDocs();
+        };
+        function xbotRenderKBDocs() {
+            var holder = document.getElementById('xbot-kb-docs');
+            if (!holder) return;
+            var docs = xbotKBDocs();
+            holder.innerHTML = docs.length === 0
+                ? '<div style="font-size:11px;color:#5c6480;">No documents yet — import your NotebookLM exports or any .md/.txt files.</div>'
+                : docs.map(function (d) {
+                    return '<div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid rgba(139,92,246,0.18);border-radius:8px;background:rgba(10,18,40,0.5);">' +
+                        '<span style="font-size:13px;">📄</span>' +
+                        '<span style="flex:1;font-size:12px;font-weight:700;color:#e0e6ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(d.title || 'Untitled') + '</span>' +
+                        '<span style="font-size:10px;color:#6a7290;font-family:\'Share Tech Mono\',monospace;">' + (d.text || '').length.toLocaleString() + ' ch</span>' +
+                        '<button onclick="xbotRemoveKBDoc(\'' + d.id + '\')" style="background:none;border:1px solid rgba(255,90,90,0.25);color:rgba(255,120,120,0.8);border-radius:5px;font-size:10px;padding:2px 8px;cursor:pointer;">✕</button></div>';
+                }).join('');
+        }
+        window.xbotRenderKBDocs = xbotRenderKBDocs;
+
+        var XBOT_STOPWORDS = { the:1, and:1, for:1, are:1, was:1, you:1, your:1, what:1, when:1, where:1, who:1, how:1, why:1, can:1, does:1, with:1, this:1, that:1, have:1, has:1, about:1, from:1, into:1, will:1, them:1, they:1, its:1, get:1, all:1, any:1, much:1, many:1 };
+        function xbotRetrieve(query, maxChars) {
+            try {
+                var docs = xbotKBDocs();
+                if (!docs.length || !query) return '';
+                var terms = String(query).toLowerCase().match(/[a-z0-9][a-z0-9'-]{2,}/g) || [];
+                terms = terms.filter(function (t) { return !XBOT_STOPWORDS[t]; });
+                if (!terms.length) return '';
+                var chunks = [];
+                docs.forEach(function (d) {
+                    // chunk on blank lines, packing to ~1100 chars
+                    var paras = (d.text || '').split(/\n\s*\n/), buf = '';
+                    paras.forEach(function (p) {
+                        if ((buf + p).length > 1100 && buf) { chunks.push({ doc: d.title, text: buf }); buf = ''; }
+                        buf += (buf ? '\n\n' : '') + p;
+                    });
+                    if (buf.trim()) chunks.push({ doc: d.title, text: buf });
+                });
+                chunks.forEach(function (c) {
+                    var low = c.text.toLowerCase(), score = 0;
+                    terms.forEach(function (t) {
+                        var n = low.split(t).length - 1;
+                        if (n > 0) score += 3 + Math.min(4, n);    // presence beats repetition
+                    });
+                    c.score = score;
+                });
+                var top = chunks.filter(function (c) { return c.score > 0; })
+                    .sort(function (a, b) { return b.score - a.score; });
+                var out = '', used = 0;
+                for (var i = 0; i < top.length && used < (maxChars || 6000); i++) {
+                    var piece = '\n— from "' + top[i].doc + '" —\n' + top[i].text.trim() + '\n';
+                    if (used + piece.length > (maxChars || 6000)) break;
+                    out += piece; used += piece.length;
+                }
+                return out;
+            } catch (e) { return ''; }
+        }
+        window.xbotRetrieve = xbotRetrieve;
 
         // Shared proxy status line (server-side keys via the PFLX AI proxy)
         function xbotRenderProxyStatus(elId) {
