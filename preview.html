@@ -19546,6 +19546,19 @@
 
         // Preload an iframe app in the background (before its view is active)
         function preloadIframe(viewName) {
+            // Defense in depth — don't preload an iframe the player isn't
+            // allowed to enter. If they later DO get access (host enables
+            // it mid-session), the iframe loads on demand from navigateTo.
+            // This prevents the bug of the gated app sitting fully rendered
+            // behind the Access Denied modal, ready to be revealed by any
+            // future bug that makes its view active.
+            try {
+                if (typeof pflxPlayerCanAccessApp === 'function' && !pflxPlayerCanAccessApp(viewName)) {
+                    console.log('[PFLX] Preload skipped for', viewName, '— cohort denied');
+                    return;
+                }
+            } catch (e) {}
+
             const viewMap = {
                 'xcoin': 'xcoin-view',
                 'pathways': 'pathways-view',
@@ -19599,6 +19612,40 @@
         }
 
         function doNavigate(viewName) {
+            // ── Cohort gate — UNIVERSAL CHOKEPOINT ──
+            // The navigateTo function above has its own gate, but doNavigate
+            // is the function that actually flips the active view. Several
+            // entry points around the platform (home app-cards at line
+            // ~35974, host instruction panels, future buttons) call
+            // doNavigate DIRECTLY, bypassing navigateTo and its gate.
+            // Putting the gate here makes EVERY view switch route through
+            // the same check — there is no path that flips a view active
+            // without first passing this guard.
+            //
+            // The check mirrors navigateTo: gated app keys, pflxPlayerCanAccessApp
+            // resolves to false → show the Access Locked modal and return
+            // without touching the DOM. Hosts/admins fall through the
+            // role test inside pflxPlayerCanAccessApp.
+            try {
+                var _gatedApps = {
+                    'xcoin': 'X-Coin',
+                    'pathways': 'Core Pathways',
+                    'arena': 'Battle Arena',
+                    'darkcampus': 'DarkCampus',
+                    'portfolio': 'My Portfolio Development',
+                    'ai-center': 'AI Center',
+                    'mission-control': 'Mission Control'
+                };
+                if (_gatedApps[viewName]
+                    && typeof pflxPlayerCanAccessApp === 'function'
+                    && !pflxPlayerCanAccessApp(viewName)) {
+                    if (typeof pflxShowAccessLocked === 'function') {
+                        pflxShowAccessLocked(viewName, _gatedApps[viewName]);
+                    }
+                    return;
+                }
+            } catch (e) {}
+
             pflxPlaySfx('click');
             if (typeof pflxXBotBrief === 'function') pflxXBotBrief(viewName);
             document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
