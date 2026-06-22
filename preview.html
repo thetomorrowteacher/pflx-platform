@@ -48119,6 +48119,47 @@ RESPONSE RULES:
                                         // module isn't loaded.
                                         try { if (typeof pflxPlaySfx === 'function') pflxPlaySfx('reward'); } catch (e4) {}
                                     }
+                                    // ── Penalty toast ── XC went DOWN. This is
+                                    // a fine, tax, marketplace purchase, or
+                                    // host-issued penalty. Same diff math; just
+                                    // the opposite direction. Distinct icon +
+                                    // red 'warning' style + lower-energy SFX
+                                    // so the player understands what happened
+                                    // without it feeling like a celebration.
+                                    // A small absolute threshold (>= 1) keeps
+                                    // float jitter from misfiring.
+                                    if (dxc <= -1) {
+                                        var loss = Math.abs(dxc).toLocaleString();
+                                        // Try to read the most recent activity
+                                        // entry the host (or the rule engine)
+                                        // logged with this update — usually
+                                        // contains the reason (fine type, tax,
+                                        // upgrade purchase name). Falls back to
+                                        // a generic message when absent.
+                                        var reason = '';
+                                        try {
+                                            var lastAct = Array.isArray(p.activity) && p.activity.length
+                                                ? p.activity[p.activity.length - 1] : null;
+                                            if (lastAct) {
+                                                if (lastAct.fineType)      reason = String(lastAct.fineType);
+                                                else if (lastAct.reason)   reason = String(lastAct.reason);
+                                                else if (lastAct.note)     reason = String(lastAct.note);
+                                                else if (lastAct.kind === 'fine')     reason = 'Fine';
+                                                else if (lastAct.kind === 'tax')      reason = 'Tax';
+                                                else if (lastAct.kind === 'purchase') reason = 'Purchase';
+                                            }
+                                        } catch (e5) {}
+                                        var penMsg = '⚠ -' + loss + ' XC' + (reason ? ' · ' + reason : '');
+                                        try { if (typeof pflxToast === 'function') pflxToast(penMsg, 'warning', 6000); } catch (e6) {}
+                                        try { if (typeof pflxPlaySfx === 'function') pflxPlaySfx('error'); } catch (e7) {}
+                                    }
+                                    // ── Badge revoked toast ── a host can take
+                                    // a badge back (mis-grant, behavior change).
+                                    // Quieter than a fine; informational only.
+                                    if (dbadges <= -1) {
+                                        var lostB = Math.abs(dbadges);
+                                        try { if (typeof pflxToast === 'function') pflxToast('A digital badge was revoked (' + lostB + ' total)', 'info', 5000); } catch (e8) {}
+                                    }
                                 }
                             } catch (e) { console.warn('[roster] reward delivery failed', e); }
                         } catch (e) { console.warn('[roster] realtime payload error', e); }
