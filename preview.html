@@ -48023,6 +48023,16 @@ RESPONSE RULES:
                             if (!row || !row.key || String(row.key).indexOf('pflx_player_') !== 0) return;
                             var p = row.data;
                             if (!p || !p.id) return;
+                            // Capture the PRE-update record so we can detect XC /
+                            // badge increases and fire a reward notification when
+                            // the active session is the player who just received
+                            // them. The host's award lands here as a realtime
+                            // update from the cloud row written on their browser.
+                            var prevRecord = null;
+                            if (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) {
+                                var _prev = PLAYERS.find(function (x) { return x && x.id === p.id; });
+                                if (_prev) prevRecord = Object.assign({}, _prev);
+                            }
                             // Merge into PLAYERS — last-write-wins on updatedAt.
                             if (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) {
                                 var existing = PLAYERS.find(function (x) { return x && x.id === p.id; });
@@ -48054,6 +48064,63 @@ RESPONSE RULES:
                                 if (typeof populateBrandSelect === 'function') populateBrandSelect();
                             } catch (e) {}
                             console.log('[roster] ← realtime player update:', p.brand);
+
+                            // ── Reward delivery to the logged-in player ──
+                            // If this realtime change is for the active session
+                            // player (i.e. someone else just awarded ME XC or a
+                            // badge from THEIR browser), sync activeSession,
+                            // refresh the toolbar XC + POSITION + RANK chips,
+                            // and pop a celebratory toast. This is the
+                            // cross-device path: host on machine A awards
+                            // NEUROFLUX 1,000 XC; NEUROFLUX on machine B sees
+                            // the toolbar tick up + a 🎉 notification within
+                            // a second of the host clicking GRANT.
+                            try {
+                                var sess = window.activeSession;
+                                if (sess && (sess.id === p.id || sess.brand === p.brand)) {
+                                    var dxc = (typeof p.xc === 'number' && prevRecord && typeof prevRecord.xc === 'number')
+                                        ? (p.xc - prevRecord.xc) : 0;
+                                    var dbadges = (typeof p.digitalBadges === 'number' && prevRecord && typeof prevRecord.digitalBadges === 'number')
+                                        ? (p.digitalBadges - prevRecord.digitalBadges) : 0;
+                                    // Push fresh fields into activeSession so the toolbar reads them.
+                                    if (typeof p.xc === 'number')             sess.xc = p.xc;
+                                    if (typeof p.totalXcoin === 'number')     sess.totalXcoin = p.totalXcoin;
+                                    if (typeof p.digitalBadges === 'number')  sess.digitalBadges = p.digitalBadges;
+                                    if (p.badgeCounts)                        sess.badgeCounts = p.badgeCounts;
+                                    if (p.image)                              sess.image = p.image;
+                                    // Toolbar refresh — XC chip, POSITION chip,
+                                    // RANK chip, avatar. All read from PLAYERS
+                                    // by activeSession.id.
+                                    try { if (typeof updateToolbarStatus === 'function') updateToolbarStatus(); } catch (e) {}
+                                    // Re-broadcast the new identity so every
+                                    // sub-app iframe sees fresh fields too.
+                                    document.querySelectorAll('iframe').forEach(function (f) {
+                                        if (!f.contentWindow) return;
+                                        try {
+                                            f.contentWindow.postMessage(JSON.stringify({
+                                                type: 'pflx_identity_broadcast',
+                                                user: sess,
+                                                role: window.pflxRole || 'player',
+                                                forceSync: true
+                                            }), '*');
+                                        } catch (e2) {}
+                                    });
+                                    // Reward toast — only when XC actually grew
+                                    // or badges grew. A "data sync" no-op
+                                    // (same values pushed back) won't fire.
+                                    if (dxc > 0 || dbadges > 0) {
+                                        var parts = [];
+                                        if (dxc > 0)     parts.push('+' + dxc.toLocaleString() + ' XC');
+                                        if (dbadges > 0) parts.push('+' + dbadges + ' Badge' + (dbadges === 1 ? '' : 's'));
+                                        var msg = '🎉 You received ' + parts.join(' & ');
+                                        try { if (typeof pflxToast === 'function') pflxToast(msg, 'success', 5000); } catch (e3) {}
+                                        // Sound cue if available — falls
+                                        // through silently when the SFX
+                                        // module isn't loaded.
+                                        try { if (typeof pflxPlaySfx === 'function') pflxPlaySfx('reward'); } catch (e4) {}
+                                    }
+                                }
+                            } catch (e) { console.warn('[roster] reward delivery failed', e); }
                         } catch (e) { console.warn('[roster] realtime payload error', e); }
                     })
                     .subscribe(function (status) {
