@@ -20315,6 +20315,21 @@
                 if (type === 'pflxranks' || type === 'all') localStorage.setItem('pflx_mc_pflxranks', JSON.stringify(mcPflxRanks));
                 if (type === 'sessions' || type === 'all') localStorage.setItem('pflx_mc_sessions', JSON.stringify(mcSessions));
             } catch(e) {}
+            // Stomp guard 3 — mark the local-write timestamp so the realtime
+            // ingest path can refuse stale cloud echoes for the next few
+            // seconds. _mcApplyingCloud is true while the cloud ingest path
+            // calls mcSaveData (to write its own data back to localStorage);
+            // we deliberately do NOT mark in that case because the stamp is
+            // for LOCAL host edits, not cloud-driven applies.
+            try {
+                if (!_mcApplyingCloud && typeof _mcMarkLocalWrite === 'function') {
+                    if (type === 'all') {
+                        MC_CLOUD_TYPES.forEach(function (t) { _mcMarkLocalWrite(t); });
+                    } else {
+                        _mcMarkLocalWrite(type);
+                    }
+                }
+            } catch (e) {}
 
             // ── Cloud Sync: push to X-Coin Supabase via iframe postMessage ──
             mcCloudSync(type);
@@ -20557,11 +20572,49 @@
 
         // Apply one MC collection that arrived from the cloud: update the
         // in-memory array, mirror to localStorage (cloud re-push suppressed).
+        // ── STOMP GUARD 3 — per-type local-write timestamp ──
+        // Without this, a stale cloud-realtime payload (echo of an
+        // earlier write, or another tab pushing pre-edit state) that
+        // arrives in the ~1s window after the host saves can wipe the
+        // freshly-added item from memory. The next debounced cloud
+        // flush then pushes the now-stale list back to the cloud,
+        // permanently deleting the new item across all devices. The
+        // user-visible symptom: "I just created a new Project and it
+        // disappeared."
+        // Track when this dashboard last wrote each MC type locally.
+        // _mcIngestCloudRow skips payloads whose updatedAt is older
+        // than the local write. Bare-row payloads with no updatedAt
+        // are treated as "old" if we wrote within the recent window
+        // (default 4 seconds) — that's the typical echo case.
+        var _mcLocalLastWrite = {};   // type → epoch ms of last local mcSaveData
+        var _MC_ECHO_WINDOW_MS = 4000;
+        function _mcMarkLocalWrite(type) {
+            try { _mcLocalLastWrite[type] = Date.now(); } catch (e) {}
+        }
+        window._mcMarkLocalWrite = _mcMarkLocalWrite;
+
         function _mcIngestCloudRow(key, payload) {
             var type = String(key || '').replace('pflx_mc_', '');
             if (MC_CLOUD_TYPES.indexOf(type) < 0) return false;
             var items = (payload && payload.items !== undefined) ? payload.items : payload;
             if (items === undefined || items === null) return false;
+
+            // ── Stomp guard 3 ── compare timestamps before applying.
+            var cloudStamp = (payload && typeof payload.updatedAt === 'number') ? payload.updatedAt : 0;
+            var localStamp = _mcLocalLastWrite[type] || 0;
+            if (localStamp > 0) {
+                if (cloudStamp && cloudStamp < localStamp) {
+                    console.warn('[MC cloud] ✋ ingest blocked for "' + type + '" — cloud stamp ' + cloudStamp + ' is older than local write ' + localStamp);
+                    return false;
+                }
+                if (!cloudStamp && (Date.now() - localStamp) < _MC_ECHO_WINDOW_MS) {
+                    // Bare payload (no stamp) within the echo window —
+                    // almost certainly our own write echoing back.
+                    console.warn('[MC cloud] ✋ ingest blocked for "' + type + '" — bare payload inside ' + _MC_ECHO_WINDOW_MS + 'ms echo window');
+                    return false;
+                }
+            }
+
             _mcApplyingCloud = true;
             var ok = false;
             try {
