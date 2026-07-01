@@ -24203,10 +24203,29 @@
                             : '') +
                     '</div>';
                 }
+                // Aggregate progress across all descendant tasks (via child
+                // projects + direct tasks). Shown as a big hero bar so the
+                // Checkpoint's overall completion state is instantly clear.
+                var cpProg = _mcCheckpointProgress(cp);
+                var cpUrgency = _mcUrgencyForDueDate(cp.endDate || cp.dueDate);
+                var cpProgressPanel = (cpProg.total > 0 || totalXC > 0)
+                    ? '<div style="margin-bottom:14px;padding:16px 18px;background:rgba(' + accentRgb + ',0.06);border:1px solid rgba(' + accentRgb + ',0.30);border-radius:14px;">' +
+                        '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:10px;">' +
+                            '<span style="font-family:Orbitron,sans-serif;font-size:12px;color:rgba(' + accentRgb + ',1);font-weight:800;letter-spacing:0.12em;">◆ CHECKPOINT PROGRESS</span>' +
+                            '<span style="font-size:18px;color:' + (cpProg.pct === 100 ? '#22c55e' : '#ffffff') + ';font-weight:900;font-family:monospace;">' + cpProg.pct + '%</span>' +
+                        '</div>' +
+                        _mcProgressBarHtml(cpProg.pct, { height: 14 }) +
+                        '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12px;color:rgba(255,255,255,0.7);">' +
+                            '<span>✓ ' + cpProg.approved + ' of ' + cpProg.total + ' tasks approved</span>' +
+                            (cp.endDate || cp.dueDate ? '<span style="color:rgba(' + cpUrgency.rgb + ',1);font-weight:700;">📅 ' + cpUrgency.label + '</span>' : '') +
+                        '</div>' +
+                    '</div>'
+                    : '';
                 return '<div data-mc-checkpoint-id="' + cp.id + '" style="background:linear-gradient(180deg, rgba(22,22,31,0.85), rgba(22,22,31,0.65));border:1.5px solid rgba(' + accentRgb + ',0.5);border-radius:22px;position:relative;overflow:hidden;box-shadow:0 0 0 1px rgba(' + accentRgb + ',0.16), 0 0 26px rgba(' + accentRgb + ',0.20), 0 0 50px rgba(' + accentRgb + ',0.08), 0 16px 34px rgba(0,0,0,0.60);transition:transform 0.2s ease, box-shadow 0.2s ease;" onmouseover="this.style.transform=\'translateY(-4px)\';this.style.boxShadow=\'0 0 0 1px rgba(' + accentRgb + ',0.28), 0 0 38px rgba(' + accentRgb + ',0.32), 0 0 78px rgba(' + accentRgb + ',0.14), 0 22px 44px rgba(0,0,0,0.70)\';" onmouseout="this.style.transform=\'translateY(0)\';this.style.boxShadow=\'0 0 0 1px rgba(' + accentRgb + ',0.16), 0 0 26px rgba(' + accentRgb + ',0.20), 0 0 50px rgba(' + accentRgb + ',0.08), 0 16px 34px rgba(0,0,0,0.60)\';">' +
                     bannerBlock +
                     '<div style="padding:22px 24px 20px 24px;">' +
                     (cp.description ? '<div style="font-size:13px;color:rgba(255,255,255,0.65);margin-bottom:14px;line-height:1.55;">' + escapeHtml(cp.description) + '</div>' : '') +
+                    cpProgressPanel +
                     contentsPanel +
                     '<div style="background:rgba(' + accentRgb + ',0.06);border:1px solid rgba(' + accentRgb + ',0.24);border-radius:12px;padding:12px 14px;margin-bottom:14px;font-size:12px;color:rgba(255,255,255,0.6);">' +
                     '<div style="margin-bottom:5px;"><strong style="color:rgba(255,255,255,0.85);">Season:</strong> ' + (seasonObj ? escapeHtml(seasonObj.name) : '—') + '</div>' +
@@ -24303,6 +24322,62 @@
             } catch (e) { console.warn('[mcJumpToItem] failed', e); }
         }
         window.mcJumpToItem = mcJumpToItem;
+
+        // ── Urgency for any date-scoped item ──
+        // Returns {color, rgb, label, days} where color is one of
+        // grey / green / yellow / orange / red. Used across Task, Project,
+        // Checkpoint cards to render the same due-date urgency chip.
+        function _mcUrgencyForDueDate(dueDateStr) {
+            if (!dueDateStr) return { color: 'grey', rgb: '156,163,175', label: 'No deadline', days: null };
+            var due = new Date(dueDateStr + 'T23:59:59');
+            var now = new Date();
+            var msPerDay = 86400000;
+            var days = Math.ceil((due.getTime() - now.getTime()) / msPerDay);
+            if (days < 0)    return { color: 'red',    rgb: '239,68,68',   label: Math.abs(days) + 'd overdue',  days: days };
+            if (days === 0)  return { color: 'red',    rgb: '239,68,68',   label: 'Due today',                    days: days };
+            if (days <= 2)   return { color: 'orange', rgb: '255,159,64',  label: days + 'd left',                days: days };
+            if (days <= 7)   return { color: 'yellow', rgb: '245,200,66',  label: days + 'd left',                days: days };
+            if (days <= 30)  return { color: 'green',  rgb: '34,197,94',   label: days + 'd left',                days: days };
+            return                 { color: 'green',  rgb: '34,197,94',   label: Math.round(days/7) + 'w left', days: days };
+        }
+        function _mcTaskIsApproved(t) { return t && (t.status === 'approved' || t.completed === true); }
+        function _mcTaskIsSubmitted(t) { return t && t.status === 'submitted'; }
+        // Progress for a Project = fraction of its taskIds that are approved.
+        function _mcProjectProgress(project) {
+            var kids = mcChildTasksForProject(project);
+            var total = kids.length;
+            var done  = kids.filter(_mcTaskIsApproved).length;
+            return { approved: done, total: total, pct: total ? Math.round(done*100/total) : 0 };
+        }
+        // Progress for a Checkpoint = fraction of ALL tasks in its scope
+        // (across every child project AND direct tasks) that are approved.
+        function _mcCheckpointProgress(cp) {
+            var seen = {};
+            mcChildProjectsForCheckpoint(cp).forEach(function (p) {
+                mcChildTasksForProject(p).forEach(function (t) { if (t && t.id) seen[t.id] = t; });
+            });
+            mcChildTasksForCheckpoint(cp).forEach(function (t) { if (t && t.id) seen[t.id] = t; });
+            var all = Object.keys(seen).map(function (k) { return seen[k]; });
+            var done = all.filter(_mcTaskIsApproved).length;
+            return { approved: done, total: all.length, pct: all.length ? Math.round(done*100/all.length) : 0 };
+        }
+        // Compact reward summary for a Task/Project/Checkpoint.
+        function _mcRewardSummary(item) {
+            if (!item) return { xc: 0, badges: 0 };
+            var xc = item.xcReward || item.budget || 0;
+            var badges = Array.isArray(item.rewardBadges) ? item.rewardBadges.length : 0;
+            return { xc: xc, badges: badges };
+        }
+        // Progress bar HTML — height, current pct, color. Reused in
+        // Project + Checkpoint cards for a consistent look.
+        function _mcProgressBarHtml(pct, opts) {
+            opts = opts || {};
+            var h = opts.height || 10;
+            var col = pct === 100 ? '#22c55e' : pct >= 66 ? '#4ade80' : pct >= 33 ? '#f5c842' : pct > 0 ? '#ff9f40' : 'rgba(255,255,255,0.15)';
+            return '<div style="width:100%;height:' + h + 'px;background:rgba(255,255,255,0.06);border-radius:999px;overflow:hidden;border:1px solid rgba(255,255,255,0.05);">' +
+                '<div style="width:' + Math.max(0, Math.min(100, pct)) + '%;height:100%;background:linear-gradient(90deg, ' + col + ', ' + col + 'cc);box-shadow:0 0 12px ' + col + '80;border-radius:999px;transition:width 0.4s ease;"></div>' +
+            '</div>';
+        }
 
         var mcCPEditIndex = -1;
         function mcCreateCheckpoint() { mcShowCPForm(-1); }
@@ -24784,34 +24859,64 @@
                     }
                 }
 
-                return '<div data-mc-task-id="' + t.id + '" style="background:rgba(22,22,31,0.6);border:1px solid rgba(255,255,255,0.06);border-radius:20px;padding:20px;display:flex;flex-direction:column;transition:box-shadow 0.3s ease;">' +
-                    // Icon + Title + Status
-                    '<div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:12px;">' +
-                    '<div style="width:60px;height:60px;border-radius:14px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;">' + categoryEmoji + '</div>' +
-                    '<div style="flex:1;min-width:0;">' +
-                    '<div style="font-size:14px;font-weight:700;color:#f0f0ff;margin-bottom:4px;">' + escapeHtml(t.title || 'Untitled') + '</div>' +
-                    '<div style="display:inline-block;background:' + statusColors.bg + ';color:' + statusColors.text + ';font-size:10px;font-weight:600;padding:4px 10px;border-radius:6px;text-transform:capitalize;">' + (t.status || 'open') + '</div>' +
+                // ── Notion-style horizontal task row ──
+                // Left: status checkbox (green filled=approved, orange half=submitted, empty=open).
+                // Middle: title + short description + lineage chips.
+                // Right: urgency chip · XC · badge count · quick actions.
+                // Expanded body (subtasks, submission panel, FLP pill) still shows below when relevant.
+                var isApproved = _mcTaskIsApproved(t);
+                var isSubmitted = _mcTaskIsSubmitted(t);
+                var checkboxHtml =
+                    '<div onclick="mcApproveTask(' + realIndex + ')" title="' + (isApproved ? 'Approved' : isSubmitted ? 'Click to approve submission' : 'Not yet submitted') + '" style="width:26px;height:26px;border-radius:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:900;cursor:' + (isSubmitted ? 'pointer' : 'default') + ';transition:transform 0.15s ease;' +
+                        (isApproved
+                            ? 'background:#22c55e;border:2px solid #22c55e;color:#0b1d10;box-shadow:0 0 12px rgba(34,197,94,0.5);'
+                          : isSubmitted
+                            ? 'background:rgba(245,165,0,0.18);border:2px solid #f5a500;color:#f5a500;'
+                            : 'background:rgba(255,255,255,0.02);border:2px solid rgba(255,255,255,0.15);color:transparent;')
+                    + '" ' + (isSubmitted ? 'onmouseover="this.style.transform=\'scale(1.08)\'" onmouseout="this.style.transform=\'scale(1)\'"' : '') + '>' +
+                        (isApproved ? '✓' : isSubmitted ? '◐' : '') +
+                    '</div>';
+                var urgency = _mcUrgencyForDueDate(t.dueDate);
+                var dueChip = t.dueDate
+                    ? '<span style="background:rgba(' + urgency.rgb + ',0.14);color:rgba(' + urgency.rgb + ',1);padding:5px 10px;border-radius:12px;font-size:11px;font-weight:700;border:1px solid rgba(' + urgency.rgb + ',0.35);white-space:nowrap;">📅 ' + urgency.label + '</span>'
+                    : '';
+                var xcChip = t.xcReward
+                    ? '<span style="background:rgba(245,200,66,0.16);color:#f5c842;padding:5px 10px;border-radius:12px;font-size:11px;font-weight:800;border:1px solid rgba(245,200,66,0.4);white-space:nowrap;box-shadow:0 0 8px rgba(245,200,66,0.14);">⚡ ' + t.xcReward + ' XC</span>'
+                    : '';
+                var rewardBadgeCount = (Array.isArray(t.rewardBadges) ? t.rewardBadges.length : 0);
+                var badgeChip = rewardBadgeCount > 0
+                    ? '<span style="background:rgba(139,92,246,0.14);color:#c4b5fd;padding:5px 10px;border-radius:12px;font-size:11px;font-weight:700;border:1px solid rgba(139,92,246,0.35);white-space:nowrap;">🏆 ' + rewardBadgeCount + '</span>'
+                    : '';
+                var expanded = (t.__mcRowOpen === true);
+                return '<div data-mc-task-id="' + t.id + '" style="background:rgba(22,22,31,0.55);border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:14px 18px;margin-bottom:8px;transition:background 0.15s ease, box-shadow 0.3s ease;" onmouseover="this.style.background=\'rgba(30,30,42,0.7)\'" onmouseout="this.style.background=\'rgba(22,22,31,0.55)\'">' +
+                    // Row header — the always-visible line
+                    '<div style="display:flex;align-items:center;gap:14px;">' +
+                        checkboxHtml +
+                        '<div style="font-size:20px;flex-shrink:0;">' + categoryEmoji + '</div>' +
+                        // Center block — title, description snippet, lineage chips
+                        '<div style="flex:1;min-width:0;">' +
+                            '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
+                                '<div style="font-size:14px;font-weight:700;color:' + (isApproved ? 'rgba(255,255,255,0.55)' : '#f0f0ff') + ';' + (isApproved ? 'text-decoration:line-through;' : '') + 'line-height:1.3;">' + escapeHtml(t.title || 'Untitled') + '</div>' +
+                                '<div style="display:inline-block;background:' + statusColors.bg + ';color:' + statusColors.text + ';font-size:9px;font-weight:800;padding:3px 8px;border-radius:5px;text-transform:uppercase;letter-spacing:0.06em;">' + (t.status || 'open') + '</div>' +
+                            '</div>' +
+                            (t.description ? '<div style="font-size:12px;color:rgba(255,255,255,0.45);line-height:1.4;margin-top:3px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;">' + escapeHtml(t.description) + '</div>' : '') +
+                            (taskLineage ? taskLineage.replace('margin-bottom:10px', 'margin-top:6px;margin-bottom:0') : '') +
+                        '</div>' +
+                        // Right block — reward + urgency + expand + action buttons
+                        '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">' +
+                            dueChip + xcChip + badgeChip +
+                            '<button class="mc-btn" style="padding:5px 10px;font-size:11px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:7px;cursor:pointer;font-weight:700;" onclick="mcEditTask(' + realIndex + ')">Edit</button>' +
+                            '<button class="mc-btn mc-btn-red" style="padding:5px 10px;font-size:11px;background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:7px;cursor:pointer;font-weight:700;" onclick="mcDeleteTask(' + realIndex + ')">Delete</button>' +
+                        '</div>' +
                     '</div>' +
-                    '</div>' +
-                    // Lineage strip — parent Checkpoint + Project chips
-                    taskLineage +
-                    // Description
-                    '<div style="font-size:12px;color:rgba(255,255,255,0.5);line-height:1.5;margin-bottom:12px;">' + escapeHtml(t.description || '') + '</div>' +
-                    // FLP phase indicator (between description and submission panel)
-                    flpPill +
-                    // Subtask checklist — host-authored steps the player ticks off
-                    subtasksHtml +
-                    // Submissions summary (E:1 D:2 Enh:1 F:0 style)
-                    tSubmissionsSummary +
-                    // Submission panel (if submitted)
-                    submissionPanel +
-                    // Metadata pills
-                    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;margin-bottom:12px;">' +
-                    (t.xcReward ? '<span style="background:rgba(0,240,255,0.08);color:#00d4ff;font-size:10px;font-weight:600;padding:4px 8px;border-radius:6px;">⚡ ' + t.xcReward + ' XC</span>' : '') +
-                    (cp ? '<span style="background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.5);font-size:10px;padding:4px 8px;border-radius:6px;">🏁 ' + escapeHtml(cp.name) + '</span>' : '') +
-                    (t.dueDate ? '<span style="background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.5);font-size:10px;padding:4px 8px;border-radius:6px;">📅 ' + t.dueDate + '</span>' : '') +
-                    (t.category ? '<span style="background:rgba(139,92,246,0.08);color:#a78bfa;font-size:10px;padding:4px 8px;border-radius:6px;">🏷️ ' + escapeHtml(t.category) + '</span>' : '') +
-                    '</div>' +
+                    // Auxiliary panels — only rendered if data present.
+                    // Kept compact under the row; FLP pill, subtask checklist,
+                    // and submission summary/panel appear as small collapsed panels
+                    // when relevant so no data is lost.
+                    (flpPill ? '<div style="margin-top:10px;">' + flpPill + '</div>' : '') +
+                    (subtasksHtml ? '<div style="margin-top:10px;">' + subtasksHtml + '</div>' : '') +
+                    (tSubmissionsSummary ? '<div style="margin-top:10px;">' + tSubmissionsSummary + '</div>' : '') +
+                    (submissionPanel ? '<div style="margin-top:10px;">' + submissionPanel + '</div>' : '') +
                     // Action buttons — lifecycle-aware:
                     //   monitored + not started → Start
                     //   monitored + in-progress → Submit for [current phase]
@@ -24845,8 +24950,8 @@
                             return '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(245,200,66,0.12);color:#f5c842;border:1px solid rgba(245,200,66,0.4);border-radius:8px;cursor:pointer;flex:1;min-width:100px;font-weight:700;" onclick="pflxConvertTaskToJobUI(' + JSON.stringify(t.id) + ')" title="Post this task to the Job Board for hire">📋 Convert to Job</button>';
                         } catch (e) { return ''; }
                     })() +
-                    '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:60px;" onclick="mcEditTask(' + realIndex + ')">Edit</button>' +
-                    '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:60px;" onclick="mcDeleteTask(' + realIndex + ')">Delete</button>' +
+                    // Edit / Delete moved to the row header above. Only render
+                    // this bottom action bar if a lifecycle button is active.
                     '</div>' +
                     '</div>';
             });
@@ -24873,7 +24978,8 @@
                         '</div>' +
                         '<div style="flex:1;font-size:11px;color:rgba(255,255,255,0.4);line-height:1.4;">' + escapeHtml(meta.desc) + '</div>' +
                     '</div>' +
-                    '<div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(380px, 1fr));gap:20px;margin-bottom:24px;">' +
+                    // Row list, not a grid — each Task is a full-width row.
+                    '<div style="display:flex;flex-direction:column;margin-bottom:24px;">' +
                         arr.join('') +
                     '</div>';
             });
@@ -26558,18 +26664,30 @@
                 var pct = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
                 var progressColor = pct >= 100 ? '#22c55e' : pct > 50 ? '#f5c842' : '#00d4ff';
 
-                // Build task progress info panel
+                // XC earned so far — sum XC of approved tasks that carry a value.
+                var xcEarnedSoFar = assignedTasks.filter(_mcTaskIsApproved).reduce(function (s, tt) { return s + (tt && tt.xcReward ? tt.xcReward : 0); }, 0);
+                var xcTotalPool   = assignedTasks.reduce(function (s, tt) { return s + (tt && tt.xcReward ? tt.xcReward : 0); }, 0) + (p.xcReward || 0);
+                // ── Progress hero panel ── prominent bar + counts + XC earned/total.
+                // Rendered even at 0% so the host + player see the objective.
                 var progressPanel = '';
-                if (totalTasks > 0) {
-                    progressPanel = '<div style="background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.3);border-radius:12px;padding:12px;margin-top:12px;">' +
-                        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
-                        '<span style="font-size:11px;color:rgba(0,240,255,0.8);font-weight:600;">📊 Task Progress</span>' +
-                        '<span style="font-size:11px;color:' + progressColor + ';font-weight:600;">' + completedTasks + '/' + totalTasks + ' (' + pct + '%)</span>' +
+                if (totalTasks > 0 || xcTotalPool > 0) {
+                    progressPanel = '<div style="margin-top:14px;padding:14px 16px;background:rgba(0,212,255,0.05);border:1px solid rgba(0,212,255,0.24);border-radius:12px;">' +
+                        '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:10px;">' +
+                            '<span style="font-family:Orbitron,sans-serif;font-size:11px;color:#7de3ff;font-weight:800;letter-spacing:0.1em;">📊 PROGRESS</span>' +
+                            '<span style="font-size:14px;color:' + (pct === 100 ? '#22c55e' : '#f0f0ff') + ';font-weight:800;font-family:monospace;">' + pct + '%</span>' +
                         '</div>' +
-                        '<div style="width:100%;height:8px;background:rgba(0,212,255,0.1);border-radius:4px;overflow:hidden;">' +
-                        '<div style="width:' + pct + '%;height:100%;background:' + progressColor + ';border-radius:4px;transition:width 0.3s ease;"></div>' +
-                        '</div></div>';
+                        _mcProgressBarHtml(pct, { height: 12 }) +
+                        '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:11px;color:rgba(255,255,255,0.65);">' +
+                            '<span>✓ ' + completedTasks + ' of ' + totalTasks + ' tasks approved</span>' +
+                            (xcTotalPool > 0 ? '<span style="color:#f5c842;font-weight:700;">⚡ ' + xcEarnedSoFar.toLocaleString() + ' / ' + xcTotalPool.toLocaleString() + ' XC</span>' : '') +
+                        '</div>' +
+                    '</div>';
                 }
+                // Due-date urgency chip — shown next to project title.
+                var projUrgency = _mcUrgencyForDueDate(p.dueDate || p.endDate || p.deadline);
+                var projUrgencyChip = (p.dueDate || p.endDate || p.deadline)
+                    ? '<span style="background:rgba(' + projUrgency.rgb + ',0.14);color:rgba(' + projUrgency.rgb + ',1);padding:5px 10px;border-radius:12px;font-size:11px;font-weight:700;border:1px solid rgba(' + projUrgency.rgb + ',0.35);white-space:nowrap;">📅 ' + projUrgency.label + '</span>'
+                    : '';
 
                 // 16:9 banner header — full-width across the top of the card.
                 // Falls back to a soft gradient with a 🎬 mark when no
@@ -26659,10 +26777,13 @@
                     '<div style="padding:20px;display:flex;flex-direction:column;flex:1;">' +
                     // Lineage strip — parent Checkpoint chip
                     projLineage +
-                    // Title + Status
+                    // Title + Status + Urgency
                     '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px;">' +
                     '<div style="font-size:16px;font-weight:700;color:#f0f0ff;line-height:1.25;flex:1;min-width:0;">' + escapeHtml(p.name || 'Untitled') + '</div>' +
-                    '<div style="display:inline-block;background:' + statusColors.bg + ';color:' + statusColors.text + ';font-size:10px;font-weight:600;padding:4px 10px;border-radius:6px;text-transform:capitalize;white-space:nowrap;flex-shrink:0;">' + (p.status || 'planning') + '</div>' +
+                    '<div style="display:flex;gap:6px;align-items:center;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">' +
+                        projUrgencyChip +
+                        '<span style="display:inline-block;background:' + statusColors.bg + ';color:' + statusColors.text + ';font-size:10px;font-weight:600;padding:4px 10px;border-radius:6px;text-transform:capitalize;white-space:nowrap;">' + (p.status || 'planning') + '</span>' +
+                    '</div>' +
                     '</div>' +
                     // Description
                     '<div style="font-size:12px;color:rgba(255,255,255,0.5);line-height:1.5;margin-bottom:12px;">' + escapeHtml(p.description || '') + '</div>' +
