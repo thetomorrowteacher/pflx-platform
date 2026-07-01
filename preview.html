@@ -24153,10 +24153,61 @@
                         '<div style="font-family:Orbitron,sans-serif;font-size:28px;font-weight:900;color:#ffffff;text-shadow:0 0 20px rgba(' + accentRgb + ',0.5);letter-spacing:0.02em;line-height:1.1;">🏁 ' + escapeHtml(cp.name) + '</div>' +
                       '</div>';
                 }
-                return '<div style="background:linear-gradient(180deg, rgba(22,22,31,0.85), rgba(22,22,31,0.65));border:1.5px solid rgba(' + accentRgb + ',0.5);border-radius:22px;position:relative;overflow:hidden;box-shadow:0 0 0 1px rgba(' + accentRgb + ',0.16), 0 0 26px rgba(' + accentRgb + ',0.20), 0 0 50px rgba(' + accentRgb + ',0.08), 0 16px 34px rgba(0,0,0,0.60);transition:transform 0.2s ease, box-shadow 0.2s ease;" onmouseover="this.style.transform=\'translateY(-4px)\';this.style.boxShadow=\'0 0 0 1px rgba(' + accentRgb + ',0.28), 0 0 38px rgba(' + accentRgb + ',0.32), 0 0 78px rgba(' + accentRgb + ',0.14), 0 22px 44px rgba(0,0,0,0.70)\';" onmouseout="this.style.transform=\'translateY(0)\';this.style.boxShadow=\'0 0 0 1px rgba(' + accentRgb + ',0.16), 0 0 26px rgba(' + accentRgb + ',0.20), 0 0 50px rgba(' + accentRgb + ',0.08), 0 16px 34px rgba(0,0,0,0.60)\';">' +
+                // Child items — nested tree of Projects (with their Tasks
+                // inside) followed by direct Tasks. Makes the Checkpoint the
+                // visible "container" of its mission contents.
+                var cpChildProjects = mcChildProjectsForCheckpoint(cp);
+                var cpDirectTasks = mcChildTasksForCheckpoint(cp);
+                // De-dupe: a task that appears under a nested Project should
+                // NOT also appear in the direct-task list.
+                var _nestedTaskIds = {};
+                cpChildProjects.forEach(function (pj) {
+                    (pj.taskIds || []).forEach(function (id) { _nestedTaskIds[id] = 1; });
+                });
+                cpDirectTasks = cpDirectTasks.filter(function (t) { return !_nestedTaskIds[t.id]; });
+                var contentsPanel = '';
+                if (cpChildProjects.length > 0 || cpDirectTasks.length > 0) {
+                    var totalTasksHere = cpDirectTasks.length + cpChildProjects.reduce(function (a, pj) { return a + (pj.taskIds || []).length; }, 0);
+                    contentsPanel = '<div style="margin-bottom:14px;padding:14px 16px;background:rgba(' + accentRgb + ',0.04);border:1px solid rgba(' + accentRgb + ',0.22);border-radius:12px;">' +
+                        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
+                            '<div style="font-family:Orbitron,sans-serif;font-size:11px;font-weight:800;color:rgba(' + accentRgb + ',1);letter-spacing:0.1em;">◆ MISSION CONTENTS</div>' +
+                            '<div style="font-size:10px;color:rgba(255,255,255,0.4);font-family:monospace;">' + cpChildProjects.length + ' project' + (cpChildProjects.length === 1 ? '' : 's') + ' · ' + totalTasksHere + ' task' + (totalTasksHere === 1 ? '' : 's') + '</div>' +
+                        '</div>' +
+                        // Projects (each with their nested tasks)
+                        cpChildProjects.map(function (pj) {
+                            var nestedTasks = mcChildTasksForProject(pj);
+                            var taskLines = nestedTasks.map(function (nt) {
+                                var col = nt.status === 'approved' ? '#22c55e' : nt.status === 'submitted' ? '#f5a500' : 'rgba(255,255,255,0.6)';
+                                return '<div onclick="event.stopPropagation();mcJumpToItem(\'task\',' + JSON.stringify(nt.id) + ')" style="display:flex;justify-content:space-between;align-items:center;padding:3px 8px 3px 22px;font-size:11px;color:#d0d6ea;cursor:pointer;border-radius:5px;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(255,255,255,0.05)\'" onmouseout="this.style.background=\'transparent\'"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📋 ' + escapeHtml(nt.title || 'Untitled') + '</span><span style="font-size:9px;color:' + col + ';font-weight:700;text-transform:uppercase;letter-spacing:0.05em;flex-shrink:0;">' + (nt.status || 'open') + '</span></div>';
+                            }).join('');
+                            return '<div style="margin-bottom:8px;">' +
+                                '<div onclick="mcJumpToItem(\'project\',' + JSON.stringify(pj.id) + ')" style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.22);border-radius:6px;cursor:pointer;transition:background 0.15s;font-weight:700;" onmouseover="this.style.background=\'rgba(139,92,246,0.16)\'" onmouseout="this.style.background=\'rgba(139,92,246,0.08)\'">' +
+                                    '<span style="font-size:12px;color:#c4b5fd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">🎬 ' + escapeHtml(pj.name || pj.title || 'Untitled') + '</span>' +
+                                    '<span style="font-size:10px;color:rgba(196,181,253,0.6);font-family:monospace;flex-shrink:0;">' + nestedTasks.length + ' task' + (nestedTasks.length === 1 ? '' : 's') + '</span>' +
+                                '</div>' +
+                                (taskLines ? '<div style="margin-top:4px;">' + taskLines + '</div>' : '') +
+                            '</div>';
+                        }).join('') +
+                        // Direct tasks (no wrapping project)
+                        (cpDirectTasks.length > 0
+                            ? '<div style="margin-top:' + (cpChildProjects.length > 0 ? '10' : '0') + 'px;">' +
+                                (cpChildProjects.length > 0 ? '<div style="font-size:9px;color:rgba(255,255,255,0.35);letter-spacing:0.1em;margin-bottom:4px;">STANDALONE TASKS</div>' : '') +
+                                cpDirectTasks.map(function (dt) {
+                                    var col = dt.status === 'approved' ? '#22c55e' : dt.status === 'submitted' ? '#f5a500' : 'rgba(255,255,255,0.6)';
+                                    return '<div onclick="mcJumpToItem(\'task\',' + JSON.stringify(dt.id) + ')" style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:rgba(79,142,247,0.05);border:1px solid rgba(79,142,247,0.18);border-radius:6px;margin-bottom:4px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(79,142,247,0.12)\'" onmouseout="this.style.background=\'rgba(79,142,247,0.05)\'">' +
+                                        '<span style="font-size:11px;color:#c9d6ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📋 ' + escapeHtml(dt.title || 'Untitled') + '</span>' +
+                                        '<span style="font-size:9px;color:' + col + ';font-weight:700;text-transform:uppercase;letter-spacing:0.05em;flex-shrink:0;">' + (dt.status || 'open') + '</span>' +
+                                    '</div>';
+                                }).join('') +
+                              '</div>'
+                            : '') +
+                    '</div>';
+                }
+                return '<div data-mc-checkpoint-id="' + cp.id + '" style="background:linear-gradient(180deg, rgba(22,22,31,0.85), rgba(22,22,31,0.65));border:1.5px solid rgba(' + accentRgb + ',0.5);border-radius:22px;position:relative;overflow:hidden;box-shadow:0 0 0 1px rgba(' + accentRgb + ',0.16), 0 0 26px rgba(' + accentRgb + ',0.20), 0 0 50px rgba(' + accentRgb + ',0.08), 0 16px 34px rgba(0,0,0,0.60);transition:transform 0.2s ease, box-shadow 0.2s ease;" onmouseover="this.style.transform=\'translateY(-4px)\';this.style.boxShadow=\'0 0 0 1px rgba(' + accentRgb + ',0.28), 0 0 38px rgba(' + accentRgb + ',0.32), 0 0 78px rgba(' + accentRgb + ',0.14), 0 22px 44px rgba(0,0,0,0.70)\';" onmouseout="this.style.transform=\'translateY(0)\';this.style.boxShadow=\'0 0 0 1px rgba(' + accentRgb + ',0.16), 0 0 26px rgba(' + accentRgb + ',0.20), 0 0 50px rgba(' + accentRgb + ',0.08), 0 16px 34px rgba(0,0,0,0.60)\';">' +
                     bannerBlock +
                     '<div style="padding:22px 24px 20px 24px;">' +
                     (cp.description ? '<div style="font-size:13px;color:rgba(255,255,255,0.65);margin-bottom:14px;line-height:1.55;">' + escapeHtml(cp.description) + '</div>' : '') +
+                    contentsPanel +
                     '<div style="background:rgba(' + accentRgb + ',0.06);border:1px solid rgba(' + accentRgb + ',0.24);border-radius:12px;padding:12px 14px;margin-bottom:14px;font-size:12px;color:rgba(255,255,255,0.6);">' +
                     '<div style="margin-bottom:5px;"><strong style="color:rgba(255,255,255,0.85);">Season:</strong> ' + (seasonObj ? escapeHtml(seasonObj.name) : '—') + '</div>' +
                     '<div><strong style="color:rgba(255,255,255,0.85);">Dates:</strong> ' + (cp.startDate || 'TBD') + ' → ' + (cp.endDate || 'TBD') + '</div>' +
@@ -24181,6 +24232,77 @@
             list.style.gridTemplateColumns = 'repeat(auto-fill, minmax(560px, 1fr))';
             list.style.gap = '24px';
         }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // MC HIERARCHY HELPERS — Season → Checkpoint → Project → Task
+        // ═══════════════════════════════════════════════════════════════════
+        //  Rules the UI enforces:
+        //  • A Task can live standalone, under a Project, under a Checkpoint,
+        //    or under both a Project AND its containing Checkpoint (inherits
+        //    both scopes).
+        //  • A Project must contain at least one Task and may live under a
+        //    Checkpoint or standalone.
+        //  • A Checkpoint must contain at least one Task or Project.
+        //  • A Season is the top-tier scope. Its cohort control applies to
+        //    everything below.
+        //  Every card gets a lineage strip so the connection is visible.
+        function mcFindTaskParentProject(taskId) {
+            if (!taskId) return null;
+            for (var i = 0; i < mcProjects.length; i++) {
+                var p = mcProjects[i];
+                if (p && Array.isArray(p.taskIds) && p.taskIds.indexOf(taskId) !== -1) return p;
+            }
+            return null;
+        }
+        function mcChildTasksForProject(project) {
+            if (!project || !Array.isArray(project.taskIds)) return [];
+            var map = {}; mcTasks.forEach(function (t) { if (t && t.id) map[t.id] = t; });
+            return project.taskIds.map(function (id) { return map[id]; }).filter(Boolean);
+        }
+        function mcChildProjectsForCheckpoint(cp) {
+            if (!cp) return [];
+            var byExplicit = Array.isArray(cp.projectIds) ? cp.projectIds : [];
+            var out = {}, i;
+            var pmap = {}; mcProjects.forEach(function (p) { if (p && p.id) pmap[p.id] = p; });
+            for (i = 0; i < byExplicit.length; i++) if (pmap[byExplicit[i]]) out[byExplicit[i]] = pmap[byExplicit[i]];
+            // Also include Projects that reference this Checkpoint via checkpointId.
+            mcProjects.forEach(function (p) { if (p && p.checkpointId === cp.id) out[p.id] = p; });
+            return Object.keys(out).map(function (k) { return out[k]; });
+        }
+        function mcChildTasksForCheckpoint(cp) {
+            if (!cp) return [];
+            var byExplicit = Array.isArray(cp.taskIds) ? cp.taskIds : [];
+            var out = {};
+            var tmap = {}; mcTasks.forEach(function (t) { if (t && t.id) tmap[t.id] = t; });
+            byExplicit.forEach(function (id) { if (tmap[id]) out[id] = tmap[id]; });
+            // Also include tasks with roundId === cp.id (legacy field).
+            mcTasks.forEach(function (t) { if (t && t.roundId === cp.id) out[t.id] = t; });
+            return Object.keys(out).map(function (k) { return out[k]; });
+        }
+        // Route the sidebar to a specific tab + optionally jump/highlight an
+        // item. Used by lineage breadcrumb chips so the host can click
+        // through the hierarchy.
+        function mcJumpToItem(kind, id) {
+            try {
+                var view = kind === 'checkpoint' ? 'checkpoints'
+                         : kind === 'project'    ? 'projects'
+                         : kind === 'task'       ? 'tasks'
+                         : null;
+                if (!view) return;
+                if (typeof mcNav === 'function') mcNav(view);
+                // Highlight the target card briefly.
+                setTimeout(function () {
+                    var sel = '[data-mc-' + kind + '-id="' + id + '"]';
+                    var el = document.querySelector(sel);
+                    if (!el) return;
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    var prev = el.style.boxShadow;
+                    el.style.boxShadow = '0 0 0 3px rgba(245,200,66,0.7), 0 0 32px rgba(245,200,66,0.5)';
+                    setTimeout(function () { el.style.boxShadow = prev; }, 1600);
+                }, 220);
+            } catch (e) { console.warn('[mcJumpToItem] failed', e); }
+        }
+        window.mcJumpToItem = mcJumpToItem;
 
         var mcCPEditIndex = -1;
         function mcCreateCheckpoint() { mcShowCPForm(-1); }
@@ -24558,6 +24680,19 @@
                     : { bg:'rgba(239,68,68,0.1)', text:'#ef4444' };
 
                 var cp = mcCheckpoints.find(function(c) { return c.id === t.roundId; });
+                // Lineage — Task can inherit from BOTH a Checkpoint AND a
+                // Project. Show both parents as clickable chips at the top
+                // of the card. If neither, this task is standalone.
+                var parentProject = mcFindTaskParentProject(t.id);
+                var taskLineage = '';
+                if (cp || parentProject) {
+                    taskLineage = '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px;font-size:10px;">' +
+                        '<span style="color:rgba(255,255,255,0.35);letter-spacing:0.12em;font-weight:700;">LINEAGE</span>' +
+                        (cp ? '<span onclick="mcJumpToItem(\'checkpoint\',' + JSON.stringify(cp.id) + ')" style="cursor:pointer;background:rgba(0,212,255,0.12);color:#00d4ff;padding:3px 9px;border-radius:6px;border:1px solid rgba(0,212,255,0.3);font-weight:700;letter-spacing:0.04em;">◆ ' + escapeHtml(cp.name) + '</span>' : '') +
+                        (cp && parentProject ? '<span style="color:rgba(255,255,255,0.25);">›</span>' : '') +
+                        (parentProject ? '<span onclick="mcJumpToItem(\'project\',' + JSON.stringify(parentProject.id) + ')" style="cursor:pointer;background:rgba(139,92,246,0.12);color:#c4b5fd;padding:3px 9px;border-radius:6px;border:1px solid rgba(139,92,246,0.3);font-weight:700;letter-spacing:0.04em;">🎬 ' + escapeHtml(parentProject.name || parentProject.title || 'Untitled Project') + '</span>' : '') +
+                    '</div>';
+                }
 
                 // Category emoji mapping
                 var categoryEmoji = '📋';
@@ -24649,7 +24784,7 @@
                     }
                 }
 
-                return '<div style="background:rgba(22,22,31,0.6);border:1px solid rgba(255,255,255,0.06);border-radius:20px;padding:20px;display:flex;flex-direction:column;">' +
+                return '<div data-mc-task-id="' + t.id + '" style="background:rgba(22,22,31,0.6);border:1px solid rgba(255,255,255,0.06);border-radius:20px;padding:20px;display:flex;flex-direction:column;transition:box-shadow 0.3s ease;">' +
                     // Icon + Title + Status
                     '<div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:12px;">' +
                     '<div style="width:60px;height:60px;border-radius:14px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;">' + categoryEmoji + '</div>' +
@@ -24658,6 +24793,8 @@
                     '<div style="display:inline-block;background:' + statusColors.bg + ';color:' + statusColors.text + ';font-size:10px;font-weight:600;padding:4px 10px;border-radius:6px;text-transform:capitalize;">' + (t.status || 'open') + '</div>' +
                     '</div>' +
                     '</div>' +
+                    // Lineage strip — parent Checkpoint + Project chips
+                    taskLineage +
                     // Description
                     '<div style="font-size:12px;color:rgba(255,255,255,0.5);line-height:1.5;margin-bottom:12px;">' + escapeHtml(t.description || '') + '</div>' +
                     // FLP phase indicator (between description and submission panel)
@@ -26382,6 +26519,37 @@
                     : { bg:'rgba(255,255,255,0.05)', text:'rgba(255,255,255,0.4)' };
 
                 var cp = mcCheckpoints.find(function(c) { return c.id === p.checkpointId; });
+                // Lineage strip — parent Checkpoint chip (if any). Project has
+                // exactly one direct parent Checkpoint (via p.checkpointId) or
+                // is standalone. Clicking the chip jumps to that Checkpoint.
+                var projLineage = '';
+                if (cp) {
+                    projLineage = '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:12px;font-size:10px;">' +
+                        '<span style="color:rgba(255,255,255,0.35);letter-spacing:0.12em;font-weight:700;">LINEAGE</span>' +
+                        '<span onclick="mcJumpToItem(\'checkpoint\',' + JSON.stringify(cp.id) + ')" style="cursor:pointer;background:rgba(0,212,255,0.12);color:#00d4ff;padding:3px 9px;border-radius:6px;border:1px solid rgba(0,212,255,0.3);font-weight:700;letter-spacing:0.04em;">◆ ' + escapeHtml(cp.name) + '</span>' +
+                    '</div>';
+                }
+                // Child tasks panel — quick list of every Task in this Project,
+                // clickable to jump. Shows the current status pill for each.
+                var projChildTasks = mcChildTasksForProject(p);
+                var projTasksPanel = '';
+                if (projChildTasks.length > 0) {
+                    projTasksPanel = '<div style="margin-top:10px;padding:10px 12px;background:rgba(79,142,247,0.05);border:1px solid rgba(79,142,247,0.2);border-radius:8px;">' +
+                        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+                            '<div style="font-family:Orbitron,sans-serif;font-size:10px;font-weight:800;color:#7aa9ff;letter-spacing:0.08em;">📋 TASKS IN THIS PROJECT</div>' +
+                            '<div style="font-size:10px;color:rgba(122,169,255,0.6);font-family:monospace;">' + projChildTasks.length + '</div>' +
+                        '</div>' +
+                        '<div style="display:flex;flex-direction:column;gap:4px;">' +
+                        projChildTasks.map(function (ct) {
+                            var ctStatusCol = ct.status === 'approved' ? '#22c55e' : ct.status === 'submitted' ? '#f5a500' : ct.status === 'open' ? '#00d4ff' : 'rgba(255,255,255,0.4)';
+                            return '<div onclick="mcJumpToItem(\'task\',' + JSON.stringify(ct.id) + ')" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 8px;background:rgba(255,255,255,0.02);border-radius:6px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(122,169,255,0.08)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.02)\'">' +
+                                '<span style="font-size:11px;color:#e0e6ff;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(ct.title || 'Untitled') + '</span>' +
+                                '<span style="font-size:9px;color:' + ctStatusCol + ';font-weight:700;text-transform:uppercase;letter-spacing:0.06em;flex-shrink:0;">' + (ct.status || 'open') + '</span>' +
+                            '</div>';
+                        }).join('') +
+                        '</div>' +
+                    '</div>';
+                }
 
                 // Compute task completion progress
                 var assignedTasks = (p.taskIds || []).map(function(tid) { return mcTasks.find(function(t) { return t.id === tid; }); }).filter(Boolean);
@@ -26483,12 +26651,14 @@
                     }
                 }
 
-                return '<div style="background:rgba(22,22,31,0.6);border:1px solid rgba(255,255,255,0.06);border-radius:20px;overflow:hidden;display:flex;flex-direction:column;">' +
+                return '<div data-mc-project-id="' + p.id + '" style="background:rgba(22,22,31,0.6);border:1px solid rgba(255,255,255,0.06);border-radius:20px;overflow:hidden;display:flex;flex-direction:column;transition:box-shadow 0.3s ease;">' +
                     // 16:9 banner header spans the full width of the card
                     bannerHeader +
                     // Everything below the banner gets its own padding so the
                     // banner remains edge-to-edge under rounded corners.
                     '<div style="padding:20px;display:flex;flex-direction:column;flex:1;">' +
+                    // Lineage strip — parent Checkpoint chip
+                    projLineage +
                     // Title + Status
                     '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px;">' +
                     '<div style="font-size:16px;font-weight:700;color:#f0f0ff;line-height:1.25;flex:1;min-width:0;">' + escapeHtml(p.name || 'Untitled') + '</div>' +
@@ -26496,6 +26666,8 @@
                     '</div>' +
                     // Description
                     '<div style="font-size:12px;color:rgba(255,255,255,0.5);line-height:1.5;margin-bottom:12px;">' + escapeHtml(p.description || '') + '</div>' +
+                    // Child tasks list — makes the Project → Task connection visible
+                    projTasksPanel +
                     // FLP phase indicator
                     pFlpPill +
                     // Subtask checklist (player-side ticks)
