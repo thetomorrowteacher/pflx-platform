@@ -26590,14 +26590,28 @@
                 el = document.getElementById('mc-project-session-code'); if (el) el.value = p.sessionCode || '';
                 el = document.getElementById('mc-project-dc-channel'); if (el) el.checked = p.dcChannelEnabled !== false;
                 el = document.getElementById('mc-project-xbot-enabled'); if (el) el.checked = p.xbotEnabled !== false;
-                // Check assigned cohorts
+                // Check assigned cohorts AND toggle the list visibility so
+                // the host can see which cohorts are selected. Previously
+                // the "All Cohorts" checkbox stayed hidden even when the
+                // project had specific cohortIds saved — the list div's
+                // display was locked at 'none' because the onchange
+                // handler doesn't fire on programmatic checkbox state
+                // changes. Fix: read the resolved allCohorts flag and
+                // toggle the list visibility explicitly.
                 if (p && p.cohortIds) {
                     var allCohortsCheckbox = document.getElementById('mc-project-all-cohorts');
-                    if (allCohortsCheckbox) allCohortsCheckbox.checked = p.cohortIds.length === 0 || p.cohortIds.length === mcCohortGroups.length;
+                    var isAll = p.cohortIds.length === 0 || (mcCohortGroups.length > 0 && p.cohortIds.length === mcCohortGroups.length);
+                    if (allCohortsCheckbox) allCohortsCheckbox.checked = isAll;
+                    if (cohortListDiv) cohortListDiv.style.display = isAll ? 'none' : 'flex';
                     p.cohortIds.forEach(function(cohortId) {
                         var cb = cohortListDiv.querySelector('input[value="' + cohortId + '"]');
                         if (cb) cb.checked = true;
                     });
+                } else {
+                    // No cohortIds set on this project — default to "All Cohorts"
+                    var allCohortsCheckbox2 = document.getElementById('mc-project-all-cohorts');
+                    if (allCohortsCheckbox2) allCohortsCheckbox2.checked = true;
+                    if (cohortListDiv) cohortListDiv.style.display = 'none';
                 }
             } else {
                 ['mc-project-title','mc-project-desc','mc-project-team','mc-project-link','mc-project-objectives','mc-project-deliverables'].forEach(function(id) {
@@ -26708,6 +26722,70 @@
             if (mcProjectEditIndex >= 0) { mcProjects[mcProjectEditIndex] = obj; }
             else { mcProjects.push(obj); }
             mcSaveData('projects');
+
+            // ── Cascade cohortIds to associated tasks ──
+            // A project's cohort scoping should flow through to every
+            // task it groups. Without this, a host setting the project
+            // to "DD Core 3 only" doesn't reach the tasks — players in
+            // other cohorts still see the individual tasks even though
+            // the project is scoped to DD Core 3. Rule of thumb:
+            //   • cohortIds NON-EMPTY → tasks inherit those cohort ids
+            //   • cohortIds EMPTY (project is All Cohorts) → tasks are
+            //     left as-is (host may have set tighter per-task scope
+            //     that should be preserved)
+            try {
+                if (Array.isArray(obj.taskIds) && obj.taskIds.length && Array.isArray(obj.cohortIds) && obj.cohortIds.length) {
+                    var _tasksTouched = false;
+                    obj.taskIds.forEach(function (tid) {
+                        var t = mcTasks.find(function (x) { return x && x.id === tid; });
+                        if (!t) return;
+                        // Mirror onto both the array-style and the
+                        // single-string convention; different renderers
+                        // read different fields.
+                        t.cohortIds = obj.cohortIds.slice();
+                        t.cohorts = obj.cohortIds.slice();
+                        _tasksTouched = true;
+                    });
+                    if (_tasksTouched) mcSaveData('tasks');
+                }
+            } catch (eCasc) { console.warn('[mc project save] cohort cascade failed', eCasc); }
+
+            // ── Project-completion reward ──
+            // When a project transitions to status='completed', fire
+            // PflxDataBus.award for the project-level xcReward + every
+            // rewardBadges entry. Reward goes to every player who was
+            // on the team OR who submitted a task in the project.
+            // Idempotency: obj._rewardedAt is set the first time so
+            // re-editing an already-completed project doesn't
+            // double-pay.
+            try {
+                var prevStatus = (mcProjectEditIndex >= 0 && mcProjects[mcProjectEditIndex]) ? mcProjects[mcProjectEditIndex]._prevStatus : null;
+                obj._prevStatus = obj.status;
+                if (obj.status === 'completed' && !obj._rewardedAt && window.PflxDataBus) {
+                    var recipients = {};
+                    (obj.team || []).forEach(function (id) { if (id) recipients[id] = 1; });
+                    (obj.taskIds || []).forEach(function (tid) {
+                        var t = mcTasks.find(function (x) { return x && x.id === tid; });
+                        if (t && t.submission && t.submission.submittedBy) recipients[t.submission.submittedBy] = 1;
+                    });
+                    var xcAmt = obj.xcReward || obj.budget || 0;
+                    Object.keys(recipients).forEach(function (pid) {
+                        try {
+                            if (xcAmt > 0) {
+                                window.PflxDataBus.award(pid, { xc: xcAmt, source: 'mc', reason: 'project:' + obj.id });
+                            }
+                            (obj.rewardBadges || []).forEach(function (badgeRef) {
+                                var b = (typeof badgeRef === 'string')
+                                    ? { id: badgeRef, name: badgeRef }
+                                    : { id: badgeRef.id, name: badgeRef.name || badgeRef.title || badgeRef.id, category: badgeRef.category || 'primary', xcValue: badgeRef.xcValue || badgeRef.xc || 0 };
+                                window.PflxDataBus.award(pid, { badge: b, source: 'mc', reason: 'project:' + obj.id });
+                            });
+                        } catch (eA) { console.warn('[mc project reward] award failed for', pid, eA); }
+                    });
+                    obj._rewardedAt = new Date().toISOString();
+                    mcSaveData('projects');
+                }
+            } catch (eProjR) { console.warn('[mc project reward] chain failed', eProjR); }
 
             // Publish to sync bus
             if (typeof pflxSyncBus !== 'undefined') {
