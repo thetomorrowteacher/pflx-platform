@@ -20171,12 +20171,24 @@
                 try { localStorage.setItem('pflx_mc_seeded', '1'); } catch (e) {}
             }
 
-            // Seed cohort groups from existing cohorts if empty
-            if (mcCohortGroups.length === 0 && typeof COHORTS !== 'undefined' && COHORTS.length > 0) {
+            // Seed cohort groups from existing cohorts — first boot only.
+            // Prior to June 2026, this ran on every mcLoadData() where the
+            // local list was empty. That defeats fresh Supabase seeds and
+            // re-plants stale data whenever a host clears their local cache.
+            // Gate behind pflx_mc_cohortgroups_seeded so it never re-runs
+            // once we've either (a) done the initial COHORTS seed, or
+            // (b) received a cloud pull with any content.
+            var __cgSeeded = false;
+            try { __cgSeeded = localStorage.getItem('pflx_mc_cohortgroups_seeded') === '1'; } catch (e) {}
+            if (mcCohortGroups.length === 0 && !__cgSeeded && typeof COHORTS !== 'undefined' && COHORTS.length > 0) {
                 mcCohortGroups = COHORTS.map(function(c, i) {
                     return { id: 'cg-' + (i+1), name: c.name || c, description: '', playerCount: 0, color: '#4f8ef7' };
                 });
                 mcSaveData('cohortgroups');
+                try { localStorage.setItem('pflx_mc_cohortgroups_seeded', '1'); } catch (e) {}
+            } else if (mcCohortGroups.length > 0 && !__cgSeeded) {
+                // Existing install upgrade — mark seeded so we never re-seed.
+                try { localStorage.setItem('pflx_mc_cohortgroups_seeded', '1'); } catch (e) {}
             }
 
             // Seed seasons from X-Coin if empty
@@ -20759,7 +20771,31 @@
                 }
 
                 if (msg.type === 'pflx_cloud_data') {
-                    // X-Coin is sending fresh Supabase data — update MC stores
+                    // X-Coin is sending fresh Supabase data — update MC stores.
+                    // ── STOMP GUARD 4 (June 2026 incident) ──
+                    // Legacy path from before MC had direct cloud access. X-Coin's
+                    // PflxBridge sends `D.mockProjects`, `D.mockCohortGroups`, etc
+                    // whenever asked, and those mock arrays clobber the live MC
+                    // cloud row. Symptom: user creates a project, refreshes, sees
+                    // only the two legacy mock stubs (proj-1 "Brand Identity
+                    // Campaign", proj-2). Same for cohort groups — a fresh
+                    // Supabase seed of 10 cohorts vanishes within seconds because
+                    // X-Coin sends back its stale (or empty) local mockCohortGroups.
+                    //
+                    // MC now owns all these keys via mcCloudPull + Realtime, so
+                    // X-Coin's bridge is no longer authoritative for them. Reject
+                    // every branch that could overwrite an MC-owned collection.
+                    // X-Coin can still keep its OWN store fresh from its own
+                    // Supabase reads; it just cannot dictate MC's state.
+                    var __MC_OWNED_XCOIN_KEYS = {
+                        checkpoints:1, tasks:1, projects:1, seasons:1,
+                        badges:1, jobs:1, cohortGroups:1, pflxRanks:1,
+                        studios:1, pitches:1, sessions:1, modifiers:1
+                    };
+                    if (msg.key && __MC_OWNED_XCOIN_KEYS[msg.key]) {
+                        console.warn('[MC cloud] ✋ pflx_cloud_data blocked for "' + msg.key + '" — MC owns this key, X-Coin bridge is not authoritative.');
+                        return;
+                    }
                     var dataUpdated = false;
                     if (msg.key === 'users' && msg.data && msg.data.length) {
                         // X-Coin uses brandName; Console uses brand. Normalize so the brand
