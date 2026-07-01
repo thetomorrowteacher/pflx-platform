@@ -20307,26 +20307,58 @@
             pflxPlaySfx(type === 'error' ? 'error' : 'save');
         }
 
-        function mcSaveData(type) {
+        // ── Quota-safe localStorage write ──
+        // If a payload is too big for localStorage, don't drop it silently.
+        // For collections that contain heavy base64 fields (bannerImage on
+        // projects, avatars on players), retry once with those stripped so
+        // the LOCAL cache stays consistent. The cloud row still gets the
+        // full payload — this is a disk-cache degradation, not data loss.
+        function _mcSetItemSafe(key, coll) {
+            var payload;
             try {
-                if (type === 'players' || type === 'all') localStorage.setItem('pflx_mc_players', JSON.stringify(mcPlayers));
-                if (type === 'checkpoints' || type === 'all') localStorage.setItem('pflx_mc_checkpoints', JSON.stringify(mcCheckpoints));
-                if (type === 'tasks' || type === 'all') localStorage.setItem('pflx_mc_tasks', JSON.stringify(mcTasks));
-                if (type === 'projects' || type === 'all') localStorage.setItem('pflx_mc_projects', JSON.stringify(mcProjects));
-                if (type === 'seasons' || type === 'all') localStorage.setItem('pflx_mc_seasons', JSON.stringify(mcSeasons));
-                if (type === 'announcements' || type === 'all') localStorage.setItem('pflx_mc_announcements', JSON.stringify(mcAnnouncements));
-                if (type === 'badges' || type === 'all') localStorage.setItem('pflx_mc_badges', JSON.stringify(mcBadges));
-                if (type === 'jobs' || type === 'all') localStorage.setItem('pflx_mc_jobs', JSON.stringify(mcJobs));
-                if (type === 'pitches' || type === 'all') localStorage.setItem('pflx_mc_pitches', JSON.stringify(mcPitches));
-                if (type === 'studios' || type === 'all') localStorage.setItem('pflx_mc_studios', JSON.stringify(mcStudios));
-                if (type === 'cohortgroups' || type === 'all') localStorage.setItem('pflx_mc_cohortgroups', JSON.stringify(mcCohortGroups));
-                if (type === 'approvals' || type === 'all') localStorage.setItem('pflx_mc_approvals', JSON.stringify(mcApprovals));
-                if (type === 'modifiers' || type === 'all') localStorage.setItem('pflx_mc_modifiers', JSON.stringify(mcModifiers));
-                if (type === 'gameconfig' || type === 'all') localStorage.setItem('pflx_mc_gameconfig', JSON.stringify(mcGameConfig));
-                if (type === 'onboarding' || type === 'all') localStorage.setItem('pflx_mc_onboarding', JSON.stringify(mcOnboarding));
-                if (type === 'pflxranks' || type === 'all') localStorage.setItem('pflx_mc_pflxranks', JSON.stringify(mcPflxRanks));
-                if (type === 'sessions' || type === 'all') localStorage.setItem('pflx_mc_sessions', JSON.stringify(mcSessions));
-            } catch(e) {}
+                payload = JSON.stringify(coll);
+                localStorage.setItem(key, payload);
+                return true;
+            } catch (e) {
+                var quota = e && (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014);
+                if (!quota) { console.warn('[MC save] setItem failed for', key, e); return false; }
+                // Quota hit — strip large fields (bannerImage/image dataURLs) and retry.
+                try {
+                    var lite = (coll || []).map(function (item) {
+                        if (!item || typeof item !== 'object') return item;
+                        var clone = Object.assign({}, item);
+                        // Drop giant data-URLs; the cloud row keeps them.
+                        if (typeof clone.bannerImage === 'string' && clone.bannerImage.length > 20000) clone.bannerImage = '';
+                        if (typeof clone.image === 'string' && clone.image.length > 20000) clone.image = '';
+                        return clone;
+                    });
+                    localStorage.setItem(key, JSON.stringify(lite));
+                    console.warn('[MC save] ⚠ localStorage quota exceeded for ' + key + ' — stripped large images from local cache. Cloud row still has full data.');
+                    return true;
+                } catch (e2) {
+                    console.error('[MC save] ✗ localStorage full even after stripping images for ' + key, e2);
+                    return false;
+                }
+            }
+        }
+        function mcSaveData(type) {
+            if (type === 'players' || type === 'all') _mcSetItemSafe('pflx_mc_players', mcPlayers);
+            if (type === 'checkpoints' || type === 'all') _mcSetItemSafe('pflx_mc_checkpoints', mcCheckpoints);
+            if (type === 'tasks' || type === 'all') _mcSetItemSafe('pflx_mc_tasks', mcTasks);
+            if (type === 'projects' || type === 'all') _mcSetItemSafe('pflx_mc_projects', mcProjects);
+            if (type === 'seasons' || type === 'all') _mcSetItemSafe('pflx_mc_seasons', mcSeasons);
+            if (type === 'announcements' || type === 'all') _mcSetItemSafe('pflx_mc_announcements', mcAnnouncements);
+            if (type === 'badges' || type === 'all') _mcSetItemSafe('pflx_mc_badges', mcBadges);
+            if (type === 'jobs' || type === 'all') _mcSetItemSafe('pflx_mc_jobs', mcJobs);
+            if (type === 'pitches' || type === 'all') _mcSetItemSafe('pflx_mc_pitches', mcPitches);
+            if (type === 'studios' || type === 'all') _mcSetItemSafe('pflx_mc_studios', mcStudios);
+            if (type === 'cohortgroups' || type === 'all') _mcSetItemSafe('pflx_mc_cohortgroups', mcCohortGroups);
+            if (type === 'approvals' || type === 'all') _mcSetItemSafe('pflx_mc_approvals', mcApprovals);
+            if (type === 'modifiers' || type === 'all') _mcSetItemSafe('pflx_mc_modifiers', mcModifiers);
+            if (type === 'gameconfig' || type === 'all') { try { localStorage.setItem('pflx_mc_gameconfig', JSON.stringify(mcGameConfig)); } catch(e){} }
+            if (type === 'onboarding' || type === 'all') { try { localStorage.setItem('pflx_mc_onboarding', JSON.stringify(mcOnboarding)); } catch(e){} }
+            if (type === 'pflxranks' || type === 'all') _mcSetItemSafe('pflx_mc_pflxranks', mcPflxRanks);
+            if (type === 'sessions' || type === 'all') _mcSetItemSafe('pflx_mc_sessions', mcSessions);
             // Stomp guard 3 — mark the local-write timestamp so the realtime
             // ingest path can refuse stale cloud echoes for the next few
             // seconds. _mcApplyingCloud is true while the cloud ingest path
@@ -26281,7 +26313,19 @@
 
         // ── Projects ────────────────────────────────────────────────
         function mcRenderProjects() {
-            mcLoadData();
+            // ── STOMP GUARD 5 (July 2026 incident) ──
+            // Previously this called mcLoadData() which re-reads every MC
+            // collection from localStorage. That's a memory-loss trap: if
+            // the in-memory mcProjects has a freshly-saved project but the
+            // localStorage write silently failed (QuotaExceededError from
+            // the base64 banner image), mcLoadData overwrites mcProjects
+            // with the stale disk state and the project vanishes on render.
+            // Fix: only load-from-disk at true boot (when nothing is loaded).
+            // Once we have any in-memory state, trust it.
+            if (!window._mcInitialLoadDone) {
+                mcLoadData();
+                window._mcInitialLoadDone = true;
+            }
             var list = document.getElementById('mc-projects-list');
             if (!list) return;
 
@@ -26503,17 +26547,80 @@
             if (ph) ph.style.display = '';
         }
 
+        // ── Client-side image downscaler ──
+        // Banner uploads used to store the raw file as a base64 dataURL. A
+        // 3 MB PNG banner becomes ~4 MB base64 which alone eats most of
+        // localStorage's 5-10 MB per-origin quota — and once quota tips, the
+        // whole "save Project" flow silently drops the new project on the
+        // very next render. We now downscale to a card-appropriate size and
+        // re-encode as JPEG. A 3 MB PNG shrinks to ~150-300 KB with no
+        // visible quality loss at the display size.
+        //   maxW × maxH: target dimensions (aspect ratio preserved)
+        //   quality:     0-1 JPEG quality
+        // Returns a Promise resolving to the resized dataURL.
+        function _mcDownscaleImageDataUrl(fileOrDataUrl, maxW, maxH, quality) {
+            return new Promise(function (resolve, reject) {
+                var img = new Image();
+                img.onload = function () {
+                    try {
+                        var w = img.naturalWidth || img.width;
+                        var h = img.naturalHeight || img.height;
+                        if (w <= 0 || h <= 0) { reject(new Error('bad-image')); return; }
+                        var scale = Math.min(1, maxW / w, maxH / h);
+                        var cw = Math.max(1, Math.round(w * scale));
+                        var ch = Math.max(1, Math.round(h * scale));
+                        var canvas = document.createElement('canvas');
+                        canvas.width = cw; canvas.height = ch;
+                        var ctx = canvas.getContext('2d');
+                        ctx.imageSmoothingEnabled = true;
+                        ctx.imageSmoothingQuality = 'high';
+                        ctx.drawImage(img, 0, 0, cw, ch);
+                        // JPEG for photos (banners) — much smaller than PNG.
+                        // Transparency is rarely needed for a project banner.
+                        resolve(canvas.toDataURL('image/jpeg', quality || 0.82));
+                    } catch (e) { reject(e); }
+                };
+                img.onerror = function () { reject(new Error('image-load-failed')); };
+                if (typeof fileOrDataUrl === 'string') {
+                    img.src = fileOrDataUrl;
+                } else {
+                    var reader = new FileReader();
+                    reader.onload = function (e) { img.src = e.target.result; };
+                    reader.onerror = function () { reject(new Error('read-failed')); };
+                    reader.readAsDataURL(fileOrDataUrl);
+                }
+            });
+        }
+
         function mcUploadProjectBanner(input) {
             if (!input.files || !input.files[0]) return;
-            var reader = new FileReader();
-            reader.onload = function(e) {
-                mcProjectBannerData = e.target.result;
+            var file = input.files[0];
+            // Downscale to 1600×900 max, JPEG 82%. Card renders at
+            // ~380×213 css px so this is 2x retina — plenty sharp — while
+            // slashing the dataURL from megabytes to ~150-300 KB.
+            _mcDownscaleImageDataUrl(file, 1600, 900, 0.82).then(function (dataUrl) {
+                mcProjectBannerData = dataUrl;
                 var img = document.getElementById('mc-project-banner-img');
                 var ph = document.getElementById('mc-project-banner-placeholder');
                 if (img) { img.src = mcProjectBannerData; img.style.display = 'block'; }
                 if (ph) ph.style.display = 'none';
-            };
-            reader.readAsDataURL(input.files[0]);
+                var kb = Math.round(dataUrl.length / 1024);
+                console.log('[MC banner] ✓ resized banner to ' + kb + 'KB (was ' + Math.round(file.size / 1024) + 'KB)');
+            }).catch(function (err) {
+                console.error('[MC banner] resize failed, falling back to raw file:', err);
+                // Fallback: keep the raw dataURL if canvas resize fails
+                // (some odd file types). _mcSetItemSafe will strip it from
+                // localStorage on quota error and the cloud row still gets it.
+                var reader = new FileReader();
+                reader.onload = function (e) {
+                    mcProjectBannerData = e.target.result;
+                    var img = document.getElementById('mc-project-banner-img');
+                    var ph = document.getElementById('mc-project-banner-placeholder');
+                    if (img) { img.src = mcProjectBannerData; img.style.display = 'block'; }
+                    if (ph) ph.style.display = 'none';
+                };
+                reader.readAsDataURL(file);
+            });
         }
 
         function mcRemoveProjectBanner() {
