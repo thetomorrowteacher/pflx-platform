@@ -8417,14 +8417,25 @@
                                             <button class="mc-btn" onclick="mcAddTaskLink()" style="font-size:10px;padding:4px 10px;">+ Add</button>
                                         </div>
                                     </div>
-                                    <div style="margin-bottom:12px;">
-                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Status</label>
-                                        <select id="mc-task-status" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
-                                            <option value="open">open</option>
-                                            <option value="submitted">submitted</option>
-                                            <option value="approved">approved</option>
-                                            <option value="rejected">rejected</option>
-                                        </select>
+                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Status</label>
+                                            <select id="mc-task-status" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                                <option value="open">open</option>
+                                                <option value="submitted">submitted</option>
+                                                <option value="approved">approved</option>
+                                                <option value="rejected">rejected</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Priority</label>
+                                            <select id="mc-task-priority" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                                <option value="urgent">◉ Urgent</option>
+                                                <option value="high">◉ High</option>
+                                                <option value="normal" selected>○ Normal</option>
+                                                <option value="low">· Low</option>
+                                            </select>
+                                        </div>
                                     </div>
                                     <div style="margin-bottom:12px;">
                                         <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Badge Rewards (Multi-Select)</label>
@@ -24338,6 +24349,28 @@
             return 'onclick="mcJumpToItem(&quot;' + kind + '&quot;,&quot;' + s + '&quot;)"';
         }
 
+        // ═══════════════════════════════════════════════════════════════════
+        // PRIORITY MODEL — Urgent / High / Normal / Low with a colored dot.
+        // Priority is orthogonal to due-date urgency: a task can have a
+        // Normal priority but still be Overdue (urgent by time). We show
+        // both signals independently on the row.
+        // ═══════════════════════════════════════════════════════════════════
+        var MC_PRIORITY_META = {
+            urgent: { label: 'Urgent', rgb: '239,68,68',   weight: 4, glyph: '◉' },
+            high:   { label: 'High',   rgb: '255,159,64',  weight: 3, glyph: '◉' },
+            normal: { label: 'Normal', rgb: '122,169,255', weight: 2, glyph: '○' },
+            low:    { label: 'Low',    rgb: '156,163,175', weight: 1, glyph: '·' }
+        };
+        function _mcPriorityFlag(p) {
+            var meta = MC_PRIORITY_META[p] || MC_PRIORITY_META.normal;
+            return '<span title="Priority: ' + meta.label + '" style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;background:rgba(' + meta.rgb + ',0.22);color:rgba(' + meta.rgb + ',1);font-size:9px;font-weight:900;line-height:1;flex-shrink:0;border:1.5px solid rgba(' + meta.rgb + ',0.65);">' + meta.glyph + '</span>';
+        }
+        function _mcPriorityLabelPill(p) {
+            var meta = MC_PRIORITY_META[p] || MC_PRIORITY_META.normal;
+            return '<span style="background:rgba(' + meta.rgb + ',0.14);color:rgba(' + meta.rgb + ',1);padding:3px 9px;border-radius:10px;font-size:10px;font-weight:800;border:1px solid rgba(' + meta.rgb + ',0.4);text-transform:uppercase;letter-spacing:0.06em;">' + meta.label + '</span>';
+        }
+        function _mcPriorityWeight(p) { return (MC_PRIORITY_META[p] || MC_PRIORITY_META.normal).weight; }
+
         // ── Urgency for any date-scoped item ──
         // Returns {color, rgb, label, days} where color is one of
         // grey / green / yellow / orange / red. Used across Task, Project,
@@ -24903,10 +24936,12 @@
                     ? '<span style="background:rgba(139,92,246,0.14);color:#c4b5fd;padding:5px 10px;border-radius:12px;font-size:11px;font-weight:700;border:1px solid rgba(139,92,246,0.35);white-space:nowrap;">🏆 ' + rewardBadgeCount + '</span>'
                     : '';
                 var expanded = (t.__mcRowOpen === true);
+                var priorityFlag = _mcPriorityFlag(t.priority || 'normal');
                 return '<div data-mc-task-id="' + t.id + '" style="background:rgba(22,22,31,0.55);border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:14px 18px;margin-bottom:8px;transition:background 0.15s ease, box-shadow 0.3s ease;" onmouseover="this.style.background=\'rgba(30,30,42,0.7)\'" onmouseout="this.style.background=\'rgba(22,22,31,0.55)\'">' +
                     // Row header — the always-visible line
                     '<div style="display:flex;align-items:center;gap:14px;">' +
                         checkboxHtml +
+                        priorityFlag +
                         '<div style="font-size:20px;flex-shrink:0;">' + categoryEmoji + '</div>' +
                         // Center block — title, description snippet, lineage chips
                         '<div style="flex:1;min-width:0;">' +
@@ -24976,9 +25011,13 @@
             // compact when only one or two phases have work.
             var __bucketed = {};
             BUCKET_ORDER.forEach(function (k) { __bucketed[k] = []; });
-            filtered.forEach(function (t, idx) {
-                var b = _mcFlpBucketForTask(t);
-                (__bucketed[b] || __bucketed.bypass).push(__taskCards[idx]);
+            // Sort within each bucket by priority (highest first) so the
+            // row list matches how Linear/ClickUp/Monday stack items.
+            var __indexed = filtered.map(function (t, idx) { return { t: t, idx: idx, w: _mcPriorityWeight(t.priority || 'normal') }; });
+            __indexed.sort(function (a, b) { return b.w - a.w; });
+            __indexed.forEach(function (row) {
+                var b = _mcFlpBucketForTask(row.t);
+                (__bucketed[b] || __bucketed.bypass).push(__taskCards[row.idx]);
             });
             var __outHtml = '';
             BUCKET_ORDER.forEach(function (k) {
@@ -25283,6 +25322,7 @@
                 el = document.getElementById('mc-task-requirement'); if (el) el.value = t.requirement || 'required';
                 el = document.getElementById('mc-task-link'); if (el) el.value = t.link || '';
                 el = document.getElementById('mc-task-status'); if (el) el.value = t.status || 'open';
+                el = document.getElementById('mc-task-priority'); if (el) el.value = t.priority || 'normal';
                 el = document.getElementById('mc-task-peer-count'); if (el) el.value = t.peerReviewCount || 0;
                 el = document.getElementById('mc-task-self-eval'); if (el) el.value = t.selfEvalRequired || 'none';
                 el = document.getElementById('mc-task-post-feedback-upload'); if (el) el.checked = t.postFeedbackUpload || false;
@@ -26416,6 +26456,7 @@
                 assignedTo: assignedTo,
                 link: document.getElementById('mc-task-link')?.value || '',
                 status: document.getElementById('mc-task-status')?.value || 'open',
+                priority: document.getElementById('mc-task-priority')?.value || (mcTaskEditIndex >= 0 && mcTasks[mcTaskEditIndex] ? (mcTasks[mcTaskEditIndex].priority || 'normal') : 'normal'),
                 peerReviewCount: parseInt(document.getElementById('mc-task-peer-count')?.value || '0', 10),
                 selfEvalRequired: document.getElementById('mc-task-self-eval')?.value || 'none',
                 postFeedbackUpload: document.getElementById('mc-task-post-feedback-upload')?.checked || false,
@@ -50990,6 +51031,166 @@ RESPONSE RULES:
             try { localStorage.setItem(DISMISS_KEY, '1'); } catch (e) {}
             hideHint(false);
         });
+    })();
+    </script>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         COMMAND PALETTE (⌘K / Ctrl+K) — Linear / Notion style.
+         Fuzzy-search across navigation targets, create actions, jump to
+         Checkpoints / Projects / Tasks / Players, award XC. Runs entirely
+         local; no additional network hop. Overlay sits above everything at
+         z-index 999999.
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div id="mc-cmdk-overlay" style="display:none;position:fixed;inset:0;z-index:999999;background:rgba(2,6,12,0.75);backdrop-filter:blur(6px);align-items:flex-start;justify-content:center;padding-top:12vh;font-family:'Rajdhani',sans-serif;">
+        <div style="width:min(680px,92vw);background:linear-gradient(180deg, rgba(18,20,32,0.98), rgba(12,14,22,0.98));border:1px solid rgba(0,212,255,0.4);border-radius:18px;box-shadow:0 30px 80px rgba(0,0,0,0.8), 0 0 60px rgba(0,212,255,0.18);overflow:hidden;">
+            <div style="display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid rgba(255,255,255,0.06);">
+                <div style="font-size:20px;color:#00d4ff;">⌘</div>
+                <input id="mc-cmdk-input" placeholder="Type a command or search..." style="flex:1;background:transparent;border:none;outline:none;color:#f0f0ff;font-size:16px;font-family:inherit;" autocomplete="off">
+                <div style="font-size:10px;color:rgba(255,255,255,0.35);letter-spacing:0.1em;font-family:monospace;padding:3px 8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:5px;">ESC</div>
+            </div>
+            <div id="mc-cmdk-results" style="max-height:60vh;overflow-y:auto;padding:8px;"></div>
+            <div style="padding:10px 20px;font-size:10px;color:rgba(255,255,255,0.35);border-top:1px solid rgba(255,255,255,0.05);display:flex;justify-content:space-between;">
+                <span>↑↓ Navigate · ↵ Select</span>
+                <span>⌘K anywhere</span>
+            </div>
+        </div>
+    </div>
+    <script>
+    (function () {
+        // Command palette actions are computed lazily on open so the list
+        // is always current (fresh mcCheckpoints / mcProjects / mcTasks).
+        function _cmdkBuildActions() {
+            var actions = [];
+            // Navigation
+            [
+                { view: 'home',         label: 'Go to Home Base',        icon: '🏠', kw: 'home dashboard' },
+                { view: 'checkpoints',  label: 'Go to Checkpoints',      icon: '🏁', kw: 'checkpoint season milestone' },
+                { view: 'projects',     label: 'Go to Projects',         icon: '🎬', kw: 'project deliverable' },
+                { view: 'tasks',        label: 'Go to Tasks',            icon: '📋', kw: 'task todo assignment' },
+                { view: 'jobs',         label: 'Go to Job Board',        icon: '💼', kw: 'job hire board work' },
+                { view: 'players',      label: 'Go to Player Management', icon: '👥', kw: 'players roster people' },
+                { view: 'badges',       label: 'Go to Badges',           icon: '🏆', kw: 'badge reward achievement' },
+                { view: 'cohorts',      label: 'Go to Cohort Groups',    icon: '🎓', kw: 'cohort group class' },
+                { view: 'approvals',    label: 'Go to Approvals',        icon: '✅', kw: 'approve review queue' }
+            ].forEach(function (a) {
+                actions.push({ label: a.label, icon: a.icon, group: 'NAVIGATE', hint: '⌥', keywords: a.kw + ' navigate', run: function () { try { if (typeof mcNav === 'function') mcNav(a.view); else if (typeof navigateTo === 'function') navigateTo(a.view); } catch (e) {} } });
+            });
+            // Quick create
+            actions.push({ label: 'New Checkpoint', icon: '＋', group: 'CREATE', keywords: 'new create add checkpoint', run: function () { try { mcNav('checkpoints'); mcCreateCheckpoint(); } catch (e) {} } });
+            actions.push({ label: 'New Project',    icon: '＋', group: 'CREATE', keywords: 'new create add project', run: function () { try { mcNav('projects'); mcShowProjectForm(-1); } catch (e) {} } });
+            actions.push({ label: 'New Task',       icon: '＋', group: 'CREATE', keywords: 'new create add task', run: function () { try { mcNav('tasks'); mcShowTaskForm(-1); } catch (e) {} } });
+            // Item jumps
+            try {
+                (mcCheckpoints || []).forEach(function (cp) { actions.push({ label: cp.name || 'Untitled Checkpoint', icon: '🏁', group: 'CHECKPOINTS', keywords: (cp.name || '') + ' checkpoint', run: function () { mcJumpToItem('checkpoint', cp.id); } }); });
+                (mcProjects || []).forEach(function (p)  { actions.push({ label: p.name || p.title || 'Untitled Project', icon: '🎬', group: 'PROJECTS', keywords: (p.name || p.title || '') + ' project', run: function () { mcJumpToItem('project', p.id); } }); });
+                (mcTasks || []).forEach(function (t)     { actions.push({ label: t.title || 'Untitled Task', icon: '📋', group: 'TASKS', keywords: (t.title || '') + ' task ' + (t.priority || ''), run: function () { mcJumpToItem('task', t.id); } }); });
+                (typeof PLAYERS !== 'undefined' ? PLAYERS : []).forEach(function (pl) {
+                    var name = pl.brandName || pl.brand || pl.name || pl.id;
+                    actions.push({ label: 'Jump to ' + name, icon: '👤', group: 'PLAYERS', keywords: name + ' player profile', run: function () { try { mcNav('players'); } catch (e) {} } });
+                });
+            } catch (e) { /* stores may not be initialized yet */ }
+            return actions;
+        }
+        var _cmdkSelected = 0;
+        var _cmdkFilteredActions = [];
+        function _cmdkFilter(q) {
+            var actions = _cmdkBuildActions();
+            q = (q || '').toLowerCase().trim();
+            if (!q) return actions.slice(0, 60);
+            return actions.filter(function (a) {
+                return (a.label + ' ' + (a.keywords || '') + ' ' + (a.group || '')).toLowerCase().indexOf(q) !== -1;
+            }).slice(0, 60);
+        }
+        function _cmdkRender() {
+            var container = document.getElementById('mc-cmdk-results');
+            if (!container) return;
+            if (_cmdkFilteredActions.length === 0) {
+                container.innerHTML = '<div style="padding:32px 20px;text-align:center;color:rgba(255,255,255,0.35);font-size:13px;">No matching commands. Try a different search.</div>';
+                return;
+            }
+            // Group
+            var byGroup = {};
+            var groupOrder = [];
+            _cmdkFilteredActions.forEach(function (a, i) {
+                var g = a.group || 'OTHER';
+                if (!byGroup[g]) { byGroup[g] = []; groupOrder.push(g); }
+                byGroup[g].push({ a: a, idx: i });
+            });
+            var html = '';
+            groupOrder.forEach(function (g) {
+                html += '<div style="font-family:Orbitron,sans-serif;font-size:9px;font-weight:800;color:rgba(255,255,255,0.35);letter-spacing:0.14em;padding:10px 12px 6px 12px;">' + g + '</div>';
+                byGroup[g].forEach(function (row) {
+                    var isSel = row.idx === _cmdkSelected;
+                    html += '<div data-cmdk-idx="' + row.idx + '" style="display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:8px;cursor:pointer;transition:background 0.1s ease;' + (isSel ? 'background:rgba(0,212,255,0.14);' : '') + '" onmouseenter="_cmdkSetSelected(' + row.idx + ')">' +
+                        '<span style="font-size:16px;width:22px;text-align:center;">' + row.a.icon + '</span>' +
+                        '<span style="flex:1;font-size:13px;color:#f0f0ff;">' + row.a.label + '</span>' +
+                        (row.a.hint ? '<span style="font-size:10px;color:rgba(255,255,255,0.35);font-family:monospace;">' + row.a.hint + '</span>' : '') +
+                    '</div>';
+                });
+            });
+            container.innerHTML = html;
+            // Selection scroll into view
+            var selEl = container.querySelector('[data-cmdk-idx="' + _cmdkSelected + '"]');
+            if (selEl && selEl.scrollIntoView) selEl.scrollIntoView({ block: 'nearest' });
+        }
+        window._cmdkSetSelected = function (i) { _cmdkSelected = i; _cmdkRender(); };
+        function _cmdkOpen() {
+            var ov = document.getElementById('mc-cmdk-overlay');
+            var input = document.getElementById('mc-cmdk-input');
+            if (!ov || !input) return;
+            _cmdkSelected = 0;
+            input.value = '';
+            _cmdkFilteredActions = _cmdkFilter('');
+            _cmdkRender();
+            ov.style.display = 'flex';
+            setTimeout(function () { input.focus(); }, 20);
+        }
+        function _cmdkClose() {
+            var ov = document.getElementById('mc-cmdk-overlay');
+            if (ov) ov.style.display = 'none';
+        }
+        function _cmdkRun() {
+            var a = _cmdkFilteredActions[_cmdkSelected];
+            if (!a) return;
+            _cmdkClose();
+            setTimeout(function () { try { a.run(); } catch (e) { console.warn('[cmdk] action failed', e); } }, 40);
+        }
+        window.addEventListener('keydown', function (e) {
+            // Open on ⌘K / Ctrl+K anywhere.
+            if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+                e.preventDefault();
+                _cmdkOpen();
+                return;
+            }
+            var ov = document.getElementById('mc-cmdk-overlay');
+            if (!ov || ov.style.display === 'none') return;
+            if (e.key === 'Escape') { e.preventDefault(); _cmdkClose(); return; }
+            if (e.key === 'ArrowDown') { e.preventDefault(); if (_cmdkSelected < _cmdkFilteredActions.length - 1) _cmdkSelected++; _cmdkRender(); return; }
+            if (e.key === 'ArrowUp')   { e.preventDefault(); if (_cmdkSelected > 0) _cmdkSelected--; _cmdkRender(); return; }
+            if (e.key === 'Enter')     { e.preventDefault(); _cmdkRun(); return; }
+        });
+        // Delegated click on results
+        document.addEventListener('click', function (e) {
+            var ov = document.getElementById('mc-cmdk-overlay');
+            if (!ov || ov.style.display === 'none') return;
+            var row = e.target.closest && e.target.closest('[data-cmdk-idx]');
+            if (row) {
+                _cmdkSelected = parseInt(row.getAttribute('data-cmdk-idx'), 10) || 0;
+                _cmdkRun();
+                return;
+            }
+            // Click outside the panel closes.
+            if (e.target === ov) _cmdkClose();
+        });
+        // Input search
+        document.addEventListener('input', function (e) {
+            if (e.target && e.target.id === 'mc-cmdk-input') {
+                _cmdkSelected = 0;
+                _cmdkFilteredActions = _cmdkFilter(e.target.value);
+                _cmdkRender();
+            }
+        });
+        window.mcOpenCommandPalette = _cmdkOpen;
     })();
     </script>
 </body>
