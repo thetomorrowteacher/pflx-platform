@@ -24178,10 +24178,10 @@
                             var nestedTasks = mcChildTasksForProject(pj);
                             var taskLines = nestedTasks.map(function (nt) {
                                 var col = nt.status === 'approved' ? '#22c55e' : nt.status === 'submitted' ? '#f5a500' : 'rgba(255,255,255,0.6)';
-                                return '<div onclick="event.stopPropagation();mcJumpToItem(\'task\',' + JSON.stringify(nt.id) + ')" style="display:flex;justify-content:space-between;align-items:center;padding:3px 8px 3px 22px;font-size:11px;color:#d0d6ea;cursor:pointer;border-radius:5px;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(255,255,255,0.05)\'" onmouseout="this.style.background=\'transparent\'"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📋 ' + escapeHtml(nt.title || 'Untitled') + '</span><span style="font-size:9px;color:' + col + ';font-weight:700;text-transform:uppercase;letter-spacing:0.05em;flex-shrink:0;">' + (nt.status || 'open') + '</span></div>';
+                                return '<div ' + _mcJumpAttr('task', nt.id) + ' style="display:flex;justify-content:space-between;align-items:center;padding:3px 8px 3px 22px;font-size:11px;color:#d0d6ea;cursor:pointer;border-radius:5px;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(255,255,255,0.05)\'" onmouseout="this.style.background=\'transparent\'"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📋 ' + escapeHtml(nt.title || 'Untitled') + '</span><span style="font-size:9px;color:' + col + ';font-weight:700;text-transform:uppercase;letter-spacing:0.05em;flex-shrink:0;">' + (nt.status || 'open') + '</span></div>';
                             }).join('');
                             return '<div style="margin-bottom:8px;">' +
-                                '<div onclick="mcJumpToItem(\'project\',' + JSON.stringify(pj.id) + ')" style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.22);border-radius:6px;cursor:pointer;transition:background 0.15s;font-weight:700;" onmouseover="this.style.background=\'rgba(139,92,246,0.16)\'" onmouseout="this.style.background=\'rgba(139,92,246,0.08)\'">' +
+                                '<div ' + _mcJumpAttr('project', pj.id) + ' style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.22);border-radius:6px;cursor:pointer;transition:background 0.15s;font-weight:700;" onmouseover="this.style.background=\'rgba(139,92,246,0.16)\'" onmouseout="this.style.background=\'rgba(139,92,246,0.08)\'">' +
                                     '<span style="font-size:12px;color:#c4b5fd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">🎬 ' + escapeHtml(pj.name || pj.title || 'Untitled') + '</span>' +
                                     '<span style="font-size:10px;color:rgba(196,181,253,0.6);font-family:monospace;flex-shrink:0;">' + nestedTasks.length + ' task' + (nestedTasks.length === 1 ? '' : 's') + '</span>' +
                                 '</div>' +
@@ -24194,7 +24194,7 @@
                                 (cpChildProjects.length > 0 ? '<div style="font-size:9px;color:rgba(255,255,255,0.35);letter-spacing:0.1em;margin-bottom:4px;">STANDALONE TASKS</div>' : '') +
                                 cpDirectTasks.map(function (dt) {
                                     var col = dt.status === 'approved' ? '#22c55e' : dt.status === 'submitted' ? '#f5a500' : 'rgba(255,255,255,0.6)';
-                                    return '<div onclick="mcJumpToItem(\'task\',' + JSON.stringify(dt.id) + ')" style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:rgba(79,142,247,0.05);border:1px solid rgba(79,142,247,0.18);border-radius:6px;margin-bottom:4px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(79,142,247,0.12)\'" onmouseout="this.style.background=\'rgba(79,142,247,0.05)\'">' +
+                                    return '<div ' + _mcJumpAttr('task', dt.id) + ' style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:rgba(79,142,247,0.05);border:1px solid rgba(79,142,247,0.18);border-radius:6px;margin-bottom:4px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(79,142,247,0.12)\'" onmouseout="this.style.background=\'rgba(79,142,247,0.05)\'">' +
                                         '<span style="font-size:11px;color:#c9d6ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📋 ' + escapeHtml(dt.title || 'Untitled') + '</span>' +
                                         '<span style="font-size:9px;color:' + col + ';font-weight:700;text-transform:uppercase;letter-spacing:0.05em;flex-shrink:0;">' + (dt.status || 'open') + '</span>' +
                                     '</div>';
@@ -24322,6 +24322,21 @@
             } catch (e) { console.warn('[mcJumpToItem] failed', e); }
         }
         window.mcJumpToItem = mcJumpToItem;
+        // ── HTML-safe onclick builder ──
+        // Embedding `JSON.stringify(id)` inside a double-quoted onclick
+        // attribute breaks the HTML parser the moment id contains a
+        // quote character, producing the classic "Unexpected end of
+        // input (line 1)" runtime crash when the browser tries to
+        // execute the truncated handler. This helper HTML-escapes the id
+        // and uses &quot; so the attribute value stays intact through
+        // parsing and JS sees a valid call.
+        function _mcJumpAttr(kind, id) {
+            var s = String(id == null ? '' : id)
+                .replace(/&/g, '&amp;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+            return 'onclick="mcJumpToItem(&quot;' + kind + '&quot;,&quot;' + s + '&quot;)"';
+        }
 
         // ── Urgency for any date-scoped item ──
         // Returns {color, rgb, label, days} where color is one of
@@ -24763,9 +24778,9 @@
                 if (cp || parentProject) {
                     taskLineage = '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px;font-size:10px;">' +
                         '<span style="color:rgba(255,255,255,0.35);letter-spacing:0.12em;font-weight:700;">LINEAGE</span>' +
-                        (cp ? '<span onclick="mcJumpToItem(\'checkpoint\',' + JSON.stringify(cp.id) + ')" style="cursor:pointer;background:rgba(0,212,255,0.12);color:#00d4ff;padding:3px 9px;border-radius:6px;border:1px solid rgba(0,212,255,0.3);font-weight:700;letter-spacing:0.04em;">◆ ' + escapeHtml(cp.name) + '</span>' : '') +
+                        (cp ? '<span ' + _mcJumpAttr('checkpoint', cp.id) + ' style="cursor:pointer;background:rgba(0,212,255,0.12);color:#00d4ff;padding:3px 9px;border-radius:6px;border:1px solid rgba(0,212,255,0.3);font-weight:700;letter-spacing:0.04em;">◆ ' + escapeHtml(cp.name) + '</span>' : '') +
                         (cp && parentProject ? '<span style="color:rgba(255,255,255,0.25);">›</span>' : '') +
-                        (parentProject ? '<span onclick="mcJumpToItem(\'project\',' + JSON.stringify(parentProject.id) + ')" style="cursor:pointer;background:rgba(139,92,246,0.12);color:#c4b5fd;padding:3px 9px;border-radius:6px;border:1px solid rgba(139,92,246,0.3);font-weight:700;letter-spacing:0.04em;">🎬 ' + escapeHtml(parentProject.name || parentProject.title || 'Untitled Project') + '</span>' : '') +
+                        (parentProject ? '<span ' + _mcJumpAttr('project', parentProject.id) + ' style="cursor:pointer;background:rgba(139,92,246,0.12);color:#c4b5fd;padding:3px 9px;border-radius:6px;border:1px solid rgba(139,92,246,0.3);font-weight:700;letter-spacing:0.04em;">🎬 ' + escapeHtml(parentProject.name || parentProject.title || 'Untitled Project') + '</span>' : '') +
                     '</div>';
                 }
 
@@ -26632,7 +26647,7 @@
                 if (cp) {
                     projLineage = '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:12px;font-size:10px;">' +
                         '<span style="color:rgba(255,255,255,0.35);letter-spacing:0.12em;font-weight:700;">LINEAGE</span>' +
-                        '<span onclick="mcJumpToItem(\'checkpoint\',' + JSON.stringify(cp.id) + ')" style="cursor:pointer;background:rgba(0,212,255,0.12);color:#00d4ff;padding:3px 9px;border-radius:6px;border:1px solid rgba(0,212,255,0.3);font-weight:700;letter-spacing:0.04em;">◆ ' + escapeHtml(cp.name) + '</span>' +
+                        '<span ' + _mcJumpAttr('checkpoint', cp.id) + ' style="cursor:pointer;background:rgba(0,212,255,0.12);color:#00d4ff;padding:3px 9px;border-radius:6px;border:1px solid rgba(0,212,255,0.3);font-weight:700;letter-spacing:0.04em;">◆ ' + escapeHtml(cp.name) + '</span>' +
                     '</div>';
                 }
                 // Child tasks panel — quick list of every Task in this Project,
@@ -26648,7 +26663,7 @@
                         '<div style="display:flex;flex-direction:column;gap:4px;">' +
                         projChildTasks.map(function (ct) {
                             var ctStatusCol = ct.status === 'approved' ? '#22c55e' : ct.status === 'submitted' ? '#f5a500' : ct.status === 'open' ? '#00d4ff' : 'rgba(255,255,255,0.4)';
-                            return '<div onclick="mcJumpToItem(\'task\',' + JSON.stringify(ct.id) + ')" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 8px;background:rgba(255,255,255,0.02);border-radius:6px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(122,169,255,0.08)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.02)\'">' +
+                            return '<div ' + _mcJumpAttr('task', ct.id) + ' style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 8px;background:rgba(255,255,255,0.02);border-radius:6px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(122,169,255,0.08)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.02)\'">' +
                                 '<span style="font-size:11px;color:#e0e6ff;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(ct.title || 'Untitled') + '</span>' +
                                 '<span style="font-size:9px;color:' + ctStatusCol + ';font-weight:700;text-transform:uppercase;letter-spacing:0.06em;flex-shrink:0;">' + (ct.status || 'open') + '</span>' +
                             '</div>';
