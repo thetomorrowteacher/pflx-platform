@@ -6132,6 +6132,13 @@
                     <span class="tcb-label">CHAT</span>
                     <span class="dc-qc-badge" id="toolbar-chat-badge" style="position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;background:#ff3b6c;color:#fff;border-radius:9px;font-size:10px;display:none;align-items:center;justify-content:center;padding:0 5px;font-family:'Share Tech Mono',monospace;font-weight:700;"></span>
                 </button>
+                <!-- LIVE presence button — visible for hosts/admins only. Shows the count of
+                     players currently online and opens a live roster panel. -->
+                <button class="toolbar-chat-btn" id="toolbar-live-btn" type="button" title="Live Roster — who's online, chatting, in a call" onclick="pflxPresenceTogglePanel()" style="display:none;position:relative;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>
+                    <span class="tcb-label">LIVE</span>
+                    <span id="toolbar-live-badge" style="position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;background:#22c55e;color:#fff;border-radius:9px;font-size:10px;display:none;align-items:center;justify-content:center;padding:0 5px;font-family:'Share Tech Mono',monospace;font-weight:700;">0</span>
+                </button>
             </div>
 
             <div class="toolbar-profile" id="toolbar-profile" onclick="pflxToggleProfileDropdown(event)" style="cursor:pointer;position:relative;" title="Your profile">
@@ -27731,6 +27738,22 @@
                         case 'notify_host':
                             try { if (typeof pflxToast === 'function') pflxToast('🤖 [' + rule.name + '] ' + String(act.value), 'warning', 5000); } catch (e) {}
                             break;
+                        case 'push_slack':
+                        case 'push_discord':
+                            var svc = act.type === 'push_slack' ? 'slack' : 'discord';
+                            var lsKey = svc === 'slack' ? 'pflx_chat_slack_webhook' : 'pflx_chat_discord_webhook';
+                            var url = localStorage.getItem(lsKey);
+                            if (!url) {
+                                console.warn('[automation] ' + svc + ' webhook not configured — set it from the Chat bridge bar first.');
+                                break;
+                            }
+                            var text = String(act.value || '');
+                            // Interpolate {{taskId}}, {{playerId}}, {{xcReward}}, etc from ctx.
+                            text = text.replace(/\{\{(\w+)\}\}/g, function (_m, key) { return String(ctx[key] || ''); });
+                            var payload = svc === 'slack' ? { text: text } : { content: text };
+                            fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+                                .catch(function (err) { console.warn('[automation push_' + svc + '] failed', err); });
+                            break;
                     }
                 } catch (e) { console.warn('[automation action failed]', act, e); }
             });
@@ -32576,16 +32599,69 @@
             list.innerHTML = mcCohortGroups.length === 0 ? '<div style="color:rgba(255,255,255,0.25);font-size:13px;">No cohort groups configured.</div>' :
                 mcCohortGroups.map(function(cg, i) {
                     var count = mcPlayers.filter(function(p) { return p.cohort === cg.name; }).length;
+                    // Chat caps summary — show which features are off (nothing shown means all on).
+                    var chat = cg.chat || {};
+                    var offs = [];
+                    if (chat.enabled === false) offs.push('chat off');
+                    if (chat.dm === false) offs.push('no DMs');
+                    if (chat.group === false) offs.push('no groups');
+                    if (chat.video === false) offs.push('no video');
+                    if (chat.screen === false) offs.push('no share');
+                    if (chat.bridges === false) offs.push('no bridges');
+                    var chatSummary = offs.length ? '<span style="font-size:10px;color:#ff9a3c;background:rgba(255,154,60,0.12);border:1px solid rgba(255,154,60,0.3);border-radius:5px;padding:1px 6px;margin-left:6px;">' + offs.join(' · ') + '</span>' : '<span style="font-size:10px;color:#22c55e;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.3);border-radius:5px;padding:1px 6px;margin-left:6px;">all chat on</span>';
                     return '<div class="mc-card" style="border-left:3px solid ' + (cg.color || '#4f8ef7') + ';">' +
                         '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-                        '<div><div style="font-weight:900;color:#f0f0ff;">' + escapeHtml(cg.name) + '</div>' +
+                        '<div><div style="font-weight:900;color:#f0f0ff;">' + escapeHtml(cg.name) + chatSummary + '</div>' +
                         '<div style="font-size:11px;color:rgba(255,255,255,0.4);">' + escapeHtml(cg.description || '') + '</div></div>' +
                         '<span style="font-size:13px;color:var(--cyan);font-weight:700;">' + count + ' players</span></div>' +
-                        '<div style="display:flex;gap:6px;margin-top:10px;">' +
+                        '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">' +
                         '<button class="mc-btn" style="font-size:10px;padding:4px 10px;" onclick="mcEditCohortGroup(' + i + ')">Edit</button>' +
+                        '<button class="mc-btn" style="font-size:10px;padding:4px 10px;color:#00d4ff;border-color:rgba(0,212,255,0.4);" onclick="mcEditCohortChat(' + i + ')">💬 Chat Controls</button>' +
                         '<button class="mc-btn" style="font-size:10px;padding:4px 10px;color:#ef4444;border-color:rgba(239,68,68,0.3);" onclick="mcDeleteCohortGroup(' + i + ')">Delete</button></div></div>';
                 }).join('');
         }
+        window.mcEditCohortChat = function (i) {
+            var cg = mcCohortGroups[i]; if (!cg) return;
+            var chat = cg.chat || {};
+            var backdrop = document.createElement('div');
+            backdrop.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;font-family:Rajdhani,sans-serif;';
+            backdrop.innerHTML = '<div style="width:min(460px,92vw);background:linear-gradient(180deg, rgba(18,20,32,0.98), rgba(12,14,22,0.98));border:1px solid rgba(0,212,255,0.4);border-radius:14px;padding:20px 22px;color:#f0f0ff;box-shadow:0 30px 80px rgba(0,0,0,0.8), 0 0 60px rgba(0,212,255,0.18);">' +
+                '<div style="font-family:Orbitron,sans-serif;font-size:14px;color:#00d4ff;font-weight:800;letter-spacing:0.14em;margin-bottom:12px;">💬 CHAT CONTROLS · ' + escapeHtml(cg.name) + '</div>' +
+                '<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:14px;">Toggle which PFLX Chat features this cohort can use. Admins are never restricted.</div>' +
+                [
+                    ['enabled', 'PFLX Chat', 'Master switch for the chat panel'],
+                    ['dm', 'Direct messages', '1:1 threads with other players'],
+                    ['group', 'Group chats', 'Multi-participant threads'],
+                    ['video', 'Video calls', 'Camera + mic P2P calls (1:1)'],
+                    ['screen', 'Screen sharing', 'Share your screen in a call (1:1)'],
+                    ['bridges', 'External bridges', 'Email / Slack / Discord push from a thread']
+                ].map(function (row) {
+                    var key = row[0], label = row[1], hint = row[2];
+                    var checked = chat[key] !== false; // default on
+                    return '<label style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);cursor:pointer;">' +
+                        '<input type="checkbox" data-chat-key="' + key + '"' + (checked ? ' checked' : '') + ' style="accent-color:#00d4ff;transform:scale(1.15);">' +
+                        '<div style="flex:1;"><div style="font-weight:700;font-size:12px;">' + label + '</div><div style="font-size:10px;color:rgba(255,255,255,0.4);">' + hint + '</div></div>' +
+                        '</label>';
+                }).join('') +
+                '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
+                '<button id="mc-chat-caps-cancel" class="mc-btn" style="font-size:11px;padding:6px 14px;">Cancel</button>' +
+                '<button id="mc-chat-caps-save" class="mc-btn" style="font-size:11px;padding:6px 14px;background:rgba(0,212,255,0.14);color:#00d4ff;border-color:rgba(0,212,255,0.4);">Save</button>' +
+                '</div></div>';
+            document.body.appendChild(backdrop);
+            backdrop.querySelector('#mc-chat-caps-cancel').onclick = function () { backdrop.remove(); };
+            backdrop.querySelector('#mc-chat-caps-save').onclick = function () {
+                var next = {};
+                backdrop.querySelectorAll('input[data-chat-key]').forEach(function (el) {
+                    next[el.getAttribute('data-chat-key')] = el.checked;
+                });
+                cg.chat = next;
+                mcSaveData('cohortgroups');
+                mcRenderCohortGroups();
+                pflxPlaySfx && pflxPlaySfx('save');
+                if (typeof pflxToast === 'function') pflxToast('Chat controls saved for ' + cg.name, 'success');
+                backdrop.remove();
+            };
+        };
 
         function mcCreateCohortGroup() {
             var name = prompt('Cohort group name:');
@@ -52750,8 +52826,28 @@ RESPONSE RULES:
             <button id="pflx-chat-back" onclick="pflxChatBackToList()" style="display:none;background:transparent;border:none;color:#00d4ff;font-size:16px;cursor:pointer;padding:0;line-height:1;">←</button>
             <span style="font-family:Orbitron,sans-serif;font-size:12px;color:#00d4ff;font-weight:800;letter-spacing:0.14em;">💬 <span id="pflx-chat-title">PFLX CHAT</span></span>
             <span style="flex:1;font-size:10px;color:rgba(255,255,255,0.35);">Direct + group messages</span>
-            <button onclick="pflxChatShowCompose()" title="New message" style="background:rgba(34,197,94,0.14);color:#22c55e;border:1px solid rgba(34,197,94,0.4);border-radius:6px;padding:4px 9px;font-size:10px;font-weight:800;cursor:pointer;letter-spacing:0.06em;">+ NEW</button>
+            <button id="pflx-chat-call-btn" onclick="pflxChatCallStart('video')" title="Start video call" style="display:none;background:rgba(0,212,255,0.14);color:#00d4ff;border:1px solid rgba(0,212,255,0.4);border-radius:6px;padding:4px 9px;font-size:10px;font-weight:800;cursor:pointer;letter-spacing:0.06em;">📹 CALL</button>
+            <button id="pflx-chat-share-btn" onclick="pflxChatCallStart('screen')" title="Share your screen" style="display:none;background:rgba(139,92,246,0.14);color:#c4b5fd;border:1px solid rgba(139,92,246,0.4);border-radius:6px;padding:4px 9px;font-size:10px;font-weight:800;cursor:pointer;letter-spacing:0.06em;">🖥 SHARE</button>
+            <button id="pflx-chat-new-btn" onclick="pflxChatShowCompose()" title="New message" style="background:rgba(34,197,94,0.14);color:#22c55e;border:1px solid rgba(34,197,94,0.4);border-radius:6px;padding:4px 9px;font-size:10px;font-weight:800;cursor:pointer;letter-spacing:0.06em;">+ NEW</button>
             <button onclick="pflxChatToggle()" style="background:transparent;border:none;color:rgba(255,255,255,0.5);font-size:18px;cursor:pointer;">✕</button>
+        </div>
+        <!-- Video-call / screen-share overlay (inside the chat panel). -->
+        <div id="pflx-chat-call-overlay" style="display:none;position:absolute;inset:0;background:linear-gradient(180deg, rgba(4,8,16,0.98), rgba(10,14,28,0.98));z-index:10;flex-direction:column;">
+            <div style="display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid rgba(0,212,255,0.2);">
+                <span id="pflx-chat-call-title" style="font-family:Orbitron,sans-serif;font-size:11px;color:#00d4ff;font-weight:800;letter-spacing:0.14em;">CALL</span>
+                <span id="pflx-chat-call-status" style="flex:1;margin-left:10px;font-size:10px;color:rgba(255,255,255,0.5);">Connecting…</span>
+                <span id="pflx-chat-call-timer" style="font-size:10px;color:rgba(255,255,255,0.5);font-family:monospace;margin-right:10px;">00:00</span>
+            </div>
+            <div style="flex:1;position:relative;display:flex;flex-direction:column;gap:6px;padding:8px;overflow:hidden;">
+                <video id="pflx-chat-call-remote" autoplay playsinline style="flex:1;background:#000;border-radius:10px;object-fit:cover;min-height:0;"></video>
+                <video id="pflx-chat-call-local" autoplay playsinline muted style="position:absolute;bottom:14px;right:14px;width:110px;height:82px;background:#000;border-radius:8px;border:2px solid rgba(0,212,255,0.6);object-fit:cover;box-shadow:0 6px 20px rgba(0,0,0,0.6);"></video>
+            </div>
+            <div style="display:flex;gap:6px;justify-content:center;padding:10px 12px;border-top:1px solid rgba(255,255,255,0.06);">
+                <button id="pflx-chat-call-mute" onclick="pflxChatCallToggleMute()" style="background:rgba(255,255,255,0.08);color:#f0f0ff;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;">🎙 Mute</button>
+                <button id="pflx-chat-call-cam" onclick="pflxChatCallToggleCam()" style="background:rgba(255,255,255,0.08);color:#f0f0ff;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;">📷 Camera</button>
+                <button id="pflx-chat-call-share" onclick="pflxChatCallToggleScreen()" style="background:rgba(139,92,246,0.14);color:#c4b5fd;border:1px solid rgba(139,92,246,0.4);border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;">🖥 Share</button>
+                <button onclick="pflxChatCallHangup()" style="background:rgba(239,68,68,0.2);color:#fca5a5;border:1px solid rgba(239,68,68,0.5);border-radius:8px;padding:6px 14px;font-size:11px;font-weight:800;cursor:pointer;letter-spacing:0.06em;">✕ END</button>
+            </div>
         </div>
         <div id="pflx-chat-body" style="flex:1;overflow-y:auto;padding:10px 12px;"></div>
         <div id="pflx-chat-composer" style="display:none;padding:10px 12px;border-top:1px solid rgba(255,255,255,0.06);background:rgba(0,0,0,0.15);">
@@ -52785,6 +52881,30 @@ RESPONSE RULES:
                 image: s.image || ''
             };
         }
+        // ── Cohort chat capabilities ──
+        // Hosts can disable chat features per cohort in Cohort Groups →
+        // Chat Controls. Default: everything enabled. `cg.chat = { enabled,
+        // dm, group, video, screen, bridges }`.
+        // Admins bypass all restrictions.
+        function _pcCapsFor(playerLike) {
+            var caps = { enabled: true, dm: true, group: true, video: true, screen: true, bridges: true };
+            if (!playerLike) return caps;
+            var isAdmin = (playerLike.role === 'admin' || playerLike.role === 'host');
+            if (isAdmin) return caps;
+            var cohortName = playerLike.cohort;
+            if (!cohortName || typeof mcCohortGroups === 'undefined') return caps;
+            var cg = (mcCohortGroups || []).find(function (g) { return g && g.name === cohortName; });
+            if (!cg || !cg.chat) return caps;
+            Object.keys(caps).forEach(function (k) {
+                if (typeof cg.chat[k] === 'boolean') caps[k] = cg.chat[k];
+            });
+            return caps;
+        }
+        function _pcMyCaps() {
+            var s = window.activeSession || {};
+            return _pcCapsFor(s);
+        }
+        window._pcMyCaps = _pcMyCaps; // exposed for toolbar gate
         function _pcLoad() {
             try {
                 var raw = localStorage.getItem('pflx_chat_threads');
@@ -52822,6 +52942,8 @@ RESPONSE RULES:
                     try { localStorage.setItem('pflx_chat_threads', JSON.stringify({ threads: _pcThreads })); } catch (e) {}
                     if (document.getElementById('pflx-chat-panel').style.display !== 'none') pflxChatRender();
                     _pcRefreshBadge();
+                    _pcCheckMentionsForMe();
+                    try { _pcCallAttachInbound(); } catch (e) {}
                 }
             });
         }
@@ -52838,6 +52960,7 @@ RESPONSE RULES:
                             try { localStorage.setItem('pflx_chat_threads', JSON.stringify({ threads: _pcThreads })); } catch (e) {}
                             if (document.getElementById('pflx-chat-panel').style.display !== 'none') pflxChatRender();
                             _pcRefreshBadge();
+                            _pcCheckMentionsForMe();
                         }
                     })
                     .subscribe();
@@ -52881,6 +53004,11 @@ RESPONSE RULES:
         window.pflxChatToggle = function () {
             var panel = document.getElementById('pflx-chat-panel');
             if (!panel) return;
+            var caps = _pcMyCaps();
+            if (!caps.enabled) {
+                if (typeof pflxToast === 'function') pflxToast('Chat is disabled for your cohort.', 'warn');
+                return;
+            }
             if (panel.style.display === 'none' || !panel.style.display) {
                 _pcLoad();
                 _pcCloudPull();
@@ -52895,6 +53023,8 @@ RESPONSE RULES:
             document.getElementById('pflx-chat-composer').style.display = 'none';
             document.getElementById('pflx-chat-back').style.display = 'none';
             document.getElementById('pflx-chat-title').textContent = 'PFLX CHAT';
+            var cb = document.getElementById('pflx-chat-call-btn'); if (cb) cb.style.display = 'none';
+            var sb = document.getElementById('pflx-chat-share-btn'); if (sb) sb.style.display = 'none';
             pflxChatRender();
         };
         window.pflxChatOpenThread = function (threadId) {
@@ -52904,6 +53034,12 @@ RESPONSE RULES:
             document.getElementById('pflx-chat-composer').style.display = 'block';
             document.getElementById('pflx-chat-back').style.display = 'inline';
             document.getElementById('pflx-chat-title').textContent = _pcParticipantNames(t) + (t.type === 'group' ? ' · GROUP' : '');
+            // Show CALL / SHARE buttons if this cohort allows them (currently 1:1 DMs only).
+            var caps = _pcMyCaps();
+            var canCall = caps.video && t.type === 'dm';
+            var canShare = caps.screen && t.type === 'dm';
+            var cb = document.getElementById('pflx-chat-call-btn'); if (cb) cb.style.display = canCall ? 'inline' : 'none';
+            var sb = document.getElementById('pflx-chat-share-btn'); if (sb) sb.style.display = canShare ? 'inline' : 'none';
             _pcMarkThreadRead(threadId);
             pflxChatRender();
         };
@@ -52916,11 +53052,30 @@ RESPONSE RULES:
             if (!t) return;
             var me = _pcMe();
             if (!Array.isArray(t.messages)) t.messages = [];
+            // ── @mention detection ──
+            // Match @name tokens against thread participants; store as ids so
+            // the receiving client can decide whether it is the target.
+            var mentions = [];
+            var mentionRegex = /@([\w\-]+)/g;
+            var m;
+            var roster = (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) ? PLAYERS : [];
+            while ((m = mentionRegex.exec(text)) !== null) {
+                var raw = m[1].toLowerCase();
+                var hit = (t.participants || []).find(function (pid) {
+                    if (String(pid).toLowerCase() === raw) return true;
+                    var pr = roster.find(function (r) { return r && (r.id === pid || r.brand === pid); });
+                    if (!pr) return false;
+                    var nm = String(pr.brand || pr.brandName || pr.name || '').toLowerCase().replace(/\s+/g, '');
+                    return nm === raw;
+                });
+                if (hit && mentions.indexOf(hit) === -1) mentions.push(hit);
+            }
             t.messages.push({
                 id: 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
                 senderId: me.id,
                 senderName: me.name,
                 text: text,
+                mentions: mentions,
                 at: new Date().toISOString(),
                 readBy: [me.id]
             });
@@ -52929,22 +53084,53 @@ RESPONSE RULES:
             input.value = '';
             pflxChatRender();
         };
+        // ── Incoming-mention toast ──
+        // When realtime delivers a message that @-mentions the current user,
+        // pop a toast even if the chat panel is closed. Uses the last-seen
+        // message id per thread to avoid re-toasting on repeat pulls.
+        var _pcLastSeen = {};
+        function _pcCheckMentionsForMe() {
+            var me = _pcMe();
+            _pcThreads.forEach(function (t) {
+                (t.messages || []).forEach(function (msg) {
+                    if (!msg || _pcLastSeen[msg.id]) return;
+                    _pcLastSeen[msg.id] = true;
+                    if (msg.senderId === me.id) return;
+                    if (Array.isArray(msg.mentions) && msg.mentions.indexOf(me.id) !== -1) {
+                        try {
+                            if (typeof pflxToast === 'function') pflxToast('💬 ' + msg.senderName + ' mentioned you: "' + String(msg.text).slice(0, 80) + '"', 'info', 6000);
+                            if (typeof pflxPlaySfx === 'function') pflxPlaySfx('nav');
+                        } catch (e) {}
+                    }
+                });
+            });
+        }
+        // Prime seen-set on boot so old messages don't re-toast on hydration.
+        function _pcPrimeSeen() {
+            _pcThreads.forEach(function (t) {
+                (t.messages || []).forEach(function (msg) { if (msg && msg.id) _pcLastSeen[msg.id] = true; });
+            });
+        }
         window.pflxChatInputKey = function (e) {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); pflxChatSend(); }
         };
         window.pflxChatShowCompose = function () {
+            var caps = _pcMyCaps();
+            if (!caps.dm && !caps.group) { pflxToast('Direct + group messages are disabled for your cohort.', 'warn'); return; }
             var roster = (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) ? PLAYERS : [];
             var me = _pcMe();
             var others = roster.filter(function (p) { return p && (p.id !== me.id && p.brand !== me.id); });
             if (others.length === 0) { alert('No players to chat with yet.'); return; }
             // Simple picker: prompt with a comma-separated list
             var options = others.slice(0, 60).map(function (p, i) { return (i + 1) + '. ' + (p.brand || p.brandName || p.name); }).join('\n');
-            var pick = prompt('Start a chat — enter comma-separated numbers (1 for DM, 2+ for group):\n\n' + options);
+            var pick = prompt('Start a chat — enter comma-separated numbers (' + (caps.dm ? '1 for DM' : '') + (caps.dm && caps.group ? ', ' : '') + (caps.group ? '2+ for group' : '') + '):\n\n' + options);
             if (!pick) return;
             var picked = pick.split(',').map(function (s) { var n = parseInt(s.trim(), 10); return others[n - 1]; }).filter(Boolean);
             if (picked.length === 0) return;
             var participants = [me.id].concat(picked.map(function (p) { return p.id || p.brand; }));
             var isGroup = picked.length > 1;
+            if (isGroup && !caps.group) { pflxToast('Group chats are disabled for your cohort.', 'warn'); return; }
+            if (!isGroup && !caps.dm) { pflxToast('Direct messages are disabled for your cohort.', 'warn'); return; }
             var name = isGroup ? (prompt('Group name (optional):', '') || 'Group') : null;
             // If a DM already exists with this participant, jump to it.
             if (!isGroup) {
@@ -52970,6 +53156,8 @@ RESPONSE RULES:
         };
         window.pflxChatPushBridge = function (kind) {
             if (!_pcCurrentThreadId) return;
+            var caps = _pcMyCaps();
+            if (!caps.bridges) { pflxToast('Slack/Discord/email bridges are disabled for your cohort.', 'warn'); return; }
             var t = _pcThreads.find(function (x) { return x.id === _pcCurrentThreadId; });
             if (!t) return;
             var body = (t.messages || []).slice(-20).map(function (m) {
@@ -53034,10 +53222,24 @@ RESPONSE RULES:
             } else {
                 body.innerHTML = msgs.map(function (m) {
                     var mine = m.senderId === me.id;
+                    var mentionsMe = Array.isArray(m.mentions) && m.mentions.indexOf(me.id) !== -1;
                     var timeStr = new Date(m.at).toLocaleString([], { hour: 'numeric', minute: '2-digit' });
+                    if (m.system) {
+                        return '<div style="text-align:center;font-size:10px;color:rgba(255,255,255,0.4);margin:8px 0;letter-spacing:0.06em;">' + escapeHtml(m.text) + ' · ' + timeStr + '</div>';
+                    }
+                    // Render text with @mention chips.
+                    var safe = escapeHtml(m.text).replace(/@([\w\-]+)/g, function (_m, name) {
+                        return '<span style="background:rgba(255,204,102,0.22);color:#ffd97a;border:1px solid rgba(255,204,102,0.45);border-radius:4px;padding:0 4px;font-weight:700;">@' + name + '</span>';
+                    });
+                    var bg = mine
+                        ? 'linear-gradient(135deg, rgba(0,212,255,0.22), rgba(0,212,255,0.14))'
+                        : (mentionsMe ? 'linear-gradient(135deg, rgba(255,204,102,0.16), rgba(255,204,102,0.08))' : 'rgba(255,255,255,0.05)');
+                    var border = mine
+                        ? 'rgba(0,212,255,0.4)'
+                        : (mentionsMe ? 'rgba(255,204,102,0.55)' : 'rgba(255,255,255,0.08)');
                     return '<div style="display:flex;flex-direction:column;align-items:' + (mine ? 'flex-end' : 'flex-start') + ';margin-bottom:8px;">' +
                         (!mine && t.type === 'group' ? '<div style="font-size:9px;color:rgba(255,255,255,0.4);margin-bottom:2px;letter-spacing:0.06em;">' + escapeHtml(m.senderName) + '</div>' : '') +
-                        '<div style="max-width:82%;padding:8px 12px;background:' + (mine ? 'linear-gradient(135deg, rgba(0,212,255,0.22), rgba(0,212,255,0.14))' : 'rgba(255,255,255,0.05)') + ';border:1px solid ' + (mine ? 'rgba(0,212,255,0.4)' : 'rgba(255,255,255,0.08)') + ';border-radius:12px;color:' + (mine ? '#f0feff' : '#f0f0ff') + ';font-size:12px;line-height:1.4;word-wrap:break-word;">' + escapeHtml(m.text) + '</div>' +
+                        '<div style="max-width:82%;padding:8px 12px;background:' + bg + ';border:1px solid ' + border + ';border-radius:12px;color:' + (mine ? '#f0feff' : '#f0f0ff') + ';font-size:12px;line-height:1.4;word-wrap:break-word;">' + safe + '</div>' +
                         '<div style="font-size:9px;color:rgba(255,255,255,0.3);margin-top:2px;font-family:monospace;">' + timeStr + '</div>' +
                     '</div>';
                 }).join('');
@@ -53045,14 +53247,499 @@ RESPONSE RULES:
             }
             _pcMarkThreadRead(t.id);
         };
+        // ══════════════════════════════════════════════════════════════
+        //  WebRTC Call Engine
+        //  1:1 video / screen share for DM threads. Signaling piggybacks
+        //  on Supabase realtime broadcast per-thread channel:
+        //    channel   pflx-call-<threadId>
+        //    events    offer   { sdp, from }
+        //              answer  { sdp, from }
+        //              ice     { candidate, from }
+        //              hangup  { from }
+        //  STUN: public Google servers. No TURN server → calls that need
+        //  relay will fail (LAN + open NAT work).
+        // ══════════════════════════════════════════════════════════════
+        var _pcCall = null; // { pc, localStream, remoteStream, channel, threadId, mode, startedAt, timerId, screenTrack, camTrack, camEnabled, micEnabled, remoteSet }
+        var _pcInboundChannels = {}; // threadId → channel (listens for offers when not in a call)
+        function _pcCallRtcConfig() {
+            return {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' }
+                ]
+            };
+        }
+        function _pcCallSetStatus(text) {
+            var el = document.getElementById('pflx-chat-call-status');
+            if (el) el.textContent = text;
+        }
+        function _pcCallShowOverlay(show) {
+            var ov = document.getElementById('pflx-chat-call-overlay');
+            if (ov) ov.style.display = show ? 'flex' : 'none';
+        }
+        function _pcCallTimerStart() {
+            if (!_pcCall) return;
+            _pcCall.startedAt = Date.now();
+            _pcCall.timerId = setInterval(function () {
+                if (!_pcCall) return;
+                var s = Math.floor((Date.now() - _pcCall.startedAt) / 1000);
+                var mm = String(Math.floor(s / 60)).padStart(2, '0');
+                var ss = String(s % 60).padStart(2, '0');
+                var el = document.getElementById('pflx-chat-call-timer');
+                if (el) el.textContent = mm + ':' + ss;
+            }, 1000);
+        }
+        function _pcCallTimerStop() {
+            if (_pcCall && _pcCall.timerId) { clearInterval(_pcCall.timerId); _pcCall.timerId = null; }
+        }
+        function _pcCallSignalingChannel(threadId) {
+            var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+            if (!client || !client.channel) return null;
+            return client.channel('pflx-call-' + threadId, { config: { broadcast: { self: false } } });
+        }
+        function _pcCallAttachInbound() {
+            // For every DM thread the current player is in, keep a passive
+            // realtime channel that listens for incoming `offer` broadcasts
+            // and pops a call banner. Only wired for DMs to keep the ICE
+            // matrix simple.
+            var me = _pcMe();
+            _pcThreads.forEach(function (t) {
+                if (t.type !== 'dm') return;
+                if (!Array.isArray(t.participants) || t.participants.indexOf(me.id) === -1) return;
+                if (_pcInboundChannels[t.id]) return;
+                var ch = _pcCallSignalingChannel(t.id);
+                if (!ch) return;
+                ch.on('broadcast', { event: 'offer' }, function (payload) {
+                    var msg = payload && payload.payload;
+                    if (!msg || msg.from === me.id) return;
+                    _pcCallIncomingOffer(t.id, msg);
+                }).subscribe();
+                _pcInboundChannels[t.id] = ch;
+            });
+        }
+        function _pcCallIncomingOffer(threadId, msg) {
+            if (_pcCall) return; // already busy
+            var t = _pcThreads.find(function (x) { return x.id === threadId; });
+            if (!t) return;
+            var accept = confirm('📞 Incoming call from ' + _pcParticipantNames(t) + '. Answer?');
+            if (!accept) {
+                var ch = _pcInboundChannels[threadId];
+                if (ch) try { ch.send({ type: 'broadcast', event: 'hangup', payload: { from: _pcMe().id } }); } catch (e) {}
+                return;
+            }
+            _pcCallOpenPanel(threadId);
+            _pcCallAnswer(threadId, msg.sdp).catch(function (err) {
+                console.error('[call] answer failed', err);
+                _pcCallSetStatus('Answer failed');
+                pflxChatCallHangup();
+            });
+        }
+        function _pcCallOpenPanel(threadId) {
+            var panel = document.getElementById('pflx-chat-panel');
+            if (panel && panel.style.display === 'none') panel.style.display = 'flex';
+            _pcCurrentThreadId = threadId;
+            _pcCallShowOverlay(true);
+        }
+        async function _pcCallGetLocalStream(mode) {
+            var constraints = mode === 'screen'
+                ? { video: true, audio: false }
+                : { video: true, audio: true };
+            var stream;
+            if (mode === 'screen') {
+                stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+                // Add mic on top of screen if no audio track.
+                if (stream.getAudioTracks().length === 0) {
+                    try {
+                        var mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+                        mic.getAudioTracks().forEach(function (tr) { stream.addTrack(tr); });
+                    } catch (e) {}
+                }
+            } else {
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+            }
+            return stream;
+        }
+        function _pcCallBuildPeer(threadId) {
+            var pc = new RTCPeerConnection(_pcCallRtcConfig());
+            var me = _pcMe();
+            pc.onicecandidate = function (ev) {
+                if (!ev.candidate || !_pcCall || !_pcCall.channel) return;
+                _pcCall.channel.send({ type: 'broadcast', event: 'ice', payload: { from: me.id, candidate: ev.candidate } });
+            };
+            pc.ontrack = function (ev) {
+                var v = document.getElementById('pflx-chat-call-remote');
+                if (!v) return;
+                if (v.srcObject !== ev.streams[0]) v.srcObject = ev.streams[0];
+                _pcCallSetStatus('Connected');
+            };
+            pc.onconnectionstatechange = function () {
+                if (!_pcCall) return;
+                _pcCallSetStatus('State: ' + pc.connectionState);
+                if (pc.connectionState === 'connected' && !_pcCall.startedAt) _pcCallTimerStart();
+                if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
+                    // Peer dropped — cleanup.
+                    setTimeout(function () { if (_pcCall && (pc.connectionState !== 'connected')) pflxChatCallHangup(); }, 500);
+                }
+            };
+            return pc;
+        }
+        window.pflxChatCallStart = async function (mode) {
+            if (_pcCall) { pflxToast('Already in a call.', 'warn'); return; }
+            var caps = _pcMyCaps();
+            if (mode === 'video' && !caps.video) { pflxToast('Video calls are disabled for your cohort.', 'warn'); return; }
+            if (mode === 'screen' && !caps.screen) { pflxToast('Screen sharing is disabled for your cohort.', 'warn'); return; }
+            if (!_pcCurrentThreadId) { pflxToast('Open a chat first.', 'warn'); return; }
+            var t = _pcThreads.find(function (x) { return x.id === _pcCurrentThreadId; });
+            if (!t || t.type !== 'dm') { pflxToast('Calls are 1:1 for now — open a direct message.', 'warn'); return; }
+            var me = _pcMe();
+            _pcCallOpenPanel(t.id);
+            _pcCallSetStatus('Requesting ' + (mode === 'screen' ? 'screen' : 'camera + mic') + '…');
+            try {
+                var stream = await _pcCallGetLocalStream(mode);
+                var pc = _pcCallBuildPeer(t.id);
+                stream.getTracks().forEach(function (track) { pc.addTrack(track, stream); });
+                var localVid = document.getElementById('pflx-chat-call-local');
+                if (localVid) localVid.srcObject = stream;
+                var ch = _pcCallSignalingChannel(t.id);
+                _pcCall = { pc: pc, localStream: stream, channel: ch, threadId: t.id, mode: mode, camEnabled: true, micEnabled: true };
+                ch.on('broadcast', { event: 'answer' }, function (payload) {
+                    var m = payload && payload.payload;
+                    if (!m || m.from === me.id || !_pcCall) return;
+                    pc.setRemoteDescription(new RTCSessionDescription(m.sdp)).catch(function (err) { console.error('[call] setRemoteDescription answer', err); });
+                });
+                ch.on('broadcast', { event: 'ice' }, function (payload) {
+                    var m = payload && payload.payload;
+                    if (!m || m.from === me.id || !_pcCall || !m.candidate) return;
+                    pc.addIceCandidate(new RTCIceCandidate(m.candidate)).catch(function (err) { console.warn('[call] addIceCandidate', err); });
+                });
+                ch.on('broadcast', { event: 'hangup' }, function (payload) {
+                    var m = payload && payload.payload;
+                    if (!m || m.from === me.id) return;
+                    pflxToast('Call ended by the other side.', 'info');
+                    pflxChatCallHangup();
+                });
+                await new Promise(function (resolve) { ch.subscribe(function (status) { if (status === 'SUBSCRIBED') resolve(); }); });
+                var offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                ch.send({ type: 'broadcast', event: 'offer', payload: { from: me.id, sdp: offer } });
+                _pcCallSetStatus('Ringing…');
+                // Also drop a short system message into the thread so there's a record.
+                t.messages.push({
+                    id: 'msg-' + Date.now(),
+                    senderId: me.id,
+                    senderName: me.name,
+                    text: mode === 'screen' ? '🖥 Started screen share' : '📹 Started a call',
+                    at: new Date().toISOString(),
+                    readBy: [me.id],
+                    system: true
+                });
+                t.updatedAt = new Date().toISOString();
+                _pcSave();
+                pflxChatRender();
+            } catch (err) {
+                console.error('[call] start failed', err);
+                pflxToast('Could not start call: ' + (err.message || err.name || 'error'), 'warn');
+                _pcCallShowOverlay(false);
+                _pcCall = null;
+            }
+        };
+        async function _pcCallAnswer(threadId, offerSdp) {
+            var me = _pcMe();
+            _pcCallSetStatus('Answering…');
+            var stream = await _pcCallGetLocalStream('video');
+            var pc = _pcCallBuildPeer(threadId);
+            stream.getTracks().forEach(function (track) { pc.addTrack(track, stream); });
+            var localVid = document.getElementById('pflx-chat-call-local');
+            if (localVid) localVid.srcObject = stream;
+            var ch = _pcCallSignalingChannel(threadId);
+            _pcCall = { pc: pc, localStream: stream, channel: ch, threadId: threadId, mode: 'video', camEnabled: true, micEnabled: true };
+            ch.on('broadcast', { event: 'ice' }, function (payload) {
+                var m = payload && payload.payload;
+                if (!m || m.from === me.id || !_pcCall || !m.candidate) return;
+                pc.addIceCandidate(new RTCIceCandidate(m.candidate)).catch(function (err) { console.warn('[call] addIceCandidate', err); });
+            });
+            ch.on('broadcast', { event: 'hangup' }, function (payload) {
+                var m = payload && payload.payload;
+                if (!m || m.from === me.id) return;
+                pflxToast('Call ended by the other side.', 'info');
+                pflxChatCallHangup();
+            });
+            await new Promise(function (resolve) { ch.subscribe(function (status) { if (status === 'SUBSCRIBED') resolve(); }); });
+            await pc.setRemoteDescription(new RTCSessionDescription(offerSdp));
+            var answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            ch.send({ type: 'broadcast', event: 'answer', payload: { from: me.id, sdp: answer } });
+            _pcCallSetStatus('Connected');
+            _pcCallTimerStart();
+        }
+        window.pflxChatCallHangup = function () {
+            if (!_pcCall) { _pcCallShowOverlay(false); return; }
+            try {
+                _pcCall.channel && _pcCall.channel.send({ type: 'broadcast', event: 'hangup', payload: { from: _pcMe().id } });
+            } catch (e) {}
+            try { _pcCall.localStream && _pcCall.localStream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+            try { _pcCall.pc && _pcCall.pc.close(); } catch (e) {}
+            try {
+                var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (client && _pcCall.channel) client.removeChannel(_pcCall.channel);
+            } catch (e) {}
+            _pcCallTimerStop();
+            var remote = document.getElementById('pflx-chat-call-remote'); if (remote) remote.srcObject = null;
+            var local = document.getElementById('pflx-chat-call-local'); if (local) local.srcObject = null;
+            _pcCall = null;
+            _pcCallShowOverlay(false);
+        };
+        window.pflxChatCallToggleMute = function () {
+            if (!_pcCall) return;
+            var enabled = !_pcCall.micEnabled;
+            _pcCall.localStream.getAudioTracks().forEach(function (t) { t.enabled = enabled; });
+            _pcCall.micEnabled = enabled;
+            var btn = document.getElementById('pflx-chat-call-mute');
+            if (btn) btn.textContent = enabled ? '🎙 Mute' : '🔇 Unmute';
+        };
+        window.pflxChatCallToggleCam = function () {
+            if (!_pcCall) return;
+            var enabled = !_pcCall.camEnabled;
+            _pcCall.localStream.getVideoTracks().forEach(function (t) { t.enabled = enabled; });
+            _pcCall.camEnabled = enabled;
+            var btn = document.getElementById('pflx-chat-call-cam');
+            if (btn) btn.textContent = enabled ? '📷 Camera' : '🚫 Cam Off';
+        };
+        window.pflxChatCallToggleScreen = async function () {
+            if (!_pcCall) return;
+            var pc = _pcCall.pc;
+            var senders = pc.getSenders();
+            var vsender = senders.find(function (s) { return s.track && s.track.kind === 'video'; });
+            if (!vsender) return;
+            if (_pcCall.mode !== 'screen') {
+                try {
+                    var screen = await navigator.mediaDevices.getDisplayMedia({ video: true });
+                    var newTrack = screen.getVideoTracks()[0];
+                    _pcCall.previousVideoTrack = vsender.track;
+                    await vsender.replaceTrack(newTrack);
+                    _pcCall.mode = 'screen';
+                    newTrack.onended = function () { pflxChatCallToggleScreen(); };
+                } catch (e) { console.warn('[call] screen failed', e); }
+            } else {
+                if (_pcCall.previousVideoTrack) {
+                    await vsender.replaceTrack(_pcCall.previousVideoTrack);
+                    _pcCall.previousVideoTrack = null;
+                } else {
+                    var cam = await navigator.mediaDevices.getUserMedia({ video: true });
+                    await vsender.replaceTrack(cam.getVideoTracks()[0]);
+                }
+                _pcCall.mode = 'video';
+            }
+        };
         // Boot — load from disk, hydrate from cloud, wire realtime.
         function _pcBoot() {
             _pcLoad();
+            _pcPrimeSeen();      // baseline what's already there so it doesn't retro-toast
             _pcRefreshBadge();
-            try { _pcCloudPull(); _pcStartRealtime(); } catch (e) {}
+            try { _pcCloudPull(); _pcStartRealtime(); _pcCallAttachInbound(); } catch (e) {}
         }
         // Delay boot so Supabase client is available.
         setTimeout(_pcBoot, 800);
+        // Cross-module hook: chat notifies presence when the panel opens/closes
+        // and when a call starts/ends. Presence engine reads via window.pflxChatState.
+        window.pflxChatState = function () {
+            var caps = _pcMyCaps();
+            var activity = 'online';
+            if (_pcCall) activity = _pcCall.mode === 'screen' ? 'sharing' : 'in-call';
+            else if (_pcCurrentThreadId) activity = 'chatting';
+            var t = _pcCurrentThreadId ? _pcThreads.find(function (x) { return x.id === _pcCurrentThreadId; }) : null;
+            return { activity: activity, threadId: _pcCurrentThreadId, threadName: t ? _pcParticipantNames(t) : null, capsEnabled: caps.enabled };
+        };
+    })();
+    </script>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         PFLX PRESENCE — Live Roster
+         Broadcasts each active player's activity via Supabase Presence on
+         channel `pflx-presence`. Master Host + Host clients render a live
+         panel with online / chatting / in-call chips, and get a toast
+         notification when someone starts a call.
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div id="pflx-presence-panel" style="display:none;position:fixed;top:70px;right:20px;width:340px;max-height:calc(100vh - 120px);z-index:9998;background:linear-gradient(180deg, rgba(18,20,32,0.98), rgba(12,14,22,0.98));border:1px solid rgba(34,197,94,0.4);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,0.7), 0 0 40px rgba(34,197,94,0.15);font-family:'Rajdhani',sans-serif;overflow:hidden;flex-direction:column;">
+        <div style="display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid rgba(255,255,255,0.06);">
+            <span style="font-family:Orbitron,sans-serif;font-size:11px;color:#22c55e;font-weight:800;letter-spacing:0.14em;">🟢 LIVE ROSTER</span>
+            <span id="pflx-presence-count" style="flex:1;font-size:10px;color:rgba(255,255,255,0.5);">0 online</span>
+            <button onclick="pflxPresenceTogglePanel()" style="background:transparent;border:none;color:rgba(255,255,255,0.5);font-size:16px;cursor:pointer;">✕</button>
+        </div>
+        <div id="pflx-presence-body" style="flex:1;overflow-y:auto;padding:6px 8px;"></div>
+    </div>
+    <script>
+    (function () {
+        // ── Presence engine ──
+        // Tracks the current player's activity on `pflx-presence`. Only broadcasts
+        // if there is an active session. Admins/hosts additionally render a Live
+        // Roster panel and receive toast notifications when a player starts a call.
+        var _prChannel = null;
+        var _prState = {};   // presenceRef → { playerId, name, role, cohort, activity, threadId, threadName, at }
+        var _prLastActivity = null; // used for "started a call" toasts
+        var _prVisible = false;
+        var _prRepeat = null;
+        function _prIsHostView() {
+            var s = window.activeSession || {};
+            var role = String(s.role || '').toLowerCase();
+            return role === 'admin' || role === 'host' || role === 'teacher' || role === 'instructor';
+        }
+        function _prMe() {
+            var s = window.activeSession || {};
+            return {
+                id: s.id || s.brand || s.brandName || null,
+                name: s.brand || s.brandName || s.name || 'Player',
+                role: String(s.role || 'player').toLowerCase(),
+                cohort: s.cohort || null,
+                image: s.image || ''
+            };
+        }
+        function _prCurrentActivity() {
+            var base = { activity: 'online', threadId: null, threadName: null };
+            try {
+                if (typeof window.pflxChatState === 'function') {
+                    var c = window.pflxChatState();
+                    if (c) return { activity: c.activity, threadId: c.threadId, threadName: c.threadName };
+                }
+            } catch (e) {}
+            return base;
+        }
+        function _prTrack() {
+            if (!_prChannel) return;
+            var me = _prMe();
+            if (!me.id) return;
+            var act = _prCurrentActivity();
+            try {
+                _prChannel.track({
+                    playerId: me.id,
+                    name: me.name,
+                    role: me.role,
+                    cohort: me.cohort,
+                    image: me.image,
+                    activity: act.activity,
+                    threadId: act.threadId,
+                    threadName: act.threadName,
+                    at: new Date().toISOString()
+                });
+            } catch (e) {}
+        }
+        window.pflxPresenceTouch = function () { _prTrack(); };
+        function _prToastIfNewCall(prev, cur) {
+            if (!_prIsHostView()) return;
+            Object.keys(cur).forEach(function (key) {
+                var next = cur[key];
+                var wasCall = prev[key] && (prev[key].activity === 'in-call' || prev[key].activity === 'sharing');
+                var isCall = next.activity === 'in-call' || next.activity === 'sharing';
+                if (isCall && !wasCall) {
+                    var verb = next.activity === 'sharing' ? 'started screen-sharing' : 'started a video call';
+                    try {
+                        if (typeof pflxToast === 'function') pflxToast('📞 ' + next.name + ' ' + verb + (next.threadName ? ' with ' + next.threadName : ''), 'info', 5000);
+                        if (typeof pflxPlaySfx === 'function') pflxPlaySfx('nav');
+                    } catch (e) {}
+                }
+            });
+        }
+        function _prSetState(newState) {
+            _prToastIfNewCall(_prState, newState);
+            _prState = newState;
+            _prRenderBadge();
+            _prRenderPanel();
+        }
+        function _prRenderBadge() {
+            var count = Object.keys(_prState).length;
+            var btn = document.getElementById('toolbar-live-btn');
+            var badge = document.getElementById('toolbar-live-badge');
+            if (!btn || !badge) return;
+            btn.style.display = _prIsHostView() ? 'inline-flex' : 'none';
+            badge.textContent = String(count);
+            badge.style.display = count > 0 ? 'flex' : 'none';
+            // Color badge by highest activity present
+            var anyCall = false, anyChat = false;
+            Object.values(_prState).forEach(function (v) {
+                if (v.activity === 'in-call' || v.activity === 'sharing') anyCall = true;
+                else if (v.activity === 'chatting' || v.activity === 'messaging') anyChat = true;
+            });
+            badge.style.background = anyCall ? '#00d4ff' : (anyChat ? '#ff9a3c' : '#22c55e');
+        }
+        function _prRenderPanel() {
+            if (!_prVisible) return;
+            var body = document.getElementById('pflx-presence-body');
+            var count = document.getElementById('pflx-presence-count');
+            if (!body || !count) return;
+            var rows = Object.values(_prState);
+            rows.sort(function (a, b) {
+                // Calls first, then chatting, then online
+                function rank(v) { return v.activity === 'in-call' || v.activity === 'sharing' ? 0 : (v.activity === 'chatting' || v.activity === 'messaging' ? 1 : 2); }
+                return rank(a) - rank(b);
+            });
+            count.textContent = rows.length + ' online';
+            if (rows.length === 0) {
+                body.innerHTML = '<div style="padding:22px 14px;text-align:center;color:rgba(255,255,255,0.35);font-size:12px;">Nobody else is online.</div>';
+                return;
+            }
+            body.innerHTML = rows.map(function (v) {
+                var color, glyph, label;
+                if (v.activity === 'in-call') { color = '#00d4ff'; glyph = '📹'; label = 'in a video call' + (v.threadName ? ' · ' + v.threadName : ''); }
+                else if (v.activity === 'sharing') { color = '#c4b5fd'; glyph = '🖥'; label = 'screen sharing' + (v.threadName ? ' · ' + v.threadName : ''); }
+                else if (v.activity === 'chatting') { color = '#ff9a3c'; glyph = '💬'; label = 'chatting' + (v.threadName ? ' · ' + v.threadName : ''); }
+                else { color = '#22c55e'; glyph = '🟢'; label = 'online'; }
+                var roleBadge = (v.role === 'admin' || v.role === 'host' || v.role === 'teacher' || v.role === 'instructor')
+                    ? '<span style="font-size:8px;color:#ffd97a;background:rgba(255,204,102,0.14);border:1px solid rgba(255,204,102,0.4);border-radius:4px;padding:0 4px;margin-left:6px;letter-spacing:0.08em;">HOST</span>'
+                    : '';
+                var cohortChip = v.cohort ? '<span style="font-size:9px;color:rgba(255,255,255,0.4);margin-left:6px;">' + escapeHtml(v.cohort) + '</span>' : '';
+                return '<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);">' +
+                    '<div style="width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,0.06);display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden;">' +
+                    (v.image ? '<img src="' + escapeHtml(v.image) + '" style="width:100%;height:100%;object-fit:cover;">' : '<span style="font-size:12px;color:rgba(255,255,255,0.6);font-weight:700;">' + escapeHtml((v.name || '?').substr(0, 1)) + '</span>') +
+                    '</div>' +
+                    '<div style="flex:1;min-width:0;">' +
+                    '<div style="font-size:12px;color:#f0f0ff;font-weight:700;">' + escapeHtml(v.name) + roleBadge + cohortChip + '</div>' +
+                    '<div style="font-size:10px;color:' + color + ';">' + glyph + ' ' + escapeHtml(label) + '</div>' +
+                    '</div>' +
+                    '</div>';
+            }).join('');
+        }
+        function _prReadPresence() {
+            if (!_prChannel) return {};
+            var state = _prChannel.presenceState ? _prChannel.presenceState() : {};
+            var out = {};
+            Object.keys(state).forEach(function (ref) {
+                var arr = state[ref];
+                if (Array.isArray(arr) && arr.length > 0) {
+                    var v = arr[0];
+                    if (v && v.playerId && v.playerId !== _prMe().id) out[v.playerId] = v;
+                }
+            });
+            return out;
+        }
+        function _prBoot() {
+            var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+            if (!client || !client.channel) { setTimeout(_prBoot, 1000); return; }
+            var me = _prMe();
+            if (!me.id) { setTimeout(_prBoot, 1500); return; } // wait for login
+            try {
+                var ch = client.channel('pflx-presence', { config: { presence: { key: me.id } } });
+                ch.on('presence', { event: 'sync' }, function () { _prSetState(_prReadPresence()); })
+                  .on('presence', { event: 'join' }, function () { _prSetState(_prReadPresence()); })
+                  .on('presence', { event: 'leave' }, function () { _prSetState(_prReadPresence()); })
+                  .subscribe(function (status) { if (status === 'SUBSCRIBED') _prTrack(); });
+                _prChannel = ch;
+                // Re-track periodically so activity stays fresh.
+                _prRepeat = setInterval(_prTrack, 8000);
+                // Also re-track on visibility change so idle vs. active shows up.
+                document.addEventListener('visibilitychange', _prTrack);
+            } catch (e) { console.warn('[presence] boot failed', e); }
+        }
+        window.pflxPresenceTogglePanel = function () {
+            var panel = document.getElementById('pflx-presence-panel');
+            if (!panel) return;
+            if (!_prIsHostView()) { if (typeof pflxToast === 'function') pflxToast('Live Roster is a host-only view.', 'warn'); return; }
+            _prVisible = !(panel.style.display === 'flex');
+            panel.style.display = _prVisible ? 'flex' : 'none';
+            if (_prVisible) _prRenderPanel();
+        };
+        setTimeout(_prBoot, 1200);
+        // Also flash the badge on any activity change from chat.
+        setInterval(_prRenderBadge, 4000);
     })();
     </script>
 
