@@ -22027,6 +22027,7 @@
                 case 'task-detail':       ppRenderTaskDetail(container); break;
                 case 'jobs': ppRenderJobBoard(container); break;
                 case 'tasks': ppRenderMyTasks(container); break;
+                case 'portfolio': ppRenderPortfolio(container); break;
                 default: ppRenderHome(container);
             }
         }
@@ -23545,6 +23546,116 @@
 
             el.innerHTML = html;
         }
+
+        // ── PORTFOLIO — player-facing showcase of approved work ──
+        // Roll-up of every approved Task and every completed Project the
+        // active player was involved in, plus streak highlights. This is a
+        // shareable page — think of it as the player's résumé built from
+        // real PFLX activity.
+        function ppRenderPortfolio(el) {
+            var s = window.activeSession || {};
+            var displayName = s.username || s.name || s.brand || 'Player';
+            var xc = s.xc || 0;
+            var myId = s.id || s.brand || s.brandName || '';
+            var html = ppBreadcrumb([{ label: 'Home', view: 'home' }, { label: 'Portfolio', view: 'portfolio' }]);
+            var myPlayer = (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) ? mcPlayers.find(function (p) { return p && (p.id === myId || p.brand === s.brand); }) : null;
+            var longestStreak = (myPlayer && myPlayer.longestStreak) || 0;
+            var currentStreak = (myPlayer && myPlayer.streak) || 0;
+            var badgeCount = (myPlayer && myPlayer.digitalBadges) || 0;
+
+            // Approved tasks + completed projects for the active player.
+            var approvedTasks = (typeof mcTasks !== 'undefined' ? mcTasks : []).filter(function (t) {
+                if (!t || !(t.status === 'approved' || t.completed)) return false;
+                if (Array.isArray(t.assignedTo)) return t.assignedTo.indexOf(myId) !== -1;
+                if (t.playerId) return t.playerId === myId;
+                if (t.submission && t.submission.submittedBy === myId) return true;
+                if (Array.isArray(t.submissions)) return t.submissions.some(function (sub) { return sub && (sub.playerId === myId || sub.submittedBy === myId); });
+                return false;
+            });
+            var completedProjects = (typeof mcProjects !== 'undefined' ? mcProjects : []).filter(function (p) {
+                if (!p || p.status !== 'completed') return false;
+                if (Array.isArray(p.team) && p.team.indexOf(myId) !== -1) return true;
+                if (Array.isArray(p.coopPlayers) && p.coopPlayers.indexOf(myId) !== -1) return true;
+                // Any approved task under this project counts as project participation.
+                return (p.taskIds || []).some(function (tid) {
+                    return approvedTasks.some(function (t) { return t.id === tid; });
+                });
+            });
+            var totalXcEarned = approvedTasks.reduce(function (sum, t) { return sum + (t.xcReward || 0); }, 0);
+
+            // ── Hero header ──
+            html += '<div style="background:linear-gradient(135deg, rgba(245,200,66,0.10), rgba(139,92,246,0.08));border:1.5px solid rgba(245,200,66,0.35);border-radius:22px;padding:28px;margin-bottom:22px;box-shadow:0 0 40px rgba(245,200,66,0.10);">' +
+                '<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">' +
+                    '<div style="width:80px;height:80px;border-radius:50%;border:3px solid #f5c842;background:rgba(0,240,255,0.05);display:flex;align-items:center;justify-content:center;font-size:36px;overflow:hidden;box-shadow:0 0 20px rgba(245,200,66,0.35);"><img src="public/PFLX Core Flat 6.png" alt="" style="width:100%;height:100%;object-fit:contain;" onerror="this.parentElement.innerHTML=\'&#x1F464;\'"></div>' +
+                    '<div style="flex:1;min-width:200px;">' +
+                        '<div style="font-family:Orbitron,sans-serif;font-size:9px;color:rgba(255,255,255,0.4);letter-spacing:0.2em;font-weight:800;">PORTFOLIO</div>' +
+                        '<div style="font-family:Orbitron,sans-serif;font-size:26px;font-weight:900;color:#f5c842;letter-spacing:0.02em;margin:4px 0 8px;">' + escapeHtml(displayName) + '</div>' +
+                        '<div style="font-size:12px;color:rgba(255,255,255,0.6);">' + (myPlayer && myPlayer.rank ? escapeHtml(String(myPlayer.rank)) + ' · ' : '') + xc.toLocaleString() + ' XC earned</div>' +
+                    '</div>' +
+                '</div>' +
+                // Big stats row
+                '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));gap:12px;margin-top:22px;">' +
+                    _ppPortfolioStat('APPROVED TASKS', approvedTasks.length, '#22c55e', '✓') +
+                    _ppPortfolioStat('COMPLETED PROJECTS', completedProjects.length, '#c4b5fd', '🎬') +
+                    _ppPortfolioStat('BADGES EARNED', badgeCount, '#00d4ff', '🏆') +
+                    _ppPortfolioStat('XC FROM APPROVALS', totalXcEarned.toLocaleString(), '#f5c842', '⚡') +
+                    _ppPortfolioStat('BEST STREAK', longestStreak + (currentStreak > 0 ? ' · Now ' + currentStreak : ''), '#f5a500', '🔥') +
+                '</div>' +
+            '</div>';
+
+            // ── Completed projects ──
+            if (completedProjects.length > 0) {
+                html += '<div style="font-family:Orbitron,sans-serif;font-size:11px;color:#c4b5fd;letter-spacing:0.16em;margin:8px 0 12px;">🎬 COMPLETED PROJECTS · ' + completedProjects.length + '</div>';
+                completedProjects.forEach(function (p) {
+                    html += '<div onclick="ppNav(\'project-detail\',{id:\'' + (p.id || '') + '\'})" style="background:rgba(139,92,246,0.06);border:1px solid rgba(139,92,246,0.28);border-left:4px solid #a78bfa;border-radius:12px;padding:14px 16px;margin-bottom:10px;cursor:pointer;transition:transform 0.15s ease;" onmouseover="this.style.transform=\'translateY(-2px)\'" onmouseout="this.style.transform=\'translateY(0)\'">' +
+                        '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">' +
+                            '<div style="font-size:14px;color:#f0f0ff;font-weight:800;">🎬 ' + escapeHtml(p.name || p.title || 'Untitled') + '</div>' +
+                            '<span style="background:rgba(34,197,94,0.14);color:#22c55e;padding:3px 9px;border-radius:8px;font-size:10px;font-weight:800;letter-spacing:0.08em;">✓ COMPLETED</span>' +
+                        '</div>' +
+                        (p.description ? '<div style="font-size:12px;color:rgba(255,255,255,0.55);line-height:1.5;margin-top:6px;">' + escapeHtml(String(p.description).substring(0, 180)) + '</div>' : '') +
+                    '</div>';
+                });
+            }
+
+            // ── Approved tasks — grouped by month if there are lots ──
+            if (approvedTasks.length > 0) {
+                html += '<div style="font-family:Orbitron,sans-serif;font-size:11px;color:#22c55e;letter-spacing:0.16em;margin:16px 0 12px;">✓ APPROVED TASKS · ' + approvedTasks.length + '</div>';
+                // Sort most-recent approval first
+                approvedTasks.sort(function (a, b) {
+                    var ad = a.approvedAt || a.completedAt || '';
+                    var bd = b.approvedAt || b.completedAt || '';
+                    return ad < bd ? 1 : ad > bd ? -1 : 0;
+                });
+                approvedTasks.slice(0, 40).forEach(function (t) {
+                    html += '<div onclick="ppNav(\'task-detail\',{id:\'' + (t.id || '') + '\'})" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-left:3px solid #22c55e;border-radius:10px;padding:12px 14px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:10px;cursor:pointer;">' +
+                        '<div style="flex:1;min-width:0;">' +
+                            '<div style="font-size:13px;color:#f0f0ff;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📋 ' + escapeHtml(t.title || 'Untitled') + '</div>' +
+                            (t.approvedAt ? '<div style="font-size:10px;color:rgba(255,255,255,0.35);margin-top:2px;font-family:monospace;">Approved ' + escapeHtml(t.approvedAt) + '</div>' : '') +
+                        '</div>' +
+                        (t.xcReward ? '<span style="background:rgba(245,200,66,0.16);color:#f5c842;padding:4px 10px;border-radius:10px;font-size:11px;font-weight:800;border:1px solid rgba(245,200,66,0.35);white-space:nowrap;">⚡ ' + t.xcReward + '</span>' : '') +
+                    '</div>';
+                });
+                if (approvedTasks.length > 40) html += '<div style="text-align:center;color:rgba(255,255,255,0.35);font-size:11px;padding:12px;font-style:italic;">+ ' + (approvedTasks.length - 40) + ' more approved tasks in your history</div>';
+            }
+
+            if (approvedTasks.length === 0 && completedProjects.length === 0) {
+                html += '<div style="padding:40px;text-align:center;color:rgba(255,255,255,0.4);font-size:13px;">No approved work yet — as tasks get approved they will build up here as your résumé.</div>';
+            }
+
+            el.innerHTML = html;
+        }
+        function _ppPortfolioStat(label, value, color, icon) {
+            return '<div style="background:rgba(0,0,0,0.15);border:1px solid rgba(' + hexToRgb(color) + ',0.28);border-radius:12px;padding:12px 14px;">' +
+                '<div style="display:flex;align-items:center;gap:6px;font-size:9px;color:rgba(255,255,255,0.4);letter-spacing:0.14em;font-weight:800;font-family:Orbitron,sans-serif;">' + icon + ' ' + label + '</div>' +
+                '<div style="font-family:Orbitron,sans-serif;font-size:22px;font-weight:900;color:' + color + ';margin-top:4px;">' + value + '</div>' +
+            '</div>';
+        }
+        function hexToRgb(hex) {
+            var m = String(hex).replace('#','').match(/.{1,2}/g);
+            if (!m || m.length < 3) return '245,200,66';
+            return parseInt(m[0], 16) + ',' + parseInt(m[1], 16) + ',' + parseInt(m[2], 16);
+        }
+        window.ppRenderPortfolio = ppRenderPortfolio;
 
         // ── Job application handler ──
         // Player-side Apply — pushes the current player into job.applicants[]
@@ -25611,12 +25722,20 @@
                     ? '<span style="background:rgba(139,92,246,0.14);color:#c4b5fd;padding:5px 10px;border-radius:12px;font-size:11px;font-weight:700;border:1px solid rgba(139,92,246,0.35);white-space:nowrap;">🏆 ' + rewardBadgeCount + '</span>'
                     : '';
                 var expanded = (t.__mcRowOpen === true);
+                var _unmetDeps = _mcTaskUnmetDependencies(t);
+                var _lockedChip = (_unmetDeps.length > 0 && !isApproved)
+                    ? '<span title="Locked — waiting on: ' + _unmetDeps.map(function(d){return d.title||'Untitled';}).join(', ') + '" style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(156,163,175,0.15);color:rgba(255,255,255,0.6);border-radius:6px;font-size:9px;font-weight:800;letter-spacing:0.08em;border:1px solid rgba(156,163,175,0.35);white-space:nowrap;">⛔ ' + _unmetDeps.length + ' blocker' + (_unmetDeps.length === 1 ? '' : 's') + '</span>'
+                    : '';
+                var _recurringChip = (t.recurring && t.recurring.frequency)
+                    ? '<span title="Recurring ' + t.recurring.frequency + '" style="padding:3px 8px;background:rgba(0,212,255,0.14);color:#00d4ff;border-radius:6px;font-size:9px;font-weight:800;letter-spacing:0.08em;border:1px solid rgba(0,212,255,0.35);white-space:nowrap;">🔁 ' + t.recurring.frequency.toUpperCase() + '</span>'
+                    : '';
                 var priorityFlag = _mcPriorityFlag(t.priority || 'normal');
                 return '<div data-mc-task-id="' + t.id + '" style="background:rgba(22,22,31,0.55);border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:14px 18px;margin-bottom:8px;transition:background 0.15s ease, box-shadow 0.3s ease;" onmouseover="this.style.background=\'rgba(30,30,42,0.7)\'" onmouseout="this.style.background=\'rgba(22,22,31,0.55)\'">' +
                     // Row header — the always-visible line
                     '<div style="display:flex;align-items:center;gap:14px;">' +
                         checkboxHtml +
                         priorityFlag +
+                        _lockedChip + _recurringChip +
                         '<div style="font-size:20px;flex-shrink:0;">' + categoryEmoji + '</div>' +
                         // Center block — title, description snippet, lineage chips
                         '<div style="flex:1;min-width:0;">' +
@@ -27656,9 +27775,20 @@
         window.mcRejectTask = mcRejectTask;
 
         function mcApproveTask(index) {
-            pflxPlaySfx('success');
             var task = mcTasks[index];
             if (!task) return;
+            // ── Dependency guard-rail ──
+            // Block approval until every task in dependsOn is approved.
+            // Ships an actionable alert listing the blockers so the host
+            // can jump to them directly.
+            var unmet = _mcTaskUnmetDependencies(task);
+            if (unmet.length > 0) {
+                try { pflxPlaySfx('error'); } catch (e) {}
+                var titles = unmet.slice(0, 5).map(function (t) { return '• ' + (t.title || 'Untitled'); }).join('\n');
+                alert('Cannot approve — the following dependencies are not yet approved:\n\n' + titles + (unmet.length > 5 ? '\n… and ' + (unmet.length - 5) + ' more' : ''));
+                return;
+            }
+            pflxPlaySfx('success');
             task.status = 'approved';
             task.approvedAt = new Date().toISOString().split('T')[0];
 
@@ -52295,6 +52425,7 @@ RESPONSE RULES:
             actions.push({ label: 'New Project',    icon: '＋', group: 'CREATE', keywords: 'new create add project', run: function () { try { mcNav('projects'); mcShowProjectForm(-1); } catch (e) {} } });
             actions.push({ label: 'New Task',       icon: '＋', group: 'CREATE', keywords: 'new create add task', run: function () { try { mcNav('tasks'); mcShowTaskForm(-1); } catch (e) {} } });
             actions.push({ label: 'New from Template…', icon: '📄', group: 'CREATE', keywords: 'template new from spawn', run: function () { try { pflxOpenTemplatePicker(); } catch (e) {} } });
+            actions.push({ label: 'My Portfolio', icon: '🏆', group: 'NAVIGATE', keywords: 'portfolio resume showcase approved', run: function () { try { if (typeof ppNav === 'function') ppNav('portfolio'); } catch (e) {} } });
             // Item jumps
             try {
                 (mcCheckpoints || []).forEach(function (cp) { actions.push({ label: cp.name || 'Untitled Checkpoint', icon: '🏁', group: 'CHECKPOINTS', keywords: (cp.name || '') + ' checkpoint', run: function () { mcJumpToItem('checkpoint', cp.id); } }); });
