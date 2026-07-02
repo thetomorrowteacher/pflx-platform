@@ -8273,8 +8273,13 @@
                                     <button class="mc-subtab" data-mc-task="submitted" onclick="mcTaskTab('submitted')">Submitted</button>
                                     <button class="mc-subtab" data-mc-task="approved" onclick="mcTaskTab('approved')">Approved</button>
                                 </div>
-                                <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
+                                <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:center;">
                                     <input type="text" class="mc-search" id="mc-task-search" placeholder="Search tasks..." style="flex:1;min-width:200px;margin-bottom:0;" oninput="mcRenderTasks()">
+                                    <!-- View mode toggle — List (Notion rows) / Board (Kanban) -->
+                                    <div id="mc-tasks-view-toggle" style="display:flex;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:3px;gap:2px;">
+                                        <button onclick="mcSetTasksView('list')" data-view="list" class="mc-view-btn" title="List view" style="padding:6px 12px;font-size:11px;font-weight:700;background:rgba(0,212,255,0.14);color:#00d4ff;border:1px solid rgba(0,212,255,0.35);border-radius:6px;cursor:pointer;letter-spacing:0.06em;">☰ LIST</button>
+                                        <button onclick="mcSetTasksView('board')" data-view="board" class="mc-view-btn" title="Kanban board" style="padding:6px 12px;font-size:11px;font-weight:700;background:transparent;color:rgba(255,255,255,0.5);border:1px solid transparent;border-radius:6px;cursor:pointer;letter-spacing:0.06em;">▤ BOARD</button>
+                                    </div>
                                     <button class="mc-btn mc-btn-green" onclick="mcShowTaskForm(-1)">+ New Task</button>
                                 </div>
 
@@ -25136,10 +25141,100 @@
             mcRenderTasks();
         }
 
+        // ── Tasks view mode toggle ──
+        // Notion / Linear / ClickUp all offer multiple views on the same data.
+        // MC now ships List (default Notion-row + FLP phase buckets) and Board
+        // (Kanban: Open / Submitted / Approved). Selection persists per session.
+        var mcTasksView = (function () {
+            try { return localStorage.getItem('pflx_mc_tasks_view') || 'list'; }
+            catch (e) { return 'list'; }
+        })();
+        function mcSetTasksView(mode) {
+            if (mode !== 'list' && mode !== 'board') return;
+            mcTasksView = mode;
+            try { localStorage.setItem('pflx_mc_tasks_view', mode); } catch (e) {}
+            // Toggle button visuals
+            document.querySelectorAll('.mc-view-btn').forEach(function (b) {
+                var isSel = b.getAttribute('data-view') === mode;
+                b.style.background = isSel ? 'rgba(0,212,255,0.14)' : 'transparent';
+                b.style.color = isSel ? '#00d4ff' : 'rgba(255,255,255,0.5)';
+                b.style.borderColor = isSel ? 'rgba(0,212,255,0.35)' : 'transparent';
+            });
+            mcRenderTasks();
+        }
+        window.mcSetTasksView = mcSetTasksView;
+
+        // ── Kanban Board renderer ── columns by status. Reuses the row
+        // markup so keyboard/mouse interactions still work per-card.
+        function _mcRenderTasksBoard(filtered) {
+            var list = document.getElementById('mc-tasks-list');
+            if (!list) return;
+            var cols = [
+                { key: 'open',      label: '📋 Open',      rgb: '0,212,255',  filter: function (t) { return t.status === 'open' || !t.status || (t.status !== 'submitted' && t.status !== 'approved' && t.status !== 'rejected'); } },
+                { key: 'submitted', label: '📤 Submitted', rgb: '245,165,0',  filter: function (t) { return t.status === 'submitted'; } },
+                { key: 'approved',  label: '✓ Approved',  rgb: '34,197,94',   filter: function (t) { return t.status === 'approved' || t.completed; } }
+            ];
+            // Compute rendered card for each task using the same row template as List view
+            // by calling into the existing map — cheaper than duplicating card markup.
+            list.style.display = 'grid';
+            list.style.gridTemplateColumns = 'repeat(3, 1fr)';
+            list.style.gap = '14px';
+            var html = '';
+            cols.forEach(function (col) {
+                var colTasks = filtered.filter(col.filter);
+                colTasks.sort(function (a, b) {
+                    var wa = _mcPriorityWeight(a.priority || 'normal');
+                    var wb = _mcPriorityWeight(b.priority || 'normal');
+                    if (wa !== wb) return wb - wa;
+                    var da = a.dueDate ? _mcUrgencyForDueDate(a.dueDate).days : 999;
+                    var db = b.dueDate ? _mcUrgencyForDueDate(b.dueDate).days : 999;
+                    return da - db;
+                });
+                html += '<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(' + col.rgb + ',0.2);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:8px;min-height:200px;">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;margin-bottom:4px;border-bottom:1px solid rgba(' + col.rgb + ',0.18);">' +
+                        '<span style="font-family:Orbitron,sans-serif;font-size:11px;font-weight:800;color:rgba(' + col.rgb + ',1);letter-spacing:0.1em;">' + col.label + '</span>' +
+                        '<span style="font-family:monospace;font-size:10px;color:rgba(255,255,255,0.4);">' + colTasks.length + '</span>' +
+                    '</div>';
+                if (colTasks.length === 0) {
+                    html += '<div style="padding:20px 10px;text-align:center;color:rgba(255,255,255,0.25);font-size:11px;font-style:italic;">Empty</div>';
+                } else {
+                    colTasks.forEach(function (t) {
+                        var realIndex = mcTasks.indexOf(t);
+                        var urgency = _mcUrgencyForDueDate(t.dueDate);
+                        var priorityFlag = _mcPriorityFlag(t.priority || 'normal');
+                        var isApproved = _mcTaskIsApproved(t);
+                        html += '<div ' + _mcJumpAttr('task', t.id) + ' data-mc-task-id="' + t.id + '" style="background:rgba(22,22,31,0.7);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:10px 12px;cursor:pointer;transition:transform 0.12s ease;" onmouseover="this.style.transform=\'translateY(-2px)\'" onmouseout="this.style.transform=\'translateY(0)\'">' +
+                            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
+                                priorityFlag +
+                                '<span style="font-size:12px;color:' + (isApproved ? 'rgba(255,255,255,0.55)' : '#f0f0ff') + ';font-weight:700;line-height:1.3;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + (isApproved ? 'text-decoration:line-through;' : '') + '">' + escapeHtml(t.title || 'Untitled') + '</span>' +
+                            '</div>' +
+                            '<div style="display:flex;gap:5px;flex-wrap:wrap;">' +
+                                (t.dueDate ? '<span style="background:rgba(' + urgency.rgb + ',0.14);color:rgba(' + urgency.rgb + ',1);padding:3px 7px;border-radius:8px;font-size:9px;font-weight:700;border:1px solid rgba(' + urgency.rgb + ',0.3);">📅 ' + urgency.label + '</span>' : '') +
+                                (t.xcReward ? '<span style="background:rgba(245,200,66,0.16);color:#f5c842;padding:3px 7px;border-radius:8px;font-size:9px;font-weight:800;border:1px solid rgba(245,200,66,0.35);">⚡ ' + t.xcReward + '</span>' : '') +
+                            '</div>' +
+                        '</div>';
+                    });
+                }
+                html += '</div>';
+            });
+            list.innerHTML = html;
+        }
+
         function mcRenderTasks() {
             mcLoadData();
             var list = document.getElementById('mc-tasks-list');
             if (!list) return;
+            // Board view early-branch — reuses filter logic below.
+            if (mcTasksView === 'board') {
+                var search = (document.getElementById('mc-task-search')?.value || '').toLowerCase();
+                var filtered = mcTasks.filter(function(t) {
+                    if (mcTaskFilter !== 'all' && t.status !== mcTaskFilter) return false;
+                    if (search && !(t.title || '').toLowerCase().includes(search) && !(t.description || '').toLowerCase().includes(search)) return false;
+                    return true;
+                });
+                _mcRenderTasksBoard(filtered);
+                return;
+            }
 
             var search = (document.getElementById('mc-task-search')?.value || '').toLowerCase();
             var filtered = mcTasks.filter(function(t) {
@@ -26977,6 +27072,42 @@
             mcShowTaskForm(index);
         }
 
+        // ── Streak system ──
+        // Track consecutive-approval count per player. Every N approvals
+        // (STREAK_TIER) grants a bonus XC award and a toast.
+        var MC_STREAK_TIER = 5;
+        var MC_STREAK_BONUS_PCT = 0.20; // 20% of the approved task's XC as bonus
+        function _mcApplyStreakBonus(submitterId, task) {
+            if (!submitterId || !task) return;
+            try {
+                var p = mcPlayers.find(function (x) { return x && x.id === submitterId; });
+                if (!p) return;
+                p.streak = (p.streak || 0) + 1;
+                p.longestStreak = Math.max(p.longestStreak || 0, p.streak);
+                if (p.streak > 0 && p.streak % MC_STREAK_TIER === 0) {
+                    var baseXc = task.xcReward || 0;
+                    var bonus = Math.max(10, Math.round(baseXc * MC_STREAK_BONUS_PCT));
+                    if (window.PflxDataBus) {
+                        window.PflxDataBus.award(submitterId, {
+                            xc: bonus, source: 'mc',
+                            reason: 'streak:' + p.streak
+                        });
+                    }
+                    try { if (typeof pflxToast === 'function') pflxToast('🔥 ' + p.streak + '-approval streak! +' + bonus + ' bonus XC', 'success'); } catch (e) {}
+                }
+                mcSaveData('players');
+            } catch (e) { console.warn('[streak] failed', e); }
+        }
+        // Streaks reset when a task is rejected (or times out overdue —
+        // that path lives outside of mcApproveTask).
+        function _mcResetStreak(submitterId) {
+            if (!submitterId) return;
+            var p = mcPlayers.find(function (x) { return x && x.id === submitterId; });
+            if (p && p.streak) { p.streak = 0; mcSaveData('players'); }
+        }
+        window._mcApplyStreakBonus = _mcApplyStreakBonus;
+        window._mcResetStreak = _mcResetStreak;
+
         function mcApproveTask(index) {
             pflxPlaySfx('success');
             var task = mcTasks[index];
@@ -27051,6 +27182,10 @@
                     }
                 } catch (eMirror) {}
             }
+
+            // ── Streak bonus ── every 5 consecutive approvals grants a
+            // percentage-based bonus XC + celebration toast.
+            try { _mcApplyStreakBonus(submitterId, task); } catch (eStreak) {}
 
             // Save task list (and propagate via pflx_mc_changed automatically)
             mcSaveData('tasks');
