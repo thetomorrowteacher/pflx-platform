@@ -6127,7 +6127,7 @@
                     <span class="tr-dot"></span>
                     <span class="tr-label" id="tr-label-text">HOST VIEW</span>
                 </button>
-                <button class="toolbar-chat-btn" id="toolbar-chat-btn" type="button" title="Open DarkCampus Quick Chat" onclick="dcQcToggle()">
+                <button class="toolbar-chat-btn" id="toolbar-chat-btn" type="button" title="Open PFLX Chat — direct + group messages" onclick="pflxChatToggle()">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                     <span class="tcb-label">CHAT</span>
                     <span class="dc-qc-badge" id="toolbar-chat-badge" style="position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;background:#ff3b6c;color:#fff;border-radius:9px;font-size:10px;display:none;align-items:center;justify-content:center;padding:0 5px;font-family:'Share Tech Mono',monospace;font-weight:700;"></span>
@@ -27846,6 +27846,81 @@
         window.mcToggleAutomation = mcToggleAutomation;
         window.mcDeleteAutomation = mcDeleteAutomation;
         window.pflxOpenAutomationsPicker = pflxOpenAutomationsPicker;
+
+        // ═══════════════════════════════════════════════════════════════════
+        // CALENDAR EXPORT — .ics generation for Google Calendar + Apple
+        // Calendar (any RFC 5545 client). Every Task with a dueDate becomes
+        // a VEVENT. Every Checkpoint becomes a VEVENT spanning start→end.
+        // For live sync (webcal://), a Supabase edge function endpoint that
+        // reads pflx_mc_tasks + pflx_mc_checkpoints and serves .ics on
+        // request would land in a follow-up pass.
+        // ═══════════════════════════════════════════════════════════════════
+        function _mcIcsDate(dateStr) {
+            // Convert 'YYYY-MM-DD' → 'YYYYMMDD' (all-day event).
+            return String(dateStr || '').replace(/-/g, '');
+        }
+        function _mcIcsEscape(s) {
+            return String(s || '').replace(/\\/g, '\\\\').replace(/,/g, '\\,').replace(/;/g, '\\;').replace(/\n/g, '\\n');
+        }
+        function mcExportCalendarIcs() {
+            var lines = [];
+            lines.push('BEGIN:VCALENDAR');
+            lines.push('VERSION:2.0');
+            lines.push('PRODID:-//PFLX//Mission Control//EN');
+            lines.push('CALSCALE:GREGORIAN');
+            lines.push('X-WR-CALNAME:PFLX Mission Control');
+            lines.push('X-WR-TIMEZONE:UTC');
+            var count = 0;
+            (mcTasks || []).forEach(function (t) {
+                if (!t || !t.dueDate) return;
+                var d = _mcIcsDate(t.dueDate);
+                var uid = 'task-' + t.id + '@pflx';
+                lines.push('BEGIN:VEVENT');
+                lines.push('UID:' + uid);
+                lines.push('DTSTAMP:' + new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, ''));
+                lines.push('DTSTART;VALUE=DATE:' + d);
+                lines.push('DTEND;VALUE=DATE:' + d);
+                var priority = { urgent: 1, high: 3, normal: 5, low: 7 }[t.priority || 'normal'] || 5;
+                lines.push('PRIORITY:' + priority);
+                lines.push('SUMMARY:' + _mcIcsEscape('📋 ' + (t.title || 'Task') + (t.xcReward ? ' · ' + t.xcReward + ' XC' : '')));
+                if (t.description) lines.push('DESCRIPTION:' + _mcIcsEscape(t.description));
+                lines.push('STATUS:' + (t.status === 'approved' ? 'CONFIRMED' : 'TENTATIVE'));
+                lines.push('END:VEVENT');
+                count++;
+            });
+            (mcCheckpoints || []).forEach(function (cp) {
+                if (!cp || !cp.startDate) return;
+                var uid = 'checkpoint-' + cp.id + '@pflx';
+                lines.push('BEGIN:VEVENT');
+                lines.push('UID:' + uid);
+                lines.push('DTSTAMP:' + new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, ''));
+                lines.push('DTSTART;VALUE=DATE:' + _mcIcsDate(cp.startDate));
+                if (cp.endDate) lines.push('DTEND;VALUE=DATE:' + _mcIcsDate(cp.endDate));
+                lines.push('SUMMARY:' + _mcIcsEscape('🏁 ' + (cp.name || 'Checkpoint') + (cp.xcReward ? ' · ' + cp.xcReward + ' XC' : '')));
+                if (cp.description) lines.push('DESCRIPTION:' + _mcIcsEscape(cp.description));
+                lines.push('END:VEVENT');
+                count++;
+            });
+            lines.push('END:VCALENDAR');
+            var blob = new Blob([lines.join('\r\n')], { type: 'text/calendar' });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = 'pflx-mc-' + new Date().toISOString().slice(0, 10) + '.ics';
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+            if (typeof pflxToast === 'function') pflxToast('📅 Exported ' + count + ' events. Import into Google/Apple Calendar.', 'success', 5000);
+        }
+        function mcCalendarSubscribeInfo() {
+            var msg =
+                'To make MC events show up LIVE in Google Calendar / Apple Calendar:\n\n' +
+                '1. Use the Export MC to Calendar action for a one-time .ics import (works now).\n\n' +
+                '2. For live-updating subscription, a Supabase Edge Function that serves .ics from pflx_mc_tasks + pflx_mc_checkpoints is needed. Once deployed, the webcal:// URL will show here.\n\n' +
+                '(Edge Function deploy is the next pass — the ics format + event mapping already work; only the HTTP endpoint is missing.)';
+            alert(msg);
+        }
+        window.mcExportCalendarIcs = mcExportCalendarIcs;
+        window.mcCalendarSubscribeInfo = mcCalendarSubscribeInfo;
 
         // ═══════════════════════════════════════════════════════════════════
         // X-BOT AI ASSIST — heuristic priority + task breakdown suggestion.
@@ -52665,6 +52740,323 @@ RESPONSE RULES:
     </script>
 
     <!-- ═══════════════════════════════════════════════════════════════════
+         PFLX CHAT — standalone direct-message + group chat panel. Replaces
+         the DarkCampus Quick Chat as the primary chat entry point. Data
+         lives in the pflx_chat_threads Supabase row (JSON: { threads: [] }).
+         Realtime channel `pflx-chat` keeps every client in sync.
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div id="pflx-chat-panel" style="display:none;position:fixed;bottom:0;right:20px;width:420px;height:min(560px,80vh);z-index:9999;background:linear-gradient(180deg, rgba(18,20,32,0.98), rgba(12,14,22,0.98));border:1px solid rgba(0,212,255,0.4);border-radius:16px 16px 0 0;box-shadow:0 -20px 60px rgba(0,0,0,0.7), 0 0 40px rgba(0,212,255,0.15);font-family:'Rajdhani',sans-serif;flex-direction:column;overflow:hidden;">
+        <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.06);">
+            <button id="pflx-chat-back" onclick="pflxChatBackToList()" style="display:none;background:transparent;border:none;color:#00d4ff;font-size:16px;cursor:pointer;padding:0;line-height:1;">←</button>
+            <span style="font-family:Orbitron,sans-serif;font-size:12px;color:#00d4ff;font-weight:800;letter-spacing:0.14em;">💬 <span id="pflx-chat-title">PFLX CHAT</span></span>
+            <span style="flex:1;font-size:10px;color:rgba(255,255,255,0.35);">Direct + group messages</span>
+            <button onclick="pflxChatShowCompose()" title="New message" style="background:rgba(34,197,94,0.14);color:#22c55e;border:1px solid rgba(34,197,94,0.4);border-radius:6px;padding:4px 9px;font-size:10px;font-weight:800;cursor:pointer;letter-spacing:0.06em;">+ NEW</button>
+            <button onclick="pflxChatToggle()" style="background:transparent;border:none;color:rgba(255,255,255,0.5);font-size:18px;cursor:pointer;">✕</button>
+        </div>
+        <div id="pflx-chat-body" style="flex:1;overflow-y:auto;padding:10px 12px;"></div>
+        <div id="pflx-chat-composer" style="display:none;padding:10px 12px;border-top:1px solid rgba(255,255,255,0.06);background:rgba(0,0,0,0.15);">
+            <div style="display:flex;gap:6px;align-items:flex-end;">
+                <textarea id="pflx-chat-input" placeholder="Type a message… (Shift+Enter for newline)" style="flex:1;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.1);color:#f0f0ff;padding:8px;border-radius:8px;font-size:12px;min-height:40px;max-height:120px;resize:none;font-family:inherit;" onkeydown="pflxChatInputKey(event)"></textarea>
+                <button onclick="pflxChatSend()" style="background:rgba(0,212,255,0.14);color:#00d4ff;border:1px solid rgba(0,212,255,0.4);border-radius:8px;padding:8px 14px;font-size:11px;font-weight:800;cursor:pointer;letter-spacing:0.06em;">SEND</button>
+            </div>
+            <div id="pflx-chat-bridges" style="display:flex;gap:5px;margin-top:6px;flex-wrap:wrap;">
+                <button onclick="pflxChatPushBridge('email')" title="Copy this thread as an email draft" style="padding:3px 8px;font-size:9px;background:rgba(139,92,246,0.1);color:#c4b5fd;border:1px solid rgba(139,92,246,0.3);border-radius:5px;cursor:pointer;font-weight:700;letter-spacing:0.06em;">📧 EMAIL</button>
+                <button onclick="pflxChatPushBridge('slack')" title="Push to a Slack webhook (host must configure URL in Settings)" style="padding:3px 8px;font-size:9px;background:rgba(74,21,75,0.14);color:#e0aaff;border:1px solid rgba(74,21,75,0.4);border-radius:5px;cursor:pointer;font-weight:700;letter-spacing:0.06em;">💼 SLACK</button>
+                <button onclick="pflxChatPushBridge('discord')" title="Push to a Discord webhook (host must configure URL in Settings)" style="padding:3px 8px;font-size:9px;background:rgba(88,101,242,0.14);color:#a0b5ff;border:1px solid rgba(88,101,242,0.4);border-radius:5px;cursor:pointer;font-weight:700;letter-spacing:0.06em;">🎮 DISCORD</button>
+            </div>
+        </div>
+    </div>
+    <script>
+    (function () {
+        // ── PFLX Chat data model ──
+        //  { threads: [{ id, type: 'dm'|'group', name, participants: [playerId], messages: [{ id, senderId, senderName, text, at, readBy: [] }], createdAt }] }
+        // Persisted in localStorage 'pflx_chat_threads' + Supabase app_data row same key.
+        // Realtime channel 'pflx-chat' broadcasts thread mutations. Each client
+        // debounces its own writes so echoes don't loop.
+        var _pcThreads = [];
+        var _pcCurrentThreadId = null;
+        var _pcCloudTimer = null;
+        var _pcSelfWriting = false;
+        function _pcMe() {
+            var s = window.activeSession || {};
+            return {
+                id: s.id || s.brand || s.brandName || 'anon',
+                name: s.brand || s.brandName || s.name || 'You',
+                image: s.image || ''
+            };
+        }
+        function _pcLoad() {
+            try {
+                var raw = localStorage.getItem('pflx_chat_threads');
+                if (raw) _pcThreads = JSON.parse(raw).threads || JSON.parse(raw) || [];
+            } catch (e) { _pcThreads = []; }
+        }
+        function _pcSave() {
+            try { localStorage.setItem('pflx_chat_threads', JSON.stringify({ threads: _pcThreads })); } catch (e) {}
+            _pcCloudPushDebounced();
+        }
+        function _pcCloudPushDebounced() {
+            if (_pcCloudTimer) clearTimeout(_pcCloudTimer);
+            _pcCloudTimer = setTimeout(function () {
+                _pcCloudTimer = null;
+                var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (!client) return;
+                _pcSelfWriting = true;
+                client.from('app_data').upsert([{
+                    key: 'pflx_chat_threads',
+                    data: { threads: _pcThreads, updatedAt: Date.now() },
+                    updated_at: new Date().toISOString()
+                }], { onConflict: 'key' }).then(function () { _pcSelfWriting = false; },
+                     function () { _pcSelfWriting = false; });
+            }, 700);
+        }
+        function _pcCloudPull() {
+            var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+            if (!client) return;
+            client.from('app_data').select('key, data').eq('key', 'pflx_chat_threads').then(function (res) {
+                if (!res || !res.data || !res.data[0]) return;
+                var d = res.data[0].data;
+                var threads = (d && d.threads) || [];
+                if (Array.isArray(threads)) {
+                    _pcThreads = threads;
+                    try { localStorage.setItem('pflx_chat_threads', JSON.stringify({ threads: _pcThreads })); } catch (e) {}
+                    if (document.getElementById('pflx-chat-panel').style.display !== 'none') pflxChatRender();
+                    _pcRefreshBadge();
+                }
+            });
+        }
+        function _pcStartRealtime() {
+            var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+            if (!client || !client.channel) return;
+            try {
+                client.channel('pflx-chat-live')
+                    .on('postgres_changes', { event: '*', schema: 'public', table: 'app_data', filter: 'key=eq.pflx_chat_threads' }, function (payload) {
+                        if (_pcSelfWriting) return; // ignore our own echo
+                        var row = payload && (payload.new || payload.record);
+                        if (row && row.data && Array.isArray(row.data.threads)) {
+                            _pcThreads = row.data.threads;
+                            try { localStorage.setItem('pflx_chat_threads', JSON.stringify({ threads: _pcThreads })); } catch (e) {}
+                            if (document.getElementById('pflx-chat-panel').style.display !== 'none') pflxChatRender();
+                            _pcRefreshBadge();
+                        }
+                    })
+                    .subscribe();
+            } catch (e) {}
+        }
+        function _pcRefreshBadge() {
+            var me = _pcMe();
+            var unread = 0;
+            _pcThreads.forEach(function (t) {
+                (t.messages || []).forEach(function (m) {
+                    if (m.senderId !== me.id && !(Array.isArray(m.readBy) && m.readBy.indexOf(me.id) !== -1)) unread++;
+                });
+            });
+            var badge = document.getElementById('toolbar-chat-badge');
+            if (!badge) return;
+            if (unread > 0) { badge.textContent = String(unread); badge.style.display = 'flex'; }
+            else { badge.style.display = 'none'; }
+        }
+        function _pcMarkThreadRead(threadId) {
+            var me = _pcMe();
+            var t = _pcThreads.find(function (x) { return x.id === threadId; });
+            if (!t) return;
+            var mutated = false;
+            (t.messages || []).forEach(function (m) {
+                if (!Array.isArray(m.readBy)) m.readBy = [];
+                if (m.readBy.indexOf(me.id) === -1) { m.readBy.push(me.id); mutated = true; }
+            });
+            if (mutated) { _pcSave(); _pcRefreshBadge(); }
+        }
+        function _pcParticipantNames(t) {
+            var me = _pcMe();
+            var others = (t.participants || []).filter(function (id) { return id !== me.id; });
+            // Prefer roster names when we have them
+            var roster = (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) ? PLAYERS : [];
+            return others.map(function (id) {
+                var p = roster.find(function (x) { return x && (x.id === id || x.brand === id || x.brandName === id); });
+                return p ? (p.brand || p.brandName || p.name || id) : id;
+            }).join(', ') || t.name || 'Direct message';
+        }
+        // Public API
+        window.pflxChatToggle = function () {
+            var panel = document.getElementById('pflx-chat-panel');
+            if (!panel) return;
+            if (panel.style.display === 'none' || !panel.style.display) {
+                _pcLoad();
+                _pcCloudPull();
+                panel.style.display = 'flex';
+                pflxChatBackToList();
+            } else {
+                panel.style.display = 'none';
+            }
+        };
+        window.pflxChatBackToList = function () {
+            _pcCurrentThreadId = null;
+            document.getElementById('pflx-chat-composer').style.display = 'none';
+            document.getElementById('pflx-chat-back').style.display = 'none';
+            document.getElementById('pflx-chat-title').textContent = 'PFLX CHAT';
+            pflxChatRender();
+        };
+        window.pflxChatOpenThread = function (threadId) {
+            _pcCurrentThreadId = threadId;
+            var t = _pcThreads.find(function (x) { return x.id === threadId; });
+            if (!t) return;
+            document.getElementById('pflx-chat-composer').style.display = 'block';
+            document.getElementById('pflx-chat-back').style.display = 'inline';
+            document.getElementById('pflx-chat-title').textContent = _pcParticipantNames(t) + (t.type === 'group' ? ' · GROUP' : '');
+            _pcMarkThreadRead(threadId);
+            pflxChatRender();
+        };
+        window.pflxChatSend = function () {
+            var input = document.getElementById('pflx-chat-input');
+            if (!input) return;
+            var text = input.value.trim();
+            if (!text || !_pcCurrentThreadId) return;
+            var t = _pcThreads.find(function (x) { return x.id === _pcCurrentThreadId; });
+            if (!t) return;
+            var me = _pcMe();
+            if (!Array.isArray(t.messages)) t.messages = [];
+            t.messages.push({
+                id: 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+                senderId: me.id,
+                senderName: me.name,
+                text: text,
+                at: new Date().toISOString(),
+                readBy: [me.id]
+            });
+            t.updatedAt = new Date().toISOString();
+            _pcSave();
+            input.value = '';
+            pflxChatRender();
+        };
+        window.pflxChatInputKey = function (e) {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); pflxChatSend(); }
+        };
+        window.pflxChatShowCompose = function () {
+            var roster = (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) ? PLAYERS : [];
+            var me = _pcMe();
+            var others = roster.filter(function (p) { return p && (p.id !== me.id && p.brand !== me.id); });
+            if (others.length === 0) { alert('No players to chat with yet.'); return; }
+            // Simple picker: prompt with a comma-separated list
+            var options = others.slice(0, 60).map(function (p, i) { return (i + 1) + '. ' + (p.brand || p.brandName || p.name); }).join('\n');
+            var pick = prompt('Start a chat — enter comma-separated numbers (1 for DM, 2+ for group):\n\n' + options);
+            if (!pick) return;
+            var picked = pick.split(',').map(function (s) { var n = parseInt(s.trim(), 10); return others[n - 1]; }).filter(Boolean);
+            if (picked.length === 0) return;
+            var participants = [me.id].concat(picked.map(function (p) { return p.id || p.brand; }));
+            var isGroup = picked.length > 1;
+            var name = isGroup ? (prompt('Group name (optional):', '') || 'Group') : null;
+            // If a DM already exists with this participant, jump to it.
+            if (!isGroup) {
+                var existing = _pcThreads.find(function (t) {
+                    if (t.type !== 'dm') return false;
+                    var s = new Set(t.participants || []);
+                    return s.size === 2 && s.has(participants[0]) && s.has(participants[1]);
+                });
+                if (existing) { pflxChatOpenThread(existing.id); return; }
+            }
+            var thread = {
+                id: 'th-' + Date.now(),
+                type: isGroup ? 'group' : 'dm',
+                name: name,
+                participants: participants,
+                messages: [],
+                createdAt: new Date().toISOString(),
+                createdBy: me.id
+            };
+            _pcThreads.push(thread);
+            _pcSave();
+            pflxChatOpenThread(thread.id);
+        };
+        window.pflxChatPushBridge = function (kind) {
+            if (!_pcCurrentThreadId) return;
+            var t = _pcThreads.find(function (x) { return x.id === _pcCurrentThreadId; });
+            if (!t) return;
+            var body = (t.messages || []).slice(-20).map(function (m) {
+                return '[' + new Date(m.at).toLocaleString() + '] ' + m.senderName + ': ' + m.text;
+            }).join('\n');
+            var subject = 'PFLX Chat — ' + _pcParticipantNames(t);
+            if (kind === 'email') {
+                window.location.href = 'mailto:?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+                return;
+            }
+            // Slack/Discord: try a webhook URL stored in localStorage per key.
+            var lsKey = kind === 'slack' ? 'pflx_chat_slack_webhook' : 'pflx_chat_discord_webhook';
+            var url = localStorage.getItem(lsKey);
+            if (!url) {
+                url = prompt(kind[0].toUpperCase() + kind.slice(1) + ' incoming webhook URL (paste from ' + (kind === 'slack' ? 'api.slack.com/messaging/webhooks' : 'Discord Server Settings › Integrations') + '):');
+                if (!url) return;
+                localStorage.setItem(lsKey, url);
+            }
+            var payload = kind === 'slack'
+                ? { text: subject + '\n\n' + body }
+                : { content: '**' + subject + '**\n\n' + body };
+            fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+                .then(function () { try { pflxToast('✓ Pushed to ' + kind, 'success'); } catch (e) {} })
+                .catch(function () { try { pflxToast('Push failed — check the webhook URL', 'warning'); } catch (e) {} });
+        };
+        window.pflxChatRender = function () {
+            var body = document.getElementById('pflx-chat-body');
+            if (!body) return;
+            var me = _pcMe();
+            if (!_pcCurrentThreadId) {
+                // Thread list
+                if (_pcThreads.length === 0) {
+                    body.innerHTML = '<div style="padding:36px 20px;text-align:center;color:rgba(255,255,255,0.35);font-size:12px;">No conversations yet. Click <strong>+ NEW</strong> above to start one.</div>';
+                    return;
+                }
+                var sorted = _pcThreads.slice().sort(function (a, b) { return (b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || ''); });
+                body.innerHTML = sorted.map(function (t) {
+                    var last = (t.messages || []).slice(-1)[0];
+                    var unread = (t.messages || []).filter(function (m) { return m.senderId !== me.id && !(Array.isArray(m.readBy) && m.readBy.indexOf(me.id) !== -1); }).length;
+                    var typeChip = t.type === 'group'
+                        ? '<span style="font-size:8px;color:#c4b5fd;background:rgba(139,92,246,0.14);border:1px solid rgba(139,92,246,0.3);padding:1px 5px;border-radius:4px;font-weight:800;letter-spacing:0.1em;">GROUP</span>'
+                        : '';
+                    return '<div onclick="pflxChatOpenThread(&quot;' + t.id + '&quot;)" style="padding:10px 12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:10px;margin-bottom:6px;cursor:pointer;display:flex;align-items:center;gap:10px;transition:background 0.12s;" onmouseover="this.style.background=\'rgba(0,212,255,0.06)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.02)\'">' +
+                        '<div style="flex:1;min-width:0;">' +
+                            '<div style="display:flex;align-items:center;gap:6px;">' +
+                                '<span style="font-size:12px;color:#f0f0ff;font-weight:700;">' + escapeHtml(_pcParticipantNames(t)) + '</span>' +
+                                typeChip +
+                            '</div>' +
+                            (last ? '<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(last.senderName + ': ' + last.text) + '</div>' : '<div style="font-size:10px;color:rgba(255,255,255,0.25);margin-top:3px;font-style:italic;">No messages yet</div>') +
+                        '</div>' +
+                        (unread > 0 ? '<span style="background:#ff3b6c;color:#fff;border-radius:9px;padding:1px 6px;font-size:9px;font-weight:800;font-family:monospace;">' + unread + '</span>' : '') +
+                    '</div>';
+                }).join('');
+                return;
+            }
+            // Message view
+            var t = _pcThreads.find(function (x) { return x.id === _pcCurrentThreadId; });
+            if (!t) { pflxChatBackToList(); return; }
+            var msgs = (t.messages || []);
+            if (msgs.length === 0) {
+                body.innerHTML = '<div style="padding:40px 20px;text-align:center;color:rgba(255,255,255,0.35);font-size:12px;">Say hi 👋</div>';
+            } else {
+                body.innerHTML = msgs.map(function (m) {
+                    var mine = m.senderId === me.id;
+                    var timeStr = new Date(m.at).toLocaleString([], { hour: 'numeric', minute: '2-digit' });
+                    return '<div style="display:flex;flex-direction:column;align-items:' + (mine ? 'flex-end' : 'flex-start') + ';margin-bottom:8px;">' +
+                        (!mine && t.type === 'group' ? '<div style="font-size:9px;color:rgba(255,255,255,0.4);margin-bottom:2px;letter-spacing:0.06em;">' + escapeHtml(m.senderName) + '</div>' : '') +
+                        '<div style="max-width:82%;padding:8px 12px;background:' + (mine ? 'linear-gradient(135deg, rgba(0,212,255,0.22), rgba(0,212,255,0.14))' : 'rgba(255,255,255,0.05)') + ';border:1px solid ' + (mine ? 'rgba(0,212,255,0.4)' : 'rgba(255,255,255,0.08)') + ';border-radius:12px;color:' + (mine ? '#f0feff' : '#f0f0ff') + ';font-size:12px;line-height:1.4;word-wrap:break-word;">' + escapeHtml(m.text) + '</div>' +
+                        '<div style="font-size:9px;color:rgba(255,255,255,0.3);margin-top:2px;font-family:monospace;">' + timeStr + '</div>' +
+                    '</div>';
+                }).join('');
+                setTimeout(function () { body.scrollTop = body.scrollHeight; }, 10);
+            }
+            _pcMarkThreadRead(t.id);
+        };
+        // Boot — load from disk, hydrate from cloud, wire realtime.
+        function _pcBoot() {
+            _pcLoad();
+            _pcRefreshBadge();
+            try { _pcCloudPull(); _pcStartRealtime(); } catch (e) {}
+        }
+        // Delay boot so Supabase client is available.
+        setTimeout(_pcBoot, 800);
+    })();
+    </script>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
          COMMAND PALETTE (⌘K / Ctrl+K) — Linear / Notion style.
          Fuzzy-search across navigation targets, create actions, jump to
          Checkpoints / Projects / Tasks / Players, award XC. Runs entirely
@@ -52713,6 +53105,9 @@ RESPONSE RULES:
             actions.push({ label: 'My Portfolio', icon: '🏆', group: 'NAVIGATE', keywords: 'portfolio resume showcase approved', run: function () { try { if (typeof ppNav === 'function') ppNav('portfolio'); } catch (e) {} } });
             actions.push({ label: 'Sprints…', icon: '🏃', group: 'NAVIGATE', keywords: 'sprint cycle timebox', run: function () { try { pflxOpenSprintsPicker(); } catch (e) {} } });
             actions.push({ label: 'Automations…', icon: '🤖', group: 'NAVIGATE', keywords: 'automation rule trigger workflow', run: function () { try { pflxOpenAutomationsPicker(); } catch (e) {} } });
+            actions.push({ label: 'Open Chat', icon: '💬', group: 'NAVIGATE', keywords: 'chat message dm direct group talk conversation', run: function () { try { pflxChatToggle(); } catch (e) {} } });
+            actions.push({ label: 'Export MC to Calendar (.ics)', icon: '📅', group: 'NAVIGATE', keywords: 'calendar export ics google apple deadlines due dates', run: function () { try { mcExportCalendarIcs(); } catch (e) {} } });
+            actions.push({ label: 'Subscribe MC Calendar (webcal)', icon: '📅', group: 'NAVIGATE', keywords: 'calendar subscribe google apple webcal live updating', run: function () { try { mcCalendarSubscribeInfo(); } catch (e) {} } });
             // Item jumps
             try {
                 (mcCheckpoints || []).forEach(function (cp) { actions.push({ label: cp.name || 'Untitled Checkpoint', icon: '🏁', group: 'CHECKPOINTS', keywords: (cp.name || '') + ' checkpoint', run: function () { mcJumpToItem('checkpoint', cp.id); } }); });
