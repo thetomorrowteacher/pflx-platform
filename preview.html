@@ -19934,6 +19934,12 @@
         // has { id, type: 'project'|'checkpoint', name, data (the stripped
         // template payload), createdAt, createdBy }.
         let mcTemplates = [];
+        // Sprints — time-boxed cycles bundling tasks. Every entry has
+        // { id, name, startDate, endDate, taskIds[], status, createdAt }.
+        let mcSprints = [];
+        // Automations — event-driven rules. Every entry has
+        // { id, name, trigger, conditions, actions, enabled }.
+        let mcAutomations = [];
 
         // ── COIN_CATEGORIES — Badge catalog synced from X-Coin ──────
         const MC_COIN_CATEGORIES = [
@@ -20238,6 +20244,8 @@
                 });
                 mcSessions = JSON.parse(localStorage.getItem('pflx_mc_sessions') || '[]');
                 mcTemplates = JSON.parse(localStorage.getItem('pflx_mc_templates') || '[]');
+                mcSprints = JSON.parse(localStorage.getItem('pflx_mc_sprints') || '[]');
+                mcAutomations = JSON.parse(localStorage.getItem('pflx_mc_automations') || '[]');
             } catch(e) { console.warn('[MC] Data load error', e); }
 
             // Seed-on-empty — ONLY if this device has never been seeded before.
@@ -20454,6 +20462,8 @@
             if (type === 'pflxranks' || type === 'all') _mcSetItemSafe('pflx_mc_pflxranks', mcPflxRanks);
             if (type === 'sessions' || type === 'all') _mcSetItemSafe('pflx_mc_sessions', mcSessions);
             if (type === 'templates' || type === 'all') _mcSetItemSafe('pflx_mc_templates', mcTemplates);
+            if (type === 'sprints' || type === 'all') _mcSetItemSafe('pflx_mc_sprints', mcSprints);
+            if (type === 'automations' || type === 'all') _mcSetItemSafe('pflx_mc_automations', mcAutomations);
             // Stomp guard 3 — mark the local-write timestamp so the realtime
             // ingest path can refuse stale cloud echoes for the next few
             // seconds. _mcApplyingCloud is true while the cloud ingest path
@@ -20573,7 +20583,7 @@
         // ═══════════════════════════════════════════════════════════════════
         var MC_CLOUD_TYPES = ['players','checkpoints','tasks','projects','seasons',
             'announcements','badges','jobs','pitches','studios','cohortgroups',
-            'modifiers','gameconfig','onboarding','pflxranks','sessions','templates'];
+            'modifiers','gameconfig','onboarding','pflxranks','sessions','templates','sprints','automations'];
         var _mcApplyingCloud = false;     // true while a cloud pull is writing in
         var _mcCloudQueue = {};
         var _mcCloudTimer = null;
@@ -20607,6 +20617,8 @@
                 case 'pflxranks': return mcPflxRanks;
                 case 'sessions': return mcSessions;
                 case 'templates': return mcTemplates;
+                case 'sprints': return mcSprints;
+                case 'automations': return mcAutomations;
                 default: return undefined;
             }
         }
@@ -20629,6 +20641,8 @@
                 case 'pflxranks': mcPflxRanks = items; break;
                 case 'sessions': mcSessions = items; break;
                 case 'templates': mcTemplates = items; break;
+                case 'sprints': mcSprints = items; break;
+                case 'automations': mcAutomations = items; break;
                 default: return false;
             }
             return true;
@@ -27576,6 +27590,264 @@
         window.pflxOpenTemplatePicker = pflxOpenTemplatePicker;
 
         // ═══════════════════════════════════════════════════════════════════
+        // SPRINTS — time-boxed cycles bundling tasks. Simple lifecycle
+        // (upcoming → active → completed). Auto-status flips based on the
+        // current date + start/end range.
+        // ═══════════════════════════════════════════════════════════════════
+        function _mcSprintStatus(sp) {
+            if (!sp) return 'upcoming';
+            if (sp.status === 'completed') return 'completed';
+            var now = new Date().toISOString().slice(0, 10);
+            if (sp.endDate && sp.endDate < now) return 'completed';
+            if (sp.startDate && sp.startDate <= now) return 'active';
+            return 'upcoming';
+        }
+        function mcCreateSprint() {
+            var name = prompt('Sprint name (e.g. "Sprint 12" or "Portfolio Sprint"):');
+            if (!name) return;
+            var startDate = prompt('Start date (YYYY-MM-DD, blank = today):', new Date().toISOString().slice(0, 10));
+            if (!startDate) startDate = new Date().toISOString().slice(0, 10);
+            var endDate = prompt('End date (YYYY-MM-DD):');
+            if (!endDate) return;
+            var sprint = {
+                id: 'sprint-' + Date.now(),
+                name: name,
+                startDate: startDate,
+                endDate: endDate,
+                taskIds: [],
+                status: 'upcoming',
+                createdAt: new Date().toISOString(),
+                createdBy: (window.activeSession && window.activeSession.brand) || 'host'
+            };
+            mcSprints.push(sprint);
+            mcSaveData('sprints');
+            if (typeof pflxToast === 'function') pflxToast('Sprint "' + name + '" created', 'success');
+            pflxOpenSprintsPicker();
+        }
+        function mcDeleteSprint(sprintId) {
+            var idx = mcSprints.findIndex(function (s) { return s && s.id === sprintId; });
+            if (idx < 0) return;
+            if (!confirm('Delete sprint "' + (mcSprints[idx].name || 'Untitled') + '"?')) return;
+            mcSprints.splice(idx, 1);
+            mcSaveData('sprints');
+            pflxOpenSprintsPicker();
+        }
+        function pflxOpenSprintsPicker() {
+            var existing = document.getElementById('mc-sprints-picker-overlay');
+            if (existing) existing.remove();
+            var sprints = (mcSprints || []).slice().sort(function (a, b) { return (b.startDate || '').localeCompare(a.startDate || ''); });
+            var ov = document.createElement('div');
+            ov.id = 'mc-sprints-picker-overlay';
+            ov.style.cssText = 'position:fixed;inset:0;z-index:999995;background:rgba(2,6,12,0.75);backdrop-filter:blur(6px);display:flex;align-items:flex-start;justify-content:center;padding-top:10vh;font-family:Rajdhani,sans-serif;';
+            var body = sprints.length === 0
+                ? '<div style="padding:36px 20px;text-align:center;color:rgba(255,255,255,0.4);font-size:13px;">No sprints yet. Click <strong>+ NEW SPRINT</strong> below to start one.</div>'
+                : sprints.map(function (sp) {
+                    var st = _mcSprintStatus(sp);
+                    var stColors = st === 'active' ? { bg: 'rgba(34,197,94,0.16)', text: '#22c55e', border: 'rgba(34,197,94,0.5)' }
+                                : st === 'completed' ? { bg: 'rgba(255,255,255,0.06)', text: 'rgba(255,255,255,0.55)', border: 'rgba(255,255,255,0.15)' }
+                                : { bg: 'rgba(79,142,247,0.14)', text: '#4f8ef7', border: 'rgba(79,142,247,0.4)' };
+                    return '<div style="padding:14px 16px;background:rgba(22,22,31,0.7);border:1px solid rgba(255,255,255,0.08);border-radius:12px;margin-bottom:8px;display:flex;align-items:center;gap:14px;">' +
+                        '<div style="flex:1;min-width:0;">' +
+                            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">' +
+                                '<span style="font-size:14px;color:#f0f0ff;font-weight:800;">🏃 ' + escapeHtml(sp.name || 'Untitled Sprint') + '</span>' +
+                                '<span style="background:' + stColors.bg + ';color:' + stColors.text + ';border:1px solid ' + stColors.border + ';padding:2px 8px;border-radius:5px;font-size:9px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;">' + st + '</span>' +
+                            '</div>' +
+                            '<div style="font-size:11px;color:rgba(255,255,255,0.5);font-family:monospace;">' + (sp.startDate || 'TBD') + ' → ' + (sp.endDate || 'TBD') + ' · ' + (sp.taskIds || []).length + ' task' + ((sp.taskIds || []).length === 1 ? '' : 's') + '</div>' +
+                        '</div>' +
+                        '<button onclick="mcDeleteSprint(&quot;' + escapeHtml(sp.id) + '&quot;);" style="padding:6px 10px;font-size:11px;background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:8px;cursor:pointer;">🗑</button>' +
+                    '</div>';
+                }).join('');
+            ov.innerHTML =
+                '<div style="width:min(560px,92vw);background:linear-gradient(180deg, rgba(18,20,32,0.98), rgba(12,14,22,0.98));border:1px solid rgba(79,142,247,0.4);border-radius:18px;box-shadow:0 30px 80px rgba(0,0,0,0.8), 0 0 60px rgba(79,142,247,0.18);overflow:hidden;">' +
+                    '<div style="display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid rgba(255,255,255,0.06);">' +
+                        '<span style="font-family:Orbitron,sans-serif;font-size:12px;color:#4f8ef7;font-weight:800;letter-spacing:0.14em;">🏃 SPRINTS</span>' +
+                        '<span style="flex:1;font-size:11px;color:rgba(255,255,255,0.4);">Time-boxed cycles</span>' +
+                        '<button onclick="mcCreateSprint()" style="padding:6px 12px;background:rgba(34,197,94,0.14);color:#22c55e;border:1px solid rgba(34,197,94,0.4);border-radius:6px;cursor:pointer;font-size:10px;font-weight:800;letter-spacing:0.08em;">+ NEW SPRINT</button>' +
+                        '<button onclick="document.getElementById(\'mc-sprints-picker-overlay\').remove()" style="background:transparent;border:none;color:rgba(255,255,255,0.4);font-size:20px;cursor:pointer;">✕</button>' +
+                    '</div>' +
+                    '<div style="max-height:60vh;overflow-y:auto;padding:12px 16px;">' + body + '</div>' +
+                '</div>';
+            ov.addEventListener('click', function (e) { if (e.target === ov) ov.remove(); });
+            document.body.appendChild(ov);
+        }
+        window.mcCreateSprint = mcCreateSprint;
+        window.mcDeleteSprint = mcDeleteSprint;
+        window.pflxOpenSprintsPicker = pflxOpenSprintsPicker;
+
+        // ═══════════════════════════════════════════════════════════════════
+        // AUTOMATIONS — event → condition → action rule engine.
+        // Rule shape: {
+        //   id, name, enabled: true,
+        //   trigger: 'task.approved' | 'task.rejected' | 'task.submitted' |
+        //            'project.completed' | 'checkpoint.completed',
+        //   conditions: [{ field: 'checkpointId'|'projectId'|'priority'|'xcReward',
+        //                  op: 'eq'|'neq'|'gte'|'lte'|'in'|'contains',
+        //                  value: <string|number|array> }],
+        //   actions: [{ type: 'award_xc'|'award_badge'|'toast'|'set_priority'|'notify_host',
+        //               value: <string|number|badgeId> }]
+        // }
+        // Simple, deterministic, no external deps.
+        // ═══════════════════════════════════════════════════════════════════
+        function _mcAutomationMatchesConditions(rule, ctx) {
+            if (!rule || !Array.isArray(rule.conditions) || rule.conditions.length === 0) return true;
+            return rule.conditions.every(function (cond) {
+                var actual = ctx && ctx[cond.field];
+                var expected = cond.value;
+                switch (cond.op) {
+                    case 'eq':       return String(actual) === String(expected);
+                    case 'neq':      return String(actual) !== String(expected);
+                    case 'gte':      return (Number(actual) || 0) >= (Number(expected) || 0);
+                    case 'lte':      return (Number(actual) || 0) <= (Number(expected) || 0);
+                    case 'in':       return Array.isArray(expected) && expected.indexOf(actual) !== -1;
+                    case 'contains': return String(actual || '').toLowerCase().indexOf(String(expected).toLowerCase()) !== -1;
+                    default:         return false;
+                }
+            });
+        }
+        function _mcAutomationRunActions(rule, ctx) {
+            (rule.actions || []).forEach(function (act) {
+                try {
+                    var pid = ctx.playerId || ctx.submitterId || null;
+                    switch (act.type) {
+                        case 'award_xc':
+                            if (pid && window.PflxDataBus) {
+                                window.PflxDataBus.award(pid, { xc: parseInt(act.value, 10) || 0, source: 'automation', reason: 'automation:' + rule.id });
+                            }
+                            break;
+                        case 'award_badge':
+                            if (pid && window.PflxDataBus) {
+                                window.PflxDataBus.award(pid, { badge: { id: String(act.value), name: String(act.value) }, source: 'automation', reason: 'automation:' + rule.id });
+                            }
+                            break;
+                        case 'toast':
+                            try { if (typeof pflxToast === 'function') pflxToast('🤖 ' + String(act.value), 'info'); } catch (e) {}
+                            break;
+                        case 'set_priority':
+                            if (ctx.taskId) {
+                                var t = mcTasks.find(function (x) { return x && x.id === ctx.taskId; });
+                                if (t) { t.priority = String(act.value); mcSaveData('tasks'); }
+                            }
+                            break;
+                        case 'notify_host':
+                            try { if (typeof pflxToast === 'function') pflxToast('🤖 [' + rule.name + '] ' + String(act.value), 'warning', 5000); } catch (e) {}
+                            break;
+                    }
+                } catch (e) { console.warn('[automation action failed]', act, e); }
+            });
+        }
+        // Public entry: called from mcApproveTask / mcRejectTask / project +
+        // checkpoint completion chains. ctx should include as much info as
+        // possible so conditions can match: taskId, playerId, projectId,
+        // checkpointId, priority, xcReward.
+        function mcAutomationsFire(trigger, ctx) {
+            if (!Array.isArray(mcAutomations) || mcAutomations.length === 0) return;
+            var rules = mcAutomations.filter(function (r) { return r && r.enabled !== false && r.trigger === trigger; });
+            if (rules.length === 0) return;
+            rules.forEach(function (rule) {
+                try {
+                    if (_mcAutomationMatchesConditions(rule, ctx || {})) {
+                        _mcAutomationRunActions(rule, ctx || {});
+                    }
+                } catch (e) { console.warn('[automation rule failed]', rule.name, e); }
+            });
+        }
+        window.mcAutomationsFire = mcAutomationsFire;
+
+        // ── Simple rule editor picker ── prompts for fields step by step.
+        // Full form editor deferred; this shipping model gets rules building
+        // via three prompts (trigger + condition + action) so hosts can
+        // author their first automation today.
+        function mcCreateAutomation() {
+            var name = prompt('Automation name (e.g. "Bonus for Falcon Studios overdue"):');
+            if (!name) return;
+            var trigger = prompt('Trigger — one of:\n  task.approved | task.rejected | task.submitted | project.completed | checkpoint.completed', 'task.approved');
+            if (!trigger) return;
+            var condField = prompt('Optional condition FIELD (blank = always fire):\n  checkpointId | projectId | priority | xcReward | cohort', '');
+            var conditions = [];
+            if (condField) {
+                var condOp = prompt('Condition operator:\n  eq | neq | gte | lte | contains', 'eq') || 'eq';
+                var condVal = prompt('Condition value (matched against the field):', '');
+                if (condVal !== null) conditions.push({ field: condField, op: condOp, value: condVal });
+            }
+            var actType = prompt('Action TYPE:\n  award_xc | award_badge | toast | set_priority | notify_host', 'award_xc');
+            if (!actType) return;
+            var actVal = prompt('Action VALUE (XC amount / badge id / message / priority level):', '');
+            if (actVal === null) return;
+            var rule = {
+                id: 'auto-' + Date.now(),
+                name: name,
+                enabled: true,
+                trigger: trigger,
+                conditions: conditions,
+                actions: [{ type: actType, value: actVal }],
+                createdAt: new Date().toISOString(),
+                createdBy: (window.activeSession && window.activeSession.brand) || 'host'
+            };
+            mcAutomations.push(rule);
+            mcSaveData('automations');
+            if (typeof pflxToast === 'function') pflxToast('🤖 Automation "' + name + '" active', 'success');
+            pflxOpenAutomationsPicker();
+        }
+        function mcToggleAutomation(id) {
+            var rule = mcAutomations.find(function (r) { return r && r.id === id; });
+            if (!rule) return;
+            rule.enabled = !(rule.enabled !== false);
+            mcSaveData('automations');
+            pflxOpenAutomationsPicker();
+        }
+        function mcDeleteAutomation(id) {
+            var idx = mcAutomations.findIndex(function (r) { return r && r.id === id; });
+            if (idx < 0) return;
+            if (!confirm('Delete automation "' + (mcAutomations[idx].name || 'Untitled') + '"?')) return;
+            mcAutomations.splice(idx, 1);
+            mcSaveData('automations');
+            pflxOpenAutomationsPicker();
+        }
+        function pflxOpenAutomationsPicker() {
+            var existing = document.getElementById('mc-automations-picker-overlay');
+            if (existing) existing.remove();
+            var ov = document.createElement('div');
+            ov.id = 'mc-automations-picker-overlay';
+            ov.style.cssText = 'position:fixed;inset:0;z-index:999995;background:rgba(2,6,12,0.75);backdrop-filter:blur(6px);display:flex;align-items:flex-start;justify-content:center;padding-top:10vh;font-family:Rajdhani,sans-serif;';
+            var body = (mcAutomations || []).length === 0
+                ? '<div style="padding:36px 20px;text-align:center;color:rgba(255,255,255,0.4);font-size:13px;">No automations yet. Click <strong>+ NEW RULE</strong>.<br><br><span style="font-size:11px;">Example: <em>When task.approved AND checkpointId eq cp-1 → award_xc 50</em></span></div>'
+                : mcAutomations.map(function (rule) {
+                    var isOn = rule.enabled !== false;
+                    var condStr = (rule.conditions || []).map(function (c) { return c.field + ' ' + c.op + ' ' + JSON.stringify(c.value); }).join(' AND ') || '(no conditions)';
+                    var actStr = (rule.actions || []).map(function (a) { return a.type + ':' + a.value; }).join(', ');
+                    return '<div style="padding:14px 16px;background:rgba(22,22,31,0.7);border:1px solid rgba(255,255,255,0.08);border-radius:12px;margin-bottom:8px;display:flex;align-items:center;gap:12px;">' +
+                        '<div style="flex:1;min-width:0;">' +
+                            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">' +
+                                '<span style="font-size:13px;color:#f0f0ff;font-weight:800;">🤖 ' + escapeHtml(rule.name) + '</span>' +
+                                '<span style="background:' + (isOn ? 'rgba(34,197,94,0.14)' : 'rgba(156,163,175,0.14)') + ';color:' + (isOn ? '#22c55e' : 'rgba(255,255,255,0.4)') + ';padding:2px 8px;border-radius:5px;font-size:9px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;">' + (isOn ? 'ON' : 'OFF') + '</span>' +
+                            '</div>' +
+                            '<div style="font-size:10px;color:rgba(255,255,255,0.5);font-family:monospace;line-height:1.5;">' +
+                                'WHEN ' + escapeHtml(rule.trigger) + ' · IF ' + escapeHtml(condStr) + ' → ' + escapeHtml(actStr) +
+                            '</div>' +
+                        '</div>' +
+                        '<button onclick="mcToggleAutomation(&quot;' + escapeHtml(rule.id) + '&quot;);" style="padding:5px 10px;font-size:10px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:6px;cursor:pointer;">' + (isOn ? 'PAUSE' : 'RESUME') + '</button>' +
+                        '<button onclick="mcDeleteAutomation(&quot;' + escapeHtml(rule.id) + '&quot;);" style="padding:5px 8px;font-size:11px;background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:6px;cursor:pointer;">🗑</button>' +
+                    '</div>';
+                }).join('');
+            ov.innerHTML =
+                '<div style="width:min(620px,92vw);background:linear-gradient(180deg, rgba(18,20,32,0.98), rgba(12,14,22,0.98));border:1px solid rgba(139,92,246,0.4);border-radius:18px;box-shadow:0 30px 80px rgba(0,0,0,0.8), 0 0 60px rgba(139,92,246,0.18);overflow:hidden;">' +
+                    '<div style="display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid rgba(255,255,255,0.06);">' +
+                        '<span style="font-family:Orbitron,sans-serif;font-size:12px;color:#c4b5fd;font-weight:800;letter-spacing:0.14em;">🤖 AUTOMATIONS</span>' +
+                        '<span style="flex:1;font-size:11px;color:rgba(255,255,255,0.4);">Event → Condition → Action rules</span>' +
+                        '<button onclick="mcCreateAutomation()" style="padding:6px 12px;background:rgba(34,197,94,0.14);color:#22c55e;border:1px solid rgba(34,197,94,0.4);border-radius:6px;cursor:pointer;font-size:10px;font-weight:800;letter-spacing:0.08em;">+ NEW RULE</button>' +
+                        '<button onclick="document.getElementById(\'mc-automations-picker-overlay\').remove()" style="background:transparent;border:none;color:rgba(255,255,255,0.4);font-size:20px;cursor:pointer;">✕</button>' +
+                    '</div>' +
+                    '<div style="max-height:60vh;overflow-y:auto;padding:12px 16px;">' + body + '</div>' +
+                '</div>';
+            ov.addEventListener('click', function (e) { if (e.target === ov) ov.remove(); });
+            document.body.appendChild(ov);
+        }
+        window.mcCreateAutomation = mcCreateAutomation;
+        window.mcToggleAutomation = mcToggleAutomation;
+        window.mcDeleteAutomation = mcDeleteAutomation;
+        window.pflxOpenAutomationsPicker = pflxOpenAutomationsPicker;
+
+        // ═══════════════════════════════════════════════════════════════════
         // X-BOT AI ASSIST — heuristic priority + task breakdown suggestion.
         // Runs locally (no network round-trip). When a real X-Bot HTTP endpoint
         // becomes available these helpers can proxy through it, but the
@@ -27868,6 +28140,19 @@
             // If this task carries a recurring config, drop the next instance
             // in the queue with the deadline pushed forward by the frequency.
             try { _mcSpawnRecurringNext(task); } catch (eRec) {}
+
+            // ── Automations ── fire any active rules matching task.approved.
+            try {
+                mcAutomationsFire('task.approved', {
+                    taskId: task.id,
+                    playerId: submitterId,
+                    submitterId: submitterId,
+                    projectId: task.projectId,
+                    checkpointId: task.checkpointId || task.roundId,
+                    priority: task.priority || 'normal',
+                    xcReward: task.xcReward || 0
+                });
+            } catch (eAuto) {}
 
             // Save task list (and propagate via pflx_mc_changed automatically)
             mcSaveData('tasks');
@@ -52426,6 +52711,8 @@ RESPONSE RULES:
             actions.push({ label: 'New Task',       icon: '＋', group: 'CREATE', keywords: 'new create add task', run: function () { try { mcNav('tasks'); mcShowTaskForm(-1); } catch (e) {} } });
             actions.push({ label: 'New from Template…', icon: '📄', group: 'CREATE', keywords: 'template new from spawn', run: function () { try { pflxOpenTemplatePicker(); } catch (e) {} } });
             actions.push({ label: 'My Portfolio', icon: '🏆', group: 'NAVIGATE', keywords: 'portfolio resume showcase approved', run: function () { try { if (typeof ppNav === 'function') ppNav('portfolio'); } catch (e) {} } });
+            actions.push({ label: 'Sprints…', icon: '🏃', group: 'NAVIGATE', keywords: 'sprint cycle timebox', run: function () { try { pflxOpenSprintsPicker(); } catch (e) {} } });
+            actions.push({ label: 'Automations…', icon: '🤖', group: 'NAVIGATE', keywords: 'automation rule trigger workflow', run: function () { try { pflxOpenAutomationsPicker(); } catch (e) {} } });
             // Item jumps
             try {
                 (mcCheckpoints || []).forEach(function (cp) { actions.push({ label: cp.name || 'Untitled Checkpoint', icon: '🏁', group: 'CHECKPOINTS', keywords: (cp.name || '') + ' checkpoint', run: function () { mcJumpToItem('checkpoint', cp.id); } }); });
