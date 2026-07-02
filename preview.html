@@ -8481,6 +8481,26 @@
                                         <span style="font-size:11px;color:rgba(196,181,253,0.85);"><strong style="color:#c4b5fd;">🤖 X-Bot</strong> — turn the description above into a step-by-step checklist</span>
                                         <button type="button" onclick="mcBreakdownTaskFromForm()" style="padding:6px 14px;font-size:11px;font-weight:800;background:rgba(139,92,246,0.16);color:#c4b5fd;border:1px solid rgba(139,92,246,0.45);border-radius:6px;cursor:pointer;letter-spacing:0.06em;">🤖 BREAK DOWN</button>
                                     </div>
+                                    <!-- Dependencies + Recurring row -->
+                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">🔒 Depends On (multi)</label>
+                                            <div id="mc-task-depends" style="max-height:120px;overflow-y:auto;padding:6px;background:rgba(10,18,40,0.5);border:1px solid rgba(255,255,255,0.08);border-radius:6px;display:flex;flex-direction:column;gap:4px;font-size:11px;">
+                                                <span style="font-size:11px;color:rgba(255,255,255,0.3);">No tasks to depend on.</span>
+                                            </div>
+                                            <div style="font-size:10px;color:rgba(255,255,255,0.35);margin-top:4px;">Blocks submission until all selected tasks are approved.</div>
+                                        </div>
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">🔁 Recurring</label>
+                                            <select id="mc-task-recurring" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                                <option value="">One-time (no recurrence)</option>
+                                                <option value="daily">Daily</option>
+                                                <option value="weekly">Weekly</option>
+                                                <option value="monthly">Monthly</option>
+                                            </select>
+                                            <div style="font-size:10px;color:rgba(255,255,255,0.35);margin-top:4px;">Auto-spawns the next instance on approval.</div>
+                                        </div>
+                                    </div>
                                     <div style="margin-bottom:12px;">
                                         <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Badge Rewards (Multi-Select)</label>
                                         <div id="mc-task-badges" style="display:flex;flex-direction:column;gap:6px;max-height:100px;overflow-y:auto;"></div>
@@ -25968,6 +25988,30 @@
             if (!form) return;
             form.style.display = 'block';
 
+            // Populate Depends On list — every task EXCEPT this one, so the
+            // host can pick prerequisites. Uses the same id-based checkbox
+            // pattern as tasks-in-project.
+            var dependsDiv = document.getElementById('mc-task-depends');
+            var editing = (index >= 0 && mcTasks[index]) ? mcTasks[index] : null;
+            if (dependsDiv) {
+                var eligible = mcTasks.filter(function (t) { return t && (!editing || t.id !== editing.id); });
+                if (eligible.length === 0) {
+                    dependsDiv.innerHTML = '<span style="font-size:11px;color:rgba(255,255,255,0.3);">No other tasks to depend on.</span>';
+                } else {
+                    dependsDiv.innerHTML = eligible.map(function (t) {
+                        var isChecked = editing && Array.isArray(editing.dependsOn) && editing.dependsOn.indexOf(t.id) !== -1;
+                        var doneLabel = _mcTaskIsApproved(t) ? ' <span style="font-size:9px;color:#22c55e;font-weight:700;">✓</span>' : '';
+                        return '<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#e0e6ff;cursor:pointer;padding:2px 0;">' +
+                            '<input type="checkbox" class="mc-task-depends-cb" value="' + escapeHtml(t.id) + '"' + (isChecked ? ' checked' : '') + '> ' +
+                            '<span>' + escapeHtml(t.title || 'Untitled') + '</span>' + doneLabel +
+                        '</label>';
+                    }).join('');
+                }
+            }
+            // Restore recurring dropdown
+            var recSel = document.getElementById('mc-task-recurring');
+            if (recSel) recSel.value = (editing && editing.recurring && editing.recurring.frequency) || '';
+
             // Populate badge checkboxes — unified catalog (defaults + X-Coin live badges)
             var badgesDiv = document.getElementById('mc-task-badges');
             if (badgesDiv) {
@@ -27170,6 +27214,16 @@
                 link: document.getElementById('mc-task-link')?.value || '',
                 status: document.getElementById('mc-task-status')?.value || 'open',
                 priority: document.getElementById('mc-task-priority')?.value || (mcTaskEditIndex >= 0 && mcTasks[mcTaskEditIndex] ? (mcTasks[mcTaskEditIndex].priority || 'normal') : 'normal'),
+                dependsOn: (function () {
+                    var ids = [];
+                    document.querySelectorAll('.mc-task-depends-cb:checked').forEach(function (cb) { ids.push(cb.value); });
+                    return ids;
+                })(),
+                recurring: (function () {
+                    var freq = document.getElementById('mc-task-recurring')?.value || '';
+                    if (!freq) return null;
+                    return { frequency: freq };
+                })(),
                 peerReviewCount: parseInt(document.getElementById('mc-task-peer-count')?.value || '0', 10),
                 selfEvalRequired: document.getElementById('mc-task-self-eval')?.value || 'none',
                 postFeedbackUpload: document.getElementById('mc-task-post-feedback-upload')?.checked || false,
@@ -27512,6 +27566,65 @@
         }
         window.mcBreakdownTaskFromForm = mcBreakdownTaskFromForm;
 
+        // ═══════════════════════════════════════════════════════════════════
+        // DEPENDENCIES + RECURRING TASKS
+        // Task.dependsOn: array of task IDs that must be `approved` before
+        //   THIS task can be submitted / approved. UI surfaces a locked state
+        //   when unmet dependencies exist.
+        // Task.recurring: { frequency: 'daily'|'weekly'|'monthly', nextAt }.
+        //   On approval, the next instance is auto-spawned with a fresh id
+        //   and a new due date offset by the frequency.
+        // ═══════════════════════════════════════════════════════════════════
+        function _mcTaskDependenciesMet(task) {
+            if (!task || !Array.isArray(task.dependsOn) || task.dependsOn.length === 0) return true;
+            var unmet = task.dependsOn.filter(function (depId) {
+                var d = mcTasks.find(function (t) { return t && t.id === depId; });
+                return !d || !(_mcTaskIsApproved(d));
+            });
+            return unmet.length === 0;
+        }
+        function _mcTaskUnmetDependencies(task) {
+            if (!task || !Array.isArray(task.dependsOn)) return [];
+            return task.dependsOn
+                .map(function (id) { return mcTasks.find(function (t) { return t && t.id === id; }); })
+                .filter(function (t) { return t && !(_mcTaskIsApproved(t)); });
+        }
+        window._mcTaskDependenciesMet = _mcTaskDependenciesMet;
+        window._mcTaskUnmetDependencies = _mcTaskUnmetDependencies;
+
+        // Recurring — spawn the next instance when a recurring task is
+        // approved. Called from mcApproveTask after the reward chain.
+        function _mcSpawnRecurringNext(task) {
+            if (!task || !task.recurring || !task.recurring.frequency) return null;
+            var freq = task.recurring.frequency;
+            var msPer = { daily: 86400000, weekly: 7 * 86400000, monthly: 30 * 86400000 }[freq];
+            if (!msPer) return null;
+            var newDue = '';
+            if (task.dueDate) {
+                var d = new Date(task.dueDate + 'T00:00:00');
+                d = new Date(d.getTime() + msPer);
+                newDue = d.toISOString().slice(0, 10);
+            }
+            // Clone and reset per-instance state.
+            var next = Object.assign({}, task);
+            next.id = 'task-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+            next.status = 'open';
+            next.completed = false;
+            next.approvedAt = ''; next.rejectedAt = ''; next.completedAt = '';
+            next.submission = null; next.submissions = [];
+            next.startedAt = null;
+            next.dueDate = newDue;
+            next.createdAt = new Date().toISOString().split('T')[0];
+            // Preserve recurring chain
+            next.recurring = task.recurring;
+            next.spawnedFrom = task.id;
+            mcTasks.push(next);
+            mcSaveData('tasks');
+            try { if (typeof pflxToast === 'function') pflxToast('🔁 Recurring task spawned for ' + (newDue || 'no deadline'), 'info', 4000); } catch (e) {}
+            return next.id;
+        }
+        window._mcSpawnRecurringNext = _mcSpawnRecurringNext;
+
         // ── Host reject flow ──
         // Marks the submitted task as rejected, records an optional host note,
         // resets the submitter's streak to zero, and broadcasts so the player
@@ -27620,6 +27733,11 @@
             // ── Streak bonus ── every 5 consecutive approvals grants a
             // percentage-based bonus XC + celebration toast.
             try { _mcApplyStreakBonus(submitterId, task); } catch (eStreak) {}
+
+            // ── Recurring task next-instance spawn ──
+            // If this task carries a recurring config, drop the next instance
+            // in the queue with the deadline pushed forward by the frequency.
+            try { _mcSpawnRecurringNext(task); } catch (eRec) {}
 
             // Save task list (and propagate via pflx_mc_changed automatically)
             mcSaveData('tasks');
