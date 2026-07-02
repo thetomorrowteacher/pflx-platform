@@ -24891,8 +24891,54 @@
                 createdBy: activeSession ? activeSession.brand : 'host'
             };
 
+            // ── Checkpoint completion reward chain ──
+            // When a Checkpoint transitions to status 'completed', every
+            // player who contributed a submission on any of its child tasks
+            // (direct or via nested Projects) gets awarded the Checkpoint's
+            // xcReward + rewardBadges. Idempotent via obj._cpRewardedAt so
+            // re-saving an already-completed CP does not double-pay.
+            var __cpPrevStatus = (mcCPEditIndex >= 0 && mcCheckpoints[mcCPEditIndex]) ? mcCheckpoints[mcCPEditIndex].status : null;
             if (mcCPEditIndex >= 0) { mcCheckpoints[mcCPEditIndex] = obj; }
             else { mcCheckpoints.push(obj); }
+            try {
+                if (obj.status === 'completed' && !obj._cpRewardedAt && window.PflxDataBus) {
+                    var recipients = {};
+                    // Collect every task under this Checkpoint's scope.
+                    var scopeTasks = [];
+                    (obj.taskIds || []).forEach(function (tid) {
+                        var t = mcTasks.find(function (x) { return x && x.id === tid; });
+                        if (t) scopeTasks.push(t);
+                    });
+                    (obj.projectIds || []).forEach(function (pid) {
+                        var p = mcProjects.find(function (x) { return x && x.id === pid; });
+                        if (p && Array.isArray(p.taskIds)) {
+                            p.taskIds.forEach(function (tid) {
+                                var t = mcTasks.find(function (x) { return x && x.id === tid; });
+                                if (t) scopeTasks.push(t);
+                            });
+                        }
+                    });
+                    // Every submitter contributes to Checkpoint recipients.
+                    scopeTasks.forEach(function (t) {
+                        if (t.submission && t.submission.submittedBy) recipients[t.submission.submittedBy] = 1;
+                        if (Array.isArray(t.submissions)) t.submissions.forEach(function (s) { if (s && (s.playerId || s.submittedBy)) recipients[s.playerId || s.submittedBy] = 1; });
+                    });
+                    var cpXc = obj.xcReward || 0;
+                    Object.keys(recipients).forEach(function (pid) {
+                        try {
+                            if (cpXc > 0) window.PflxDataBus.award(pid, { xc: cpXc, source: 'mc', reason: 'checkpoint:' + obj.id });
+                            (obj.rewardBadges || []).forEach(function (badgeRef) {
+                                var b = (typeof badgeRef === 'string')
+                                    ? { id: badgeRef, name: badgeRef }
+                                    : { id: badgeRef.id, name: badgeRef.name || badgeRef.title || badgeRef.id, category: badgeRef.category || 'primary', xcValue: badgeRef.xcValue || badgeRef.xc || 0 };
+                                window.PflxDataBus.award(pid, { badge: b, source: 'mc', reason: 'checkpoint:' + obj.id });
+                            });
+                        } catch (eA) { console.warn('[mc checkpoint reward] award failed for', pid, eA); }
+                    });
+                    obj._cpRewardedAt = new Date().toISOString();
+                    if (typeof pflxToast === 'function') pflxToast('Checkpoint completed — rewards dispatched to ' + Object.keys(recipients).length + ' player' + (Object.keys(recipients).length === 1 ? '' : 's'), 'success');
+                }
+            } catch (eCpR) { console.warn('[mc checkpoint reward] chain failed', eCpR); }
             mcSaveData('checkpoints');
             pflxPlaySfx('save');
             mcCancelCPForm();
@@ -26788,7 +26834,21 @@
             //   3. pflx_award_granted fires — sub-apps can show animations/feed entries
             //   4. The activity log gets the reason='task:<id>' entry
             // mcPlayers stays mirrored to PLAYERS so the MC roster UI re-renders too.
-            var submitterId = task.submission ? task.submission.submittedBy : null;
+            // Submitter resolution — three shapes coexist:
+            //   1. Legacy: task.submission.submittedBy (single scalar)
+            //   2. New player submission modal: task.submissions[N].playerId
+            //   3. Job-hired auto-task: task.assignedTo array or task.playerId scalar
+            var submitterId = (task.submission && task.submission.submittedBy) || null;
+            if (!submitterId && Array.isArray(task.submissions) && task.submissions.length > 0) {
+                var last = task.submissions[task.submissions.length - 1];
+                submitterId = last && (last.playerId || last.submittedBy);
+            }
+            if (!submitterId && Array.isArray(task.assignedTo) && task.assignedTo.length === 1) {
+                submitterId = task.assignedTo[0];
+            }
+            if (!submitterId && task.playerId) {
+                submitterId = task.playerId;
+            }
             if (submitterId) {
                 try {
                     if (task.xcReward && window.PflxDataBus) {
