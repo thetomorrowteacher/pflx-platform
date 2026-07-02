@@ -22892,34 +22892,54 @@
                 return;
             }
 
+            var me = window.activeSession || {};
+            var myId = me.id || me.brand || me.brandName || '';
             myJobs.forEach(function(job) {
-                var daysLeft = '';
-                if (job.deadline) {
-                    var dl = Math.ceil((new Date(job.deadline) - new Date()) / 86400000);
-                    daysLeft = dl > 0 ? dl + 'd left' : 'PAST DUE';
-                }
-                var hired = job.hired || false;
-                var borderCol = hired ? 'rgba(34,197,94,0.25)' : 'rgba(167,139,250,0.15)';
-                // data-job-row carries the id so the Home Base deep-link
-                // (ppNav('jobs', { id })) can scroll the matching row into
-                // view and pulse-highlight it after this render lands.
+                var xcVal = job.xcReward || job.xc || 0;
+                var endDate = job.endDate || job.deadline;
+                var urgency = (typeof _mcUrgencyForDueDate === 'function') ? _mcUrgencyForDueDate(endDate) : null;
+                // Real hired/applied detection (array-aware).
+                var hired = Array.isArray(job.hired) ? job.hired.indexOf(myId) !== -1 : !!job.hired;
+                var applied = Array.isArray(job.applicants) ? job.applicants.some(function (a) { return a && a.playerId === myId; }) : false;
+                var slotsFilled = (Array.isArray(job.hired) ? job.hired.length : 0) >= (job.slots || 1);
+                var borderCol = hired ? 'rgba(34,197,94,0.35)' : applied ? 'rgba(245,165,0,0.28)' : 'rgba(167,139,250,0.15)';
                 html += '<div data-job-row="' + escapeHtml(String(job.id || '')) + '" style="background:rgba(255,255,255,0.02);border:1px solid ' + borderCol + ';border-radius:14px;padding:18px;margin-bottom:10px;transition:box-shadow 0.3s ease, border-color 0.3s ease;">';
 
-                if (hired) html += '<div style="display:inline-block;background:rgba(34,197,94,0.15);color:#22c55e;font-size:9px;font-weight:700;padding:3px 8px;border-radius:6px;letter-spacing:1px;margin-bottom:8px;">✓ HIRED — ASSIGNED AS TASK</div>';
+                if (hired) {
+                    html += '<div style="display:inline-block;background:rgba(34,197,94,0.15);color:#22c55e;font-size:9px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.14em;margin-bottom:8px;text-transform:uppercase;">✓ Hired — Assigned as Task</div>';
+                } else if (applied) {
+                    html += '<div style="display:inline-block;background:rgba(245,165,0,0.15);color:#f5a500;font-size:9px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.14em;margin-bottom:8px;text-transform:uppercase;">◐ Applied — Awaiting Host Review</div>';
+                }
 
-                html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">' +
-                    '<div><div style="font-family:\'Rajdhani\',sans-serif;font-size:16px;font-weight:900;color:#e0e6ff;">' + escapeHtml(job.title || 'Job') + '</div>' +
-                    (job.description ? '<div style="font-size:12px;color:#8a92b0;margin-top:4px;">' + escapeHtml(job.description).substring(0, 120) + '</div>' : '') + '</div>' +
-                    '<div style="text-align:right;">' +
-                    (job.xc ? '<div style="font-family:\'Share Tech Mono\',monospace;font-size:14px;color:#f5c842;font-weight:700;">' + job.xc + ' XC</div>' : '') +
-                    (daysLeft ? '<div style="font-size:10px;color:' + (daysLeft === 'PAST DUE' ? '#ef4444' : 'rgba(255,255,255,0.4)') + ';margin-top:2px;">' + daysLeft + '</div>' : '') +
+                html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px;">' +
+                    '<div style="flex:1;min-width:0;"><div style="font-family:\'Rajdhani\',sans-serif;font-size:18px;font-weight:900;color:#e0e6ff;">💼 ' + escapeHtml(job.title || 'Job') + '</div>' +
+                    (job.description ? '<div style="font-size:12px;color:#8a92b0;margin-top:4px;line-height:1.5;">' + escapeHtml(String(job.description).substring(0, 160)) + '</div>' : '') + '</div>' +
+                    '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;">' +
+                    (xcVal > 0 ? '<span style="background:rgba(245,200,66,0.16);color:#f5c842;padding:5px 12px;border-radius:12px;font-size:12px;font-weight:800;border:1px solid rgba(245,200,66,0.4);white-space:nowrap;box-shadow:0 0 10px rgba(245,200,66,0.14);">⚡ ' + xcVal + ' XC</span>' : '') +
+                    (urgency && endDate ? '<span style="background:rgba(' + urgency.rgb + ',0.14);color:rgba(' + urgency.rgb + ',1);padding:4px 10px;border-radius:10px;font-size:10px;font-weight:700;border:1px solid rgba(' + urgency.rgb + ',0.35);white-space:nowrap;">📅 ' + urgency.label + '</span>' : '') +
                     '</div></div>';
 
-                if (job.pathway) html += '<div style="display:inline-block;background:rgba(0,240,255,0.06);border:1px solid rgba(0,240,255,0.12);border-radius:6px;padding:3px 8px;font-size:10px;color:var(--cyan);margin-bottom:8px;">' + escapeHtml(job.pathway) + '</div> ';
-                if (job.type) html += '<div style="display:inline-block;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:3px 8px;font-size:10px;color:rgba(255,255,255,0.5);">' + escapeHtml(job.type) + '</div>';
+                // Slot / applicant summary
+                var slotStr = (Array.isArray(job.hired) ? job.hired.length : 0) + ' / ' + (job.slots || 1) + ' hired';
+                var appCount = Array.isArray(job.applicants) ? job.applicants.length : 0;
+                html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:10px;color:rgba(255,255,255,0.5);">' +
+                    '<span style="padding:3px 8px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.2);border-radius:6px;">🎯 ' + slotStr + '</span>' +
+                    (appCount > 0 ? '<span style="padding:3px 8px;background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.2);border-radius:6px;">👥 ' + appCount + ' applicant' + (appCount === 1 ? '' : 's') + '</span>' : '') +
+                    (job.pathway ? '<span style="padding:3px 8px;background:rgba(0,240,255,0.06);border:1px solid rgba(0,240,255,0.12);border-radius:6px;color:var(--cyan);">' + escapeHtml(job.pathway) + '</span>' : '') +
+                '</div>';
 
-                if (!hired) {
-                    html += '<div style="margin-top:12px;"><button class="mc-btn" onclick="ppApplyForJob(\'' + (job.id || '') + '\')" style="font-size:11px;padding:8px 20px;background:rgba(167,139,250,0.1);border-color:rgba(167,139,250,0.3);color:#a78bfa;">Apply for This Job</button></div>';
+                if (hired) {
+                    // Already hired — show a link to the created task if we can find one.
+                    var hireTask = (typeof mcTasks !== 'undefined') ? mcTasks.find(function (t) { return t && t.jobId === job.id && (t.playerId === myId || (Array.isArray(t.assignedTo) && t.assignedTo.indexOf(myId) !== -1)); }) : null;
+                    if (hireTask) {
+                        html += '<div style="margin-top:10px;"><button class="mc-btn" onclick="ppNav(\'task-detail\',{id:\'' + escapeHtml(hireTask.id) + '\'})" style="font-size:11px;padding:8px 20px;background:rgba(34,197,94,0.14);border-color:rgba(34,197,94,0.4);color:#22c55e;font-weight:800;letter-spacing:0.06em;">→ Open My Task</button></div>';
+                    }
+                } else if (applied) {
+                    html += '<div style="margin-top:10px;font-size:11px;color:rgba(255,255,255,0.4);font-style:italic;">Your application is with the host. You will be notified if you are hired.</div>';
+                } else if (slotsFilled) {
+                    html += '<div style="margin-top:10px;font-size:11px;color:rgba(255,255,255,0.4);font-style:italic;">All slots have been filled.</div>';
+                } else {
+                    html += '<div style="margin-top:10px;"><button class="mc-btn" onclick="ppApplyForJob(\'' + (job.id || '') + '\')" style="font-size:12px;padding:9px 22px;background:rgba(167,139,250,0.14);border-color:rgba(167,139,250,0.4);color:#c4b5fd;font-weight:800;letter-spacing:0.06em;">📝 Apply for This Job</button></div>';
                 }
 
                 html += '</div>';
@@ -22988,31 +23008,89 @@
                 titleFont: "'Rajdhani',sans-serif",
                 kicker: '📁 PROJECT'
             });
+            // Lineage chip — clickable parent Checkpoint. Shown right below
+            // the banner so the player can hop up the hierarchy.
+            var projLineageChip = parentCp
+                ? '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:12px;font-size:10px;">' +
+                    '<span style="color:rgba(255,255,255,0.35);letter-spacing:0.12em;font-weight:700;">LINEAGE</span>' +
+                    '<span onclick="ppNav(\'checkpoint-detail\',{id:\'' + escapeHtml(parentCp.id) + '\'})" style="cursor:pointer;background:rgba(0,212,255,0.12);color:#00d4ff;padding:3px 9px;border-radius:6px;border:1px solid rgba(0,212,255,0.3);font-weight:700;letter-spacing:0.04em;">◆ ' + escapeHtml(parentCp.name || 'Checkpoint') + '</span>' +
+                  '</div>'
+                : '';
+
+            // XC earned so far — sum XC of approved child tasks.
+            var xcEarnedSoFar = tasks.filter(function (t) { return t && (t.status === 'approved' || t.completed); }).reduce(function (s, t) { return s + (t.xcReward || t.xc || 0); }, 0);
+            var xcTotalPool   = tasks.reduce(function (s, t) { return s + (t.xcReward || t.xc || 0); }, 0) + (proj.xcRewardPool || proj.xcReward || 0);
+            var projUrg = (typeof _mcUrgencyForDueDate === 'function') ? _mcUrgencyForDueDate(proj.dueDate || proj.endDate || proj.deadline) : null;
+
             html += '<div class="mc-card" style="padding:0;margin-bottom:16px;border-left:3px solid #a78bfa;overflow:hidden;">' +
                 projBanner +
                 '<div style="padding:' + (projBanner ? '18px 22px 20px' : '20px') + ';">' +
+                projLineageChip +
                 (projBanner
                     ? ''
-                    : '<div style="font-family:\'Rajdhani\',sans-serif;font-size:22px;font-weight:900;color:#e0e6ff;">📁 ' + escapeHtml(proj.name || proj.title || 'Project') + '</div>') +
+                    : '<div style="font-family:\'Rajdhani\',sans-serif;font-size:22px;font-weight:900;color:#e0e6ff;">🎬 ' + escapeHtml(proj.name || proj.title || 'Project') + '</div>') +
                 (proj.description ? '<div style="font-size:13px;color:rgba(255,255,255,0.65);margin-top:' + (projBanner ? '0' : '6px') + ';line-height:1.6;">' + escapeHtml(proj.description) + '</div>' : '') +
-                '<div style="display:flex;gap:14px;margin-top:14px;align-items:center;flex-wrap:wrap;">' +
-                (proj.xcRewardPool ? '<span style="font-family:\'Share Tech Mono\',monospace;font-size:13px;color:#f5c842;">⚡ ' + proj.xcRewardPool + ' XC pool</span>' : '') +
-                (proj.dueDate ? '<span style="font-size:11px;color:rgba(255,255,255,0.5);">📅 Due ' + escapeHtml(proj.dueDate) + '</span>' : '') +
+                // PROGRESS hero panel — parity with MC Project card.
+                '<div style="margin-top:14px;padding:14px 16px;background:rgba(139,92,246,0.06);border:1px solid rgba(139,92,246,0.28);border-radius:12px;">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:10px;">' +
+                        '<span style="font-family:Orbitron,sans-serif;font-size:11px;color:#c4b5fd;font-weight:800;letter-spacing:0.1em;">📊 PROGRESS</span>' +
+                        '<span style="font-size:14px;color:' + (pct === 100 ? '#22c55e' : '#f0f0ff') + ';font-weight:800;font-family:monospace;">' + pct + '%</span>' +
+                    '</div>' +
+                    (typeof _mcProgressBarHtml === 'function' ? _mcProgressBarHtml(pct, { height: 12 }) : ppProgressBar(pct, '#a78bfa')) +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:11px;color:rgba(255,255,255,0.65);">' +
+                        '<span>✓ ' + done + ' of ' + tasks.length + ' tasks approved</span>' +
+                        (xcTotalPool > 0 ? '<span style="color:#f5c842;font-weight:700;">⚡ ' + xcEarnedSoFar.toLocaleString() + ' / ' + xcTotalPool.toLocaleString() + ' XC</span>' : '') +
+                    '</div>' +
                 '</div>' +
-                '<div style="margin-top:14px;">' + ppProgressBar(pct, '#a78bfa') + '<div style="margin-top:6px;font-size:11px;color:rgba(255,255,255,0.4);">' + pct + '% · ' + done + '/' + tasks.length + ' tasks completed</div></div>' +
+                // Meta row — due + urgency
+                (proj.dueDate || proj.endDate
+                    ? '<div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">' +
+                        (projUrg && (proj.dueDate || proj.endDate)
+                            ? '<span style="background:rgba(' + projUrg.rgb + ',0.14);color:rgba(' + projUrg.rgb + ',1);padding:5px 10px;border-radius:12px;font-size:11px;font-weight:700;border:1px solid rgba(' + projUrg.rgb + ',0.35);white-space:nowrap;">📅 ' + projUrg.label + '</span>'
+                            : '') +
+                      '</div>'
+                    : '') +
                 '</div></div>';
 
             if (!tasks.length) {
                 html += '<div class="mc-card" style="text-align:center;padding:30px;color:rgba(255,255,255,0.3);">No tasks in this project yet.</div>';
             } else {
+                // Sort by priority DESC then urgency ASC — same rule as MyTasks.
+                tasks.sort(function (a, b) {
+                    var wa = (typeof _mcPriorityWeight === 'function') ? _mcPriorityWeight(a.priority || 'normal') : 2;
+                    var wb = (typeof _mcPriorityWeight === 'function') ? _mcPriorityWeight(b.priority || 'normal') : 2;
+                    if (wa !== wb) return wb - wa;
+                    var da = a.dueDate ? (typeof _mcUrgencyForDueDate === 'function' ? _mcUrgencyForDueDate(a.dueDate).days : 999) : 999;
+                    var db = b.dueDate ? (typeof _mcUrgencyForDueDate === 'function' ? _mcUrgencyForDueDate(b.dueDate).days : 999) : 999;
+                    return da - db;
+                });
+                html += '<div style="font-family:Orbitron,sans-serif;font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:0.12em;margin-bottom:10px;">📋 TASKS IN THIS PROJECT · ' + tasks.length + '</div>';
                 tasks.forEach(function (t) {
-                    var st = t.status === 'approved' ? '✅' : t.status === 'submitted' ? '⏳' : t.status === 'rejected' ? '✗' : '⬜';
-                    var col = (t.status === 'approved' || t.completed) ? 'rgba(255,255,255,0.4)' : (t.status === 'submitted' ? '#f5c842' : '#e0e6ff');
-                    html += '<div onclick="ppNav(\'task-detail\',{id:\'' + (t.id || '') + '\'})" style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:10px;margin-bottom:6px;cursor:pointer;">' +
-                        '<span style="font-size:16px;">' + st + '</span>' +
-                        '<div style="flex:1;"><div style="font-size:13px;color:' + col + ';font-weight:600;">' + escapeHtml(t.title || t.name || 'Task') + '</div>' +
-                        (t.description ? '<div style="font-size:11px;color:#6a7290;margin-top:2px;">' + escapeHtml(String(t.description).substring(0, 90)) + '</div>' : '') + '</div>' +
-                        (t.xcReward || t.xc ? '<span style="font-size:12px;color:#f5c842;font-weight:700;font-family:\'Share Tech Mono\',monospace;">' + (t.xcReward || t.xc) + ' XC</span>' : '') + '</div>';
+                    var isApproved = (t.status === 'approved' || t.completed);
+                    var isSubmitted = (t.status === 'submitted');
+                    var checkboxHtml = '<div style="width:22px;height:22px;border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;' +
+                        (isApproved ? 'background:#22c55e;border:2px solid #22c55e;color:#0b1d10;box-shadow:0 0 10px rgba(34,197,94,0.5);'
+                        : isSubmitted ? 'background:rgba(245,165,0,0.18);border:2px solid #f5a500;color:#f5a500;'
+                        : 'background:rgba(255,255,255,0.02);border:2px solid rgba(255,255,255,0.15);color:transparent;') +
+                        '">' + (isApproved ? '✓' : isSubmitted ? '◐' : '') + '</div>';
+                    var priorityFlag = (typeof _mcPriorityFlag === 'function') ? _mcPriorityFlag(t.priority || 'normal') : '';
+                    var urgency = (typeof _mcUrgencyForDueDate === 'function') ? _mcUrgencyForDueDate(t.dueDate) : null;
+                    var dueChip = (t.dueDate && urgency)
+                        ? '<span style="background:rgba(' + urgency.rgb + ',0.14);color:rgba(' + urgency.rgb + ',1);padding:4px 9px;border-radius:10px;font-size:10px;font-weight:700;border:1px solid rgba(' + urgency.rgb + ',0.35);white-space:nowrap;">📅 ' + urgency.label + '</span>'
+                        : '';
+                    var xcChip = (t.xcReward || t.xc)
+                        ? '<span style="background:rgba(245,200,66,0.16);color:#f5c842;padding:4px 9px;border-radius:10px;font-size:11px;font-weight:800;border:1px solid rgba(245,200,66,0.4);white-space:nowrap;box-shadow:0 0 8px rgba(245,200,66,0.14);">⚡ ' + (t.xcReward || t.xc) + '</span>'
+                        : '';
+                    html += '<div onclick="ppNav(\'task-detail\',{id:\'' + (t.id || '') + '\'})" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px;margin-bottom:8px;cursor:pointer;transition:background 0.15s ease;" onmouseover="this.style.background=\'rgba(30,30,42,0.7)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.02)\'">' +
+                        checkboxHtml + priorityFlag +
+                        '<div style="flex:1;min-width:0;">' +
+                            '<div style="font-size:13px;color:' + (isApproved ? 'rgba(255,255,255,0.55)' : '#f0f0ff') + ';font-weight:700;line-height:1.3;' + (isApproved ? 'text-decoration:line-through;' : '') + '">' + escapeHtml(t.title || t.name || 'Task') + '</div>' +
+                            (t.description ? '<div style="font-size:11px;color:rgba(255,255,255,0.45);line-height:1.4;margin-top:3px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;">' + escapeHtml(String(t.description).substring(0, 120)) + '</div>' : '') +
+                        '</div>' +
+                        '<div style="display:flex;gap:6px;align-items:center;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">' +
+                            dueChip + xcChip +
+                        '</div>' +
+                    '</div>';
                 });
             }
 
@@ -23408,10 +23486,37 @@
         }
 
         // ── Job application handler ──
+        // Player-side Apply — pushes the current player into job.applicants[]
+        // so the host sees them in the Job's Applicants panel with an inline
+        // Hire button. Idempotent: repeat clicks just re-show the toast.
         window.ppApplyForJob = function(jobId) {
-            if (!jobId) return;
+            if (!jobId || typeof mcJobs === 'undefined') return;
+            var me = window.activeSession || {};
+            var myId = me.id || me.brand || me.brandName || '';
+            var myName = me.brand || me.brandName || me.name || myId || 'Player';
+            if (!myId) return;
+            var job = mcJobs.find(function (j) { return j && j.id === jobId; });
+            if (!job) return;
+            if (!Array.isArray(job.applicants)) job.applicants = [];
+            var already = job.applicants.some(function (a) { return a && a.playerId === myId; });
+            if (already) {
+                if (typeof pflxToast === 'function') pflxToast('You have already applied for this Job.', 'info');
+                return;
+            }
+            job.applicants.push({ playerId: myId, playerName: myName, appliedAt: new Date().toISOString() });
+            try { mcSaveData('jobs'); } catch (e) {}
             if (typeof pflxToast === 'function') pflxToast('Application submitted! Awaiting host approval.', 'success');
             if (typeof pflxPlaySfx === 'function') pflxPlaySfx('success');
+            // Refresh the visible Job Board so the button flips to
+            // "Applied — awaiting review" without a page reload.
+            try {
+                var el = document.getElementById('mc-content');
+                if (el && typeof ppRenderJobBoard === 'function') {
+                    // Player Portal renders into an anon child inside mc-content;
+                    // easiest is to bounce nav so the current view rerenders.
+                    if (window.playerPortalView === 'jobs' || window.playerPortalView === 'jobboard') ppNav('jobs');
+                }
+            } catch (e) {}
         };
 
         // ── Schedule & Epics ────────────────────────────────────────
