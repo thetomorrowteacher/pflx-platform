@@ -6859,6 +6859,24 @@
                         <!-- MAIN CONTENT AREA -->
                         <div class="mc-content" id="mc-content">
 
+                            <!-- ═══ SEASON CONTEXT BAR ═══
+                                 Top-tier scope. Renders on every MC view so hosts
+                                 always know which Season they're operating in and
+                                 which cohort the current scope applies to. Populated
+                                 by pflxRenderSeasonBar() on nav + data change. -->
+                            <div id="mc-season-bar" style="margin-bottom:16px;padding:12px 18px;background:linear-gradient(90deg, rgba(245,200,66,0.10), rgba(139,92,246,0.10));border:1px solid rgba(245,200,66,0.28);border-radius:14px;display:flex;flex-wrap:wrap;align-items:center;gap:14px;">
+                                <div style="display:flex;align-items:center;gap:10px;">
+                                    <span style="font-size:18px;">🏆</span>
+                                    <div>
+                                        <div style="font-family:Orbitron,sans-serif;font-size:9px;color:rgba(255,255,255,0.4);letter-spacing:0.14em;font-weight:800;">ACTIVE SEASON</div>
+                                        <div id="mc-season-name" style="font-family:Orbitron,sans-serif;font-size:14px;color:#f5c842;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;">—</div>
+                                    </div>
+                                </div>
+                                <div style="width:1px;height:32px;background:rgba(255,255,255,0.1);"></div>
+                                <div style="display:flex;flex-wrap:wrap;gap:8px;flex:1;" id="mc-season-stats"></div>
+                                <div id="mc-season-cohort" style="display:flex;align-items:center;gap:8px;font-size:11px;color:rgba(255,255,255,0.7);"></div>
+                            </div>
+
                             <!-- ═══ DASHBOARD PANEL ═══ -->
                             <div class="mc-panel active" id="mc-panel-dashboard">
                                 <h1 class="mc-page-title" id="mc-dash-title" style="margin-bottom:6px;">Mission Dashboard</h1>
@@ -7781,6 +7799,17 @@
                                         <span style="font-size:10px;color:rgba(255,255,255,0.35);font-weight:400;">Tagged broadcasts</span>
                                     </div>
                                     <div id="pflx-dc-board-body" style="padding:6px;display:flex;flex-direction:column;gap:6px;max-height:240px;overflow-y:auto;"></div>
+                                </div>
+                                <!-- ═══ MY WORK WIDGET ═══
+                                     Personalized. For host: what's awaiting approval + what's overdue.
+                                     For player: my open assignments sorted by urgency.
+                                     Rendered by pflxRenderMyWork() on nav + data change. -->
+                                <div class="mc-card" id="mc-my-work-card" style="background:linear-gradient(135deg, rgba(0,212,255,0.06), rgba(139,92,246,0.04));border:1px solid rgba(0,212,255,0.25);">
+                                    <div class="mc-card-title" style="display:flex;align-items:center;justify-content:space-between;">
+                                        <span id="mc-my-work-title">📌 MY WORK</span>
+                                        <span id="mc-my-work-count" style="font-size:10px;color:rgba(255,255,255,0.4);font-family:monospace;letter-spacing:0.06em;"></span>
+                                    </div>
+                                    <div id="mc-my-work-body" style="padding:6px;display:flex;flex-direction:column;gap:8px;max-height:360px;overflow-y:auto;"></div>
                                 </div>
                                 <div class="mc-stat-grid" id="mc-dashboard-stats"></div>
                                 <!-- Cloud Save Rollout widget — fed live by pflxRenderCloudRolloutWidget -->
@@ -21620,6 +21649,144 @@
         window.mcCanPushToDarkcampus = mcCanPushToDarkcampus;
 
         // ── Navigation ──────────────────────────────────────────────
+        // ── Season Context Bar renderer ──
+        // Season is the top of the hierarchy. This strip stays visible on every
+        // MC view so the host always knows the active Season, cohort scope,
+        // and roll-up counts.
+        function pflxRenderSeasonBar() {
+            try {
+                var bar = document.getElementById('mc-season-bar');
+                if (!bar) return;
+                var activeSeason = (mcSeasons || []).find(function (s) { return s && s.active; }) || (mcSeasons || [])[0] || null;
+                var nameEl = document.getElementById('mc-season-name');
+                var statsEl = document.getElementById('mc-season-stats');
+                var cohortEl = document.getElementById('mc-season-cohort');
+                if (nameEl) nameEl.textContent = activeSeason ? (activeSeason.name || 'Untitled Season') : 'No Season Set';
+                var activeCps = (mcCheckpoints || []).filter(function (c) { return c && c.status === 'active'; }).length;
+                var openTasks = (mcTasks || []).filter(function (t) { return t && t.status !== 'approved'; }).length;
+                var awaiting  = (mcTasks || []).filter(function (t) { return t && t.status === 'submitted'; }).length;
+                var playersN  = (mcPlayers || []).filter(function (p) { return p && p.role !== 'admin'; }).length;
+                var pillCss = 'padding:5px 10px;border-radius:10px;font-size:11px;font-weight:700;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.75);';
+                if (statsEl) {
+                    statsEl.innerHTML =
+                        '<span style="' + pillCss + '">👥 ' + playersN + ' players</span>' +
+                        '<span style="' + pillCss + '">🏁 ' + activeCps + ' active checkpoint' + (activeCps === 1 ? '' : 's') + '</span>' +
+                        '<span style="' + pillCss + '">📋 ' + openTasks + ' open task' + (openTasks === 1 ? '' : 's') + '</span>' +
+                        (awaiting > 0 ? '<span style="padding:5px 10px;border-radius:10px;font-size:11px;font-weight:800;background:rgba(245,165,0,0.16);border:1px solid rgba(245,165,0,0.4);color:#f5a500;">📤 ' + awaiting + ' awaiting approval</span>' : '');
+                }
+                if (cohortEl) {
+                    // Season Pass cohort scope — if the active Season has a
+                    // cohortScope field, show it; otherwise "All cohorts".
+                    var scope = (activeSeason && activeSeason.cohortScope) || 'All Cohorts';
+                    var scopeArr = Array.isArray(scope) ? scope : [scope];
+                    cohortEl.innerHTML =
+                        '<span style="font-size:9px;letter-spacing:0.14em;color:rgba(255,255,255,0.35);font-weight:800;font-family:Orbitron,sans-serif;">SCOPE</span>' +
+                        '<span style="padding:5px 10px;border-radius:10px;background:rgba(139,92,246,0.14);border:1px solid rgba(139,92,246,0.35);color:#c4b5fd;font-weight:700;">🎫 ' + escapeHtml(scopeArr.join(' · ')) + '</span>';
+                }
+            } catch (e) { console.warn('[season-bar] render failed', e); }
+        }
+        window.pflxRenderSeasonBar = pflxRenderSeasonBar;
+
+        // ── My Work widget ──
+        // Personalized landing block on the MC Dashboard.
+        //   Host: 'Awaiting your approval' (submitted tasks) + 'Overdue open tasks'
+        //         + 'Overdue projects'.
+        //   Player: their own assigned tasks sorted highest-priority-first,
+        //           then urgency-first (overdue at top).
+        // Empty-state copy encourages the user to keep moving.
+        function pflxRenderMyWork() {
+            var body  = document.getElementById('mc-my-work-body');
+            var title = document.getElementById('mc-my-work-title');
+            var count = document.getElementById('mc-my-work-count');
+            if (!body) return;
+            try {
+                var isHost = window.pflxRole !== 'player';
+                var rows = [];
+                var totalCount = 0;
+                if (isHost) {
+                    if (title) title.textContent = '📌 MY WORK — HOST QUEUE';
+                    // Awaiting approval (all submitted tasks)
+                    var awaiting = (mcTasks || []).filter(function (t) { return t && t.status === 'submitted'; });
+                    // Overdue open tasks
+                    var overdueTasks = (mcTasks || []).filter(function (t) {
+                        if (!t || t.status === 'approved') return false;
+                        if (!t.dueDate) return false;
+                        return _mcUrgencyForDueDate(t.dueDate).days < 0;
+                    });
+                    // Overdue projects (endDate/dueDate < today, status !== completed)
+                    var overdueProjects = (mcProjects || []).filter(function (p) {
+                        if (!p || p.status === 'completed') return false;
+                        var d = p.dueDate || p.endDate || p.deadline;
+                        if (!d) return false;
+                        return _mcUrgencyForDueDate(d).days < 0;
+                    });
+                    totalCount = awaiting.length + overdueTasks.length + overdueProjects.length;
+                    if (awaiting.length > 0) {
+                        rows.push('<div style="font-family:Orbitron,sans-serif;font-size:10px;font-weight:800;letter-spacing:0.12em;color:#f5a500;padding:6px 4px 4px 4px;">📤 AWAITING YOUR APPROVAL · ' + awaiting.length + '</div>');
+                        awaiting.slice(0, 6).forEach(function (t) {
+                            var idx = mcTasks.indexOf(t);
+                            rows.push('<div ' + _mcJumpAttr('task', t.id) + ' style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:rgba(245,165,0,0.08);border:1px solid rgba(245,165,0,0.3);border-radius:8px;cursor:pointer;"><span style="font-size:12px;color:#f0f0ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;">📋 ' + escapeHtml(t.title || 'Untitled') + '</span><button onclick="event.stopPropagation();mcApproveTask(' + idx + ')" style="background:rgba(34,197,94,0.14);color:#22c55e;border:1px solid rgba(34,197,94,0.4);padding:4px 10px;border-radius:6px;font-size:10px;font-weight:800;cursor:pointer;letter-spacing:0.06em;">✓ APPROVE</button></div>');
+                        });
+                    }
+                    if (overdueTasks.length > 0) {
+                        rows.push('<div style="font-family:Orbitron,sans-serif;font-size:10px;font-weight:800;letter-spacing:0.12em;color:#ef4444;padding:6px 4px 4px 4px;margin-top:4px;">⚠ OVERDUE TASKS · ' + overdueTasks.length + '</div>');
+                        overdueTasks.slice(0, 6).forEach(function (t) {
+                            var u = _mcUrgencyForDueDate(t.dueDate);
+                            rows.push('<div ' + _mcJumpAttr('task', t.id) + ' style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.25);border-radius:8px;cursor:pointer;"><span style="font-size:12px;color:#f0f0ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;">📋 ' + escapeHtml(t.title || 'Untitled') + '</span><span style="font-size:10px;color:#ef4444;font-weight:800;padding:3px 8px;background:rgba(239,68,68,0.14);border-radius:6px;flex-shrink:0;">' + u.label + '</span></div>');
+                        });
+                    }
+                    if (overdueProjects.length > 0) {
+                        rows.push('<div style="font-family:Orbitron,sans-serif;font-size:10px;font-weight:800;letter-spacing:0.12em;color:#ef4444;padding:6px 4px 4px 4px;margin-top:4px;">⚠ OVERDUE PROJECTS · ' + overdueProjects.length + '</div>');
+                        overdueProjects.slice(0, 4).forEach(function (p) {
+                            var d = p.dueDate || p.endDate || p.deadline;
+                            var u = _mcUrgencyForDueDate(d);
+                            rows.push('<div ' + _mcJumpAttr('project', p.id) + ' style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.25);border-radius:8px;cursor:pointer;"><span style="font-size:12px;color:#f0f0ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;">🎬 ' + escapeHtml(p.name || p.title || 'Untitled') + '</span><span style="font-size:10px;color:#ef4444;font-weight:800;padding:3px 8px;background:rgba(239,68,68,0.14);border-radius:6px;flex-shrink:0;">' + u.label + '</span></div>');
+                        });
+                    }
+                    if (totalCount === 0) {
+                        rows.push('<div style="padding:26px;text-align:center;color:rgba(255,255,255,0.4);font-size:13px;">Nothing waiting on you. Nice work. 🎉</div>');
+                    }
+                } else {
+                    if (title) title.textContent = '📌 MY WORK';
+                    // Player: their own assigned tasks. activeSession.brand or .id is
+                    // the identifier used elsewhere for assignment matching.
+                    var me = window.activeSession || {};
+                    var myId = me.id || me.brand || me.brandName || '';
+                    var mine = (mcTasks || []).filter(function (t) {
+                        if (!t || t.status === 'approved') return false;
+                        var assigned = t.assignedTo;
+                        if (!assigned || assigned === 'all') return true;
+                        if (Array.isArray(assigned)) return assigned.indexOf(myId) !== -1;
+                        return String(assigned) === String(myId);
+                    });
+                    mine.sort(function (a, b) {
+                        var wa = _mcPriorityWeight(a.priority || 'normal');
+                        var wb = _mcPriorityWeight(b.priority || 'normal');
+                        if (wa !== wb) return wb - wa;
+                        var da = a.dueDate ? _mcUrgencyForDueDate(a.dueDate).days : 999;
+                        var db = b.dueDate ? _mcUrgencyForDueDate(b.dueDate).days : 999;
+                        return da - db;
+                    });
+                    totalCount = mine.length;
+                    if (mine.length === 0) {
+                        rows.push('<div style="padding:26px;text-align:center;color:rgba(255,255,255,0.4);font-size:13px;">No open tasks assigned to you. Explore the Job Board for new work.</div>');
+                    } else {
+                        mine.slice(0, 8).forEach(function (t) {
+                            var u = _mcUrgencyForDueDate(t.dueDate);
+                            var pf = _mcPriorityFlag(t.priority || 'normal');
+                            rows.push('<div ' + _mcJumpAttr('task', t.id) + ' style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:8px;cursor:pointer;">' +
+                                '<span style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">' + pf + '<span style="font-size:12px;color:#f0f0ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📋 ' + escapeHtml(t.title || 'Untitled') + '</span></span>' +
+                                (t.dueDate ? '<span style="font-size:10px;color:rgba(' + u.rgb + ',1);font-weight:700;padding:3px 8px;background:rgba(' + u.rgb + ',0.14);border-radius:6px;flex-shrink:0;">' + u.label + '</span>' : '') +
+                            '</div>');
+                        });
+                    }
+                }
+                body.innerHTML = rows.join('');
+                if (count) count.textContent = totalCount > 0 ? (totalCount + ' item' + (totalCount === 1 ? '' : 's')) : '';
+            } catch (e) { console.warn('[my-work] render failed', e); }
+        }
+        window.pflxRenderMyWork = pflxRenderMyWork;
+
         function mcNav(tab) {
             pflxPlaySfx('nav');
 
@@ -21673,6 +21840,10 @@
             if (tab === 'mcsettings') mcRenderMCSettings();
             if (tab === 'systemevents' && typeof pflxRenderSystemEventsPanel === 'function') pflxRenderSystemEventsPanel();
             if (tab === 'livesession' && typeof lsRenderPanel === 'function') lsRenderPanel();
+            // Season bar refresh — always shown at the top of MC regardless of tab.
+            try { pflxRenderSeasonBar(); } catch (e) {}
+            // My Work widget refresh (only shown on Dashboard, but harmless elsewhere).
+            try { if (typeof pflxRenderMyWork === 'function') pflxRenderMyWork(); } catch (e) {}
         }
 
         // ── Dashboard ───────────────────────────────────────────────
@@ -24648,6 +24819,14 @@
 
             var jobIds = [];
             document.querySelectorAll('.mc-cp-job-cb:checked').forEach(function(cb) { jobIds.push(cb.value); });
+            // ── Structural rule ──
+            // A Checkpoint must contain at least one Task OR one Project.
+            // This is the hierarchy contract: Checkpoint is a container tier
+            // and cannot be empty. Jobs are inverse-of-tasks so they count too.
+            if (taskIds.length === 0 && projectIds.length === 0 && jobIds.length === 0) {
+                alert('A Checkpoint needs at least one Task, Project, or Job attached. Please pick one below, or create it first from the Tasks / Projects / Jobs tab.');
+                return;
+            }
 
             // Badge rewards stored as { name, xc } objects (matching X-Coin format)
             var rewardBadges = mcCPSelectedBadges.map(function(b) { return { name: b.name, xc: b.xc }; });
@@ -27167,6 +27346,15 @@
             pflxPlaySfx('save');
             var title = (document.getElementById('mc-project-title')?.value || '').trim();
             if (!title) { alert('Project title is required.'); return; }
+            // ── Structural rule ──
+            // A Project must contain at least one Task. This mirrors the
+            // hierarchy contract Season > Checkpoint > Project > Task where
+            // Task is atomic and everything above rolls up from it.
+            var __projTaskCbCount = document.querySelectorAll('.mc-project-task-cb:checked').length;
+            if (__projTaskCbCount === 0) {
+                alert('A Project needs at least one Task. Please select a Task below, or create one first from the Tasks tab.');
+                return;
+            }
 
             var teamStr = (document.getElementById('mc-project-team')?.value || '').trim();
             var team = teamStr ? teamStr.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
