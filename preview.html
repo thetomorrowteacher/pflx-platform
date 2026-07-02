@@ -22113,10 +22113,25 @@
         }
         // Helper: does this task/project belong to the given checkpoint?
         // Tolerates both naming conventions — tasks use 'roundId', projects
-        // use 'checkpointId', some import paths use either.
+        // use 'checkpointId', some import paths use either. Also honors the
+        // REVERSE pointer: `cp.taskIds` / `cp.projectIds` / `cp.jobIds` list
+        // ids of children attached through the checkpoint form. Without this
+        // reverse-check, a host who wired tasks via the CP form (instead of
+        // setting the checkpoint dropdown inside each task) would see nothing
+        // in the Player Portal.
         function ppItemInCheckpoint(item, cpId) {
             if (!item || !cpId) return false;
-            return item.roundId === cpId || item.checkpointId === cpId;
+            if (item.roundId === cpId || item.checkpointId === cpId) return true;
+            try {
+                var cps = (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) ? mcCheckpoints : null;
+                if (!cps) return false;
+                var cp = cps.find(function (c) { return c && c.id === cpId; });
+                if (!cp) return false;
+                if (Array.isArray(cp.taskIds) && cp.taskIds.indexOf(item.id) !== -1) return true;
+                if (Array.isArray(cp.projectIds) && cp.projectIds.indexOf(item.id) !== -1) return true;
+                if (Array.isArray(cp.jobIds) && cp.jobIds.indexOf(item.id) !== -1) return true;
+            } catch (e) {}
+            return false;
         }
         // ─────────────────────────────────────────────────────────────────
         // pflxPlayerCanSeeItem(item, pid, cohorts)
@@ -22141,9 +22156,29 @@
         // ─────────────────────────────────────────────────────────────────
         function pflxItemCohortsMatch(item, cohorts) {
             if (!cohorts || !cohorts.length) return false;
-            if (item.cohort && cohorts.indexOf(item.cohort) >= 0) return true;
-            if (Array.isArray(item.cohorts) && item.cohorts.some(function (c) { return cohorts.indexOf(c) >= 0; })) return true;
-            if (Array.isArray(item.assignedTo) && item.assignedTo.some(function (a) { return cohorts.indexOf(a) >= 0; })) return true;
+            // ── Cohort tag reconciliation ──
+            // Historical inconsistency: the Checkpoint form saves cohort
+            // NAMES into `assignedTo`, while the Task and Project forms
+            // save cohort-group IDs (like `cg-1720...`) into `assignedTo`
+            // / `cohorts` / `cohortIds`. A player's session stores their
+            // cohort by NAME (via player.cohort). Without reconciliation
+            // the ID-tagged rows never match the name-tagged player and
+            // tasks/projects go invisible inside a valid checkpoint.
+            //
+            // Build a Set of every tag that should be treated as "mine":
+            //   * every cohort name I belong to
+            //   * every cohort-group ID whose `name` is one of my cohorts
+            var acceptable = new Set(cohorts);
+            if (typeof mcCohortGroups !== 'undefined' && Array.isArray(mcCohortGroups)) {
+                mcCohortGroups.forEach(function (g) {
+                    if (g && g.id && g.name && cohorts.indexOf(g.name) !== -1) acceptable.add(g.id);
+                });
+            }
+            function tagMatches(tag) { return !!tag && acceptable.has(tag); }
+            if (item.cohort && tagMatches(item.cohort)) return true;
+            if (Array.isArray(item.cohorts) && item.cohorts.some(tagMatches)) return true;
+            if (Array.isArray(item.cohortIds) && item.cohortIds.some(tagMatches)) return true;
+            if (Array.isArray(item.assignedTo) && item.assignedTo.some(tagMatches)) return true;
             return false;
         }
         function pflxItemHasOwnCohort(item) {
@@ -22152,6 +22187,7 @@
             if (Array.isArray(item.assignedTo) && item.assignedTo.length > 0) return true;
             if (item.cohort) return true;
             if (Array.isArray(item.cohorts) && item.cohorts.length > 0) return true;
+            if (Array.isArray(item.cohortIds) && item.cohortIds.length > 0) return true;
             return false;
         }
         function pflxFindCheckpoint(cps, id) {
