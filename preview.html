@@ -8437,8 +8437,27 @@
                                         </div>
                                     </div>
                                     <div style="margin-bottom:12px;">
-                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Assign To</label>
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Assign To Cohort(s)</label>
                                         <div id="mc-task-cohorts" style="display:flex;flex-direction:column;gap:6px;max-height:100px;overflow-y:auto;"></div>
+                                    </div>
+                                    <!-- Individual player assignment within the selected cohort(s).
+                                         Optional. Leave empty = task belongs to every player in
+                                         the selected cohort. Assigning specific players still lets
+                                         every cohort peer SEE the task, but only assignees are
+                                         expected to submit. Auto-repopulates when cohorts change. -->
+                                    <div style="margin-bottom:12px;padding:10px 12px;background:rgba(139,92,246,0.04);border:1px solid rgba(139,92,246,0.15);border-radius:8px;">
+                                        <label style="display:flex;justify-content:space-between;align-items:baseline;font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:4px;text-transform:uppercase;">
+                                            <span>Assign Specific Players (optional)</span>
+                                            <span style="font-size:9px;text-transform:none;color:rgba(255,255,255,0.35);">Empty = all cohort members</span>
+                                        </label>
+                                        <div style="font-size:10px;color:rgba(255,255,255,0.35);margin-bottom:8px;line-height:1.4;">
+                                            Everyone in the cohort still sees this task, but only assigned players are expected to submit. A project completes when every assigned player's task is approved.
+                                        </div>
+                                        <div style="display:flex;gap:6px;margin-bottom:8px;">
+                                            <input type="text" id="mc-task-players-search" placeholder="Search players…" oninput="mcRenderTaskAssignedPlayers()" style="flex:1;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.1);color:#e0e6ff;padding:6px 10px;border-radius:6px;font-size:11px;">
+                                            <button type="button" class="mc-btn" onclick="mcTaskAssignedPlayersClear()" style="font-size:10px;padding:4px 10px;">Clear</button>
+                                        </div>
+                                        <div id="mc-task-players" style="display:flex;flex-direction:column;gap:4px;max-height:180px;overflow-y:auto;padding:6px;background:rgba(10,18,40,0.35);border-radius:6px;border:1px solid rgba(255,255,255,0.05);"></div>
                                     </div>
                                     <!-- CHECKLIST SECTION -->
                                     <div style="margin-bottom:12px;padding:12px;background:rgba(0,212,255,0.03);border:1px solid rgba(0,212,255,0.08);border-radius:8px;">
@@ -22263,6 +22282,159 @@
             var cohorts = Array.isArray(s.cohorts) ? s.cohorts : (s.cohort ? [s.cohort] : []);
             return pflxPlayerCanSeeItem(item, pid, cohorts);
         }
+        // ── Individual-player assignment inside a cohort ──
+        // A task can be scoped to specific players inside its cohort. Everyone
+        // in the cohort sees the task (visibility unchanged); only the assigned
+        // players are EXPECTED to submit. Project completion requires every
+        // assigned player's task to be approved.
+        function pflxTaskAssignees(t) {
+            return (t && Array.isArray(t.assignedPlayers)) ? t.assignedPlayers : [];
+        }
+        function pflxTaskIsMine(t, pid) {
+            if (!t) return false;
+            var a = pflxTaskAssignees(t);
+            if (a.length === 0) return true;    // empty = everyone in cohort
+            if (!pid) return false;
+            return a.indexOf(pid) !== -1;
+        }
+        // Player lookup by id. Uses PLAYERS if defined (parent-shell roster)
+        // else mcPlayers. Case-tolerant on id string.
+        function pflxLookupPlayer(pid) {
+            if (!pid) return null;
+            var roster = (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) ? PLAYERS : (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers) ? mcPlayers : []);
+            return roster.find(function (p) { return p && (p.id === pid || p.brand === pid); }) || null;
+        }
+        function pflxAssigneeChipHtml(t, opts) {
+            opts = opts || {};
+            var a = pflxTaskAssignees(t);
+            if (a.length === 0) {
+                if (!opts.showWhenAll) return '';
+                return '<span style="font-size:9px;background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.5);padding:2px 7px;border-radius:8px;border:1px solid rgba(255,255,255,0.08);letter-spacing:0.04em;">EVERYONE</span>';
+            }
+            // Show up to 3 avatars + a "+N" bubble.
+            var names = a.map(pflxLookupPlayer).filter(Boolean);
+            var pid = (window.activeSession || {}).id;
+            var mine = pid && a.indexOf(pid) !== -1;
+            var accent = mine ? 'rgba(0,212,255,0.5)' : 'rgba(139,92,246,0.5)';
+            var bg = mine ? 'rgba(0,212,255,0.12)' : 'rgba(139,92,246,0.1)';
+            var color = mine ? '#00d4ff' : '#c4b5fd';
+            var head = mine ? '👤 You' : ('👤 ' + (names[0] ? (names[0].brand || names[0].brandName || names[0].name) : (a.length + ' player' + (a.length > 1 ? 's' : ''))));
+            var extra = a.length > 1 ? ' +' + (a.length - 1) : '';
+            return '<span title="Assigned to ' + escapeHtml(names.map(function (p) { return p.brand || p.brandName || p.name || '?'; }).join(', ') || a.join(', ')) + '" style="font-size:9px;background:' + bg + ';color:' + color + ';padding:2px 8px;border-radius:8px;border:1px solid ' + accent + ';letter-spacing:0.04em;font-weight:700;">' + escapeHtml(head + extra) + '</span>';
+        }
+        // Given a project, resolve the roster of players who *should* be
+        // participating. Preference order:
+        //   1. project.team (explicit team list)
+        //   2. union of assignedPlayers across every task
+        //   3. every player whose cohort matches project.cohortIds names
+        function pflxProjectRoster(project) {
+            if (!project) return [];
+            var pool = (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) ? mcPlayers : [];
+            if (Array.isArray(project.team) && project.team.length) {
+                return project.team.map(pflxLookupPlayer).filter(Boolean);
+            }
+            var tasks = (typeof mcTasks !== 'undefined' ? mcTasks : []).filter(function (t) {
+                return Array.isArray(project.taskIds) && project.taskIds.indexOf(t.id) !== -1;
+            });
+            var assignSet = new Set();
+            tasks.forEach(function (t) { (t.assignedPlayers || []).forEach(function (pid) { assignSet.add(pid); }); });
+            if (assignSet.size > 0) return Array.from(assignSet).map(pflxLookupPlayer).filter(Boolean);
+            // Fallback: cohort-scoped players.
+            var cohortNames = [];
+            (project.cohortIds || []).forEach(function (id) {
+                var g = (mcCohortGroups || []).find(function (x) { return x && x.id === id; });
+                if (g && g.name) cohortNames.push(g.name);
+            });
+            if (cohortNames.length === 0) return [];
+            return pool.filter(function (p) { return p && cohortNames.indexOf(p.cohort) !== -1 && (p.role || 'player') === 'player'; });
+        }
+        // Create (or reuse) a PFLX Chat group named after the project and
+        // seed it with the project roster. Opens PFLX Chat panel + jumps
+        // straight into the thread.
+        window.pflxStartProjectChat = function (projectId) {
+            var proj = (typeof mcProjects !== 'undefined' ? mcProjects : []).find(function (p) { return p && p.id === projectId; });
+            if (!proj) { if (typeof pflxToast === 'function') pflxToast('Project not found.', 'warn'); return; }
+            var roster = pflxProjectRoster(proj);
+            var me = window.activeSession || {};
+            if (!me.id) { if (typeof pflxToast === 'function') pflxToast('Please sign in first.', 'warn'); return; }
+            var participantIds = [me.id];
+            roster.forEach(function (p) { if (p && p.id && participantIds.indexOf(p.id) === -1) participantIds.push(p.id); });
+            if (participantIds.length < 2) { if (typeof pflxToast === 'function') pflxToast('No cohort members to invite yet.', 'warn'); return; }
+            var wantName = 'Project · ' + (proj.name || proj.title || 'Project');
+            // Load chat threads and dedupe by name.
+            var threads = [];
+            try { var raw = localStorage.getItem('pflx_chat_threads'); if (raw) threads = JSON.parse(raw).threads || []; } catch (e) {}
+            var existing = threads.find(function (t) { return t && t.name === wantName && t.type === 'group'; });
+            if (existing) {
+                if (typeof pflxChatToggle === 'function') {
+                    var panel = document.getElementById('pflx-chat-panel');
+                    if (panel && panel.style.display === 'none') pflxChatToggle();
+                }
+                setTimeout(function () { if (typeof pflxChatOpenThread === 'function') pflxChatOpenThread(existing.id); }, 60);
+                return;
+            }
+            // Compose a new group thread and persist. We mirror the chat
+            // engine's own contract so its next cloud pull picks it up.
+            var thread = {
+                id: 'th-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+                type: 'group',
+                name: wantName,
+                participants: participantIds,
+                messages: [],
+                createdAt: new Date().toISOString(),
+                createdBy: me.id,
+                fromProjectId: proj.id
+            };
+            threads.push(thread);
+            try { localStorage.setItem('pflx_chat_threads', JSON.stringify({ threads: threads })); } catch (e) {}
+            // Push to cloud via the chat engine if it's booted.
+            try {
+                var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (client) client.from('app_data').upsert({ key: 'pflx_chat_threads', data: { threads: threads } }).then(function () {});
+            } catch (e) {}
+            if (typeof pflxToast === 'function') pflxToast('💬 Started "' + wantName + '" with ' + participantIds.length + ' members', 'success');
+            if (typeof pflxChatToggle === 'function') {
+                var panel2 = document.getElementById('pflx-chat-panel');
+                if (panel2 && panel2.style.display === 'none') pflxChatToggle();
+            }
+            setTimeout(function () { if (typeof pflxChatOpenThread === 'function') pflxChatOpenThread(thread.id); }, 100);
+        };
+        // Project completion — every task's assigned player(s) must have an
+        // approved submission for that task. Task with empty assignedPlayers
+        // is treated as "any cohort member can complete it".
+        function pflxProjectCompletion(project) {
+            var out = { total: 0, done: 0, pct: 0, tasks: [] };
+            if (!project || !Array.isArray(project.taskIds)) return out;
+            var byId = {};
+            (typeof mcTasks !== 'undefined' ? mcTasks : []).forEach(function (t) { if (t && t.id) byId[t.id] = t; });
+            project.taskIds.forEach(function (tid) {
+                var t = byId[tid];
+                if (!t) return;
+                var expected = pflxTaskAssignees(t);
+                if (expected.length === 0) {
+                    // Everyone-mode: task is done iff task.status === 'approved'.
+                    out.total += 1;
+                    var doneOne = t.status === 'approved' || t.completed;
+                    if (doneOne) out.done += 1;
+                    out.tasks.push({ id: t.id, title: t.title, expected: [], done: doneOne });
+                } else {
+                    // Per-assignee: each expected player is a "unit of work".
+                    // A player is done if their submission on this task is approved.
+                    // Fallback: if the task itself is approved (aggregate), count everyone.
+                    var subs = (t.submissions || []);
+                    expected.forEach(function (pid) {
+                        out.total += 1;
+                        var doneAll = t.status === 'approved' || t.completed;
+                        var mine = subs.find(function (s) { return s && s.submittedBy === pid; });
+                        var doneMine = doneAll || (mine && (mine.status === 'approved' || mine.approved));
+                        if (doneMine) out.done += 1;
+                        out.tasks.push({ id: t.id, title: t.title, playerId: pid, done: !!doneMine });
+                    });
+                }
+            });
+            out.pct = out.total ? Math.round(100 * out.done / out.total) : 0;
+            return out;
+        }
 
         // ── Breadcrumb nav ──
         function ppBreadcrumb(trail) {
@@ -22956,9 +23128,11 @@
                             var col = _statusColor(t);
                             var done = (t.completed || t.status === 'approved');
                             var reqLabel = (t.requirement === 'required' || t.required) ? '<span style="font-size:9px;color:#ef4444;margin-left:6px;">REQUIRED</span>' : '<span style="font-size:9px;color:rgba(255,255,255,0.25);margin-left:6px;">OPTIONAL</span>';
+                            var chip = pflxAssigneeChipHtml(t);
                             html += '<div onclick="event.stopPropagation();ppNav(\'task-detail\',{id:\'' + (t.id || '') + '\'})" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(255,255,255,0.015);border-radius:6px;cursor:pointer;">' +
                                 '<span style="font-size:14px;">' + icon + '</span>' +
                                 '<span style="flex:1;font-size:12px;color:' + col + ';' + (done ? 'text-decoration:line-through;' : '') + '">' + escapeHtml(t.title || t.name || 'Task') + reqLabel + '</span>' +
+                                (chip ? '<span style="margin-right:6px;">' + chip + '</span>' : '') +
                                 (t.xcReward || t.xc ? '<span style="font-size:11px;color:#f5c842;font-family:\'Share Tech Mono\',monospace;">' + (t.xcReward || t.xc) + ' XC</span>' : '') + '</div>';
                         });
                         html += '</div>';
@@ -23106,11 +23280,19 @@
             }
             var cps = ppGetCheckpoints();
             var parentCp = pflxFindCheckpoint(cps, proj.checkpointId || proj.roundId);
+            // Include tasks whose projectId matches OR whose id appears in the
+            // project's taskIds list (some hosts wire via project form only).
+            var projTaskIds = Array.isArray(proj.taskIds) ? proj.taskIds : [];
             var tasks = ppGetTasks().filter(function (t) {
-                return t && t.projectId === proj.id && ppItemAssignedToActivePlayer(t);
+                if (!t) return false;
+                var linked = t.projectId === proj.id || projTaskIds.indexOf(t.id) !== -1;
+                return linked && ppItemAssignedToActivePlayer(t);
             });
-            var done = tasks.filter(function (t) { return t.completed || t.status === 'approved'; }).length;
-            var pct = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
+            // Project completion: honors per-assignee expectations.
+            var comp = pflxProjectCompletion(proj);
+            var done = comp.done;
+            var pct = comp.pct;
+            var totalUnits = comp.total;
 
             var crumb = [{ label: 'Home', view: 'home' }];
             if (parentCp) crumb.push({ label: parentCp.name || 'Checkpoint', view: 'checkpoint-detail', data: { id: parentCp.id } });
@@ -23157,9 +23339,15 @@
                     '</div>' +
                     (typeof _mcProgressBarHtml === 'function' ? _mcProgressBarHtml(pct, { height: 12 }) : ppProgressBar(pct, '#a78bfa')) +
                     '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:11px;color:rgba(255,255,255,0.65);">' +
-                        '<span>✓ ' + done + ' of ' + tasks.length + ' tasks approved</span>' +
+                        '<span>✓ ' + done + ' of ' + totalUnits + ' assignments completed</span>' +
                         (xcTotalPool > 0 ? '<span style="color:#f5c842;font-weight:700;">⚡ ' + xcEarnedSoFar.toLocaleString() + ' / ' + xcTotalPool.toLocaleString() + ' XC</span>' : '') +
                     '</div>' +
+                '</div>' +
+                // Start Project Chat — spins up a PFLX Chat group named after
+                // this project with every cohort member as a participant. If
+                // a group with the same name already exists we jump to it.
+                '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">' +
+                    '<button onclick="pflxStartProjectChat(\'' + escapeHtml(proj.id) + '\')" style="background:rgba(0,212,255,0.14);color:#00d4ff;border:1px solid rgba(0,212,255,0.4);border-radius:8px;padding:7px 14px;font-size:11px;font-weight:800;cursor:pointer;letter-spacing:0.06em;">💬 START PROJECT CHAT</button>' +
                 '</div>' +
                 // Meta row — due + urgency
                 (proj.dueDate || proj.endDate
@@ -23170,6 +23358,43 @@
                       '</div>'
                     : '') +
                 '</div></div>';
+
+            // ── COHORT ROSTER ── who's in this project's cohort + per-task status
+            (function () {
+                var roster = pflxProjectRoster(proj);
+                if (!roster || roster.length === 0) return;
+                var byTaskId = {}; comp.tasks.forEach(function (r) { byTaskId[r.id + ':' + (r.playerId || '')] = r; });
+                html += '<div class="mc-card" style="padding:14px 16px;margin-bottom:16px;border-left:3px solid rgba(0,212,255,0.4);">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;">' +
+                        '<span style="font-family:Orbitron,sans-serif;font-size:11px;color:#00d4ff;font-weight:800;letter-spacing:0.12em;">👥 COHORT ROSTER · ' + roster.length + '</span>' +
+                        '<span style="font-size:10px;color:rgba(255,255,255,0.4);">All tasks are visible to everyone; only assignees complete them.</span>' +
+                    '</div>' +
+                    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;">' +
+                    roster.map(function (p) {
+                        var name = escapeHtml(p.brand || p.brandName || p.name || 'Player');
+                        var initial = String(name).substr(0, 1).toUpperCase();
+                        var avatar = p.image
+                            ? '<img src="' + escapeHtml(p.image) + '" style="width:32px;height:32px;border-radius:50%;object-fit:cover;flex-shrink:0;">'
+                            : '<div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,rgba(0,212,255,0.3),rgba(139,92,246,0.2));display:flex;align-items:center;justify-content:center;color:#f0f0ff;font-weight:800;font-size:14px;flex-shrink:0;">' + initial + '</div>';
+                        // Count tasks assigned to this player + how many done.
+                        var totalMine = 0, doneMine = 0;
+                        comp.tasks.forEach(function (r) {
+                            if (r.playerId === p.id) { totalMine++; if (r.done) doneMine++; }
+                            else if (!r.playerId) { totalMine++; if (r.done) doneMine++; } // shared task counts too
+                        });
+                        var pctMine = totalMine ? Math.round(100 * doneMine / totalMine) : 0;
+                        var me = (window.activeSession || {}).id === p.id;
+                        return '<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:rgba(255,255,255,0.02);border:1px solid ' + (me ? 'rgba(0,212,255,0.4)' : 'rgba(255,255,255,0.05)') + ';border-radius:10px;">' +
+                            avatar +
+                            '<div style="flex:1;min-width:0;">' +
+                                '<div style="font-size:12px;color:#f0f0ff;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + name + (me ? ' <span style="font-size:9px;color:#00d4ff;">(you)</span>' : '') + '</div>' +
+                                '<div style="font-size:10px;color:' + (pctMine === 100 ? '#22c55e' : 'rgba(255,255,255,0.45)') + ';">' + doneMine + '/' + totalMine + ' done · ' + pctMine + '%</div>' +
+                            '</div>' +
+                        '</div>';
+                    }).join('') +
+                    '</div>' +
+                '</div>';
+            })();
 
             if (!tasks.length) {
                 html += '<div class="mc-card" style="text-align:center;padding:30px;color:rgba(255,255,255,0.3);">No tasks in this project yet.</div>';
@@ -23200,14 +23425,18 @@
                     var xcChip = (t.xcReward || t.xc)
                         ? '<span style="background:rgba(245,200,66,0.16);color:#f5c842;padding:4px 9px;border-radius:10px;font-size:11px;font-weight:800;border:1px solid rgba(245,200,66,0.4);white-space:nowrap;box-shadow:0 0 8px rgba(245,200,66,0.14);">⚡ ' + (t.xcReward || t.xc) + '</span>'
                         : '';
-                    html += '<div onclick="ppNav(\'task-detail\',{id:\'' + (t.id || '') + '\'})" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px;margin-bottom:8px;cursor:pointer;transition:background 0.15s ease;" onmouseover="this.style.background=\'rgba(30,30,42,0.7)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.02)\'">' +
+                    var assigneeChip = pflxAssigneeChipHtml(t, { showWhenAll: false });
+                    var pid = (window.activeSession || {}).id;
+                    var notMine = pflxTaskAssignees(t).length > 0 && !pflxTaskIsMine(t, pid);
+                    var rowOpacity = notMine ? 'opacity:0.72;' : '';
+                    html += '<div onclick="ppNav(\'task-detail\',{id:\'' + (t.id || '') + '\'})" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px;margin-bottom:8px;cursor:pointer;transition:background 0.15s ease;' + rowOpacity + '" onmouseover="this.style.background=\'rgba(30,30,42,0.7)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.02)\'">' +
                         checkboxHtml + priorityFlag +
                         '<div style="flex:1;min-width:0;">' +
                             '<div style="font-size:13px;color:' + (isApproved ? 'rgba(255,255,255,0.55)' : '#f0f0ff') + ';font-weight:700;line-height:1.3;' + (isApproved ? 'text-decoration:line-through;' : '') + '">' + escapeHtml(t.title || t.name || 'Task') + '</div>' +
                             (t.description ? '<div style="font-size:11px;color:rgba(255,255,255,0.45);line-height:1.4;margin-top:3px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;">' + escapeHtml(String(t.description).substring(0, 120)) + '</div>' : '') +
                         '</div>' +
                         '<div style="display:flex;gap:6px;align-items:center;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">' +
-                            dueChip + xcChip +
+                            (assigneeChip || '') + dueChip + xcChip +
                         '</div>' +
                     '</div>';
                 });
@@ -26217,9 +26446,15 @@
                 cohortDiv.innerHTML = mcCohortGroups.length === 0 ? '<span style="font-size:11px;color:rgba(255,255,255,0.25);">No cohort groups defined</span>' :
                     mcCohortGroups.map(function(g) {
                         return '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;">' +
-                            '<input type="checkbox" class="mc-task-cohort-cb" value="' + g.id + '"> ' + escapeHtml(g.name) + '</label>';
+                            '<input type="checkbox" class="mc-task-cohort-cb" value="' + g.id + '" onchange="mcRenderTaskAssignedPlayers()"> ' + escapeHtml(g.name) + '</label>';
                     }).join('');
             }
+            // Wire player-assignment renderer so it can react to cohort changes.
+            // Reset priming flag so the edit target's saved assignedPlayers
+            // is folded back in on this render.
+            var _playerList = document.getElementById('mc-task-players');
+            if (_playerList) _playerList.dataset.primed = '';
+            setTimeout(mcRenderTaskAssignedPlayers, 0);
 
             if (index >= 0 && mcTasks[index]) {
                 var t = mcTasks[index];
@@ -27318,6 +27553,59 @@
         }
         window.mcTaskRecalcRewardTotal = mcTaskRecalcRewardTotal;
 
+        // Render the individual-player assignment checkbox list inside the
+        // task form. Reads the current cohort selections + search box, then
+        // shows every player who belongs to any selected cohort (by name).
+        // If no cohorts are selected yet, shows every player. Empty list of
+        // checked players saves as [] and means "everyone in the cohort".
+        window.mcRenderTaskAssignedPlayers = function () {
+            var list = document.getElementById('mc-task-players');
+            if (!list) return;
+            var checkedCohortIds = [];
+            document.querySelectorAll('.mc-task-cohort-cb:checked').forEach(function (cb) { checkedCohortIds.push(cb.value); });
+            // Cohort ids → cohort names via mcCohortGroups. Player.cohort is stored as name.
+            var cohortNames = [];
+            (mcCohortGroups || []).forEach(function (g) {
+                if (checkedCohortIds.indexOf(g.id) !== -1) cohortNames.push(g.name);
+            });
+            var pool = (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) ? mcPlayers : [];
+            var scoped = cohortNames.length
+                ? pool.filter(function (p) { return p && cohortNames.indexOf(p.cohort) !== -1 && (p.role || 'player') === 'player'; })
+                : pool.filter(function (p) { return p && (p.role || 'player') === 'player'; });
+            var q = (document.getElementById('mc-task-players-search')?.value || '').toLowerCase().trim();
+            if (q) {
+                scoped = scoped.filter(function (p) {
+                    var name = String(p.brand || p.brandName || p.name || '').toLowerCase();
+                    return name.indexOf(q) !== -1;
+                });
+            }
+            // Preserve current selection through re-renders.
+            var priorSelected = new Set();
+            list.querySelectorAll('.mc-task-player-cb:checked').forEach(function (cb) { priorSelected.add(cb.value); });
+            // Merge in the edit-target's saved assignedPlayers on first paint.
+            var editTgt = mcTaskEditIndex >= 0 ? mcTasks[mcTaskEditIndex] : null;
+            if (list.dataset.primed !== '1' && editTgt && Array.isArray(editTgt.assignedPlayers)) {
+                editTgt.assignedPlayers.forEach(function (pid) { priorSelected.add(pid); });
+                list.dataset.primed = '1';
+            }
+            if (scoped.length === 0) {
+                list.innerHTML = '<div style="padding:10px;color:rgba(255,255,255,0.35);font-size:11px;text-align:center;">' + (cohortNames.length ? 'No players in the selected cohort(s).' : 'Pick a cohort above to filter.') + '</div>';
+                return;
+            }
+            list.innerHTML = scoped.map(function (p) {
+                var checked = priorSelected.has(p.id);
+                var name = escapeHtml(p.brand || p.brandName || p.name || 'Player');
+                var cohortChip = p.cohort ? '<span style="font-size:9px;color:rgba(255,255,255,0.35);margin-left:6px;">' + escapeHtml(p.cohort) + '</span>' : '';
+                return '<label style="display:flex;align-items:center;gap:8px;padding:4px 6px;cursor:pointer;font-size:11px;color:#e0e6ff;border-radius:4px;transition:background 0.12s;" onmouseenter="this.style.background=\'rgba(255,255,255,0.03)\'" onmouseleave="this.style.background=\'transparent\'">' +
+                    '<input type="checkbox" class="mc-task-player-cb" value="' + escapeHtml(p.id) + '"' + (checked ? ' checked' : '') + ' style="accent-color:#a78bfa;">' +
+                    '<span style="flex:1;">' + name + cohortChip + '</span>' +
+                    '</label>';
+            }).join('');
+        };
+        window.mcTaskAssignedPlayersClear = function () {
+            document.querySelectorAll('.mc-task-player-cb:checked').forEach(function (cb) { cb.checked = false; });
+        };
+
         function mcSaveTaskForm() {
             var title = (document.getElementById('mc-task-title')?.value || '').trim();
             if (!title) { pflxPlaySfx('error'); alert('Task title is required.'); return; }
@@ -27325,6 +27613,8 @@
             pflxPlaySfx('save');
             var assignedTo = [];
             document.querySelectorAll('.mc-task-cohort-cb:checked').forEach(function(cb) { assignedTo.push(cb.value); });
+            var assignedPlayers = [];
+            document.querySelectorAll('.mc-task-player-cb:checked').forEach(function(cb) { assignedPlayers.push(cb.value); });
 
             var rewardBadges = [];
             document.querySelectorAll('.mc-task-badge-cb:checked').forEach(function(cb) { rewardBadges.push(cb.value); });
@@ -27387,6 +27677,12 @@
                 completionMode: document.getElementById('mc-task-mode')?.value || 'one-time',
                 requirement: document.getElementById('mc-task-requirement')?.value || 'required',
                 assignedTo: assignedTo,
+                // Individual-player assignment WITHIN the cohort. Empty array
+                // means "everyone in the assigned cohort(s)". A specific list
+                // means only those players are expected to submit — but every
+                // cohort peer still sees the task (visibility is by cohort;
+                // assignment is by expectation).
+                assignedPlayers: assignedPlayers,
                 link: document.getElementById('mc-task-link')?.value || '',
                 status: document.getElementById('mc-task-status')?.value || 'open',
                 priority: document.getElementById('mc-task-priority')?.value || (mcTaskEditIndex >= 0 && mcTasks[mcTaskEditIndex] ? (mcTasks[mcTaskEditIndex].priority || 'normal') : 'normal'),
@@ -32651,11 +32947,144 @@
                         '<div style="font-size:11px;color:rgba(255,255,255,0.4);">' + escapeHtml(cg.description || '') + '</div></div>' +
                         '<span style="font-size:13px;color:var(--cyan);font-weight:700;">' + count + ' players</span></div>' +
                         '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">' +
+                        '<button class="mc-btn" style="font-size:10px;padding:4px 10px;color:#22c55e;border-color:rgba(34,197,94,0.4);" onclick="mcShowCohortProgress(' + i + ')">📊 View Progress</button>' +
                         '<button class="mc-btn" style="font-size:10px;padding:4px 10px;" onclick="mcEditCohortGroup(' + i + ')">Edit</button>' +
                         '<button class="mc-btn" style="font-size:10px;padding:4px 10px;color:#00d4ff;border-color:rgba(0,212,255,0.4);" onclick="mcEditCohortChat(' + i + ')">💬 Chat Controls</button>' +
                         '<button class="mc-btn" style="font-size:10px;padding:4px 10px;color:#ef4444;border-color:rgba(239,68,68,0.3);" onclick="mcDeleteCohortGroup(' + i + ')">Delete</button></div></div>';
                 }).join('');
         }
+        // ── Cohort progress dashboard ──
+        // Host clicks "View Progress" on any cohort card and gets a modal
+        // that lists every Checkpoint / Project / Task the cohort has been
+        // assigned, with roll-up bars. Cross-references cohort NAMES and
+        // group IDs so it works with either tagging style.
+        window.mcShowCohortProgress = function (i) {
+            var cg = mcCohortGroups[i]; if (!cg) return;
+            var cohortName = cg.name;
+            var cohortId = cg.id;
+            // Filter helper: does this item target this cohort?
+            function targetsThis(item) {
+                if (!item) return false;
+                if (item.assignedTo === 'all') return true;
+                if (item.cohort === cohortName || item.cohort === cohortId) return true;
+                if (Array.isArray(item.assignedTo) && (item.assignedTo.indexOf(cohortName) !== -1 || item.assignedTo.indexOf(cohortId) !== -1)) return true;
+                if (Array.isArray(item.cohorts) && (item.cohorts.indexOf(cohortName) !== -1 || item.cohorts.indexOf(cohortId) !== -1)) return true;
+                if (Array.isArray(item.cohortIds) && (item.cohortIds.indexOf(cohortName) !== -1 || item.cohortIds.indexOf(cohortId) !== -1)) return true;
+                return false;
+            }
+            var members = (mcPlayers || []).filter(function (p) { return p && p.cohort === cohortName && (p.role || 'player') === 'player'; });
+            var checkpoints = (typeof mcCheckpoints !== 'undefined' ? mcCheckpoints : []).filter(targetsThis);
+            var projects = (typeof mcProjects !== 'undefined' ? mcProjects : []).filter(targetsThis);
+            var tasks = (typeof mcTasks !== 'undefined' ? mcTasks : []).filter(targetsThis);
+
+            function cpProgress(cp) {
+                var progFn = (typeof _mcCheckpointProgress === 'function') ? _mcCheckpointProgress(cp) : null;
+                if (progFn) return progFn;
+                return { approved: 0, total: 0, pct: cp.progress || 0 };
+            }
+            function tStatusIcon(t) {
+                if (t.status === 'approved' || t.completed) return '<span style="color:#22c55e;">✓</span>';
+                if (t.status === 'submitted') return '<span style="color:#f5a500;">◐</span>';
+                if (t.status === 'rejected') return '<span style="color:#ef4444;">✗</span>';
+                return '<span style="color:rgba(255,255,255,0.35);">◯</span>';
+            }
+            function progBar(pct, color) {
+                color = color || '#00d4ff';
+                return '<div style="height:8px;background:rgba(255,255,255,0.05);border-radius:4px;overflow:hidden;margin-top:6px;">' +
+                    '<div style="height:100%;width:' + pct + '%;background:' + color + ';border-radius:4px;transition:width 0.3s;"></div>' +
+                '</div>';
+            }
+            function memberChip(pid) {
+                var p = pflxLookupPlayer(pid);
+                if (!p) return '<span style="font-size:9px;color:rgba(255,255,255,0.35);">' + escapeHtml(String(pid).slice(0, 8)) + '</span>';
+                var name = escapeHtml(p.brand || p.brandName || p.name || 'Player');
+                return '<span style="font-size:9px;background:rgba(139,92,246,0.1);color:#c4b5fd;padding:2px 7px;border-radius:8px;border:1px solid rgba(139,92,246,0.3);letter-spacing:0.04em;">👤 ' + name + '</span>';
+            }
+
+            var overlay = document.createElement('div');
+            overlay.id = 'mc-cohort-progress-overlay';
+            overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.75);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;font-family:Rajdhani,sans-serif;';
+            overlay.onclick = function (ev) { if (ev.target === overlay) overlay.remove(); };
+
+            // Overall roll-up
+            var totalTasks = tasks.length;
+            var approvedTasks = tasks.filter(function (t) { return t.status === 'approved' || t.completed; }).length;
+            var overallPct = totalTasks ? Math.round(100 * approvedTasks / totalTasks) : 0;
+            var totalProjPct = 0;
+            projects.forEach(function (proj) { totalProjPct += pflxProjectCompletion(proj).pct; });
+            var projMeanPct = projects.length ? Math.round(totalProjPct / projects.length) : 0;
+
+            var cpHtml = checkpoints.length
+                ? checkpoints.map(function (cp) {
+                    var prog = cpProgress(cp);
+                    return '<div style="padding:12px 14px;background:rgba(255,255,255,0.02);border:1px solid rgba(0,212,255,0.15);border-radius:10px;margin-bottom:8px;">' +
+                        '<div style="display:flex;justify-content:space-between;align-items:baseline;">' +
+                            '<span style="font-size:13px;color:#f0f0ff;font-weight:700;">◆ ' + escapeHtml(cp.name || 'Checkpoint') + '</span>' +
+                            '<span style="font-size:11px;color:' + (prog.pct === 100 ? '#22c55e' : '#00d4ff') + ';font-family:monospace;font-weight:700;">' + prog.pct + '% · ' + prog.approved + '/' + prog.total + '</span>' +
+                        '</div>' +
+                        progBar(prog.pct, '#00d4ff') +
+                    '</div>';
+                }).join('')
+                : '<div style="color:rgba(255,255,255,0.3);font-size:12px;padding:12px;text-align:center;">No checkpoints assigned to this cohort.</div>';
+
+            var projHtml = projects.length
+                ? projects.map(function (proj) {
+                    var pc = pflxProjectCompletion(proj);
+                    return '<div style="padding:12px 14px;background:rgba(255,255,255,0.02);border:1px solid rgba(139,92,246,0.15);border-radius:10px;margin-bottom:8px;">' +
+                        '<div style="display:flex;justify-content:space-between;align-items:baseline;">' +
+                            '<span style="font-size:13px;color:#f0f0ff;font-weight:700;">📁 ' + escapeHtml(proj.name || proj.title || 'Project') + '</span>' +
+                            '<span style="font-size:11px;color:' + (pc.pct === 100 ? '#22c55e' : '#c4b5fd') + ';font-family:monospace;font-weight:700;">' + pc.pct + '% · ' + pc.done + '/' + pc.total + '</span>' +
+                        '</div>' +
+                        progBar(pc.pct, '#a78bfa') +
+                    '</div>';
+                }).join('')
+                : '<div style="color:rgba(255,255,255,0.3);font-size:12px;padding:12px;text-align:center;">No projects assigned to this cohort.</div>';
+
+            var taskHtml = tasks.length
+                ? tasks.map(function (t) {
+                    var assignees = pflxTaskAssignees(t);
+                    var chips = assignees.length ? assignees.map(memberChip).join(' ') : '<span style="font-size:9px;background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.5);padding:2px 7px;border-radius:8px;">EVERYONE</span>';
+                    return '<div style="padding:10px 12px;background:rgba(255,255,255,0.015);border:1px solid rgba(255,255,255,0.05);border-radius:8px;margin-bottom:6px;display:flex;align-items:center;gap:10px;">' +
+                        '<span style="font-size:14px;">' + tStatusIcon(t) + '</span>' +
+                        '<div style="flex:1;min-width:0;">' +
+                            '<div style="font-size:12px;color:#f0f0ff;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(t.title || 'Task') + '</div>' +
+                            '<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">' + chips + '</div>' +
+                        '</div>' +
+                        (t.xcReward || t.xc ? '<span style="font-size:10px;color:#f5c842;font-family:monospace;font-weight:700;flex-shrink:0;">⚡ ' + (t.xcReward || t.xc) + '</span>' : '') +
+                    '</div>';
+                }).join('')
+                : '<div style="color:rgba(255,255,255,0.3);font-size:12px;padding:12px;text-align:center;">No tasks assigned to this cohort.</div>';
+
+            overlay.innerHTML = '<div style="width:min(780px,94vw);max-height:88vh;background:linear-gradient(180deg, rgba(18,20,32,0.98), rgba(12,14,22,0.98));border:1px solid rgba(34,197,94,0.4);border-radius:16px;box-shadow:0 30px 80px rgba(0,0,0,0.85), 0 0 60px rgba(34,197,94,0.15);display:flex;flex-direction:column;overflow:hidden;">' +
+                '<div style="display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid rgba(255,255,255,0.06);">' +
+                    '<span style="font-family:Orbitron,sans-serif;font-size:13px;color:#22c55e;font-weight:800;letter-spacing:0.14em;">📊 COHORT PROGRESS</span>' +
+                    '<span style="flex:1;font-size:14px;color:#f0f0ff;font-weight:700;">' + escapeHtml(cohortName) + '</span>' +
+                    '<span style="font-size:11px;color:rgba(255,255,255,0.4);">' + members.length + ' player' + (members.length === 1 ? '' : 's') + '</span>' +
+                    '<button onclick="document.getElementById(\'mc-cohort-progress-overlay\').remove()" style="background:transparent;border:none;color:rgba(255,255,255,0.5);font-size:20px;cursor:pointer;line-height:1;">✕</button>' +
+                '</div>' +
+                '<div style="padding:16px 20px;border-bottom:1px solid rgba(255,255,255,0.04);display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">' +
+                    '<div style="padding:10px;background:rgba(0,212,255,0.06);border:1px solid rgba(0,212,255,0.25);border-radius:10px;">' +
+                        '<div style="font-size:9px;color:rgba(255,255,255,0.4);letter-spacing:0.1em;">CHECKPOINTS</div>' +
+                        '<div style="font-size:22px;font-weight:900;color:#00d4ff;font-family:Orbitron,sans-serif;">' + checkpoints.length + '</div>' +
+                    '</div>' +
+                    '<div style="padding:10px;background:rgba(139,92,246,0.06);border:1px solid rgba(139,92,246,0.25);border-radius:10px;">' +
+                        '<div style="font-size:9px;color:rgba(255,255,255,0.4);letter-spacing:0.1em;">PROJECTS · MEAN</div>' +
+                        '<div style="font-size:22px;font-weight:900;color:#c4b5fd;font-family:Orbitron,sans-serif;">' + projects.length + ' · ' + projMeanPct + '%</div>' +
+                    '</div>' +
+                    '<div style="padding:10px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.25);border-radius:10px;">' +
+                        '<div style="font-size:9px;color:rgba(255,255,255,0.4);letter-spacing:0.1em;">TASKS · APPROVED</div>' +
+                        '<div style="font-size:22px;font-weight:900;color:#22c55e;font-family:Orbitron,sans-serif;">' + approvedTasks + '/' + totalTasks + ' · ' + overallPct + '%</div>' +
+                    '</div>' +
+                '</div>' +
+                '<div style="flex:1;overflow-y:auto;padding:16px 20px;">' +
+                    '<div style="font-family:Orbitron,sans-serif;font-size:10px;color:rgba(0,212,255,0.7);letter-spacing:0.14em;margin-bottom:10px;">◆ CHECKPOINTS</div>' + cpHtml +
+                    '<div style="font-family:Orbitron,sans-serif;font-size:10px;color:rgba(139,92,246,0.7);letter-spacing:0.14em;margin:16px 0 10px;">📁 PROJECTS</div>' + projHtml +
+                    '<div style="font-family:Orbitron,sans-serif;font-size:10px;color:rgba(34,197,94,0.7);letter-spacing:0.14em;margin:16px 0 10px;">📋 TASKS</div>' + taskHtml +
+                '</div>' +
+            '</div>';
+            document.body.appendChild(overlay);
+        };
+
         window.mcEditCohortChat = function (i) {
             var cg = mcCohortGroups[i]; if (!cg) return;
             var chat = cg.chat || {};
