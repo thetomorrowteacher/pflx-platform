@@ -19900,6 +19900,10 @@
         let mcOnboarding = {};
         let mcSessions = [];
         let mcPflxRanks = [];
+        // Templates — reusable Project / Checkpoint blueprints. Every entry
+        // has { id, type: 'project'|'checkpoint', name, data (the stripped
+        // template payload), createdAt, createdBy }.
+        let mcTemplates = [];
 
         // ── COIN_CATEGORIES — Badge catalog synced from X-Coin ──────
         const MC_COIN_CATEGORIES = [
@@ -20203,6 +20207,7 @@
                     if (!Array.isArray(r.badgeTypeRequirements)) r.badgeTypeRequirements = [];
                 });
                 mcSessions = JSON.parse(localStorage.getItem('pflx_mc_sessions') || '[]');
+                mcTemplates = JSON.parse(localStorage.getItem('pflx_mc_templates') || '[]');
             } catch(e) { console.warn('[MC] Data load error', e); }
 
             // Seed-on-empty — ONLY if this device has never been seeded before.
@@ -20418,6 +20423,7 @@
             if (type === 'onboarding' || type === 'all') { try { localStorage.setItem('pflx_mc_onboarding', JSON.stringify(mcOnboarding)); } catch(e){} }
             if (type === 'pflxranks' || type === 'all') _mcSetItemSafe('pflx_mc_pflxranks', mcPflxRanks);
             if (type === 'sessions' || type === 'all') _mcSetItemSafe('pflx_mc_sessions', mcSessions);
+            if (type === 'templates' || type === 'all') _mcSetItemSafe('pflx_mc_templates', mcTemplates);
             // Stomp guard 3 — mark the local-write timestamp so the realtime
             // ingest path can refuse stale cloud echoes for the next few
             // seconds. _mcApplyingCloud is true while the cloud ingest path
@@ -20537,7 +20543,7 @@
         // ═══════════════════════════════════════════════════════════════════
         var MC_CLOUD_TYPES = ['players','checkpoints','tasks','projects','seasons',
             'announcements','badges','jobs','pitches','studios','cohortgroups',
-            'modifiers','gameconfig','onboarding','pflxranks','sessions'];
+            'modifiers','gameconfig','onboarding','pflxranks','sessions','templates'];
         var _mcApplyingCloud = false;     // true while a cloud pull is writing in
         var _mcCloudQueue = {};
         var _mcCloudTimer = null;
@@ -20570,6 +20576,7 @@
                 case 'onboarding': return mcOnboarding;
                 case 'pflxranks': return mcPflxRanks;
                 case 'sessions': return mcSessions;
+                case 'templates': return mcTemplates;
                 default: return undefined;
             }
         }
@@ -20591,6 +20598,7 @@
                 case 'onboarding': mcOnboarding = items; break;
                 case 'pflxranks': mcPflxRanks = items; break;
                 case 'sessions': mcSessions = items; break;
+                case 'templates': mcTemplates = items; break;
                 default: return false;
             }
             return true;
@@ -24598,6 +24606,7 @@
                     '<div style="display:flex;gap:10px;flex-wrap:wrap;padding-top:14px;border-top:1px solid rgba(' + accentRgb + ',0.18);">' +
                     '<button class="mc-btn" style="padding:8px 18px;font-size:11px;font-weight:700;" onclick="mcEditCheckpoint(' + i + ')">Edit</button>' +
                     '<button class="mc-btn" style="padding:8px 18px;font-size:11px;font-weight:700;" onclick="mcDuplicateCheckpoint(' + i + ')">Duplicate</button>' +
+                    '<button class="mc-btn" style="padding:8px 14px;font-size:11px;font-weight:700;background:rgba(245,200,66,0.1);color:#f5c842;border:1px solid rgba(245,200,66,0.35);border-radius:8px;cursor:pointer;" title="Save as Template" onclick="mcSaveAsTemplate(&quot;checkpoint&quot;,' + i + ')">📄 Template</button>' +
                     '<button class="mc-btn mc-btn-red" style="padding:8px 18px;font-size:11px;font-weight:700;" onclick="mcDeleteCheckpoint(' + i + ')">Delete</button>' +
                     '</div>' +
                     '</div>' +
@@ -27108,6 +27117,166 @@
         window._mcApplyStreakBonus = _mcApplyStreakBonus;
         window._mcResetStreak = _mcResetStreak;
 
+        // ═══════════════════════════════════════════════════════════════════
+        // TEMPLATES — save any Project or Checkpoint as a reusable blueprint,
+        // spawn a fresh one from a template. Templates are cloud-synced so a
+        // host who saves "6-week Internship" on one browser sees it on
+        // another.
+        // ═══════════════════════════════════════════════════════════════════
+        // Fields stripped when saving as template (per-run state, not reusable):
+        //   Project: id, createdAt, createdBy, coopPlayers, phaseSubmissions,
+        //            subtasks[].completed*, _prevStatus, _rewardedAt
+        //   Checkpoint: id, createdAt, createdBy, taskIds, projectIds, jobIds,
+        //                _cpRewardedAt (child links are per-instance)
+        function _mcStripForTemplate(kind, obj) {
+            if (!obj) return {};
+            var out = JSON.parse(JSON.stringify(obj));
+            delete out.id; delete out.createdAt; delete out.createdBy;
+            delete out._prevStatus; delete out._rewardedAt; delete out._cpRewardedAt;
+            delete out.approvedAt; delete out.rejectedAt; delete out.completedAt;
+            if (kind === 'project') {
+                delete out.coopPlayers;
+                delete out.phaseSubmissions;
+                delete out.startedAt;
+                delete out.status;
+                if (Array.isArray(out.subtasks)) {
+                    out.subtasks = out.subtasks.map(function (s) { return Object.assign({}, s, { completed: false, completedAt: null, completedBy: null }); });
+                }
+            }
+            if (kind === 'checkpoint') {
+                out.taskIds = [];
+                out.projectIds = [];
+                out.jobIds = [];
+                out.status = 'upcoming';
+                delete out.startedAt;
+            }
+            return out;
+        }
+        function mcSaveAsTemplate(kind, index) {
+            var srcArr = (kind === 'project') ? mcProjects : mcCheckpoints;
+            var src = srcArr[index];
+            if (!src) return;
+            var suggested = (kind === 'project' ? (src.name || src.title) : src.name) || 'Untitled';
+            var tplName = prompt('Template name (used when spawning new ' + kind + 's):', suggested + ' Template');
+            if (!tplName) return;
+            var stripped = _mcStripForTemplate(kind, src);
+            mcTemplates.push({
+                id: 'tpl-' + kind + '-' + Date.now(),
+                type: kind,
+                name: tplName,
+                data: stripped,
+                createdAt: new Date().toISOString(),
+                createdBy: (window.activeSession && window.activeSession.brand) || 'host'
+            });
+            mcSaveData('templates');
+            if (typeof pflxToast === 'function') pflxToast('Saved as template: ' + tplName, 'success');
+        }
+        function mcSpawnFromTemplate(templateId) {
+            var tpl = mcTemplates.find(function (t) { return t && t.id === templateId; });
+            if (!tpl) return;
+            var freshName = prompt('Name for the new ' + tpl.type + ':', tpl.data.name || tpl.name);
+            if (!freshName) return;
+            var newObj = JSON.parse(JSON.stringify(tpl.data));
+            if (tpl.type === 'project') {
+                newObj.id = 'proj-' + Date.now();
+                newObj.name = freshName;
+                newObj.createdAt = new Date().toISOString().split('T')[0];
+                newObj.createdBy = (window.activeSession && window.activeSession.brand) || 'host';
+                newObj.status = newObj.status || 'planning';
+                mcProjects.push(newObj);
+                mcSaveData('projects');
+                try { mcNav('projects'); } catch (e) {}
+                try { mcRenderProjects(); } catch (e) {}
+            } else if (tpl.type === 'checkpoint') {
+                newObj.id = 'cp-' + Date.now();
+                newObj.name = freshName;
+                newObj.createdAt = new Date().toISOString().split('T')[0];
+                newObj.createdBy = (window.activeSession && window.activeSession.brand) || 'host';
+                mcCheckpoints.push(newObj);
+                mcSaveData('checkpoints');
+                try { mcNav('checkpoints'); } catch (e) {}
+                try { mcRenderCheckpoints(); } catch (e) {}
+            }
+            if (typeof pflxToast === 'function') pflxToast('Created "' + freshName + '" from template', 'success');
+        }
+        function mcDeleteTemplate(templateId) {
+            var idx = mcTemplates.findIndex(function (t) { return t && t.id === templateId; });
+            if (idx < 0) return;
+            if (!confirm('Delete template "' + (mcTemplates[idx].name || 'Untitled') + '"?')) return;
+            mcTemplates.splice(idx, 1);
+            mcSaveData('templates');
+            try { pflxOpenTemplatePicker(); } catch (e) {}
+        }
+        // Modal-based template picker. Called from + New Project / + New
+        // Checkpoint entry points and from the command palette.
+        function pflxOpenTemplatePicker(filterKind) {
+            var existing = document.getElementById('mc-template-picker-overlay');
+            if (existing) existing.remove();
+            var templates = (mcTemplates || []).filter(function (t) { return t && (!filterKind || t.type === filterKind); });
+            var ov = document.createElement('div');
+            ov.id = 'mc-template-picker-overlay';
+            ov.style.cssText = 'position:fixed;inset:0;z-index:999995;background:rgba(2,6,12,0.75);backdrop-filter:blur(6px);display:flex;align-items:flex-start;justify-content:center;padding-top:10vh;font-family:Rajdhani,sans-serif;';
+            var body = templates.length === 0
+                ? '<div style="padding:36px 20px;text-align:center;color:rgba(255,255,255,0.4);font-size:13px;">No templates yet. From any Project or Checkpoint card, use <strong>📄 Save as Template</strong>.</div>'
+                : templates.map(function (t) {
+                    var typeLabel = t.type === 'project' ? '🎬 Project' : '◆ Checkpoint';
+                    var typeColor = t.type === 'project' ? '#c4b5fd' : '#00d4ff';
+                    return '<div style="padding:14px 16px;background:rgba(22,22,31,0.7);border:1px solid rgba(255,255,255,0.08);border-radius:12px;margin-bottom:8px;display:flex;align-items:center;gap:14px;">' +
+                        '<div style="flex:1;min-width:0;">' +
+                            '<div style="font-family:Orbitron,sans-serif;font-size:10px;font-weight:800;color:' + typeColor + ';letter-spacing:0.1em;margin-bottom:4px;">' + typeLabel + '</div>' +
+                            '<div style="font-size:14px;color:#f0f0ff;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(t.name || 'Untitled Template') + '</div>' +
+                        '</div>' +
+                        '<button onclick="mcSpawnFromTemplate(&quot;' + escapeHtml(t.id) + '&quot;);document.getElementById(\'mc-template-picker-overlay\').remove();" style="padding:8px 14px;font-size:11px;font-weight:800;background:rgba(34,197,94,0.14);color:#22c55e;border:1px solid rgba(34,197,94,0.4);border-radius:8px;cursor:pointer;letter-spacing:0.06em;">✨ USE</button>' +
+                        '<button onclick="mcDeleteTemplate(&quot;' + escapeHtml(t.id) + '&quot;);" style="padding:8px 12px;font-size:11px;background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:8px;cursor:pointer;">🗑</button>' +
+                    '</div>';
+                }).join('');
+            ov.innerHTML =
+                '<div style="width:min(560px,92vw);background:linear-gradient(180deg, rgba(18,20,32,0.98), rgba(12,14,22,0.98));border:1px solid rgba(0,212,255,0.4);border-radius:18px;box-shadow:0 30px 80px rgba(0,0,0,0.8), 0 0 60px rgba(0,212,255,0.18);overflow:hidden;">' +
+                    '<div style="display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid rgba(255,255,255,0.06);">' +
+                        '<span style="font-family:Orbitron,sans-serif;font-size:12px;color:#00d4ff;font-weight:800;letter-spacing:0.14em;">📄 TEMPLATES</span>' +
+                        '<span style="flex:1;font-size:11px;color:rgba(255,255,255,0.4);">Reusable Project / Checkpoint blueprints</span>' +
+                        '<button onclick="document.getElementById(\'mc-template-picker-overlay\').remove()" style="background:transparent;border:none;color:rgba(255,255,255,0.4);font-size:20px;cursor:pointer;">✕</button>' +
+                    '</div>' +
+                    '<div style="max-height:60vh;overflow-y:auto;padding:12px 16px;">' + body + '</div>' +
+                '</div>';
+            ov.addEventListener('click', function (e) { if (e.target === ov) ov.remove(); });
+            document.body.appendChild(ov);
+        }
+        window.mcSaveAsTemplate = mcSaveAsTemplate;
+        window.mcSpawnFromTemplate = mcSpawnFromTemplate;
+        window.mcDeleteTemplate = mcDeleteTemplate;
+        window.pflxOpenTemplatePicker = pflxOpenTemplatePicker;
+
+        // ── Host reject flow ──
+        // Marks the submitted task as rejected, records an optional host note,
+        // resets the submitter's streak to zero, and broadcasts so the player
+        // sees the state change immediately.
+        function mcRejectTask(index, note) {
+            var task = mcTasks[index];
+            if (!task) return;
+            var reason = (typeof note === 'string') ? note : (prompt('Reason for rejecting this submission (optional, shared with the player):') || '');
+            task.status = 'rejected';
+            task.rejectedAt = new Date().toISOString().split('T')[0];
+            if (reason) task.rejectionReason = reason;
+            // Resolve submitter — same 3-shape chain as approve.
+            var submitterId = (task.submission && task.submission.submittedBy) || null;
+            if (!submitterId && Array.isArray(task.submissions) && task.submissions.length > 0) {
+                var last = task.submissions[task.submissions.length - 1];
+                submitterId = last && (last.playerId || last.submittedBy);
+            }
+            if (!submitterId && Array.isArray(task.assignedTo) && task.assignedTo.length === 1) submitterId = task.assignedTo[0];
+            if (!submitterId && task.playerId) submitterId = task.playerId;
+            // Streak reset
+            try { _mcResetStreak(submitterId); } catch (e) {}
+            mcSaveData('tasks');
+            try { mcRenderTasks(); } catch (e) {}
+            try { if (typeof pflxToast === 'function') pflxToast('Task rejected — streak reset', 'warning'); } catch (e) {}
+            try {
+                if (typeof mcBroadcastToApps === 'function') mcBroadcastToApps('pflx_task_rejected', { taskId: task.id, playerId: submitterId, reason: reason });
+            } catch (e) {}
+        }
+        window.mcRejectTask = mcRejectTask;
+
         function mcApproveTask(index) {
             pflxPlaySfx('success');
             var task = mcTasks[index];
@@ -27475,6 +27644,7 @@
                         ? '<div style="padding:6px 12px;font-size:11px;background:rgba(34,197,94,0.05);color:#22c55e;border:1px dashed rgba(34,197,94,0.35);border-radius:8px;flex:1;min-width:90px;text-align:center;letter-spacing:0.04em;font-weight:700;">✓ COMPLETED</div>'
                         : '') +
                     '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:60px;" onclick="mcEditProject(' + i + ')">Edit</button>' +
+                    '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(245,200,66,0.08);color:#f5c842;border:1px solid rgba(245,200,66,0.3);border-radius:8px;cursor:pointer;min-width:36px;" title="Save as Template" onclick="mcSaveAsTemplate(&quot;project&quot;,' + i + ')">📄</button>' +
                     '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:60px;" onclick="mcDeleteProject(' + i + ')">Delete</button>' +
                     '</div>' +
                     '</div>' +  // close padded content wrapper
@@ -51741,6 +51911,7 @@ RESPONSE RULES:
             actions.push({ label: 'New Checkpoint', icon: '＋', group: 'CREATE', keywords: 'new create add checkpoint', run: function () { try { mcNav('checkpoints'); mcCreateCheckpoint(); } catch (e) {} } });
             actions.push({ label: 'New Project',    icon: '＋', group: 'CREATE', keywords: 'new create add project', run: function () { try { mcNav('projects'); mcShowProjectForm(-1); } catch (e) {} } });
             actions.push({ label: 'New Task',       icon: '＋', group: 'CREATE', keywords: 'new create add task', run: function () { try { mcNav('tasks'); mcShowTaskForm(-1); } catch (e) {} } });
+            actions.push({ label: 'New from Template…', icon: '📄', group: 'CREATE', keywords: 'template new from spawn', run: function () { try { pflxOpenTemplatePicker(); } catch (e) {} } });
             // Item jumps
             try {
                 (mcCheckpoints || []).forEach(function (cp) { actions.push({ label: cp.name || 'Untitled Checkpoint', icon: '🏁', group: 'CHECKPOINTS', keywords: (cp.name || '') + ' checkpoint', run: function () { mcJumpToItem('checkpoint', cp.id); } }); });
