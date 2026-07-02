@@ -8401,9 +8401,28 @@
                                             <input type="date" id="mc-task-due" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
                                         </div>
                                     </div>
-                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                                    <!-- Core Pathway node picker.
+                                         A single grouped dropdown lists every Core Pathway with
+                                         its live node catalog. Picking a node auto-fills the
+                                         hidden pathway / node-name / node-type fields so the
+                                         cross-app hooks (pflxSyncBus 'cp:nodeLinked' + the
+                                         pathway-portal module_saves cascade) keep working.
+                                         Custom option keeps the free-text field open for
+                                         one-off assignments that don't map to a catalog node. -->
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Assign a Core Pathway Node</label>
+                                        <select id="mc-task-pathway-node-select" onchange="mcTaskOnPathwayNodePick()" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                            <option value="">— None —</option>
+                                            <option value="__custom__">✎ Custom (type below)</option>
+                                        </select>
+                                        <div id="mc-task-pathway-node-hint" style="font-size:10px;color:rgba(255,255,255,0.35);margin-top:6px;">Pick a live pathway node. Player completes the module → task auto-completes.</div>
+                                    </div>
+                                    <!-- Custom pathway + node-name pair — shown only when
+                                         "Custom" is picked above. Kept in the DOM so legacy
+                                         data still round-trips through mcShowTaskForm. -->
+                                    <div id="mc-task-pathway-custom-row" style="display:none;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
                                         <div>
-                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Core Pathway Link</label>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Core Pathway</label>
                                             <select id="mc-task-pathway" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
                                                 <option value="">None</option>
                                                 <option value="content-creator">🎬 Content Creator</option>
@@ -8416,7 +8435,7 @@
                                             </select>
                                         </div>
                                         <div>
-                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Pathway Node</label>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Custom Node Name</label>
                                             <input type="text" id="mc-task-pathway-node" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="e.g. Intro to Media Production">
                                         </div>
                                     </div>
@@ -20610,6 +20629,140 @@
         var MC_CLOUD_TYPES = ['players','checkpoints','tasks','projects','seasons',
             'announcements','badges','jobs','pitches','studios','cohortgroups',
             'modifiers','gameconfig','onboarding','pflxranks','sessions','templates','sprints','automations'];
+
+        // ── Core Pathway node catalog ──
+        // Curated list of the nodes each Core Pathway ships with. Hosts pick
+        // from this list in the Task form to assign "complete this pathway
+        // node/module" as the task. The pathway portal broadcasts
+        // 'pflx_pathway_node_complete' when a player finishes; the parent
+        // shell maps that back to task.nodeId and auto-approves the task.
+        // Overlays: MC_PATHWAY_CATALOG_OVERRIDE (from cloud/localStorage) lets
+        // a host add / edit nodes without shipping a code change.
+        var MC_PATHWAY_CATALOG_BASE = [
+            { id: 'content-creator', name: '🎬 Content Creator', nodes: [
+                { id: 'cc-intro', name: 'Intro to Media Production', type: 'course' },
+                { id: 'cc-storybuilding', name: 'Storybuilding & Storyboarding', type: 'module' },
+                { id: 'cc-video-basics', name: 'Video Editing Foundations', type: 'course' },
+                { id: 'cc-podcast', name: 'Podcast Production 101', type: 'course' },
+                { id: 'cc-social', name: 'Social Media Strategy', type: 'sim' },
+                { id: 'cc-brand', name: 'Personal Brand Design', type: 'game' }
+            ] },
+            { id: '3d-modeler', name: '🎮 3D Modeler', nodes: [
+                { id: '3d-intro', name: 'Intro to 3D Modeling', type: 'course' },
+                { id: '3d-blender', name: 'Blender Foundations', type: 'course' },
+                { id: '3d-sculpt', name: 'Digital Sculpting Basics', type: 'sim' },
+                { id: '3d-lowpoly', name: 'Low-Poly Character Design', type: 'module' },
+                { id: '3d-texturing', name: 'Texturing & UV Unwrapping', type: 'course' },
+                { id: '3d-render', name: 'Lighting & Rendering', type: 'course' }
+            ] },
+            { id: 'sound-designer', name: '🎵 Sound Designer', nodes: [
+                { id: 'sd-intro', name: 'Intro to Sound Design', type: 'course' },
+                { id: 'sd-daw', name: 'DAW Foundations', type: 'course' },
+                { id: 'sd-foley', name: 'Foley for Games', type: 'sim' },
+                { id: 'sd-mix', name: 'Mixing & Mastering', type: 'course' },
+                { id: 'sd-synth', name: 'Synthesis Basics', type: 'sim' }
+            ] },
+            { id: 'digital-artist', name: '🎨 Digital Artist', nodes: [
+                { id: 'da-intro', name: 'Intro to Digital Illustration', type: 'course' },
+                { id: 'da-storyboard', name: 'Storyboard Fundamentals', type: 'module' },
+                { id: 'da-character', name: 'Character Design', type: 'course' },
+                { id: 'da-env', name: 'Environment Painting', type: 'course' },
+                { id: 'da-color', name: 'Color Theory for Games', type: 'game' }
+            ] },
+            { id: 'computer-programmer', name: '💻 Computer Programmer', nodes: [
+                { id: 'cp-intro', name: 'Intro to Programming', type: 'course' },
+                { id: 'cp-py', name: 'Python Foundations', type: 'course' },
+                { id: 'cp-js', name: 'JavaScript Foundations', type: 'course' },
+                { id: 'cp-algo', name: 'Algorithms & Data Structures', type: 'sim' },
+                { id: 'cp-web', name: 'Web Development', type: 'course' },
+                { id: 'cp-ai', name: 'Intro to AI / ML', type: 'module' }
+            ] },
+            { id: 'game-designer', name: '🎯 Game Designer', nodes: [
+                { id: 'gd-intro', name: 'Intro to Game Design', type: 'course' },
+                { id: 'gd-mechanics', name: 'Mechanics & Systems', type: 'sim' },
+                { id: 'gd-level', name: 'Level Design', type: 'game' },
+                { id: 'gd-narrative', name: 'Narrative Design', type: 'module' },
+                { id: 'gd-balance', name: 'Balancing & Playtesting', type: 'sim' }
+            ] },
+            { id: 'industrial-designer', name: '🔧 Industrial Designer', nodes: [
+                { id: 'id-intro', name: 'Intro to Industrial Design', type: 'course' },
+                { id: 'id-sketch', name: 'Product Sketching', type: 'course' },
+                { id: 'id-cad', name: 'CAD Foundations', type: 'course' },
+                { id: 'id-prototype', name: 'Prototyping & Materials', type: 'sim' },
+                { id: 'id-ux', name: 'UX for Physical Products', type: 'module' }
+            ] }
+        ];
+        function mcGetPathwayCatalog() {
+            try {
+                var raw = localStorage.getItem('pflx_mc_pathway_catalog');
+                if (raw) {
+                    var parsed = JSON.parse(raw);
+                    if (Array.isArray(parsed) && parsed.length) return parsed;
+                }
+            } catch (e) {}
+            return MC_PATHWAY_CATALOG_BASE;
+        }
+        function mcFindPathwayForNode(nodeId) {
+            var cat = mcGetPathwayCatalog();
+            for (var i = 0; i < cat.length; i++) {
+                var p = cat[i];
+                if (!p.nodes) continue;
+                for (var j = 0; j < p.nodes.length; j++) {
+                    if (p.nodes[j].id === nodeId) return { pathway: p, node: p.nodes[j] };
+                }
+            }
+            return null;
+        }
+        function mcPopulateTaskPathwayNodeDropdown() {
+            var sel = document.getElementById('mc-task-pathway-node-select');
+            if (!sel) return;
+            var cat = mcGetPathwayCatalog();
+            var currentVal = sel.value;
+            var opts = [
+                '<option value="">— None —</option>',
+                '<option value="__custom__">✎ Custom (type below)</option>'
+            ];
+            cat.forEach(function (p) {
+                opts.push('<optgroup label="' + escapeHtml(p.name) + '">');
+                (p.nodes || []).forEach(function (n) {
+                    var typeChip = n.type ? ' · ' + n.type : '';
+                    opts.push('<option value="' + escapeHtml(p.id + '::' + n.id) + '">' + escapeHtml(n.name + typeChip) + '</option>');
+                });
+                opts.push('</optgroup>');
+            });
+            sel.innerHTML = opts.join('');
+            if (currentVal) sel.value = currentVal;
+        }
+        window.mcTaskOnPathwayNodePick = function () {
+            var sel = document.getElementById('mc-task-pathway-node-select');
+            if (!sel) return;
+            var v = sel.value;
+            var customRow = document.getElementById('mc-task-pathway-custom-row');
+            var pathwaySelect = document.getElementById('mc-task-pathway');
+            var nodeInput = document.getElementById('mc-task-pathway-node');
+            var nodeTypeSelect = document.getElementById('mc-task-node-type');
+            var hint = document.getElementById('mc-task-pathway-node-hint');
+            if (!v) {
+                if (customRow) customRow.style.display = 'none';
+                if (pathwaySelect) pathwaySelect.value = '';
+                if (nodeInput) nodeInput.value = '';
+                if (hint) hint.textContent = 'Pick a live pathway node. Player completes the module → task auto-completes.';
+                return;
+            }
+            if (v === '__custom__') {
+                if (customRow) customRow.style.display = 'grid';
+                if (hint) hint.textContent = 'Manual entry — type the pathway name and node name below.';
+                return;
+            }
+            if (customRow) customRow.style.display = 'none';
+            var parts = v.split('::');
+            var match = mcFindPathwayForNode(parts[1]);
+            if (!match) return;
+            if (pathwaySelect) pathwaySelect.value = match.pathway.id;
+            if (nodeInput) nodeInput.value = match.node.name;
+            if (nodeTypeSelect && match.node.type) nodeTypeSelect.value = match.node.type;
+            if (hint) hint.textContent = '📎 ' + match.pathway.name + ' · ' + match.node.name + (match.node.type ? ' (' + match.node.type + ')' : '');
+        };
         var _mcApplyingCloud = false;     // true while a cloud pull is writing in
         var _mcCloudQueue = {};
         var _mcCloudTimer = null;
@@ -23458,6 +23611,48 @@
         //   → mcSaveData('tasks') persists + fires pflx_mc_changed
         //   → host sees it in MC Approvals view
         //   → host approves via mcApproveTask → PflxDataBus.award → economy
+        // Launch a Core Pathways deep-link. Prefers navigating within the
+        // parent shell (posts a message to the pathways iframe with the
+        // target node) — falls back to opening a new tab when the shell
+        // isn't available (e.g. Player Portal loaded stand-alone).
+        window.pflxOpenPathwayNode = function (ev, anchor) {
+            try {
+                var href = anchor && anchor.getAttribute('href') || '';
+                var url = new URL(href, window.location.href);
+                var params = url.searchParams;
+                var payload = {
+                    nodeId: params.get('nodeId') || '',
+                    pathwayId: params.get('pathwayId') || '',
+                    nodeName: params.get('nodeName') || '',
+                    sourceTaskId: params.get('sourceTaskId') || ''
+                };
+                var frame = document.querySelector('.pathways-view iframe');
+                var canNav = typeof navigateTo === 'function' || typeof doNavigate === 'function';
+                if (frame && canNav) {
+                    if (ev && ev.preventDefault) ev.preventDefault();
+                    if (typeof navigateTo === 'function') navigateTo('pathways');
+                    else doNavigate('pathways');
+                    // Post repeatedly for a short window to survive the
+                    // pathway app's own bootstrap timeline.
+                    var tries = 0;
+                    var post = function () {
+                        try { frame.contentWindow && frame.contentWindow.postMessage({ type: 'pflx_pathways_deeplink', payload: payload }, '*'); } catch (e) {}
+                        tries += 1;
+                        if (tries < 8) setTimeout(post, 400);
+                    };
+                    post();
+                    return false;
+                }
+                // Fallback: open in new tab (parent-shell nav unavailable).
+                if (ev && ev.preventDefault) ev.preventDefault();
+                window.open(href, '_blank', 'noopener');
+                return false;
+            } catch (e) {
+                // If URL parsing fails, let the default click handle it.
+                return true;
+            }
+        };
+
         function ppRenderTaskDetail(el) {
             var d = window._ppDetailData || {};
             var allTasks = ppGetTasks();
@@ -23551,6 +23746,30 @@
                 rewardHtml +
                 '<div style="margin-top:18px;">' + ppProgressBar(pct, '#00d4ff') + '<div style="margin-top:6px;font-size:11px;color:rgba(255,255,255,0.4);">' + pct + '% complete' + (checklist.length ? ' · ' + checked + '/' + checklist.length + ' checked' : '') + '</div></div>' +
                 '</div></div>';
+
+            // ── Core Pathway node deep-link ──
+            // If the host attached a live pathway node to this task, surface
+            // a big call-to-action that opens Core Pathways with the target
+            // node pre-selected. The pathway portal reads `?nodeId=` and
+            // `?pathwayId=` from the URL to warp the player straight into it.
+            if (task.pathwayNodeId || (task.pathwayId && task.pathwayNodeName)) {
+                var _pnUrl = 'https://pflx-pathway-portal.vercel.app/?';
+                if (task.pathwayId) _pnUrl += 'pathwayId=' + encodeURIComponent(task.pathwayId) + '&';
+                if (task.pathwayNodeId) _pnUrl += 'nodeId=' + encodeURIComponent(task.pathwayNodeId) + '&';
+                if (task.pathwayNodeName) _pnUrl += 'nodeName=' + encodeURIComponent(task.pathwayNodeName) + '&';
+                if (task.id) _pnUrl += 'sourceTaskId=' + encodeURIComponent(task.id);
+                var _pnLabel = task.pathwayNodeName || 'this pathway node';
+                html += '<div class="mc-card" style="padding:18px 22px;margin-bottom:14px;border:1px solid rgba(0,212,255,0.4);background:linear-gradient(135deg, rgba(0,212,255,0.06), rgba(139,92,246,0.06));">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;">' +
+                        '<div style="min-width:0;flex:1;">' +
+                            '<div style="font-family:Orbitron,sans-serif;font-size:11px;color:#00d4ff;letter-spacing:1.5px;margin-bottom:6px;">🚀 CORE PATHWAY MODULE</div>' +
+                            '<div style="font-size:14px;color:#f0feff;font-weight:800;">' + escapeHtml(_pnLabel) + '</div>' +
+                            (task.pathwayId ? '<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:3px;">' + escapeHtml(task.pathwayId) + ' · ' + escapeHtml(task.nodeType || 'course') + '</div>' : '') +
+                        '</div>' +
+                        '<a href="' + escapeHtml(_pnUrl) + '" onclick="pflxOpenPathwayNode(event, this)" style="background:linear-gradient(135deg, rgba(0,212,255,0.3), rgba(139,92,246,0.3));color:#f0feff;border:1px solid rgba(0,212,255,0.6);border-radius:10px;padding:10px 18px;font-size:12px;font-weight:800;letter-spacing:0.08em;text-decoration:none;cursor:pointer;white-space:nowrap;box-shadow:0 0 20px rgba(0,212,255,0.2);">▶ LAUNCH NODE</a>' +
+                    '</div>' +
+                '</div>';
+            }
 
             // Host-provided reference links
             if (Array.isArray(task.links) && task.links.length) {
@@ -26527,6 +26746,33 @@
                 el = document.getElementById('mc-task-pathway'); if (el) el.value = t.pathwayId || '';
                 el = document.getElementById('mc-task-pathway-node'); if (el) el.value = t.pathwayNodeName || '';
                 el = document.getElementById('mc-task-node-type'); if (el) el.value = t.nodeType || 'course';
+                // Prime the grouped node picker. If the task carries a
+                // pathwayNodeId that matches the catalog, pre-select it.
+                // Otherwise if there IS a legacy pathwayId+node-name pair
+                // fall back to Custom so the pair stays editable.
+                (function () {
+                    mcPopulateTaskPathwayNodeDropdown();
+                    var sel = document.getElementById('mc-task-pathway-node-select');
+                    var customRow = document.getElementById('mc-task-pathway-custom-row');
+                    if (!sel) return;
+                    if (t.pathwayId && t.pathwayNodeId) {
+                        sel.value = t.pathwayId + '::' + t.pathwayNodeId;
+                        if (sel.value !== (t.pathwayId + '::' + t.pathwayNodeId)) {
+                            // Node not in catalog anymore — fall back to custom
+                            sel.value = '__custom__';
+                            if (customRow) customRow.style.display = 'grid';
+                        } else {
+                            if (customRow) customRow.style.display = 'none';
+                            mcTaskOnPathwayNodePick();
+                        }
+                    } else if (t.pathwayId || t.pathwayNodeName) {
+                        sel.value = '__custom__';
+                        if (customRow) customRow.style.display = 'grid';
+                    } else {
+                        sel.value = '';
+                        if (customRow) customRow.style.display = 'none';
+                    }
+                })();
                 el = document.getElementById('mc-task-coop-mode'); if (el) el.value = t.coopMode || 'solo';
                 mcToggleCoopFields(t.coopMode || 'solo');
                 el = document.getElementById('mc-task-max-players'); if (el) el.value = t.maxPlayers || 4;
@@ -26574,6 +26820,12 @@
                 el = document.getElementById('mc-task-pathway'); if (el) el.value = '';
                 el = document.getElementById('mc-task-pathway-node'); if (el) el.value = '';
                 el = document.getElementById('mc-task-node-type'); if (el) el.value = 'course';
+                // Repopulate + reset grouped node picker
+                mcPopulateTaskPathwayNodeDropdown();
+                var _nsel = document.getElementById('mc-task-pathway-node-select');
+                if (_nsel) _nsel.value = '';
+                var _crow = document.getElementById('mc-task-pathway-custom-row');
+                if (_crow) _crow.style.display = 'none';
                 el = document.getElementById('mc-task-coop-mode'); if (el) el.value = 'solo';
                 mcToggleCoopFields('solo');
                 el = document.getElementById('mc-task-max-players'); if (el) el.value = 4;
@@ -27723,6 +27975,13 @@
                 submissions: mcTaskEditIndex >= 0 && mcTasks[mcTaskEditIndex] ? (mcTasks[mcTaskEditIndex].submissions || []) : [],
                 pathwayId: document.getElementById('mc-task-pathway')?.value || '',
                 pathwayNodeName: document.getElementById('mc-task-pathway-node')?.value || '',
+                // Deep-link identifier — when set, the player can jump
+                // straight into this node inside the Core Pathways app.
+                pathwayNodeId: (function () {
+                    var v = document.getElementById('mc-task-pathway-node-select')?.value || '';
+                    if (!v || v === '__custom__') return '';
+                    var parts = v.split('::'); return parts[1] || '';
+                })(),
                 nodeType: document.getElementById('mc-task-node-type')?.value || 'course',
                 coopMode: document.getElementById('mc-task-coop-mode')?.value || 'solo',
                 maxPlayers: parseInt(document.getElementById('mc-task-max-players')?.value || '4', 10),
