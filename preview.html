@@ -8630,26 +8630,31 @@
                                         <div id="mc-submit-task-title" style="font-size:16px;font-weight:900;color:#f0f0ff;margin-bottom:4px;"></div>
                                         <div id="mc-submit-task-desc" style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:12px;"></div>
                                         <div id="mc-submit-task-instructions" style="font-size:11px;color:var(--cyan);margin-bottom:12px;padding:8px;background:rgba(0,212,255,0.03);border-radius:6px;display:none;"></div>
+                                        <!-- Submission Title — player labels the artifact -->
+                                        <div style="margin-bottom:12px;">
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Submission Title *</label>
+                                            <input type="text" id="mc-submit-title" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="Give your submission a title">
+                                        </div>
+                                        <!-- Submission Description — what did you do? -->
+                                        <div style="margin-bottom:12px;">
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Description</label>
+                                            <textarea id="mc-submit-notes" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;min-height:70px;box-sizing:border-box;font-family:'Jura',sans-serif;" placeholder="Describe what you did, what you learned, what to look for..."></textarea>
+                                        </div>
                                         <!-- Checklist -->
                                         <div id="mc-submit-checklist" style="margin-bottom:12px;display:none;">
                                             <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Checklist</label>
                                             <div id="mc-submit-checklist-items" style="display:flex;flex-direction:column;gap:6px;"></div>
                                         </div>
-                                        <!-- File Upload -->
-                                        <div id="mc-submit-file-area" style="margin-bottom:12px;">
-                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Upload File</label>
-                                            <input type="file" id="mc-submit-file" style="font-size:11px;color:rgba(255,255,255,0.5);">
-                                            <div id="mc-submit-file-name" style="font-size:10px;color:var(--cyan);margin-top:4px;"></div>
-                                        </div>
-                                        <!-- Link Submission -->
+                                        <!-- Link Submission (moved above file) -->
                                         <div id="mc-submit-link-area" style="margin-bottom:12px;display:none;">
                                             <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Submission Link</label>
                                             <input type="url" id="mc-submit-link" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="https://...">
                                         </div>
-                                        <!-- Notes -->
-                                        <div style="margin-bottom:12px;">
-                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Notes</label>
-                                            <textarea id="mc-submit-notes" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;min-height:60px;box-sizing:border-box;font-family:'Jura',sans-serif;" placeholder="Add notes about your submission..."></textarea>
+                                        <!-- File Upload — with downscale for images -->
+                                        <div id="mc-submit-file-area" style="margin-bottom:12px;">
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Upload File</label>
+                                            <input type="file" id="mc-submit-file" style="font-size:11px;color:rgba(255,255,255,0.5);" onchange="mcPlayerSubmitFilePick(this)">
+                                            <div id="mc-submit-file-name" style="font-size:10px;color:var(--cyan);margin-top:4px;"></div>
                                         </div>
                                         <div style="display:flex;gap:8px;justify-content:flex-end;">
                                             <button class="mc-btn" onclick="mcCloseSubmitModal()" style="padding:8px 16px;">Cancel</button>
@@ -25324,8 +25329,56 @@
             if (linkInput) linkInput.value = '';
             var notesInput = document.getElementById('mc-submit-notes');
             if (notesInput) notesInput.value = '';
+            var titleInput = document.getElementById('mc-submit-title');
+            if (titleInput) titleInput.value = '';
+            var fileName = document.getElementById('mc-submit-file-name');
+            if (fileName) fileName.textContent = '';
             mcSubmitFileData = '';
+            mcSubmitFileName = '';
+            mcSubmitFileType = '';
         }
+
+        // ── Player submission file picker with image downscaling ──
+        // Images are canvas-resized to 1600x900 max, JPEG @ 82% so the
+        // upload fits under localStorage + Supabase row limits. Non-image
+        // files are size-capped at 4MB (raw base64 will be ~5.3MB — under
+        // the 6MB row-size safety line).
+        var mcSubmitFileName = '';
+        var mcSubmitFileType = '';
+        function mcPlayerSubmitFilePick(input) {
+            if (!input || !input.files || !input.files[0]) return;
+            var file = input.files[0];
+            var infoEl = document.getElementById('mc-submit-file-name');
+            var isImage = /^image\//.test(file.type);
+            mcSubmitFileName = file.name;
+            mcSubmitFileType = file.type || '';
+            if (isImage && typeof _mcDownscaleImageDataUrl === 'function') {
+                if (infoEl) infoEl.textContent = 'Optimizing image…';
+                _mcDownscaleImageDataUrl(file, 1600, 900, 0.82).then(function (dataUrl) {
+                    mcSubmitFileData = dataUrl;
+                    if (infoEl) infoEl.textContent = '📎 ' + file.name + ' — ' + Math.round(dataUrl.length / 1024) + 'KB (resized)';
+                }).catch(function () {
+                    _readAsDataUrl(file, infoEl);
+                });
+            } else {
+                var cap = 4 * 1024 * 1024;
+                if (file.size > cap) {
+                    if (infoEl) infoEl.textContent = '⚠ File too large (' + Math.round(file.size / 1024 / 1024) + 'MB, max 4MB).';
+                    mcSubmitFileData = ''; mcSubmitFileName = '';
+                    return;
+                }
+                _readAsDataUrl(file, infoEl);
+            }
+        }
+        function _readAsDataUrl(file, infoEl) {
+            var r = new FileReader();
+            r.onload = function (e) {
+                mcSubmitFileData = e.target.result;
+                if (infoEl) infoEl.textContent = '📎 ' + file.name + ' — ' + Math.round(file.size / 1024) + 'KB';
+            };
+            r.readAsDataURL(file);
+        }
+        window.mcPlayerSubmitFilePick = mcPlayerSubmitFilePick;
 
         function mcCloseSubmitModal() {
             var modal = document.getElementById('mc-player-submit-modal');
@@ -25336,6 +25389,15 @@
         function mcPlayerSubmitTask() {
             if (mcSubmitTaskIndex < 0 || !mcTasks[mcSubmitTaskIndex]) return;
             var t = mcTasks[mcSubmitTaskIndex];
+
+            // Title is now required so submissions are meaningfully labeled
+            // in the host approval queue.
+            var subTitle = (document.getElementById('mc-submit-title')?.value || '').trim();
+            if (!subTitle) {
+                pflxPlaySfx('error');
+                alert('Please add a Submission Title so your host knows what to review.');
+                return;
+            }
 
             // Check required checklist items
             if (t.checklist && t.checklist.length > 0) {
@@ -25350,18 +25412,19 @@
 
             pflxPlaySfx('save');
 
-            // Read file if uploaded
-            var fileInput = document.getElementById('mc-submit-file');
-            var fileName = fileInput && fileInput.files && fileInput.files[0] ? fileInput.files[0].name : '';
+            var fileName = mcSubmitFileName || '';
 
             var submission = {
                 id: 'sub-' + Date.now(),
                 playerId: (typeof activeSession !== 'undefined' && activeSession) ? activeSession.id : 'unknown',
                 playerName: (typeof activeSession !== 'undefined' && activeSession) ? (activeSession.brand || activeSession.name || 'Player') : 'Player',
                 date: new Date().toISOString(),
+                title: subTitle,
                 link: document.getElementById('mc-submit-link')?.value || '',
                 notes: document.getElementById('mc-submit-notes')?.value || '',
+                description: document.getElementById('mc-submit-notes')?.value || '',
                 fileName: fileName,
+                fileType: mcSubmitFileType || '',
                 fileData: mcSubmitFileData || '',
                 checklistCompleted: [],
                 status: 'pending'
