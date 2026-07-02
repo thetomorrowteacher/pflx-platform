@@ -52839,8 +52839,9 @@ RESPONSE RULES:
                 <span id="pflx-chat-call-timer" style="font-size:10px;color:rgba(255,255,255,0.5);font-family:monospace;margin-right:10px;">00:00</span>
             </div>
             <div style="flex:1;position:relative;display:flex;flex-direction:column;gap:6px;padding:8px;overflow:hidden;">
-                <video id="pflx-chat-call-remote" autoplay playsinline style="flex:1;background:#000;border-radius:10px;object-fit:cover;min-height:0;"></video>
-                <video id="pflx-chat-call-local" autoplay playsinline muted style="position:absolute;bottom:14px;right:14px;width:110px;height:82px;background:#000;border-radius:8px;border:2px solid rgba(0,212,255,0.6);object-fit:cover;box-shadow:0 6px 20px rgba(0,0,0,0.6);"></video>
+                <!-- Tile grid: N video tiles auto-arranged. The local tile is always tile-me
+                     (bottom-right styling handled in JS for 1-remote layouts). -->
+                <div id="pflx-chat-call-tiles" style="flex:1;display:grid;grid-template-columns:1fr;grid-template-rows:1fr;gap:6px;min-height:0;"></div>
             </div>
             <div style="display:flex;gap:6px;justify-content:center;padding:10px 12px;border-top:1px solid rgba(255,255,255,0.06);">
                 <button id="pflx-chat-call-mute" onclick="pflxChatCallToggleMute()" style="background:rgba(255,255,255,0.08);color:#f0f0ff;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;">🎙 Mute</button>
@@ -53034,10 +53035,11 @@ RESPONSE RULES:
             document.getElementById('pflx-chat-composer').style.display = 'block';
             document.getElementById('pflx-chat-back').style.display = 'inline';
             document.getElementById('pflx-chat-title').textContent = _pcParticipantNames(t) + (t.type === 'group' ? ' · GROUP' : '');
-            // Show CALL / SHARE buttons if this cohort allows them (currently 1:1 DMs only).
+            // Show CALL / SHARE buttons if this cohort allows them. Groups
+            // now support mesh calls (up to ~6 participants).
             var caps = _pcMyCaps();
-            var canCall = caps.video && t.type === 'dm';
-            var canShare = caps.screen && t.type === 'dm';
+            var canCall = caps.video;
+            var canShare = caps.screen;
             var cb = document.getElementById('pflx-chat-call-btn'); if (cb) cb.style.display = canCall ? 'inline' : 'none';
             var sb = document.getElementById('pflx-chat-share-btn'); if (sb) sb.style.display = canShare ? 'inline' : 'none';
             _pcMarkThreadRead(threadId);
@@ -53395,19 +53397,24 @@ RESPONSE RULES:
             _pcMarkThreadRead(t.id);
         };
         // ══════════════════════════════════════════════════════════════
-        //  WebRTC Call Engine
-        //  1:1 video / screen share for DM threads. Signaling piggybacks
-        //  on Supabase realtime broadcast per-thread channel:
+        //  WebRTC Call Engine — MESH TOPOLOGY (1:1 + group calls)
+        //  Signaling piggybacks on Supabase realtime broadcast per-thread:
         //    channel   pflx-call-<threadId>
-        //    events    offer   { sdp, from }
-        //              answer  { sdp, from }
-        //              ice     { candidate, from }
-        //              hangup  { from }
-        //  STUN: public Google servers. No TURN server → calls that need
-        //  relay will fail (LAN + open NAT work).
+        //    events    invite   { from, name, mode }          (broadcast — ring the thread)
+        //              join     { from, name, mode }          (broadcast — new peer entered)
+        //              offer    { from, to, sdp, mode }       (directed)
+        //              answer   { from, to, sdp }             (directed)
+        //              ice      { from, to, candidate }       (directed)
+        //              leave    { from }                      (broadcast — peer left)
+        //  Convention: joiner initiates the offer to every already-present
+        //  participant. `to` field is honored on directed events; if the
+        //  event isn't addressed to me, I ignore it.
+        //  STUN: public Google servers. No TURN — calls behind symmetric
+        //  NAT will fail until a TURN URL is added.
+        //  Mesh scales to ~4-6 participants. Beyond that, an SFU is needed.
         // ══════════════════════════════════════════════════════════════
-        var _pcCall = null; // { pc, localStream, remoteStream, channel, threadId, mode, startedAt, timerId, screenTrack, camTrack, camEnabled, micEnabled, remoteSet }
-        var _pcInboundChannels = {}; // threadId → channel (listens for offers when not in a call)
+        var _pcCall = null; // { threadId, mode, localStream, channel, startedAt, timerId, micEnabled, camEnabled, previousVideoTrack, peers: { peerId: { pc, name, remoteStream } } }
+        var _pcInboundChannels = {}; // threadId → channel (listens for invites when not in a call)
         function _pcCallRtcConfig() {
             return {
                 iceServers: [
@@ -53425,7 +53432,7 @@ RESPONSE RULES:
             if (ov) ov.style.display = show ? 'flex' : 'none';
         }
         function _pcCallTimerStart() {
-            if (!_pcCall) return;
+            if (!_pcCall || _pcCall.timerId) return;
             _pcCall.startedAt = Date.now();
             _pcCall.timerId = setInterval(function () {
                 if (!_pcCall) return;
@@ -53445,39 +53452,34 @@ RESPONSE RULES:
             return client.channel('pflx-call-' + threadId, { config: { broadcast: { self: false } } });
         }
         function _pcCallAttachInbound() {
-            // For every DM thread the current player is in, keep a passive
-            // realtime channel that listens for incoming `offer` broadcasts
-            // and pops a call banner. Only wired for DMs to keep the ICE
-            // matrix simple.
+            // For every thread I'm in, keep a passive realtime channel that
+            // listens for `invite` events. On invite, prompt to join.
             var me = _pcMe();
             _pcThreads.forEach(function (t) {
-                if (t.type !== 'dm') return;
                 if (!Array.isArray(t.participants) || t.participants.indexOf(me.id) === -1) return;
                 if (_pcInboundChannels[t.id]) return;
                 var ch = _pcCallSignalingChannel(t.id);
                 if (!ch) return;
-                ch.on('broadcast', { event: 'offer' }, function (payload) {
+                ch.on('broadcast', { event: 'invite' }, function (payload) {
                     var msg = payload && payload.payload;
                     if (!msg || msg.from === me.id) return;
-                    _pcCallIncomingOffer(t.id, msg);
+                    if (_pcCall) return; // busy
+                    _pcCallIncomingInvite(t.id, msg);
                 }).subscribe();
                 _pcInboundChannels[t.id] = ch;
             });
         }
-        function _pcCallIncomingOffer(threadId, msg) {
-            if (_pcCall) return; // already busy
+        function _pcCallIncomingInvite(threadId, msg) {
             var t = _pcThreads.find(function (x) { return x.id === threadId; });
             if (!t) return;
-            var accept = confirm('📞 Incoming call from ' + _pcParticipantNames(t) + '. Answer?');
-            if (!accept) {
-                var ch = _pcInboundChannels[threadId];
-                if (ch) try { ch.send({ type: 'broadcast', event: 'hangup', payload: { from: _pcMe().id } }); } catch (e) {}
-                return;
-            }
-            _pcCallOpenPanel(threadId);
-            _pcCallAnswer(threadId, msg.sdp).catch(function (err) {
-                console.error('[call] answer failed', err);
-                _pcCallSetStatus('Answer failed');
+            var who = msg.name || 'Someone';
+            var kind = msg.mode === 'screen' ? 'screen-sharing' : 'video call';
+            var context = t.type === 'group' ? ' in ' + (t.name || 'group') : '';
+            var accept = confirm('📞 ' + who + ' started a ' + kind + context + '. Join?');
+            if (!accept) return;
+            _pcCallJoinExisting(threadId, msg.mode || 'video').catch(function (err) {
+                console.error('[call] join failed', err);
+                pflxToast('Could not join: ' + (err.message || 'error'), 'warn');
                 pflxChatCallHangup();
             });
         }
@@ -53488,13 +53490,9 @@ RESPONSE RULES:
             _pcCallShowOverlay(true);
         }
         async function _pcCallGetLocalStream(mode) {
-            var constraints = mode === 'screen'
-                ? { video: true, audio: false }
-                : { video: true, audio: true };
             var stream;
             if (mode === 'screen') {
                 stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-                // Add mic on top of screen if no audio track.
                 if (stream.getAudioTracks().length === 0) {
                     try {
                         var mic = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -53502,34 +53500,141 @@ RESPONSE RULES:
                     } catch (e) {}
                 }
             } else {
-                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
             }
             return stream;
         }
-        function _pcCallBuildPeer(threadId) {
+        function _pcCallBuildPeer(peerId, peerName) {
             var pc = new RTCPeerConnection(_pcCallRtcConfig());
             var me = _pcMe();
             pc.onicecandidate = function (ev) {
                 if (!ev.candidate || !_pcCall || !_pcCall.channel) return;
-                _pcCall.channel.send({ type: 'broadcast', event: 'ice', payload: { from: me.id, candidate: ev.candidate } });
+                _pcCall.channel.send({ type: 'broadcast', event: 'ice', payload: { from: me.id, to: peerId, candidate: ev.candidate } });
             };
             pc.ontrack = function (ev) {
-                var v = document.getElementById('pflx-chat-call-remote');
-                if (!v) return;
-                if (v.srcObject !== ev.streams[0]) v.srcObject = ev.streams[0];
-                _pcCallSetStatus('Connected');
+                if (!_pcCall || !_pcCall.peers[peerId]) return;
+                _pcCall.peers[peerId].remoteStream = ev.streams[0];
+                _pcCallRenderTiles();
+                _pcCallSetStatus('Connected · ' + Object.keys(_pcCall.peers).length + ' peer(s)');
             };
             pc.onconnectionstatechange = function () {
                 if (!_pcCall) return;
-                _pcCallSetStatus('State: ' + pc.connectionState);
-                if (pc.connectionState === 'connected' && !_pcCall.startedAt) _pcCallTimerStart();
-                if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
-                    // Peer dropped — cleanup.
-                    setTimeout(function () { if (_pcCall && (pc.connectionState !== 'connected')) pflxChatCallHangup(); }, 500);
+                var st = pc.connectionState;
+                if (st === 'connected') _pcCallTimerStart();
+                if (st === 'failed' || st === 'closed') {
+                    // Peer dropped — remove tile, keep the call alive if others remain.
+                    _pcCallRemovePeer(peerId, true);
                 }
             };
+            // Attach my local tracks to this peer connection.
+            if (_pcCall && _pcCall.localStream) {
+                _pcCall.localStream.getTracks().forEach(function (track) { pc.addTrack(track, _pcCall.localStream); });
+            }
+            _pcCall.peers[peerId] = { pc: pc, name: peerName || peerId, remoteStream: null };
             return pc;
         }
+        function _pcCallRemovePeer(peerId, silent) {
+            if (!_pcCall || !_pcCall.peers[peerId]) return;
+            try { _pcCall.peers[peerId].pc && _pcCall.peers[peerId].pc.close(); } catch (e) {}
+            delete _pcCall.peers[peerId];
+            _pcCallRenderTiles();
+            if (!silent) _pcCallSetStatus('Connected · ' + Object.keys(_pcCall.peers).length + ' peer(s)');
+            // If nobody is left, close the call.
+            if (Object.keys(_pcCall.peers).length === 0 && _pcCall.wasEverConnected) {
+                pflxToast('Everyone left the call.', 'info');
+                pflxChatCallHangup();
+            }
+        }
+        // ── Grid layout ──
+        function _pcCallRenderTiles() {
+            var grid = document.getElementById('pflx-chat-call-tiles');
+            if (!grid || !_pcCall) return;
+            var me = _pcMe();
+            var tiles = [];
+            // Always include local tile first.
+            tiles.push({ id: '__me__', name: me.name + ' (you)', stream: _pcCall.localStream, mine: true });
+            Object.keys(_pcCall.peers).forEach(function (pid) {
+                var p = _pcCall.peers[pid];
+                tiles.push({ id: pid, name: p.name, stream: p.remoteStream, mine: false });
+            });
+            var n = tiles.length;
+            var cols = n <= 1 ? 1 : (n <= 4 ? 2 : (n <= 9 ? 3 : 4));
+            var rows = Math.ceil(n / cols);
+            grid.style.gridTemplateColumns = 'repeat(' + cols + ', 1fr)';
+            grid.style.gridTemplateRows = 'repeat(' + rows + ', 1fr)';
+            // Diff-update: only rebuild if the set of ids changed.
+            var currentIds = Array.from(grid.children).map(function (el) { return el.getAttribute('data-tid'); }).join(',');
+            var desiredIds = tiles.map(function (t) { return t.id; }).join(',');
+            if (currentIds !== desiredIds) {
+                grid.innerHTML = tiles.map(function (t) {
+                    return '<div data-tid="' + escapeHtml(t.id) + '" style="position:relative;background:#000;border-radius:10px;overflow:hidden;border:1px solid ' + (t.mine ? 'rgba(0,212,255,0.6)' : 'rgba(255,255,255,0.08)') + ';min-width:0;min-height:0;">' +
+                        '<video autoplay playsinline' + (t.mine ? ' muted' : '') + ' style="width:100%;height:100%;object-fit:cover;background:#000;"></video>' +
+                        '<div style="position:absolute;bottom:6px;left:6px;padding:3px 8px;background:rgba(0,0,0,0.6);border-radius:6px;font-size:10px;color:#f0f0ff;font-weight:700;max-width:calc(100% - 12px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(t.name) + '</div>' +
+                    '</div>';
+                }).join('');
+            }
+            // Wire srcObject per-tile (idempotent — only sets when it changes).
+            tiles.forEach(function (t) {
+                var wrap = grid.querySelector('[data-tid="' + t.id.replace(/"/g, '\\"') + '"]');
+                if (!wrap) return;
+                var vid = wrap.querySelector('video');
+                if (vid && vid.srcObject !== t.stream) vid.srcObject = t.stream;
+            });
+        }
+        // ── Signaling wiring, shared by initiator + joiner ──
+        function _pcCallWireChannel(ch, mode) {
+            var me = _pcMe();
+            ch.on('broadcast', { event: 'join' }, function (payload) {
+                var m = payload && payload.payload;
+                if (!m || m.from === me.id || !_pcCall) return;
+                // A new peer joined. I already know they're joining — I create
+                // an offer to them (joiner-initiates rule inverted: the earlier
+                // participants initiate to the newer joiner).
+                if (_pcCall.peers[m.from]) return; // already have a PC to them
+                var pc = _pcCallBuildPeer(m.from, m.name);
+                pc.createOffer().then(function (offer) {
+                    return pc.setLocalDescription(offer).then(function () { return offer; });
+                }).then(function (offer) {
+                    ch.send({ type: 'broadcast', event: 'offer', payload: { from: me.id, to: m.from, sdp: offer, mode: _pcCall.mode } });
+                }).catch(function (err) { console.error('[call] createOffer', err); });
+                _pcCallRenderTiles();
+            });
+            ch.on('broadcast', { event: 'offer' }, function (payload) {
+                var m = payload && payload.payload;
+                if (!m || m.from === me.id || m.to !== me.id || !_pcCall) return;
+                var pc = _pcCall.peers[m.from] ? _pcCall.peers[m.from].pc : _pcCallBuildPeer(m.from, m.fromName);
+                pc.setRemoteDescription(new RTCSessionDescription(m.sdp))
+                    .then(function () { return pc.createAnswer(); })
+                    .then(function (answer) { return pc.setLocalDescription(answer).then(function () { return answer; }); })
+                    .then(function (answer) {
+                        ch.send({ type: 'broadcast', event: 'answer', payload: { from: me.id, to: m.from, sdp: answer } });
+                    })
+                    .catch(function (err) { console.error('[call] handle offer', err); });
+                _pcCallRenderTiles();
+            });
+            ch.on('broadcast', { event: 'answer' }, function (payload) {
+                var m = payload && payload.payload;
+                if (!m || m.from === me.id || m.to !== me.id || !_pcCall || !_pcCall.peers[m.from]) return;
+                _pcCall.peers[m.from].pc.setRemoteDescription(new RTCSessionDescription(m.sdp)).catch(function (err) { console.error('[call] setRemoteDescription answer', err); });
+                _pcCall.wasEverConnected = true;
+            });
+            ch.on('broadcast', { event: 'ice' }, function (payload) {
+                var m = payload && payload.payload;
+                if (!m || m.from === me.id || m.to !== me.id || !_pcCall || !m.candidate) return;
+                var peer = _pcCall.peers[m.from];
+                if (!peer) return;
+                peer.pc.addIceCandidate(new RTCIceCandidate(m.candidate)).catch(function (err) { console.warn('[call] addIceCandidate', err); });
+            });
+            ch.on('broadcast', { event: 'leave' }, function (payload) {
+                var m = payload && payload.payload;
+                if (!m || m.from === me.id || !_pcCall) return;
+                if (_pcCall.peers[m.from]) {
+                    pflxToast((_pcCall.peers[m.from].name || 'A peer') + ' left the call.', 'info');
+                    _pcCallRemovePeer(m.from);
+                }
+            });
+        }
+        // ── Start (initiator path) ──
         window.pflxChatCallStart = async function (mode) {
             if (_pcCall) { pflxToast('Already in a call.', 'warn'); return; }
             var caps = _pcMyCaps();
@@ -53537,45 +53642,28 @@ RESPONSE RULES:
             if (mode === 'screen' && !caps.screen) { pflxToast('Screen sharing is disabled for your cohort.', 'warn'); return; }
             if (!_pcCurrentThreadId) { pflxToast('Open a chat first.', 'warn'); return; }
             var t = _pcThreads.find(function (x) { return x.id === _pcCurrentThreadId; });
-            if (!t || t.type !== 'dm') { pflxToast('Calls are 1:1 for now — open a direct message.', 'warn'); return; }
+            if (!t) return;
             var me = _pcMe();
             _pcCallOpenPanel(t.id);
             _pcCallSetStatus('Requesting ' + (mode === 'screen' ? 'screen' : 'camera + mic') + '…');
             try {
                 var stream = await _pcCallGetLocalStream(mode);
-                var pc = _pcCallBuildPeer(t.id);
-                stream.getTracks().forEach(function (track) { pc.addTrack(track, stream); });
-                var localVid = document.getElementById('pflx-chat-call-local');
-                if (localVid) localVid.srcObject = stream;
                 var ch = _pcCallSignalingChannel(t.id);
-                _pcCall = { pc: pc, localStream: stream, channel: ch, threadId: t.id, mode: mode, camEnabled: true, micEnabled: true };
-                ch.on('broadcast', { event: 'answer' }, function (payload) {
-                    var m = payload && payload.payload;
-                    if (!m || m.from === me.id || !_pcCall) return;
-                    pc.setRemoteDescription(new RTCSessionDescription(m.sdp)).catch(function (err) { console.error('[call] setRemoteDescription answer', err); });
-                });
-                ch.on('broadcast', { event: 'ice' }, function (payload) {
-                    var m = payload && payload.payload;
-                    if (!m || m.from === me.id || !_pcCall || !m.candidate) return;
-                    pc.addIceCandidate(new RTCIceCandidate(m.candidate)).catch(function (err) { console.warn('[call] addIceCandidate', err); });
-                });
-                ch.on('broadcast', { event: 'hangup' }, function (payload) {
-                    var m = payload && payload.payload;
-                    if (!m || m.from === me.id) return;
-                    pflxToast('Call ended by the other side.', 'info');
-                    pflxChatCallHangup();
-                });
+                _pcCall = { threadId: t.id, mode: mode, localStream: stream, channel: ch, camEnabled: true, micEnabled: true, peers: {}, wasEverConnected: false };
+                _pcCallWireChannel(ch, mode);
                 await new Promise(function (resolve) { ch.subscribe(function (status) { if (status === 'SUBSCRIBED') resolve(); }); });
-                var offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-                ch.send({ type: 'broadcast', event: 'offer', payload: { from: me.id, sdp: offer } });
-                _pcCallSetStatus('Ringing…');
-                // Also drop a short system message into the thread so there's a record.
+                // Broadcast the invite to everyone in the thread…
+                ch.send({ type: 'broadcast', event: 'invite', payload: { from: me.id, name: me.name, mode: mode } });
+                // …and my own `join` so anyone already in the call adds me.
+                ch.send({ type: 'broadcast', event: 'join', payload: { from: me.id, name: me.name, mode: mode } });
+                _pcCallSetStatus(t.type === 'group' ? 'Waiting for others to join…' : 'Ringing…');
+                _pcCallRenderTiles();
+                // Drop a system message so there's a record.
                 t.messages.push({
                     id: 'msg-' + Date.now(),
                     senderId: me.id,
                     senderName: me.name,
-                    text: mode === 'screen' ? '🖥 Started screen share' : '📹 Started a call',
+                    text: mode === 'screen' ? '🖥 Started screen share' : '📹 Started a ' + (t.type === 'group' ? 'group ' : '') + 'call',
                     at: new Date().toISOString(),
                     readBy: [me.id],
                     system: true
@@ -53590,52 +53678,40 @@ RESPONSE RULES:
                 _pcCall = null;
             }
         };
-        async function _pcCallAnswer(threadId, offerSdp) {
+        // ── Join (invitee path) ──
+        async function _pcCallJoinExisting(threadId, mode) {
             var me = _pcMe();
-            _pcCallSetStatus('Answering…');
-            var stream = await _pcCallGetLocalStream('video');
-            var pc = _pcCallBuildPeer(threadId);
-            stream.getTracks().forEach(function (track) { pc.addTrack(track, stream); });
-            var localVid = document.getElementById('pflx-chat-call-local');
-            if (localVid) localVid.srcObject = stream;
+            _pcCallOpenPanel(threadId);
+            _pcCallSetStatus('Joining…');
+            var stream = await _pcCallGetLocalStream('video'); // joiners open camera; can toggle to screen after
             var ch = _pcCallSignalingChannel(threadId);
-            _pcCall = { pc: pc, localStream: stream, channel: ch, threadId: threadId, mode: 'video', camEnabled: true, micEnabled: true };
-            ch.on('broadcast', { event: 'ice' }, function (payload) {
-                var m = payload && payload.payload;
-                if (!m || m.from === me.id || !_pcCall || !m.candidate) return;
-                pc.addIceCandidate(new RTCIceCandidate(m.candidate)).catch(function (err) { console.warn('[call] addIceCandidate', err); });
-            });
-            ch.on('broadcast', { event: 'hangup' }, function (payload) {
-                var m = payload && payload.payload;
-                if (!m || m.from === me.id) return;
-                pflxToast('Call ended by the other side.', 'info');
-                pflxChatCallHangup();
-            });
+            _pcCall = { threadId: threadId, mode: 'video', localStream: stream, channel: ch, camEnabled: true, micEnabled: true, peers: {}, wasEverConnected: false };
+            _pcCallWireChannel(ch, mode);
             await new Promise(function (resolve) { ch.subscribe(function (status) { if (status === 'SUBSCRIBED') resolve(); }); });
-            await pc.setRemoteDescription(new RTCSessionDescription(offerSdp));
-            var answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            ch.send({ type: 'broadcast', event: 'answer', payload: { from: me.id, sdp: answer } });
-            _pcCallSetStatus('Connected');
-            _pcCallTimerStart();
+            ch.send({ type: 'broadcast', event: 'join', payload: { from: me.id, name: me.name, mode: mode } });
+            _pcCallRenderTiles();
+            _pcCallSetStatus('Connecting…');
         }
+        // ── Hangup ──
         window.pflxChatCallHangup = function () {
             if (!_pcCall) { _pcCallShowOverlay(false); return; }
             try {
-                _pcCall.channel && _pcCall.channel.send({ type: 'broadcast', event: 'hangup', payload: { from: _pcMe().id } });
+                _pcCall.channel && _pcCall.channel.send({ type: 'broadcast', event: 'leave', payload: { from: _pcMe().id } });
             } catch (e) {}
             try { _pcCall.localStream && _pcCall.localStream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
-            try { _pcCall.pc && _pcCall.pc.close(); } catch (e) {}
+            Object.keys(_pcCall.peers).forEach(function (pid) {
+                try { _pcCall.peers[pid].pc && _pcCall.peers[pid].pc.close(); } catch (e) {}
+            });
             try {
                 var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
                 if (client && _pcCall.channel) client.removeChannel(_pcCall.channel);
             } catch (e) {}
             _pcCallTimerStop();
-            var remote = document.getElementById('pflx-chat-call-remote'); if (remote) remote.srcObject = null;
-            var local = document.getElementById('pflx-chat-call-local'); if (local) local.srcObject = null;
+            var grid = document.getElementById('pflx-chat-call-tiles'); if (grid) grid.innerHTML = '';
             _pcCall = null;
             _pcCallShowOverlay(false);
         };
+        // ── Controls ──
         window.pflxChatCallToggleMute = function () {
             if (!_pcCall) return;
             var enabled = !_pcCall.micEnabled;
@@ -53654,27 +53730,42 @@ RESPONSE RULES:
         };
         window.pflxChatCallToggleScreen = async function () {
             if (!_pcCall) return;
-            var pc = _pcCall.pc;
-            var senders = pc.getSenders();
-            var vsender = senders.find(function (s) { return s.track && s.track.kind === 'video'; });
-            if (!vsender) return;
+            var senderLists = Object.keys(_pcCall.peers).map(function (pid) { return _pcCall.peers[pid].pc.getSenders(); });
+            function replaceEveryVideoSender(track) {
+                senderLists.forEach(function (sList) {
+                    var vsender = sList.find(function (s) { return s.track && s.track.kind === 'video'; });
+                    if (vsender) vsender.replaceTrack(track).catch(function (err) { console.warn('[call] replaceTrack', err); });
+                });
+            }
             if (_pcCall.mode !== 'screen') {
                 try {
-                    var screen = await navigator.mediaDevices.getDisplayMedia({ video: true });
-                    var newTrack = screen.getVideoTracks()[0];
-                    _pcCall.previousVideoTrack = vsender.track;
-                    await vsender.replaceTrack(newTrack);
+                    var scr = await navigator.mediaDevices.getDisplayMedia({ video: true });
+                    var newTrack = scr.getVideoTracks()[0];
+                    // Remember current camera video track so we can restore it later.
+                    var curVidTrack = _pcCall.localStream.getVideoTracks()[0];
+                    _pcCall.previousVideoTrack = curVidTrack;
+                    replaceEveryVideoSender(newTrack);
+                    // Swap it in the local stream + preview.
+                    if (curVidTrack) _pcCall.localStream.removeTrack(curVidTrack);
+                    _pcCall.localStream.addTrack(newTrack);
+                    _pcCallRenderTiles();
                     _pcCall.mode = 'screen';
                     newTrack.onended = function () { pflxChatCallToggleScreen(); };
                 } catch (e) { console.warn('[call] screen failed', e); }
             } else {
-                if (_pcCall.previousVideoTrack) {
-                    await vsender.replaceTrack(_pcCall.previousVideoTrack);
-                    _pcCall.previousVideoTrack = null;
-                } else {
-                    var cam = await navigator.mediaDevices.getUserMedia({ video: true });
-                    await vsender.replaceTrack(cam.getVideoTracks()[0]);
+                var back = _pcCall.previousVideoTrack;
+                if (!back || back.readyState === 'ended') {
+                    try {
+                        var cam = await navigator.mediaDevices.getUserMedia({ video: true });
+                        back = cam.getVideoTracks()[0];
+                    } catch (e) { console.warn('[call] restore cam failed', e); return; }
                 }
+                replaceEveryVideoSender(back);
+                var scrTrack = _pcCall.localStream.getVideoTracks()[0];
+                if (scrTrack) { _pcCall.localStream.removeTrack(scrTrack); scrTrack.stop(); }
+                _pcCall.localStream.addTrack(back);
+                _pcCallRenderTiles();
+                _pcCall.previousVideoTrack = null;
                 _pcCall.mode = 'video';
             }
         };
