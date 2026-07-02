@@ -8275,10 +8275,12 @@
                                 </div>
                                 <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:center;">
                                     <input type="text" class="mc-search" id="mc-task-search" placeholder="Search tasks..." style="flex:1;min-width:200px;margin-bottom:0;" oninput="mcRenderTasks()">
-                                    <!-- View mode toggle — List (Notion rows) / Board (Kanban) -->
+                                    <!-- View mode toggle — List / Board / Calendar / Table -->
                                     <div id="mc-tasks-view-toggle" style="display:flex;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:3px;gap:2px;">
                                         <button onclick="mcSetTasksView('list')" data-view="list" class="mc-view-btn" title="List view" style="padding:6px 12px;font-size:11px;font-weight:700;background:rgba(0,212,255,0.14);color:#00d4ff;border:1px solid rgba(0,212,255,0.35);border-radius:6px;cursor:pointer;letter-spacing:0.06em;">☰ LIST</button>
                                         <button onclick="mcSetTasksView('board')" data-view="board" class="mc-view-btn" title="Kanban board" style="padding:6px 12px;font-size:11px;font-weight:700;background:transparent;color:rgba(255,255,255,0.5);border:1px solid transparent;border-radius:6px;cursor:pointer;letter-spacing:0.06em;">▤ BOARD</button>
+                                        <button onclick="mcSetTasksView('calendar')" data-view="calendar" class="mc-view-btn" title="Calendar view" style="padding:6px 12px;font-size:11px;font-weight:700;background:transparent;color:rgba(255,255,255,0.5);border:1px solid transparent;border-radius:6px;cursor:pointer;letter-spacing:0.06em;">📅 CALENDAR</button>
+                                        <button onclick="mcSetTasksView('table')" data-view="table" class="mc-view-btn" title="Table view" style="padding:6px 12px;font-size:11px;font-weight:700;background:transparent;color:rgba(255,255,255,0.5);border:1px solid transparent;border-radius:6px;cursor:pointer;letter-spacing:0.06em;">▦ TABLE</button>
                                     </div>
                                     <button class="mc-btn mc-btn-green" onclick="mcShowTaskForm(-1)">+ New Task</button>
                                 </div>
@@ -22228,15 +22230,33 @@
 
             var html = '';
 
+            // Streak read from the player's canonical record so it's the same
+            // number MC + sub-apps see. mcPlayers is the writer surface.
+            var myPlayer = (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers))
+                ? mcPlayers.find(function (p) { return p && (p.id === s.id || p.brand === s.brand); }) : null;
+            var streakN = (myPlayer && myPlayer.streak) || 0;
+            var longestStreak = (myPlayer && myPlayer.longestStreak) || 0;
+
             // ── Player header ──
-            html += '<div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;">' +
+            html += '<div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;flex-wrap:wrap;">' +
                 '<div style="width:52px;height:52px;border-radius:50%;border:2px solid var(--cyan);overflow:hidden;display:flex;align-items:center;justify-content:center;background:rgba(0,240,255,0.05);">' +
                 '<img src="public/PFLX Core Flat 6.png" alt="" style="width:100%;height:100%;object-fit:contain;" onerror="this.parentElement.innerHTML=\'&#x1F464;\'">' +
                 '</div>' +
-                '<div>' +
+                '<div style="flex:1;min-width:0;">' +
                 '<div style="font-family:\'Rajdhani\',sans-serif;font-size:20px;font-weight:900;color:#fff;">Welcome back, ' + escapeHtml(displayName) + '</div>' +
                 '<div style="font-family:\'Jura\',sans-serif;font-size:11px;color:#6a7290;letter-spacing:1px;">' + escapeHtml(cohort) + ' · ' + xc.toLocaleString() + ' XC</div>' +
-                '</div></div>';
+                '</div>' +
+                // Streak badge — flame icon + current streak. Shows longest streak below when > 0.
+                (streakN > 0 || longestStreak > 0
+                    ? '<div title="Approval streak — every 5 grants bonus XC" style="display:flex;align-items:center;gap:10px;padding:8px 14px;background:linear-gradient(135deg, rgba(245,165,0,0.14), rgba(239,68,68,0.10));border:1px solid rgba(245,165,0,0.4);border-radius:12px;box-shadow:0 0 14px rgba(245,165,0,0.14);">' +
+                        '<span style="font-size:22px;">🔥</span>' +
+                        '<div style="line-height:1.1;">' +
+                            '<div style="font-family:Orbitron,sans-serif;font-size:18px;font-weight:900;color:#f5a500;">' + streakN + '</div>' +
+                            '<div style="font-size:9px;color:rgba(255,255,255,0.55);letter-spacing:0.12em;text-transform:uppercase;font-weight:700;">Streak' + (longestStreak > streakN ? ' · Best ' + longestStreak : '') + '</div>' +
+                        '</div>' +
+                      '</div>'
+                    : '') +
+            '</div>';
 
             // ── Active checkpoint hero + Next Up strip ────────────────────
             // Surface the active checkpoint front and center with its banner,
@@ -25159,7 +25179,7 @@
             catch (e) { return 'list'; }
         })();
         function mcSetTasksView(mode) {
-            if (mode !== 'list' && mode !== 'board') return;
+            if (['list', 'board', 'calendar', 'table'].indexOf(mode) === -1) return;
             mcTasksView = mode;
             try { localStorage.setItem('pflx_mc_tasks_view', mode); } catch (e) {}
             // Toggle button visuals
@@ -25229,21 +25249,148 @@
             list.innerHTML = html;
         }
 
+        // ── Calendar view (month grid) ──
+        // Tasks land on their dueDate cell. Multi-task days show a "+N more"
+        // pill. Prev/Next nav. Today cell is highlighted.
+        var _mcCalMonth = (function () { var d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; })();
+        function _mcCalMoveMonth(delta) {
+            _mcCalMonth.m += delta;
+            while (_mcCalMonth.m < 0)  { _mcCalMonth.m += 12; _mcCalMonth.y--; }
+            while (_mcCalMonth.m > 11) { _mcCalMonth.m -= 12; _mcCalMonth.y++; }
+            mcRenderTasks();
+        }
+        window._mcCalMoveMonth = _mcCalMoveMonth;
+        function _mcRenderTasksCalendar(filtered) {
+            var list = document.getElementById('mc-tasks-list');
+            if (!list) return;
+            var year = _mcCalMonth.y, month = _mcCalMonth.m;
+            var monthName = new Date(year, month, 1).toLocaleString('default', { month: 'long' });
+            var firstDay = new Date(year, month, 1).getDay(); // 0=Sun
+            var daysInMonth = new Date(year, month + 1, 0).getDate();
+            var todayDay = null;
+            var now = new Date();
+            if (now.getFullYear() === year && now.getMonth() === month) todayDay = now.getDate();
+            // Bucket tasks by day-of-month
+            var buckets = {};
+            filtered.forEach(function (t) {
+                if (!t.dueDate) return;
+                var d = new Date(t.dueDate + 'T00:00:00');
+                if (d.getFullYear() !== year || d.getMonth() !== month) return;
+                var day = d.getDate();
+                if (!buckets[day]) buckets[day] = [];
+                buckets[day].push(t);
+            });
+            list.style.display = 'block';
+            list.style.gridTemplateColumns = '';
+            list.style.gap = '';
+            var html = '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 4px 10px;">' +
+                '<div style="display:flex;gap:8px;align-items:center;">' +
+                    '<button onclick="_mcCalMoveMonth(-1)" style="padding:6px 12px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;">← PREV</button>' +
+                    '<div style="font-family:Orbitron,sans-serif;font-size:16px;font-weight:800;color:#f0f0ff;letter-spacing:0.06em;">' + monthName.toUpperCase() + ' ' + year + '</div>' +
+                    '<button onclick="_mcCalMoveMonth(1)" style="padding:6px 12px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;">NEXT →</button>' +
+                '</div>' +
+                '<div style="font-size:10px;color:rgba(255,255,255,0.4);font-family:monospace;">' + filtered.filter(function (t) { return t.dueDate; }).length + ' scheduled tasks</div>' +
+            '</div>';
+            // Weekday header
+            html += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px;">';
+            ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(function (d) {
+                html += '<div style="text-align:center;padding:6px;font-family:Orbitron,sans-serif;font-size:10px;color:rgba(255,255,255,0.35);letter-spacing:0.12em;font-weight:700;">' + d + '</div>';
+            });
+            html += '</div>';
+            // Day cells
+            html += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;">';
+            for (var i = 0; i < firstDay; i++) html += '<div></div>';
+            for (var day = 1; day <= daysInMonth; day++) {
+                var dayTasks = buckets[day] || [];
+                var isToday = day === todayDay;
+                var cellBorder = isToday ? '2px solid rgba(0,212,255,0.6)' : '1px solid rgba(255,255,255,0.06)';
+                var cellBg = isToday ? 'rgba(0,212,255,0.06)' : 'rgba(255,255,255,0.02)';
+                html += '<div style="min-height:100px;padding:8px;background:' + cellBg + ';border:' + cellBorder + ';border-radius:8px;display:flex;flex-direction:column;gap:4px;">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
+                        '<span style="font-size:12px;color:' + (isToday ? '#00d4ff' : 'rgba(255,255,255,0.6)') + ';font-weight:' + (isToday ? '800' : '600') + ';">' + day + '</span>' +
+                        (dayTasks.length > 0 ? '<span style="font-size:9px;color:rgba(255,255,255,0.4);font-family:monospace;">' + dayTasks.length + '</span>' : '') +
+                    '</div>';
+                dayTasks.slice(0, 3).forEach(function (t) {
+                    var isApproved = t.status === 'approved' || t.completed;
+                    var pRgb = MC_PRIORITY_META[t.priority || 'normal'].rgb;
+                    html += '<div ' + _mcJumpAttr('task', t.id) + ' style="padding:3px 6px;background:rgba(' + pRgb + ',0.14);border:1px solid rgba(' + pRgb + ',0.3);border-radius:4px;font-size:10px;color:' + (isApproved ? 'rgba(255,255,255,0.55)' : '#f0f0ff') + ';cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + (isApproved ? 'text-decoration:line-through;' : '') + '" title="' + escapeHtml(t.title || 'Untitled') + '">' + escapeHtml(t.title || 'Untitled') + '</div>';
+                });
+                if (dayTasks.length > 3) html += '<div style="font-size:9px;color:rgba(255,255,255,0.4);text-align:center;padding-top:2px;">+ ' + (dayTasks.length - 3) + ' more</div>';
+                html += '</div>';
+            }
+            html += '</div>';
+            list.innerHTML = html;
+        }
+
+        // ── Table view (dense sortable columns) ──
+        var _mcTableSort = { field: 'priority', dir: 'desc' };
+        window._mcTableSortBy = function (field) {
+            if (_mcTableSort.field === field) _mcTableSort.dir = _mcTableSort.dir === 'asc' ? 'desc' : 'asc';
+            else { _mcTableSort.field = field; _mcTableSort.dir = 'asc'; }
+            mcRenderTasks();
+        };
+        function _mcRenderTasksTable(filtered) {
+            var list = document.getElementById('mc-tasks-list');
+            if (!list) return;
+            var sorted = filtered.slice();
+            var f = _mcTableSort.field, dir = _mcTableSort.dir === 'asc' ? 1 : -1;
+            sorted.sort(function (a, b) {
+                var av, bv;
+                if (f === 'priority') { av = _mcPriorityWeight(a.priority || 'normal'); bv = _mcPriorityWeight(b.priority || 'normal'); }
+                else if (f === 'due') { av = a.dueDate ? new Date(a.dueDate).getTime() : Infinity; bv = b.dueDate ? new Date(b.dueDate).getTime() : Infinity; }
+                else if (f === 'xc') { av = a.xcReward || 0; bv = b.xcReward || 0; }
+                else if (f === 'status') { av = String(a.status || ''); bv = String(b.status || ''); }
+                else { av = String(a[f] || '').toLowerCase(); bv = String(b[f] || '').toLowerCase(); }
+                if (av < bv) return -1 * dir;
+                if (av > bv) return 1 * dir;
+                return 0;
+            });
+            list.style.display = 'block';
+            list.style.gridTemplateColumns = '';
+            list.style.gap = '';
+            function th(field, label) {
+                var arrow = _mcTableSort.field === field ? (_mcTableSort.dir === 'asc' ? ' ↑' : ' ↓') : '';
+                return '<th onclick="_mcTableSortBy(&quot;' + field + '&quot;)" style="padding:10px 12px;text-align:left;font-family:Orbitron,sans-serif;font-size:10px;color:rgba(255,255,255,0.5);letter-spacing:0.14em;font-weight:800;cursor:pointer;user-select:none;border-bottom:1px solid rgba(255,255,255,0.08);background:rgba(0,0,0,0.15);">' + label + arrow + '</th>';
+            }
+            var html = '<table style="width:100%;border-collapse:collapse;background:rgba(22,22,31,0.5);border:1px solid rgba(255,255,255,0.06);border-radius:12px;overflow:hidden;">' +
+                '<thead><tr>' +
+                    th('priority', 'Priority') + th('title', 'Task') + th('status', 'Status') + th('due', 'Due') + th('xc', 'XC') +
+                    '<th style="padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.08);background:rgba(0,0,0,0.15);"></th>' +
+                '</tr></thead><tbody>';
+            sorted.forEach(function (t) {
+                var realIndex = mcTasks.indexOf(t);
+                var priorityFlag = _mcPriorityFlag(t.priority || 'normal');
+                var urgency = _mcUrgencyForDueDate(t.dueDate);
+                var isApproved = _mcTaskIsApproved(t);
+                var statusCol = t.status === 'approved' ? '#22c55e' : t.status === 'submitted' ? '#f5a500' : t.status === 'rejected' ? '#ef4444' : '#00d4ff';
+                html += '<tr onmouseover="this.style.background=\'rgba(0,212,255,0.04)\'" onmouseout="this.style.background=\'transparent\'" style="transition:background 0.1s ease;">' +
+                    '<td style="padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.04);">' + priorityFlag + '</td>' +
+                    '<td ' + _mcJumpAttr('task', t.id) + ' style="padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.04);color:' + (isApproved ? 'rgba(255,255,255,0.55)' : '#f0f0ff') + ';font-weight:700;cursor:pointer;' + (isApproved ? 'text-decoration:line-through;' : '') + '">' + escapeHtml(t.title || 'Untitled') + '</td>' +
+                    '<td style="padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.04);color:' + statusCol + ';font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;">' + (t.status || 'open') + '</td>' +
+                    '<td style="padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.04);font-size:12px;' + (t.dueDate ? 'color:rgba(' + urgency.rgb + ',1);font-weight:700;' : 'color:rgba(255,255,255,0.3);') + '">' + (t.dueDate ? urgency.label : '—') + '</td>' +
+                    '<td style="padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.04);color:#f5c842;font-weight:700;font-family:monospace;">' + (t.xcReward ? '⚡ ' + t.xcReward : '—') + '</td>' +
+                    '<td style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);white-space:nowrap;">' +
+                        '<button onclick="mcEditTask(' + realIndex + ')" style="padding:5px 10px;font-size:10px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:6px;cursor:pointer;font-weight:700;">Edit</button>' +
+                    '</td>' +
+                '</tr>';
+            });
+            html += '</tbody></table>';
+            list.innerHTML = html;
+        }
+
         function mcRenderTasks() {
             mcLoadData();
             var list = document.getElementById('mc-tasks-list');
             if (!list) return;
-            // Board view early-branch — reuses filter logic below.
-            if (mcTasksView === 'board') {
-                var search = (document.getElementById('mc-task-search')?.value || '').toLowerCase();
-                var filtered = mcTasks.filter(function(t) {
-                    if (mcTaskFilter !== 'all' && t.status !== mcTaskFilter) return false;
-                    if (search && !(t.title || '').toLowerCase().includes(search) && !(t.description || '').toLowerCase().includes(search)) return false;
-                    return true;
-                });
-                _mcRenderTasksBoard(filtered);
-                return;
-            }
+            var search = (document.getElementById('mc-task-search')?.value || '').toLowerCase();
+            var _filtered = mcTasks.filter(function(t) {
+                if (mcTaskFilter !== 'all' && t.status !== mcTaskFilter) return false;
+                if (search && !(t.title || '').toLowerCase().includes(search) && !(t.description || '').toLowerCase().includes(search)) return false;
+                return true;
+            });
+            if (mcTasksView === 'board')    { _mcRenderTasksBoard(_filtered); return; }
+            if (mcTasksView === 'calendar') { _mcRenderTasksCalendar(_filtered); return; }
+            if (mcTasksView === 'table')    { _mcRenderTasksTable(_filtered); return; }
 
             var search = (document.getElementById('mc-task-search')?.value || '').toLowerCase();
             var filtered = mcTasks.filter(function(t) {
