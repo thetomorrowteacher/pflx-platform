@@ -8464,7 +8464,10 @@
                                             </select>
                                         </div>
                                         <div>
-                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Priority</label>
+                                            <label style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">
+                                                <span>Priority</span>
+                                                <button type="button" onclick="mcSuggestPriorityFromForm()" title="X-Bot: heuristically pick a priority based on the description + deadline + XC" style="padding:2px 8px;font-size:9px;font-weight:800;background:rgba(139,92,246,0.14);color:#c4b5fd;border:1px solid rgba(139,92,246,0.35);border-radius:5px;cursor:pointer;letter-spacing:0.06em;text-transform:uppercase;">🤖 Suggest</button>
+                                            </label>
                                             <select id="mc-task-priority" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
                                                 <option value="urgent">◉ Urgent</option>
                                                 <option value="high">◉ High</option>
@@ -8472,6 +8475,11 @@
                                                 <option value="low">· Low</option>
                                             </select>
                                         </div>
+                                    </div>
+                                    <!-- X-Bot AI Task Breakdown button — decomposes the description into a checklist -->
+                                    <div style="margin-bottom:12px;padding:10px 12px;background:rgba(139,92,246,0.05);border:1px dashed rgba(139,92,246,0.25);border-radius:8px;display:flex;justify-content:space-between;align-items:center;">
+                                        <span style="font-size:11px;color:rgba(196,181,253,0.85);"><strong style="color:#c4b5fd;">🤖 X-Bot</strong> — turn the description above into a step-by-step checklist</span>
+                                        <button type="button" onclick="mcBreakdownTaskFromForm()" style="padding:6px 14px;font-size:11px;font-weight:800;background:rgba(139,92,246,0.16);color:#c4b5fd;border:1px solid rgba(139,92,246,0.45);border-radius:6px;cursor:pointer;letter-spacing:0.06em;">🤖 BREAK DOWN</button>
                                     </div>
                                     <div style="margin-bottom:12px;">
                                         <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Badge Rewards (Multi-Select)</label>
@@ -27393,6 +27401,116 @@
         window.mcSpawnFromTemplate = mcSpawnFromTemplate;
         window.mcDeleteTemplate = mcDeleteTemplate;
         window.pflxOpenTemplatePicker = pflxOpenTemplatePicker;
+
+        // ═══════════════════════════════════════════════════════════════════
+        // X-BOT AI ASSIST — heuristic priority + task breakdown suggestion.
+        // Runs locally (no network round-trip). When a real X-Bot HTTP endpoint
+        // becomes available these helpers can proxy through it, but the
+        // heuristics ship value today.
+        // ═══════════════════════════════════════════════════════════════════
+
+        // Priority signal — combines urgency signals from description tone,
+        // due-date proximity, and the XC pool. Returns one of urgent/high/
+        // normal/low with a short human-readable reason for the toast.
+        function _mcSuggestPriority(opts) {
+            opts = opts || {};
+            var desc = String(opts.description || '').toLowerCase();
+            var due = opts.dueDate || '';
+            var xc = opts.xcReward || 0;
+            var reasons = [];
+            var score = 0;
+            // Description keywords
+            var urgentTerms = ['urgent','asap','immediately','emergency','critical','p0','priority','deadline','overdue','must ship','can\'t wait','blocking'];
+            var highTerms = ['important','soon','p1','key','required','high priority','strategic','launch'];
+            var lowTerms = ['optional','bonus','stretch','nice-to-have','when possible','low priority','extra credit','if time'];
+            urgentTerms.forEach(function (t) { if (desc.indexOf(t) !== -1) { score += 3; reasons.push('keyword "' + t + '"'); } });
+            highTerms.forEach(function (t) { if (desc.indexOf(t) !== -1) { score += 2; reasons.push('keyword "' + t + '"'); } });
+            lowTerms.forEach(function (t) { if (desc.indexOf(t) !== -1) { score -= 2; reasons.push('keyword "' + t + '"'); } });
+            // Due-date urgency
+            if (due) {
+                var u = _mcUrgencyForDueDate(due);
+                if (u.days !== null) {
+                    if (u.days < 0)  { score += 4; reasons.push('overdue by ' + Math.abs(u.days) + 'd'); }
+                    else if (u.days <= 2) { score += 3; reasons.push('due in ' + u.days + 'd'); }
+                    else if (u.days <= 7) { score += 1; reasons.push('due within a week'); }
+                    else if (u.days > 30) { score -= 1; reasons.push('due > 30d out'); }
+                }
+            }
+            // XC pool signals importance
+            if (xc >= 500) { score += 2; reasons.push('high XC reward'); }
+            else if (xc >= 200) { score += 1; reasons.push('meaningful XC reward'); }
+            // Decide
+            var priority = 'normal';
+            if (score >= 5) priority = 'urgent';
+            else if (score >= 3) priority = 'high';
+            else if (score <= -2) priority = 'low';
+            var summary = priority.charAt(0).toUpperCase() + priority.slice(1) + (reasons.length ? ' — ' + reasons.slice(0, 3).join(', ') : '');
+            return { priority: priority, reasons: reasons, score: score, summary: summary };
+        }
+        window._mcSuggestPriority = _mcSuggestPriority;
+
+        // Task breakdown — split a description into sub-task candidates.
+        // Handles numbered lists (1. 2. 3.), bullet-style lines (- * •),
+        // sentences connected by 'then/and/next', and sentence boundaries
+        // as a last resort. Returns an array of {label} objects.
+        function _mcSuggestBreakdown(description) {
+            var text = String(description || '').trim();
+            if (!text) return [];
+            // 1) Numbered list detection — split on "1." "2." etc.
+            var numMatches = text.match(/(\d+[\.\)]\s+[^\n\d]+)/g);
+            if (numMatches && numMatches.length >= 2) {
+                return numMatches.map(function (m) { return { label: m.replace(/^\d+[\.\)]\s+/, '').trim().replace(/[.,;\s]+$/, '') }; }).filter(function (r) { return r.label; });
+            }
+            // 2) Bullet-style split
+            if (/^[-*•]\s/m.test(text)) {
+                return text.split(/\n+/).map(function (line) {
+                    return { label: line.replace(/^[-*•]\s+/, '').trim().replace(/[.,;\s]+$/, '') };
+                }).filter(function (r) { return r.label; });
+            }
+            // 3) "and/then/next" connectors — cut on those keywords when 3+
+            //    steps appear.
+            var connectorSplit = text.split(/\s+(?:then|and then|next|after that|finally)[,:\s]+/i);
+            if (connectorSplit.length >= 3) {
+                return connectorSplit.map(function (s) { return { label: s.trim().replace(/[.,;\s]+$/, '') }; }).filter(function (r) { return r.label; });
+            }
+            // 4) Sentence boundary — 2+ sentences → treat each as a step.
+            var sentences = text.split(/(?<=[.!?])\s+/);
+            if (sentences.length >= 2 && sentences.length <= 8) {
+                return sentences.map(function (s) { return { label: s.trim().replace(/[.,;\s]+$/, '') }; }).filter(function (r) { return r.label; });
+            }
+            // 5) Single sentence — offer a single "Complete: <title>" candidate.
+            return [{ label: text.slice(0, 120) }];
+        }
+        window._mcSuggestBreakdown = _mcSuggestBreakdown;
+
+        // Wire-ups for the Task form buttons.
+        function mcSuggestPriorityFromForm() {
+            var desc = document.getElementById('mc-task-desc')?.value || '';
+            var due = document.getElementById('mc-task-due')?.value || '';
+            var xc = parseInt(document.getElementById('mc-task-xc')?.value || '0', 10);
+            var result = _mcSuggestPriority({ description: desc, dueDate: due, xcReward: xc });
+            var prioSel = document.getElementById('mc-task-priority');
+            if (prioSel) prioSel.value = result.priority;
+            try { if (typeof pflxToast === 'function') pflxToast('🤖 Suggested: ' + result.summary, 'info', 5000); } catch (e) {}
+        }
+        window.mcSuggestPriorityFromForm = mcSuggestPriorityFromForm;
+
+        function mcBreakdownTaskFromForm() {
+            var desc = document.getElementById('mc-task-desc')?.value || '';
+            if (!desc.trim()) { try { pflxToast('Add a description first, then click Break down.', 'warning'); } catch (e) {} return; }
+            var steps = _mcSuggestBreakdown(desc);
+            if (!steps.length) { try { pflxToast('Could not extract steps from the description.', 'warning'); } catch (e) {} return; }
+            // Push the AI-suggested subtasks into the current mcTaskChecklist so
+            // the existing "Checklist" section of the form picks them up and
+            // renders / saves them normally.
+            if (typeof mcTaskChecklist === 'undefined' || !Array.isArray(mcTaskChecklist)) window.mcTaskChecklist = [];
+            steps.forEach(function (s, i) {
+                mcTaskChecklist.push({ id: 'chk-' + Date.now() + '-' + i, text: s.label, required: false });
+            });
+            try { if (typeof mcRenderTaskChecklist === 'function') mcRenderTaskChecklist(); } catch (e) {}
+            try { if (typeof pflxToast === 'function') pflxToast('🤖 Broke into ' + steps.length + ' step' + (steps.length === 1 ? '' : 's'), 'success'); } catch (e) {}
+        }
+        window.mcBreakdownTaskFromForm = mcBreakdownTaskFromForm;
 
         // ── Host reject flow ──
         // Marks the submitted task as rejected, records an optional host note,
