@@ -9207,9 +9207,18 @@
                                             </select>
                                         </div>
                                         <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">🎬 Source Project</label>
+                                            <select id="mc-job-project" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(139,92,246,0.28);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" title="When someone is hired, the created Task nests inside this Project">
+                                                <option value="">None (standalone Job)</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                                        <div>
                                             <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Timeline Start</label>
                                             <input type="date" id="mc-job-start" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
                                         </div>
+                                        <div></div>
                                     </div>
                                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
                                         <div>
@@ -30464,6 +30473,16 @@
                     cpSelect.innerHTML += '<option value="' + escapeAttr(cp.id) + '">' + escapeHtml(cp.name) + '</option>';
                 });
             }
+            // Populate Source Project dropdown — Jobs=inverse. Hiring an
+            // applicant on a Project-linked Job auto-creates a Task inside
+            // that Project so the lineage rolls up.
+            var projSelect = document.getElementById('mc-job-project');
+            if (projSelect) {
+                projSelect.innerHTML = '<option value="">None (standalone Job)</option>';
+                (mcProjects || []).forEach(function (p) {
+                    projSelect.innerHTML += '<option value="' + escapeAttr(p.id) + '">' + escapeHtml(p.name || p.title || 'Untitled') + '</option>';
+                });
+            }
 
             // Populate cohorts checkboxes
             var cohortDiv = document.getElementById('mc-job-cohorts');
@@ -30482,6 +30501,7 @@
                 document.getElementById('mc-job-slots').value = j.slots || 1;
                 document.getElementById('mc-job-status').value = j.status || 'open';
                 document.getElementById('mc-job-checkpoint').value = j.checkpoint || '';
+                var _projEl = document.getElementById('mc-job-project'); if (_projEl) _projEl.value = j.projectId || '';
                 document.getElementById('mc-job-start').value = j.startDate || '';
                 document.getElementById('mc-job-end').value = j.endDate || '';
                 document.getElementById('mc-job-desc').value = j.description || '';
@@ -30520,6 +30540,10 @@
 
             var cohorts = Array.from(document.querySelectorAll('#mc-job-cohorts input:checked')).map(function(cb) { return cb.value; });
 
+            // projectId — optional link to a source Project. If the host
+            // set it (via the Job form's new selector) the auto-created
+            // hired-player task cascades to that Project's taskIds.
+            var projectId = document.getElementById('mc-job-project')?.value || '';
             if (mcCurrentJobIdx >= 0) {
                 var existing = mcJobs[mcCurrentJobIdx];
                 mcJobs[mcCurrentJobIdx] = {
@@ -30530,6 +30554,7 @@
                     slots: slots,
                     status: status,
                     checkpoint: checkpoint,
+                    projectId: projectId || existing.projectId || '',
                     startDate: startDate,
                     endDate: endDate,
                     cohorts: cohorts,
@@ -30548,6 +30573,7 @@
                     slots: slots,
                     status: status,
                     checkpoint: checkpoint,
+                    projectId: projectId || '',
                     startDate: startDate,
                     endDate: endDate,
                     cohorts: cohorts,
@@ -30560,39 +30586,63 @@
 
             mcSaveData('jobs');
 
-            // Auto-create tasks for hired players if status is 'Claimed'
+            // ── Jobs → Tasks (inverse of Tasks → Jobs) ──
+            // A hired player automatically gets a Task assigned to them.
+            // If the Job was posted under a Project (job.projectId), the new
+            // Task is also nested inside that Project so the lineage rolls
+            // up correctly (Project → Task list, Checkpoint progress bars).
+            // This fires on any save where hired[] has items and the job is
+            // marked Open/Claimed. Idempotent — an existing job→task link is
+            // never duplicated.
             var savedJob = mcCurrentJobIdx >= 0 ? mcJobs[mcCurrentJobIdx] : mcJobs[mcJobs.length - 1];
-            if (savedJob && savedJob.status === 'Claimed' && savedJob.hired && savedJob.hired.length > 0) {
+            if (savedJob && Array.isArray(savedJob.hired) && savedJob.hired.length > 0) {
                 mcLoadData();
-                savedJob.hired.forEach(function(hiredPlayerId) {
-                    var existingTask = mcTasks.find(function(t) {
-                        return t.jobId === savedJob.id && t.playerId === hiredPlayerId;
+                var newlyCreatedTaskIds = [];
+                savedJob.hired.forEach(function (hiredPlayerId) {
+                    var existingTask = mcTasks.find(function (t) {
+                        return t && t.jobId === savedJob.id && (t.playerId === hiredPlayerId || (Array.isArray(t.assignedTo) && t.assignedTo.indexOf(hiredPlayerId) !== -1));
                     });
                     if (!existingTask) {
+                        var newTaskId = 'task-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
                         mcTasks.push({
-                            id: 'task-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+                            id: newTaskId,
                             title: '[JOB] ' + savedJob.title,
                             description: savedJob.description || '',
-                            category: 'Job',
-                            playerId: hiredPlayerId,
+                            category: 'collaboration',
+                            playerId: hiredPlayerId,               // legacy scalar
+                            assignedTo: [hiredPlayerId],          // canonical array
                             jobId: savedJob.id,
-                            status: 'Active',
-                            priority: 'Normal',
+                            projectId: savedJob.projectId || '',
+                            checkpointId: savedJob.checkpoint || '',
+                            status: 'open',                       // lowercase — matches Notion-row checkbox states
+                            priority: 'normal',
+                            xcReward: savedJob.xcReward || 0,
                             dueDate: savedJob.endDate || '',
                             createdAt: new Date().toISOString().split('T')[0],
                             completedAt: '',
-                            // Close the round-trip when this job originated
-                            // from a converted task: the hired player's auto-
-                            // created task points back to the original via
-                            // backFromJobId + originTaskId so the lineage is
-                            // visible in the UI ("hired from task X").
                             backFromJobId: savedJob.id,
-                            originTaskId: savedJob.sourceTaskId || ''
+                            originTaskId: savedJob.sourceTaskId || '',
+                            allowFileUpload: true,
+                            allowLinkSubmit: true
                         });
+                        newlyCreatedTaskIds.push(newTaskId);
                     }
                 });
-                mcSaveData('tasks');
-                mcRenderTasks();
+                // Cascade new tasks up to the source Project so they appear
+                // in the Project's TASKS IN THIS PROJECT panel and count
+                // towards its progress bar.
+                if (savedJob.projectId && newlyCreatedTaskIds.length > 0) {
+                    var srcProj = mcProjects.find(function (p) { return p && p.id === savedJob.projectId; });
+                    if (srcProj) {
+                        srcProj.taskIds = (srcProj.taskIds || []).concat(newlyCreatedTaskIds);
+                        mcSaveData('projects');
+                    }
+                }
+                if (newlyCreatedTaskIds.length > 0) {
+                    mcSaveData('tasks');
+                    try { mcRenderTasks(); } catch (e) {}
+                    try { if (typeof pflxToast === 'function') pflxToast('Created ' + newlyCreatedTaskIds.length + ' Task' + (newlyCreatedTaskIds.length === 1 ? '' : 's') + ' from Job hires', 'success'); } catch (e) {}
+                }
             }
 
             mcCancelJobForm();
