@@ -22723,42 +22723,65 @@
                 { label: cp.name || 'Detail', view: 'checkpoint-detail' }
             ]);
 
-            var pct = cp.progress || 0;
+            // Real aggregate progress across every player task in scope.
+            // Falls back to the pre-computed cp.progress if the MC helper
+            // isn't available (defensive — Player Portal can load before MC
+            // finishes booting).
+            var cpProg = (typeof _mcCheckpointProgress === 'function') ? _mcCheckpointProgress(cp) : { approved: 0, total: 0, pct: cp.progress || 0 };
+            var pct = cpProg.pct;
             var isActive = cp.status === 'active' || cp.status === 'current';
+            var ppDetailAccentRgb = isActive ? '0,212,255' : cp.status === 'upcoming' ? '79,142,247' : '245,200,66';
+            var cpUrg = (typeof _mcUrgencyForDueDate === 'function') ? _mcUrgencyForDueDate(cp.endDate || cp.dueDate) : null;
 
-            // Header — same banner pattern as the host card and the list view.
-            // overflow:hidden so the image hugs the top corners; padding lives
-            // inside the body wrapper below.
-            html += '<div style="background:linear-gradient(135deg,rgba(245,200,66,0.06),rgba(10,18,40,0.4));border:1px solid rgba(245,200,66,0.15);border-radius:16px;margin-bottom:20px;overflow:hidden;">';
-            var ppDetailAccentRgb = isActive ? '34,197,94' : '245,200,66';
+            // Header card — 16:9 hero banner matching MC treatment. Rounded
+            // corners + overflow hidden so the image reaches edge-to-edge.
+            html += '<div style="background:linear-gradient(180deg, rgba(22,22,31,0.85), rgba(22,22,31,0.65));border:1.5px solid rgba(' + ppDetailAccentRgb + ',0.4);border-radius:22px;margin-bottom:20px;overflow:hidden;box-shadow:0 0 26px rgba(' + ppDetailAccentRgb + ',0.14), 0 16px 34px rgba(0,0,0,0.5);">';
             if (cp.bannerImage) {
-                html += '<div style="position:relative;height:200px;overflow:hidden;">' +
-                    '<img src="' + escapeHtml(cp.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;display:block;filter:saturate(1.15) brightness(1.05);">' +
-                    '<div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(10,10,15,0) 0%, rgba(22,22,31,0.45) 55%, rgba(22,22,31,0.95) 100%);"></div>' +
-                    '<div style="position:absolute;inset:0;box-shadow:inset 0 0 80px rgba(' + ppDetailAccentRgb + ',0.22);pointer-events:none;"></div>' +
-                    '<div style="position:absolute;left:22px;right:22px;bottom:16px;display:flex;justify-content:space-between;align-items:flex-end;gap:12px;">' +
-                        '<div style="font-family:\'Orbitron\',sans-serif;font-size:22px;font-weight:800;color:#ffffff;text-shadow:0 2px 12px rgba(0,0,0,0.9), 0 0 14px rgba(' + ppDetailAccentRgb + ',0.35);letter-spacing:0.04em;">' + escapeHtml(cp.name || 'Checkpoint') + '</div>' +
-                        (isActive
-                            ? '<span style="background:rgba(34,197,94,0.2);color:#22c55e;padding:5px 12px;border-radius:14px;font-size:11px;font-weight:700;border:1px solid rgba(34,197,94,0.5);backdrop-filter:blur(8px);text-transform:uppercase;letter-spacing:0.08em;white-space:nowrap;">● ACTIVE</span>'
-                            : '') +
+                html += '<div style="position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;">' +
+                    '<img src="' + escapeHtml(cp.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;display:block;filter:saturate(1.15) brightness(1.02);">' +
+                    '<div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(10,10,15,0) 0%, rgba(10,10,15,0.15) 45%, rgba(22,22,31,0.92) 100%);"></div>' +
+                    '<div style="position:absolute;inset:0;box-shadow:inset 0 0 90px rgba(' + ppDetailAccentRgb + ',0.28);pointer-events:none;"></div>' +
+                    // Hierarchy tag — top-left
+                    '<div style="position:absolute;top:16px;left:16px;background:rgba(' + ppDetailAccentRgb + ',0.22);color:rgba(255,255,255,0.95);padding:5px 12px;border-radius:6px;font-size:10px;font-weight:800;border:1px solid rgba(' + ppDetailAccentRgb + ',0.55);backdrop-filter:blur(10px);text-transform:uppercase;letter-spacing:0.14em;font-family:Orbitron,sans-serif;">◆ Checkpoint</div>' +
+                    // Status pill — top-right
+                    (isActive
+                        ? '<div style="position:absolute;top:16px;right:16px;background:rgba(34,197,94,0.2);color:#22c55e;padding:6px 14px;border-radius:14px;font-size:11px;font-weight:800;border:1px solid rgba(34,197,94,0.55);backdrop-filter:blur(10px);text-transform:uppercase;letter-spacing:0.1em;">● Active Now</div>'
+                        : '') +
+                    // Title — bottom overlay
+                    '<div style="position:absolute;left:24px;right:24px;bottom:20px;">' +
+                        '<div style="font-family:Orbitron,sans-serif;font-size:28px;font-weight:900;color:#ffffff;text-shadow:0 2px 18px rgba(0,0,0,0.9), 0 0 22px rgba(' + ppDetailAccentRgb + ',0.35);letter-spacing:0.02em;line-height:1.1;">' + escapeHtml(cp.name || 'Checkpoint') + '</div>' +
                     '</div>' +
                 '</div>';
+            } else {
+                // No-banner fallback — 16:9 gradient panel with hierarchy tag + title
+                html += '<div style="position:relative;width:100%;aspect-ratio:16/9;background:linear-gradient(135deg, rgba(' + ppDetailAccentRgb + ',0.22), rgba(' + ppDetailAccentRgb + ',0.05));display:flex;align-items:flex-end;padding:24px;box-shadow:inset 0 0 90px rgba(' + ppDetailAccentRgb + ',0.18);">' +
+                    '<div style="position:absolute;top:16px;left:16px;background:rgba(' + ppDetailAccentRgb + ',0.28);color:rgba(255,255,255,0.95);padding:5px 12px;border-radius:6px;font-size:10px;font-weight:800;border:1px solid rgba(' + ppDetailAccentRgb + ',0.6);text-transform:uppercase;letter-spacing:0.14em;font-family:Orbitron,sans-serif;">◆ Checkpoint</div>' +
+                    (isActive ? '<div style="position:absolute;top:16px;right:16px;background:rgba(34,197,94,0.22);color:#22c55e;padding:6px 14px;border-radius:14px;font-size:11px;font-weight:800;border:1px solid rgba(34,197,94,0.55);text-transform:uppercase;letter-spacing:0.1em;">● Active Now</div>' : '') +
+                    '<div style="font-family:Orbitron,sans-serif;font-size:28px;font-weight:900;color:#ffffff;text-shadow:0 0 20px rgba(' + ppDetailAccentRgb + ',0.5);letter-spacing:0.02em;line-height:1.1;">🏁 ' + escapeHtml(cp.name || 'Checkpoint') + '</div>' +
+                '</div>';
             }
-            html += '<div style="padding:24px;">';
-            if (!cp.bannerImage && isActive) html += '<div style="display:inline-block;background:rgba(34,197,94,0.15);color:#22c55e;font-size:9px;font-weight:700;padding:3px 8px;border-radius:6px;letter-spacing:1px;margin-bottom:10px;">● ACTIVE</div>';
-            if (!cp.bannerImage) html += '<div style="font-family:\'Orbitron\',sans-serif;font-size:18px;font-weight:700;color:#f5c842;letter-spacing:1px;margin-bottom:6px;">' + escapeHtml(cp.name || 'Checkpoint') + '</div>';
-            if (cp.description) html += '<div style="font-size:13px;color:#a0a8c4;line-height:1.6;margin-bottom:14px;">' + escapeHtml(cp.description) + '</div>';
+            html += '<div style="padding:22px 24px 20px 24px;">';
+            if (cp.description) html += '<div style="font-size:13px;color:rgba(255,255,255,0.65);line-height:1.55;margin-bottom:14px;">' + escapeHtml(cp.description) + '</div>';
 
-            // Stats row
-            html += '<div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:14px;">';
-            if (cp.startDate) html += '<div style="font-size:11px;"><span style="color:rgba(255,255,255,0.4);">START:</span> <span style="color:#22c55e;font-family:\'Share Tech Mono\',monospace;">' + escapeHtml(cp.startDate) + '</span></div>';
-            if (cp.endDate) html += '<div style="font-size:11px;"><span style="color:rgba(255,255,255,0.4);">DEADLINE:</span> <span style="color:#ef4444;font-family:\'Share Tech Mono\',monospace;">' + escapeHtml(cp.endDate) + '</span></div>';
-            if (cp.xc) html += '<div style="font-size:11px;"><span style="color:rgba(255,255,255,0.4);">REWARD:</span> <span style="color:#f5c842;font-family:\'Share Tech Mono\',monospace;">' + cp.xc + ' XC</span></div>';
+            // ── CHECKPOINT PROGRESS hero panel ── mirrors MC's aggregate bar.
+            html += '<div style="margin-bottom:14px;padding:16px 18px;background:rgba(' + ppDetailAccentRgb + ',0.06);border:1px solid rgba(' + ppDetailAccentRgb + ',0.30);border-radius:14px;">' +
+                '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:10px;">' +
+                    '<span style="font-family:Orbitron,sans-serif;font-size:12px;color:rgba(' + ppDetailAccentRgb + ',1);font-weight:800;letter-spacing:0.12em;">◆ CHECKPOINT PROGRESS</span>' +
+                    '<span style="font-size:18px;color:' + (pct === 100 ? '#22c55e' : '#ffffff') + ';font-weight:900;font-family:monospace;">' + pct + '%</span>' +
+                '</div>' +
+                (typeof _mcProgressBarHtml === 'function' ? _mcProgressBarHtml(pct, { height: 14 }) : ppProgressBar(pct, '#f5c842')) +
+                '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12px;color:rgba(255,255,255,0.7);">' +
+                    '<span>✓ ' + cpProg.approved + ' of ' + cpProg.total + ' tasks approved</span>' +
+                    (cpUrg && (cp.endDate || cp.dueDate) ? '<span style="color:rgba(' + cpUrg.rgb + ',1);font-weight:700;">📅 ' + cpUrg.label + '</span>' : '') +
+                '</div>' +
+            '</div>';
+
+            // Meta row (start / deadline / reward)
+            html += '<div style="display:flex;gap:20px;flex-wrap:wrap;font-size:11px;color:rgba(255,255,255,0.6);">';
+            if (cp.startDate) html += '<div><span style="color:rgba(255,255,255,0.4);">START:</span> <span style="color:#22c55e;font-family:monospace;">' + escapeHtml(cp.startDate) + '</span></div>';
+            if (cp.endDate) html += '<div><span style="color:rgba(255,255,255,0.4);">DEADLINE:</span> <span style="color:' + (cpUrg && cpUrg.days < 0 ? '#ef4444' : '#f5a500') + ';font-family:monospace;">' + escapeHtml(cp.endDate) + '</span></div>';
+            if (cp.xc || cp.xcReward) html += '<div><span style="color:rgba(255,255,255,0.4);">REWARD:</span> <span style="color:#f5c842;font-family:monospace;font-weight:700;">⚡ ' + (cp.xc || cp.xcReward) + ' XC</span></div>';
             html += '</div>';
-
-            html += '<div style="display:flex;align-items:center;gap:10px;">' +
-                '<div style="flex:1;">' + ppProgressBar(pct, '#f5c842') + '</div>' +
-                '<span style="font-size:12px;color:#f5c842;font-weight:700;">' + pct + '%</span></div>';
 
             // Snapshot info
             if (cp.snapshotInterval) {
