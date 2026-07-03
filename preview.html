@@ -22514,7 +22514,15 @@
             roster.forEach(function (p) { if (p && p.id && participantIds.indexOf(p.id) === -1) participantIds.push(p.id); });
             if (participantIds.length < 2) { if (typeof pflxToast === 'function') pflxToast('No cohort members to invite yet.', 'warn'); return; }
             var wantName = 'Project · ' + (proj.name || proj.title || 'Project');
-            // Load chat threads and dedupe by name.
+            // Preferred path — the chat engine owns thread state. Creating the
+            // group through it keeps _pcThreads authoritative (no stomp risk),
+            // wires the call invite listener, and opens the thread reliably.
+            if (typeof window.pflxChatEnsureGroupThread === 'function') {
+                var tid = window.pflxChatEnsureGroupThread(wantName, participantIds, { projectId: proj.id });
+                if (tid && typeof pflxToast === 'function') pflxToast('\ud83d\udcac "' + wantName + '" ready \u2014 ' + participantIds.length + ' members', 'success');
+                return;
+            }
+            // Legacy fallback (chat engine not booted yet) — direct write.
             var threads = [];
             try { var raw = localStorage.getItem('pflx_chat_threads'); if (raw) threads = JSON.parse(raw).threads || []; } catch (e) {}
             var existing = threads.find(function (t) { return t && t.name === wantName && t.type === 'group'; });
@@ -53739,6 +53747,10 @@ RESPONSE RULES:
                             if (document.getElementById('pflx-chat-panel').style.display !== 'none') pflxChatRender();
                             _pcRefreshBadge();
                             _pcCheckMentionsForMe();
+                            // New threads must get an invite listener immediately —
+                            // otherwise a call started right after a DM/group is
+                            // created never rings this client.
+                            try { _pcCallAttachInbound(); } catch (e) {}
                         }
                     })
                     .subscribe();
@@ -53804,6 +53816,45 @@ RESPONSE RULES:
             var cb = document.getElementById('pflx-chat-call-btn'); if (cb) cb.style.display = 'none';
             var sb = document.getElementById('pflx-chat-share-btn'); if (sb) sb.style.display = 'none';
             pflxChatRender();
+        };
+        // Ensure a group thread exists (dedupe by name), keep membership in
+        // sync, and open it — all INSIDE the engine so _pcThreads stays the
+        // source of truth. The old Project-chat path wrote localStorage +
+        // cloud directly behind the engine's back; the engine's next _pcSave
+        // then clobbered the new group with its stale in-memory copy, and
+        // pflxChatOpenThread couldn't find the thread at all.
+        window.pflxChatEnsureGroupThread = function (name, participantIds, opts) {
+            opts = opts || {};
+            var caps = _pcMyCaps();
+            if (!caps.enabled) { pflxToast('Chat is disabled for your cohort.', 'warn'); return null; }
+            if (!caps.group) { pflxToast('Group chats are disabled for your cohort.', 'warn'); return null; }
+            var me = _pcMe();
+            var ids = Array.isArray(participantIds) ? participantIds.slice() : [];
+            if (ids.indexOf(me.id) === -1) ids.unshift(me.id);
+            var t = _pcThreads.find(function (x) { return x && x.type === 'group' && x.name === name; });
+            if (t) {
+                // Membership sync — cohort members added since creation join in.
+                var grew = false;
+                if (!Array.isArray(t.participants)) t.participants = [];
+                ids.forEach(function (id) { if (t.participants.indexOf(id) === -1) { t.participants.push(id); grew = true; } });
+                if (grew) { t.updatedAt = new Date().toISOString(); _pcSave(); }
+            } else {
+                t = {
+                    id: 'th-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+                    type: 'group', name: name, participants: ids, messages: [],
+                    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+                    createdBy: me.id, fromProjectId: opts.projectId || null
+                };
+                _pcThreads.push(t);
+                _pcSave();
+            }
+            try { _pcCallAttachInbound(); } catch (e) {}
+            if (opts.open !== false) {
+                var panel = document.getElementById('pflx-chat-panel');
+                if (panel && (panel.style.display === 'none' || !panel.style.display)) panel.style.display = 'flex';
+                pflxChatOpenThread(t.id);
+            }
+            return t.id;
         };
         window.pflxChatOpenThread = function (threadId) {
             _pcCurrentThreadId = threadId;
@@ -54228,6 +54279,40 @@ RESPONSE RULES:
             if (!client || !client.channel) return null;
             return client.channel('pflx-call-' + threadId, { config: { broadcast: { self: false } } });
         }
+        // Detach the passive invite-listener channel for a thread BEFORE
+        // creating the active call channel. Two subscribed channels on the
+        // same realtime topic on one client conflict (Phoenix allows one
+        // join per topic per socket) — this was why calls hung at
+        // "Requesting…" / "Joining…" and never rang the other side.
+        function _pcCallDetachInbound(threadId) {
+            if (!_pcInboundChannels[threadId]) return;
+            try {
+                var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (client && client.removeChannel) client.removeChannel(_pcInboundChannels[threadId]);
+                else _pcInboundChannels[threadId].unsubscribe();
+            } catch (e) {}
+            delete _pcInboundChannels[threadId];
+        }
+        // subscribe() wrapped in a promise that actually settles: resolves
+        // on SUBSCRIBED, rejects on CHANNEL_ERROR / TIMED_OUT / CLOSED or
+        // after 12s. The old bare await hung forever on any error state.
+        function _pcCallSubscribe(ch) {
+            return new Promise(function (resolve, reject) {
+                var settled = false;
+                var to = setTimeout(function () {
+                    if (settled) return; settled = true;
+                    reject(new Error('Signaling timed out — check your connection.'));
+                }, 12000);
+                ch.subscribe(function (status) {
+                    if (settled) return;
+                    if (status === 'SUBSCRIBED') { settled = true; clearTimeout(to); resolve(); }
+                    else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+                        settled = true; clearTimeout(to);
+                        reject(new Error('Signaling channel error (' + status + ')'));
+                    }
+                });
+            });
+        }
         function _pcCallAttachInbound() {
             // For every thread I'm in, keep a passive realtime channel that
             // listens for `invite` events. On invite, prompt to join.
@@ -54307,6 +54392,7 @@ RESPONSE RULES:
             if (_pcCall && _pcCall.localStream) {
                 _pcCall.localStream.getTracks().forEach(function (track) { pc.addTrack(track, _pcCall.localStream); });
             }
+            if (_pcCall.ringTimer) { clearTimeout(_pcCall.ringTimer); _pcCall.ringTimer = null; }
             _pcCall.peers[peerId] = { pc: pc, name: peerName || peerId, remoteStream: null };
             return pc;
         }
@@ -54372,7 +54458,7 @@ RESPONSE RULES:
                 pc.createOffer().then(function (offer) {
                     return pc.setLocalDescription(offer).then(function () { return offer; });
                 }).then(function (offer) {
-                    ch.send({ type: 'broadcast', event: 'offer', payload: { from: me.id, to: m.from, sdp: offer, mode: _pcCall.mode } });
+                    ch.send({ type: 'broadcast', event: 'offer', payload: { from: me.id, fromName: me.name, to: m.from, sdp: offer, mode: _pcCall.mode } });
                 }).catch(function (err) { console.error('[call] createOffer', err); });
                 _pcCallRenderTiles();
             });
@@ -54425,15 +54511,26 @@ RESPONSE RULES:
             _pcCallSetStatus('Requesting ' + (mode === 'screen' ? 'screen' : 'camera + mic') + '…');
             try {
                 var stream = await _pcCallGetLocalStream(mode);
+                _pcCallDetachInbound(t.id);
                 var ch = _pcCallSignalingChannel(t.id);
-                _pcCall = { threadId: t.id, mode: mode, localStream: stream, channel: ch, camEnabled: true, micEnabled: true, peers: {}, wasEverConnected: false };
+                if (!ch) throw new Error('Realtime unavailable — cannot signal the call.');
+                _pcCall = { threadId: t.id, mode: mode, localStream: stream, channel: ch, camEnabled: true, micEnabled: true, peers: {}, wasEverConnected: false, ringTimer: null };
                 _pcCallWireChannel(ch, mode);
-                await new Promise(function (resolve) { ch.subscribe(function (status) { if (status === 'SUBSCRIBED') resolve(); }); });
+                await _pcCallSubscribe(ch);
                 // Broadcast the invite to everyone in the thread…
                 ch.send({ type: 'broadcast', event: 'invite', payload: { from: me.id, name: me.name, mode: mode } });
                 // …and my own `join` so anyone already in the call adds me.
                 ch.send({ type: 'broadcast', event: 'join', payload: { from: me.id, name: me.name, mode: mode } });
                 _pcCallSetStatus(t.type === 'group' ? 'Waiting for others to join…' : 'Ringing…');
+                // Ring feedback — if nobody joins within 45s, tell the caller
+                // instead of leaving "Ringing…" forever. The system message in
+                // the thread still lets the other side call back.
+                _pcCall.ringTimer = setTimeout(function () {
+                    if (_pcCall && !_pcCall.wasEverConnected && Object.keys(_pcCall.peers).length === 0) {
+                        _pcCallSetStatus('No answer — they may be offline');
+                        pflxToast('No answer. They\'ll see the call message in the thread.', 'info');
+                    }
+                }, 45000);
                 _pcCallRenderTiles();
                 // Drop a system message so there's a record.
                 t.messages.push({
@@ -54461,10 +54558,12 @@ RESPONSE RULES:
             _pcCallOpenPanel(threadId);
             _pcCallSetStatus('Joining…');
             var stream = await _pcCallGetLocalStream('video'); // joiners open camera; can toggle to screen after
+            _pcCallDetachInbound(threadId);
             var ch = _pcCallSignalingChannel(threadId);
-            _pcCall = { threadId: threadId, mode: 'video', localStream: stream, channel: ch, camEnabled: true, micEnabled: true, peers: {}, wasEverConnected: false };
+            if (!ch) throw new Error('Realtime unavailable — cannot signal the call.');
+            _pcCall = { threadId: threadId, mode: 'video', localStream: stream, channel: ch, camEnabled: true, micEnabled: true, peers: {}, wasEverConnected: false, ringTimer: null };
             _pcCallWireChannel(ch, mode);
-            await new Promise(function (resolve) { ch.subscribe(function (status) { if (status === 'SUBSCRIBED') resolve(); }); });
+            await _pcCallSubscribe(ch);
             ch.send({ type: 'broadcast', event: 'join', payload: { from: me.id, name: me.name, mode: mode } });
             _pcCallRenderTiles();
             _pcCallSetStatus('Connecting…');
@@ -54483,10 +54582,14 @@ RESPONSE RULES:
                 var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
                 if (client && _pcCall.channel) client.removeChannel(_pcCall.channel);
             } catch (e) {}
+            if (_pcCall.ringTimer) { clearTimeout(_pcCall.ringTimer); _pcCall.ringTimer = null; }
             _pcCallTimerStop();
             var grid = document.getElementById('pflx-chat-call-tiles'); if (grid) grid.innerHTML = '';
             _pcCall = null;
             _pcCallShowOverlay(false);
+            // Re-attach the passive invite listener we detached for this call
+            // so future inbound calls on this thread still ring.
+            setTimeout(function () { try { _pcCallAttachInbound(); } catch (e) {} }, 600);
         };
         // ── Controls ──
         window.pflxChatCallToggleMute = function () {
