@@ -23483,19 +23483,36 @@
                 (projBanner
                     ? ''
                     : '<div style="font-family:\'Rajdhani\',sans-serif;font-size:22px;font-weight:900;color:#e0e6ff;">🎬 ' + escapeHtml(proj.name || proj.title || 'Project') + '</div>') +
-                (proj.description ? '<div style="font-size:13px;color:rgba(255,255,255,0.65);margin-top:' + (projBanner ? '0' : '6px') + ';line-height:1.6;">' + escapeHtml(proj.description) + '</div>' : '') +
-                // PROGRESS hero panel — parity with MC Project card.
-                '<div style="margin-top:14px;padding:14px 16px;background:rgba(139,92,246,0.06);border:1px solid rgba(139,92,246,0.28);border-radius:12px;">' +
-                    '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:10px;">' +
-                        '<span style="font-family:Orbitron,sans-serif;font-size:11px;color:#c4b5fd;font-weight:800;letter-spacing:0.1em;">📊 PROGRESS</span>' +
-                        '<span style="font-size:14px;color:' + (pct === 100 ? '#22c55e' : '#f0f0ff') + ';font-weight:800;font-family:monospace;">' + pct + '%</span>' +
-                    '</div>' +
-                    (typeof _mcProgressBarHtml === 'function' ? _mcProgressBarHtml(pct, { height: 12 }) : ppProgressBar(pct, '#a78bfa')) +
-                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:11px;color:rgba(255,255,255,0.65);">' +
-                        '<span>✓ ' + done + ' of ' + totalUnits + ' assignments completed</span>' +
-                        (xcTotalPool > 0 ? '<span style="color:#f5c842;font-weight:700;">⚡ ' + xcEarnedSoFar.toLocaleString() + ' / ' + xcTotalPool.toLocaleString() + ' XC</span>' : '') +
-                    '</div>' +
-                '</div>' +
+                (proj.description ? '<div style="font-size:13px;color:rgba(255,255,255,0.65);margin-top:' + (projBanner ? '0' : '6px') + ';line-height:1.6;">' + pflxLinkify(proj.description) + '</div>' : '') +
+                // PROGRESS hero panel — parity with the MC Project card hero
+                // treatment (July 2 2026): SVG ring + dynamic accent color.
+                (function () {
+                    var pgRgb = pct === 100 ? '34,197,94' : pct >= 66 ? '74,222,128' : pct >= 33 ? '245,200,66' : pct > 0 ? '255,159,64' : '0,212,255';
+                    var pgHex = pct === 100 ? '#22c55e' : pct >= 66 ? '#4ade80' : pct >= 33 ? '#f5c842' : pct > 0 ? '#ff9f40' : '#00d4ff';
+                    var r = 23, c = 2 * Math.PI * r;
+                    var pgRing = '<svg width="58" height="58" viewBox="0 0 58 58" style="display:block;transform:rotate(-90deg);">' +
+                        '<circle cx="29" cy="29" r="' + r + '" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="5"/>' +
+                        '<circle cx="29" cy="29" r="' + r + '" fill="none" stroke="' + pgHex + '" stroke-width="5" stroke-linecap="round" stroke-dasharray="' + c.toFixed(1) + '" stroke-dashoffset="' + (c * (1 - Math.max(0, Math.min(100, pct)) / 100)).toFixed(1) + '" style="filter:drop-shadow(0 0 4px rgba(' + pgRgb + ',0.8));transition:stroke-dashoffset 0.5s ease;"/>' +
+                    '</svg>';
+                    return '<div style="margin-top:14px;padding:14px 16px;background:linear-gradient(135deg, rgba(' + pgRgb + ',0.13), rgba(' + pgRgb + ',0.03) 55%, rgba(6,10,20,0.4));border:1px solid rgba(' + pgRgb + ',0.35);border-left:3px solid rgba(' + pgRgb + ',0.9);border-radius:14px;box-shadow:0 0 18px rgba(' + pgRgb + ',0.10), inset 0 1px 0 rgba(255,255,255,0.05);">' +
+                        '<div style="display:flex;align-items:center;gap:14px;">' +
+                            '<div style="position:relative;width:58px;height:58px;flex-shrink:0;">' + pgRing +
+                                '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:Orbitron,sans-serif;font-size:' + (pct === 100 ? '15' : '13') + 'px;font-weight:900;color:' + pgHex + ';">' + (pct === 100 ? '✓' : (pct + '<span style="font-size:8px;opacity:0.7;">%</span>')) + '</div>' +
+                            '</div>' +
+                            '<div style="flex:1;min-width:0;">' +
+                                '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px;">' +
+                                    '<span style="font-family:Orbitron,sans-serif;font-size:11px;color:rgba(' + pgRgb + ',1);font-weight:800;letter-spacing:0.14em;">📊 MISSION PROGRESS</span>' +
+                                    (pct === 100 ? '<span style="font-size:9px;color:#22c55e;font-weight:800;letter-spacing:0.1em;border:1px solid rgba(34,197,94,0.4);padding:2px 8px;border-radius:8px;">COMPLETE</span>' : '') +
+                                '</div>' +
+                                (typeof _mcProgressBarHtml === 'function' ? _mcProgressBarHtml(pct, { height: 14 }) : ppProgressBar(pct, pgHex)) +
+                                '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:9px;flex-wrap:wrap;">' +
+                                    '<span style="font-size:11px;color:rgba(255,255,255,0.78);font-weight:600;">✓ ' + done + ' <span style="opacity:0.55;">of</span> ' + totalUnits + ' <span style="opacity:0.55;">assignments completed</span></span>' +
+                                    (xcTotalPool > 0 ? '<span style="background:rgba(245,200,66,0.12);border:1px solid rgba(245,200,66,0.35);padding:3px 9px;border-radius:8px;font-size:11px;color:#f5c842;font-weight:800;font-family:monospace;">⚡ ' + xcEarnedSoFar.toLocaleString() + ' / ' + xcTotalPool.toLocaleString() + ' XC</span>' : '') +
+                                '</div>' +
+                            '</div>' +
+                        '</div>' +
+                    '</div>';
+                })() +
                 // Start Project Chat — spins up a PFLX Chat group named after
                 // this project with every cohort member as a participant. If
                 // a group with the same name already exists we jump to it.
@@ -23741,7 +23758,7 @@
                     : '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:10px;">' +
                         '<div style="font-family:\'Rajdhani\',sans-serif;font-size:24px;font-weight:900;color:#e0e6ff;">📋 ' + escapeHtml(task.title || task.name || 'Task') + '</div>' +
                         statusBadge + '</div>') +
-                (task.description ? '<div style="font-size:13px;color:rgba(255,255,255,0.7);line-height:1.7;margin-bottom:14px;">' + escapeHtml(task.description) + '</div>' : '') +
+                (task.description ? '<div style="font-size:13px;color:rgba(255,255,255,0.7);line-height:1.7;margin-bottom:14px;">' + pflxLinkify(task.description) + '</div>' : '') +
                 '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">' + (deadlineHtml || '') + '</div>' +
                 rewardHtml +
                 '<div style="margin-top:18px;">' + ppProgressBar(pct, '#00d4ff') + '<div style="margin-top:6px;font-size:11px;color:rgba(255,255,255,0.4);">' + pct + '% complete' + (checklist.length ? ' · ' + checked + '/' + checklist.length + ' checked' : '') + '</div></div>' +
@@ -25438,6 +25455,24 @@
         }
         // Progress bar HTML — height, current pct, color. Reused in
         // Project + Checkpoint cards for a consistent look.
+        // ── pflxLinkify ── escape HTML, then turn bare URLs (https://…,
+        // http://…, www.…) into clickable cyan anchors. Anchors open in a
+        // new tab and stopPropagation so links inside clickable rows/cards
+        // don't trigger the row's own onclick navigation. Window-attached
+        // so every script scope (MC + Player Portal) can use it.
+        window.pflxLinkify = function (text) {
+            var esc = String(text == null ? '' : text)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            return esc.replace(/\b((?:https?:\/\/|www\.)[^\s<>"']+)/gi, function (m) {
+                var url = m, trail = '';
+                var tm = url.match(/[),.;:!?\]]+$/);
+                if (tm) { trail = tm[0]; url = url.slice(0, url.length - trail.length); }
+                var href = /^https?:\/\//i.test(url) ? url : 'https://' + url;
+                return '<a href="' + href + '" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="color:#00d4ff;text-decoration:underline;text-underline-offset:2px;word-break:break-all;">' + url + '</a>' + trail;
+            });
+        };
+
         function _mcProgressBarHtml(pct, opts) {
             opts = opts || {};
             var h = opts.height || 10;
@@ -26248,7 +26283,7 @@
                                 '<div style="font-size:14px;font-weight:700;color:' + (isApproved ? 'rgba(255,255,255,0.55)' : '#f0f0ff') + ';' + (isApproved ? 'text-decoration:line-through;' : '') + 'line-height:1.3;">' + escapeHtml(t.title || 'Untitled') + '</div>' +
                                 '<div style="display:inline-block;background:' + statusColors.bg + ';color:' + statusColors.text + ';font-size:9px;font-weight:800;padding:3px 8px;border-radius:5px;text-transform:uppercase;letter-spacing:0.06em;">' + (t.status || 'open') + '</div>' +
                             '</div>' +
-                            (t.description ? '<div style="font-size:12px;color:rgba(255,255,255,0.45);line-height:1.4;margin-top:3px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;">' + escapeHtml(t.description) + '</div>' : '') +
+                            (t.description ? '<div style="font-size:12px;color:rgba(255,255,255,0.45);line-height:1.4;margin-top:3px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;">' + pflxLinkify(t.description) + '</div>' : '') +
                             (taskLineage ? taskLineage.replace('margin-bottom:10px', 'margin-top:6px;margin-bottom:0') : '') +
                         '</div>' +
                         // Right block — reward + urgency + expand + action buttons
@@ -26595,7 +26630,7 @@
                     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
                     '<span style="font-weight:700;color:#f0f0ff;font-size:14px;">' + escapeHtml(t.title) + '</span>' +
                     '<span style="font-size:9px;padding:2px 8px;border-radius:6px;background:rgba(255,255,255,0.04);color:' + statusColor + ';font-weight:700;">' + statusText + '</span></div>' +
-                    (t.description ? '<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;">' + escapeHtml(t.description) + '</div>' : '') +
+                    (t.description ? '<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;">' + pflxLinkify(t.description) + '</div>' : '') +
                     '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">' + xcPill + duePill + '</div>' +
                     (hasSubmitted ? '<span style="font-size:11px;color:#f5c842;">Awaiting review...</span>' :
                     '<button class="mc-btn mc-btn-green" onclick="mcOpenSubmitModal(' + realIdx + ')" style="font-size:11px;padding:6px 14px;">Submit Task</button>') +
@@ -29119,7 +29154,7 @@
                     '</div>' +
                     '</div>' +
                     // Description
-                    '<div style="font-size:12px;color:rgba(255,255,255,0.5);line-height:1.5;margin-bottom:12px;">' + escapeHtml(p.description || '') + '</div>' +
+                    '<div style="font-size:12px;color:rgba(255,255,255,0.5);line-height:1.5;margin-bottom:12px;">' + pflxLinkify(p.description || '') + '</div>' +
                     // Progress hero panel FIRST — the objective leads the card
                     progressPanel +
                     // Child tasks list — makes the Project → Task connection visible
@@ -32965,7 +33000,7 @@
                             '<span style="font-size:10px;color:rgba(0,240,255,0.7);border:1px solid rgba(0,240,255,0.2);border-radius:999px;padding:2px 9px;">' + typeChip + '</span>' +
                             (p.suggestedXC ? '<span style="font-size:10px;color:#f5c842;border:1px solid rgba(245,200,66,0.3);border-radius:999px;padding:2px 9px;">⚡ suggests ' + p.suggestedXC + ' XC</span>' : '') +
                         '</div>' +
-                        '<div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:8px;">' + escapeHtml(p.description || '') + '</div>' +
+                        '<div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:8px;">' + pflxLinkify(p.description || '') + '</div>' +
                         (p.hostNote ? '<div style="font-size:11px;color:rgba(96,165,250,0.8);margin-bottom:8px;">Note sent: ' + escapeHtml(p.hostNote) + '</div>' : '') +
                         (p.status === 'pending' ? '<div style="display:flex;gap:6px;">' +
                         '<button class="mc-btn mc-btn-green" style="font-size:10px;padding:4px 10px;" onclick="mcApprovePitch(' + i + ')">Approve & Create</button>' +
@@ -44976,7 +45011,7 @@ RESPONSE RULES:
                             <h4 style="margin:0;font-size:13px;font-weight:800;color:#e0e6ff;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(t.title || 'Task')}</h4>
                             ${src}
                         </div>
-                        ${t.description ? `<p style="margin:0 0 8px;font-size:11px;color:rgba(255,255,255,0.4);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${escapeHtml(t.description)}</p>` : ''}
+                        ${t.description ? `<p style="margin:0 0 8px;font-size:11px;color:rgba(255,255,255,0.4);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${pflxLinkify(t.description)}</p>` : ''}
                         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                             ${t.category ? `<span style="padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;background:rgba(0,240,255,0.08);border:1px solid rgba(0,240,255,0.15);color:var(--cyan);">${escapeHtml(t.category)}</span>` : ''}
                             ${reward}
@@ -45004,7 +45039,7 @@ RESPONSE RULES:
                     ${portfolioEditMode ? `<button onclick="portfolioRemoveProject(${i})" style="position:absolute;top:10px;right:10px;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#ef4444;width:26px;height:26px;border-radius:50%;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;z-index:2;">&#x2715;</button>` : ''}
                     ${portfolioRenderProjectMedia(p)}
                     <h4 style="margin:0 0 6px;font-size:16px;font-weight:800;color:#f0f0ff;">${escapeHtml(p.title || 'Untitled')}</h4>
-                    <p style="margin:0 0 12px;font-size:12px;color:rgba(255,255,255,0.5);line-height:1.5;">${escapeHtml(p.description || '')}</p>
+                    <p style="margin:0 0 12px;font-size:12px;color:rgba(255,255,255,0.5);line-height:1.5;">${pflxLinkify(p.description || '')}</p>
                     ${p.url ? `<a href="${escapeHtml(p.url)}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--cyan);text-decoration:none;padding:5px 12px;border-radius:8px;background:rgba(0,240,255,0.06);border:1px solid rgba(0,240,255,0.15);transition:background .2s;" onmouseover="this.style.background='rgba(0,240,255,0.12)'" onmouseout="this.style.background='rgba(0,240,255,0.06)'">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                         ${escapeHtml(p.linkLabel || 'View Project')}</a>` : ''}
