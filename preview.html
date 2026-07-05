@@ -20261,9 +20261,31 @@
                 mcPlayers = JSON.parse(localStorage.getItem('pflx_mc_players') || '[]');
                 mcPlayers.forEach(pflxNormalizePlayerRecord);
                 mcCheckpoints = JSON.parse(localStorage.getItem('pflx_mc_checkpoints') || '[]');
+                // ── auto-expiry: MC is the source of truth for seasonal data, so
+                // anything past its endDate must not read as 'active' anywhere.
+                (function () {
+                    try {
+                        var today = new Date().toISOString().slice(0, 10);
+                        var dirty = false;
+                        (mcCheckpoints || []).forEach(function (c) {
+                            if (c && c.status === 'active' && c.endDate && c.endDate < today) { c.status = 'completed'; dirty = true; }
+                        });
+                        if (dirty) setTimeout(function () { try { mcSaveData('checkpoints'); } catch (e) {} }, 800);
+                    } catch (e) {}
+                })();
                 mcTasks = JSON.parse(localStorage.getItem('pflx_mc_tasks') || '[]');
                 mcProjects = JSON.parse(localStorage.getItem('pflx_mc_projects') || '[]');
                 mcSeasons = JSON.parse(localStorage.getItem('pflx_mc_seasons') || '[]');
+                (function () {
+                    try {
+                        var today = new Date().toISOString().slice(0, 10);
+                        var dirty = false;
+                        (mcSeasons || []).forEach(function (s) {
+                            if (s && s.active && s.endDate && s.endDate < today) { s.active = false; dirty = true; }
+                        });
+                        if (dirty) setTimeout(function () { try { mcSaveData('seasons'); } catch (e) {} }, 800);
+                    } catch (e) {}
+                })();
                 mcAnnouncements = JSON.parse(localStorage.getItem('pflx_mc_announcements') || '[]');
                 mcBadges = JSON.parse(localStorage.getItem('pflx_mc_badges') || '[]');
                 mcJobs = JSON.parse(localStorage.getItem('pflx_mc_jobs') || '[]');
