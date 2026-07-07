@@ -15416,7 +15416,7 @@
             // Populate cohort filter dropdown
             const cohortSelect = document.getElementById('hmc-cohort-filter');
             const currentVal = cohortSelect?.value;
-            const cohorts = [...new Set(PLAYERS.filter(p => p.role === 'player').map(p => p.cohort).filter(Boolean))].sort();
+            const cohorts = [...new Set(PLAYERS.filter(p => p.role === 'player').map(p => p.cohort).filter(Boolean))].sort().filter(_pflxCohortVisible);
             if (cohortSelect && cohortSelect.options.length <= 1) {
                 cohorts.forEach(c => {
                     const opt = document.createElement('option');
@@ -15427,6 +15427,7 @@
             }
 
             let players = PLAYERS.filter(p => p.role === 'player');
+            players = players.filter(_pflxPlayerVisible); // Phase 3b: cohort/scope visibility
             if (cohortFilter !== 'all') players = players.filter(p => p.cohort === cohortFilter);
             if (search) players = players.filter(p =>
                 (p.brand || '').toLowerCase().includes(search) ||
@@ -18631,6 +18632,20 @@
                 default: return true;
             }
         }
+        // ── Player / cohort visibility scoping (Phase 3b) ──
+        // A scoped host only sees players in the cohorts it manages and only its
+        // own cohort cards. Master/Admin (global) and a legacy tier with no
+        // assigned scope stay permissive; engine-absent → fail open.
+        function _pflxPlayerVisible(p) {
+            if (!window.pflxCan) return true;
+            return window.pflxCan('manage.players', (p && p.cohort) ? { cohort: p.cohort } : null);
+        }
+        function _pflxCohortVisible(name) {
+            if (!window.pflxCan) return true;
+            return window.pflxCan('manage.cohorts', name ? { cohort: name } : null);
+        }
+        window._pflxPlayerVisible = _pflxPlayerVisible;
+        window._pflxCohortVisible = _pflxCohortVisible;
         // Action-time backstop (the render filter hides out-of-scope items, this
         // stops a stale/forged button from approving one anyway).
         function _pflxApprovalActionAllowed(kind, id) {
@@ -24724,6 +24739,7 @@
             const xcMax = parseInt(document.getElementById('mc-player-xc-max')?.value || '', 10);
 
             let filtered = mcPlayers.filter(function(p) {
+                if (!_pflxPlayerVisible(p)) return false; // Phase 3b: cohort/scope visibility
                 if (search) {
                     var s = search;
                     if (!(p.name||'').toLowerCase().includes(s) && !(p.brand||'').toLowerCase().includes(s) && !(p.email||'').toLowerCase().includes(s)) return false;
@@ -33520,8 +33536,11 @@
 
             var list = document.getElementById('mc-cohortgroups-list');
             if (!list) return;
-            list.innerHTML = mcCohortGroups.length === 0 ? '<div style="color:rgba(255,255,255,0.25);font-size:13px;">No cohort groups configured.</div>' :
+            // Phase 3b: a scoped host only sees the cohort cards it manages.
+            var _cgAnyVisible = mcCohortGroups.some(function(cg) { return _pflxCohortVisible(cg && cg.name); });
+            list.innerHTML = !_cgAnyVisible ? '<div style="color:rgba(255,255,255,0.25);font-size:13px;">No cohort groups in your scope.</div>' :
                 mcCohortGroups.map(function(cg, i) {
+                    if (!_pflxCohortVisible(cg && cg.name)) return ''; // out of scope — keep index i intact
                     var count = mcPlayers.filter(function(p) { return p.cohort === cg.name; }).length;
                     // Chat caps summary — show which features are off (nothing shown means all on).
                     var chat = cg.chat || {};
