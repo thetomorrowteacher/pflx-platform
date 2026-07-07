@@ -43731,14 +43731,42 @@ RESPONSE RULES:
                 } catch (e) {}
             }
             function safetyPrompt() { return SAFETY; }
+            // Live validation: prove the connection works before we activate.
+            // host mode → probe the server proxy; BYO → a tiny real call with the
+            // candidate key, restoring the engine's keys on failure.
+            async function testConnection(conn) {
+                if (typeof XBOT_AI === 'undefined' || !XBOT_AI || !conn) return { ok: false, error: 'engine unavailable' };
+                if (conn.provider === 'host') {
+                    try { var pr = await XBOT_AI.probeProxy(); return { ok: !!(pr && pr.ok), error: pr && pr.ok ? '' : 'proxy unreachable' }; }
+                    catch (e) { return { ok: false, error: (e && e.message) || String(e) }; }
+                }
+                var snap = Object.assign({}, XBOT_AI.keys), snapMode = XBOT_AI.routeMode;
+                try {
+                    if (conn.provider === 'claude') XBOT_AI.keys.claude = conn.key;
+                    else if (conn.provider === 'openai') XBOT_AI.keys.openai = conn.key;
+                    else if (conn.provider === 'gemini') XBOT_AI.keys.gemini = conn.key;
+                    else if (conn.provider === 'local') { XBOT_AI.keys.localUrl = conn.localUrl; XBOT_AI.keys.localModel = conn.localModel || ''; XBOT_AI.keys.localKey = conn.key || ''; }
+                    var model = conn.provider === 'local' ? 'local' : conn.provider;
+                    var txt = await XBOT_AI.callModel(model, 'Connection test. Reply with the single word OK.', [{ role: 'user', content: 'ping' }]);
+                    var ok = typeof txt === 'string' && txt.trim().length > 0;
+                    if (!ok) { XBOT_AI.keys = snap; XBOT_AI.routeMode = snapMode; }
+                    return { ok: ok, error: ok ? '' : 'empty response' };
+                } catch (e) {
+                    XBOT_AI.keys = snap; XBOT_AI.routeMode = snapMode;
+                    return { ok: false, error: (e && e.message) || String(e) };
+                }
+            }
+            function _refreshUi() { try { if (window.xbotRefreshAbilities) window.xbotRefreshAbilities(); } catch (e) {} }
             function connect(conn) {
                 saveConnection(Object.assign({ connectedAt: Date.now() }, conn || {}));
                 applyToEngine();
                 try { if (window.activeSession) activeSession.aiConnected = true; } catch (e) {}
+                _refreshUi();
             }
             function disconnect() {
                 saveConnection(null);
                 try { if (window.activeSession) activeSession.aiConnected = false; } catch (e) {}
+                _refreshUi();
             }
 
             // ── Connect modal (uses the shared openModal helper if available) ──
@@ -43790,20 +43818,32 @@ RESPONSE RULES:
                         prov.addEventListener('change', sync); sync();
                     }
                     var act = card.querySelector('#pai-activate');
-                    if (act) act.onclick = function () {
-                        if (mode === 'host') { connect({ provider: 'host' }); }
+                    if (act) act.onclick = async function () {
+                        // gather the candidate connection
+                        var cand;
+                        if (mode === 'host') { cand = { provider: 'host' }; }
                         else {
                             var p = prov ? prov.value : 'claude';
                             if (p === 'local') {
                                 var url = (card.querySelector('#pai-local') || {}).value || '';
                                 if (!url.trim()) { if (typeof pflxToast === 'function') pflxToast('Enter your local model URL.', 'error'); return; }
-                                connect({ provider: 'local', localUrl: url.trim(), localModel: ((card.querySelector('#pai-local-model') || {}).value || '').trim() });
+                                cand = { provider: 'local', localUrl: url.trim(), localModel: ((card.querySelector('#pai-local-model') || {}).value || '').trim() };
                             } else {
                                 var key = (card.querySelector('#pai-key') || {}).value || '';
                                 if (!key.trim()) { if (typeof pflxToast === 'function') pflxToast('Paste your ' + p + ' API key.', 'error'); return; }
-                                connect({ provider: p, key: key.trim() });
+                                cand = { provider: p, key: key.trim() };
                             }
                         }
+                        // validate before activating (no silent broken connections)
+                        var label = act.textContent;
+                        act.disabled = true; act.textContent = 'Validating…';
+                        var res = await testConnection(cand);
+                        if (!res.ok) {
+                            act.disabled = false; act.textContent = label;
+                            if (typeof pflxToast === 'function') pflxToast('Couldn\'t reach that AI: ' + (res.error || 'connection failed') + '. Check the key/URL and try again.', 'error');
+                            return;
+                        }
+                        connect(cand);
                         if (typeof pflxToast === 'function') pflxToast('⚡ X-Bot activated — say hi!', 'success');
                         if (typeof pflxPlaySfx === 'function') pflxPlaySfx('unlock');
                         if (close) close();
@@ -43819,7 +43859,7 @@ RESPONSE RULES:
                 MODES: MODES, cohortAiMode: cohortAiMode, activeCohort: activeCohort, isHostSession: isHostSession,
                 isActivated: isActivated, applyToEngine: applyToEngine, safetyPrompt: safetyPrompt,
                 connect: connect, disconnect: disconnect, getConnection: getConnection, hasConnection: hasConnection,
-                openConnect: openConnect
+                testConnection: testConnection, openConnect: openConnect
             };
         })();
         window.pflxPlayerAI = pflxPlayerAI;
@@ -44789,6 +44829,62 @@ RESPONSE RULES:
             }
         }
 
+        // Activation-aware quick actions: an unactivated player sees a single
+        // "Activate X-Bot" chip; once their AI is connected the dormant learning
+        // abilities (Study Buddy / Explain This / Quest Hint / Writing Coach)
+        // light up. Hosts keep the classic basics. Abilities send a safety-
+        // wrapped preset through the normal respond() path.
+        function xbotRefreshAbilities() {
+            var qa = document.getElementById('xbot-quick-actions');
+            if (!qa) return;
+            var byo = window.pflxPlayerAI;
+            var isPlayer = !(byo && byo.isHostSession());
+            var activated = !byo || byo.isActivated();
+            if (isPlayer && byo && !activated) {
+                qa.style.display = 'flex';
+                qa.innerHTML = '<button class="xbot-quick-btn" id="xbot-activate-chip">⚡ Activate X-Bot</button>';
+                var ab = qa.querySelector('#xbot-activate-chip');
+                if (ab) ab.onclick = function () { byo.openConnect(); };
+                return;
+            }
+            var chips = [
+                { label: '📊 My Progress', action: 'progress' },
+                { label: '🎯 Missions', action: 'missions' },
+                { label: '🏆 My Rank', action: 'rank' }
+            ];
+            if (isPlayer && activated && byo) {
+                chips.push({ label: '📚 Study Buddy', send: 'Be my study buddy. Ask me what I\'m working on in PFLX right now, then quiz me on it one question at a time to help it stick.' });
+                chips.push({ label: '🧭 Explain This', send: 'Explain, simply, what I can do on the PFLX screen I\'m currently on, and suggest one good next step.' });
+                chips.push({ label: '💡 Quest Hint', send: 'Give me a helpful hint for my current Core Pathways quest or checkpoint — a nudge in the right direction, not the full answer.' });
+                chips.push({ label: '✍️ Writing Coach', send: 'Be my writing coach. Ask me for the text I\'m working on, then give kind, specific feedback and guiding questions to improve it — do not rewrite it for me.' });
+            }
+            chips.push({ label: '❓ Help', action: 'help' });
+            qa.style.display = 'flex';
+            qa.innerHTML = chips.map(function (c, i) { return '<button class="xbot-quick-btn" data-chip="' + i + '">' + c.label + '</button>'; }).join('');
+            Array.prototype.forEach.call(qa.querySelectorAll('[data-chip]'), function (b) {
+                b.onclick = async function () {
+                    var c = chips[parseInt(b.getAttribute('data-chip'), 10)];
+                    xbotAddMessage(c.label, true);
+                    qa.style.display = 'none';
+                    xbotShowTyping();
+                    try {
+                        var avail = XBOT_AI.availableModels();
+                        if (c.send || avail.length > 0) {
+                            var result = await XBOT_AI.respond(c.send || c.label);
+                            xbotRemoveTyping();
+                            xbotAddMessage(result.text, false, result.model);
+                            if (xbotVoiceActive || xbotCurrentMode === 'voice') xbotSpeak(result.text);
+                        } else {
+                            var resp = (c.action && XBOT_STATIC[c.action]) ? XBOT_STATIC[c.action]() : XBOT_STATIC.default(c.label);
+                            xbotRemoveTyping();
+                            xbotAddMessage(resp, false);
+                        }
+                    } catch (e) { xbotRemoveTyping(); xbotAddMessage('X-Bot had trouble responding — try again.', false); }
+                };
+            });
+        }
+        window.xbotRefreshAbilities = xbotRefreshAbilities;
+
         function initXBot() {
             const panel = document.getElementById('xbot-side-panel');
             const tab = document.getElementById('xbot-toggle-tab');
@@ -44829,31 +44925,9 @@ RESPONSE RULES:
                 });
             }
 
-            // Quick action buttons
-            if (quickActions) {
-                quickActions.querySelectorAll('.xbot-quick-btn').forEach(btn => {
-                    btn.addEventListener('click', async () => {
-                        const action = btn.dataset.action;
-                        const displayText = btn.textContent;
-                        xbotAddMessage(displayText, true);
-                        quickActions.style.display = 'none';
-                        xbotShowTyping();
-                        // Quick actions: try AI first, static fallback
-                        const avail = XBOT_AI.availableModels();
-                        let resp;
-                        if (avail.length > 0) {
-                            const result = await XBOT_AI.respond(displayText);
-                            resp = result.text;
-                            xbotRemoveTyping();
-                            xbotAddMessage(resp, false, result.model);
-                        } else {
-                            resp = XBOT_STATIC[action] ? XBOT_STATIC[action]() : XBOT_STATIC.default(action);
-                            xbotRemoveTyping();
-                            xbotAddMessage(resp, false);
-                        }
-                    });
-                });
-            }
+            // Quick actions / dormant abilities (activation-aware). Rebuilt here
+            // and again whenever the player connects/disconnects their AI.
+            xbotRefreshAbilities();
 
             // Update subtitle to show AI engine status
             const subtitleEl = document.querySelector('.xbot-chat-subtitle');
