@@ -8020,6 +8020,42 @@
                                             </select>
                                         </div>
 
+                                        <!-- Access & Role Section (host tiers) — visible only to assign.tiers holders -->
+                                        <div id="mc-player-access-section" style="display:none;border-top:1px solid rgba(0,212,255,0.1);padding-top:16px;margin-bottom:12px;">
+                                            <div style="font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;color:var(--cyan);letter-spacing:1px;margin-bottom:12px;">ACCESS &amp; ROLE</div>
+                                            <div>
+                                                <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">Access Tier</label>
+                                                <select id="mc-player-form-tier" onchange="mcTierScopeRefresh()" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(0,212,255,0.2);color:#e0e6ff;padding:10px;border-radius:8px;font-size:13px;box-sizing:border-box;">
+                                                    <option value="player">Player (no host access)</option>
+                                                    <option value="guest">Guest Instructor — one Project / Node</option>
+                                                    <option value="instructor">Instructor — single cohort</option>
+                                                    <option value="cohost">Co-Host — multiple cohorts</option>
+                                                    <option value="admin">Admin Host — full console</option>
+                                                    <option value="master">Master Host — full + plus features</option>
+                                                </select>
+                                                <div id="mc-player-tier-desc" style="font-size:11px;color:rgba(125,249,255,0.7);margin-top:6px;line-height:1.4;"></div>
+                                            </div>
+                                            <!-- Managed cohorts (co-host = multiple, instructor = single) -->
+                                            <div id="mc-player-scope-cohorts" style="display:none;margin-top:12px;">
+                                                <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">Managed Cohort(s) <span id="mc-scope-cohort-hint" style="color:rgba(125,249,255,0.6);"></span></label>
+                                                <input type="text" id="mc-player-form-cohorts" list="mc-cohort-datalist" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:10px;border-radius:8px;font-size:13px;box-sizing:border-box;" placeholder="e.g. DD Core 3, Falcon Studios">
+                                                <div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:4px;">Comma-separated cohort names. Leave blank = manages none until scoped.</div>
+                                            </div>
+                                            <!-- Managed project (guest) -->
+                                            <div id="mc-player-scope-project" style="display:none;margin-top:12px;">
+                                                <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">Managed Project</label>
+                                                <select id="mc-player-form-project" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:10px;border-radius:8px;font-size:13px;box-sizing:border-box;">
+                                                    <option value="">Select a project…</option>
+                                                </select>
+                                            </div>
+                                            <!-- Managed nodes/modules (any scoped tier) -->
+                                            <div id="mc-player-scope-nodes" style="display:none;margin-top:12px;">
+                                                <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">Managed Core Pathway Node/Module IDs</label>
+                                                <input type="text" id="mc-player-form-nodes" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:10px;border-radius:8px;font-size:13px;box-sizing:border-box;" placeholder="e.g. cc-storyboard, da-storyboard">
+                                                <div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:4px;">Comma-separated node IDs (from the Core Pathways editor). Optional.</div>
+                                            </div>
+                                        </div>
+
                                         <!-- Economy Section -->
                                         <div style="border-top:1px solid rgba(0,212,255,0.1);padding-top:16px;margin-bottom:12px;">
                                             <div style="font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;color:var(--cyan);letter-spacing:1px;margin-bottom:12px;">ECONOMY</div>
@@ -24652,8 +24688,10 @@
             }
 
             tbody.innerHTML = filtered.map(function(p) {
-                const roleColor = p.role === 'admin' ? '#f5c842' : '#4f8ef7';
-                const roleName = p.role === 'admin' ? 'Host' : 'Player';
+                const _ptier = (function () { try { return window.pflxHostTier ? (window.pflxHostTier(p) || 'player') : ((p.role && p.role !== 'player') ? 'admin' : 'player'); } catch (e) { return 'player'; } })();
+                const _ptierMeta = (window.PFLX_TIER_META && window.PFLX_TIER_META[_ptier]) || null;
+                const roleName = _ptierMeta ? _ptierMeta.label : 'Player';
+                const roleColor = ({ master: '#f5c842', admin: '#f5c842', cohost: '#a78bfa', instructor: '#4f8ef7', guest: '#2dd4bf' })[_ptier] || '#4f8ef7';
                 const studioLabel = p.studioId ? (MC_STUDIO_LABELS[p.studioId] || p.studioId) : '—';
                 const evoObj = mcGetEvoRankObj(p);
                 const evo = evoObj ? evoObj.name : 'Player';
@@ -24757,6 +24795,7 @@
             document.getElementById('mc-player-form-image').value = '';
             document.getElementById('mc-player-avatar-preview').innerHTML = '<span style="font-size:24px;">?</span>';
             var studioEl = document.getElementById('mc-player-form-studio'); if (studioEl) studioEl.value = '';
+            try { mcPopulateTierUI(null); } catch (e) { console.warn('[MC] tier UI (add)', e); }
             var modal = document.getElementById('mc-player-edit-modal');
             modal.style.display = 'flex';
         }
@@ -24787,6 +24826,7 @@
             } else {
                 avPrev.innerHTML = '<span style="font-size:24px;">' + (p.brand || p.name || '?').charAt(0).toUpperCase() + '</span>';
             }
+            try { mcPopulateTierUI(p); } catch (e) { console.warn('[MC] tier UI (edit)', e); }
             var modal = document.getElementById('mc-player-edit-modal');
             modal.style.display = 'flex';
             // Populate the BADGES section with this player's awarded badges.
@@ -24983,6 +25023,108 @@
             document.getElementById('mc-player-edit-modal').style.display = 'none';
         }
 
+        // ── Tiered host access (Phase 2): tier + scope in the player editor ──
+        function mcAccessCanAssign() { return !!(window.pflxCan && window.pflxCan('assign.tiers')); }
+        function mcAssignerRank() {
+            try { var t = window.pflxHostTier && window.pflxHostTier(); var m = t && window.PFLX_TIER_META && window.PFLX_TIER_META[t]; return m ? m.rank : 0; } catch (e) { return 0; }
+        }
+        // Resolve the tier of an existing player record (explicit hostTier or derived from role).
+        function mcPlayerTier(p) {
+            try { if (window.pflxHostTier) return window.pflxHostTier(p) || 'player'; } catch (e) {}
+            if (p && p.hostTier) return p.hostTier;
+            var r = String((p && p.role) || 'player').toLowerCase();
+            if (r === 'admin') return 'master';
+            if (r === 'host') return 'admin';
+            if (r === 'instructor' || r === 'teacher') return 'instructor';
+            return 'player';
+        }
+        function mcTierScopeRefresh() {
+            var sel = document.getElementById('mc-player-form-tier');
+            var tier = (sel && sel.value) || 'player';
+            var meta = window.PFLX_TIER_META && window.PFLX_TIER_META[tier];
+            var desc = document.getElementById('mc-player-tier-desc');
+            if (desc) desc.textContent = meta ? meta.desc : 'Standard player — no host console access.';
+            var showCohorts = (tier === 'cohost' || tier === 'instructor');
+            var showProject = (tier === 'guest');
+            var showNodes = (tier === 'cohost' || tier === 'instructor' || tier === 'guest');
+            var el;
+            if ((el = document.getElementById('mc-player-scope-cohorts'))) el.style.display = showCohorts ? 'block' : 'none';
+            if ((el = document.getElementById('mc-player-scope-project'))) el.style.display = showProject ? 'block' : 'none';
+            if ((el = document.getElementById('mc-player-scope-nodes'))) el.style.display = showNodes ? 'block' : 'none';
+            var hint = document.getElementById('mc-scope-cohort-hint');
+            if (hint) hint.textContent = tier === 'instructor' ? '(single cohort)' : tier === 'cohost' ? '(one or more)' : '';
+        }
+        // Populate the ACCESS & ROLE section from a player record (or blank for new).
+        // The whole section is hidden unless the current user holds assign.tiers.
+        function mcPopulateTierUI(p) {
+            var section = document.getElementById('mc-player-access-section');
+            if (!section) return;
+            var canAssign = mcAccessCanAssign();
+            section.style.display = canAssign ? 'block' : 'none';
+            if (!canAssign) return;
+            var myRank = mcAssignerRank();
+            var sel = document.getElementById('mc-player-form-tier');
+            if (sel) {
+                Array.prototype.forEach.call(sel.options, function (opt) {
+                    var m = window.PFLX_TIER_META && window.PFLX_TIER_META[opt.value];
+                    var rank = m ? m.rank : 0; // 'player' has no meta → rank 0
+                    opt.disabled = rank > myRank;  // can't grant a tier above your own
+                });
+            }
+            var projSel = document.getElementById('mc-player-form-project');
+            if (projSel) {
+                var opts = '<option value="">Select a project…</option>';
+                try {
+                    (typeof mcProjects !== 'undefined' ? mcProjects : []).forEach(function (pr) {
+                        opts += '<option value="' + pr.id + '">' + String(pr.title || pr.name || pr.id).replace(/</g, '&lt;') + '</option>';
+                    });
+                } catch (e) {}
+                projSel.innerHTML = opts;
+            }
+            var tier = p ? mcPlayerTier(p) : 'player';
+            if (sel) sel.value = tier;
+            var cohortsInput = document.getElementById('mc-player-form-cohorts');
+            if (cohortsInput) cohortsInput.value = (p && p.managedCohorts && p.managedCohorts.length) ? p.managedCohorts.join(', ') : '';
+            var nodesInput = document.getElementById('mc-player-form-nodes');
+            if (nodesInput) nodesInput.value = (p && p.managedNodes && p.managedNodes.length) ? p.managedNodes.join(', ') : '';
+            if (projSel) projSel.value = (p && p.managedProjectId) || '';
+            mcTierScopeRefresh();
+        }
+        // Apply the selected tier + scope onto a player record. Guarded: only
+        // assign.tiers holders may change tier, and never above their own rank.
+        function mcApplyTierToRecord(rec) {
+            if (!mcAccessCanAssign()) return;
+            var sel = document.getElementById('mc-player-form-tier');
+            if (!sel) return;
+            var tier = sel.value || 'player';
+            var myRank = mcAssignerRank();
+            var meta = window.PFLX_TIER_META && window.PFLX_TIER_META[tier];
+            var tierRank = meta ? meta.rank : 0;
+            if (tierRank > myRank) { alert('You cannot assign a tier above your own access level.'); return; }
+            var csv = function (id) {
+                var v = (document.getElementById(id) || { value: '' }).value || '';
+                return v.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+            };
+            if (tier === 'player') {
+                rec.role = 'player';
+                delete rec.hostTier; delete rec.managedCohorts; delete rec.managedNodes; delete rec.managedProjectId;
+            } else {
+                var roleFor = { master: 'admin', admin: 'host', cohost: 'host', instructor: 'instructor', guest: 'instructor' };
+                rec.role = roleFor[tier] || 'host';
+                rec.hostTier = tier;
+                if (tier === 'cohost') {
+                    rec.managedCohorts = csv('mc-player-form-cohorts'); rec.managedNodes = csv('mc-player-form-nodes'); delete rec.managedProjectId;
+                } else if (tier === 'instructor') {
+                    rec.managedCohorts = csv('mc-player-form-cohorts').slice(0, 1); rec.managedNodes = csv('mc-player-form-nodes'); delete rec.managedProjectId;
+                } else if (tier === 'guest') {
+                    rec.managedProjectId = (document.getElementById('mc-player-form-project') || { value: '' }).value || null;
+                    rec.managedNodes = csv('mc-player-form-nodes'); delete rec.managedCohorts;
+                } else { // master / admin — global scope, clear any leftovers
+                    delete rec.managedCohorts; delete rec.managedNodes; delete rec.managedProjectId;
+                }
+            }
+        }
+
         function mcSavePlayerForm() {
             var id = document.getElementById('mc-player-form-id').value;
             var name = document.getElementById('mc-player-form-name').value.trim();
@@ -25013,6 +25155,7 @@
                     mcPlayers[idx].pin = pin;
                     mcPlayers[idx].image = image;
                     mcPlayers[idx].studioId = studioId;
+                    mcApplyTierToRecord(mcPlayers[idx]);
                 }
             } else {
                 // New player
@@ -25038,6 +25181,7 @@
                     studioId: studioId,
                     favorite: false
                 };
+                mcApplyTierToRecord(newPlayer);
                 mcPlayers.push(newPlayer);
             }
             mcSaveData('players');
