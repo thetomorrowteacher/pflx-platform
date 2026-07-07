@@ -33729,7 +33729,13 @@
                     var opts = [['off', 'Off — no AI for this cohort'], ['host', 'Host key — school AI powers it (best for minors)'], ['player', 'Player BYO — students connect their own AI'], ['both', 'Both — student key, else host key']];
                     return opts.map(function (o) { return '<option value="' + o[0] + '"' + (cur === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('');
                 })() +
-                '</select></div>' +
+                '</select>' +
+                '<div style="margin-top:10px;font-size:10px;color:rgba(255,255,255,0.4);">Dormant abilities that unlock once a student activates X-Bot:</div>' +
+                [['studyBuddy', '📚 Study Buddy'], ['explain', '🧭 Explain This'], ['questHint', '💡 Quest Hint'], ['writingCoach', '✍️ Writing Coach']].map(function (a) {
+                    var on = !(cg.ai && cg.ai.abilities && cg.ai.abilities[a[0]] === false);
+                    return '<label style="display:inline-flex;align-items:center;gap:6px;margin:6px 12px 0 0;font-size:11px;cursor:pointer;"><input type="checkbox" data-ability="' + a[0] + '"' + (on ? ' checked' : '') + ' style="accent-color:#00d4ff;"> ' + a[1] + '</label>';
+                }).join('') +
+                '</div>' +
                 '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
                 '<button id="mc-chat-caps-cancel" class="mc-btn" style="font-size:11px;padding:6px 14px;">Cancel</button>' +
                 '<button id="mc-chat-caps-save" class="mc-btn" style="font-size:11px;padding:6px 14px;background:rgba(0,212,255,0.14);color:#00d4ff;border-color:rgba(0,212,255,0.4);">Save</button>' +
@@ -33743,7 +33749,11 @@
                 });
                 cg.chat = next;
                 var aiSel = backdrop.querySelector('#mc-ai-mode');
-                if (aiSel) cg.ai = { mode: aiSel.value };
+                if (aiSel) {
+                    var abilities = {};
+                    backdrop.querySelectorAll('input[data-ability]').forEach(function (el) { abilities[el.getAttribute('data-ability')] = el.checked; });
+                    cg.ai = { mode: aiSel.value, abilities: abilities };
+                }
                 mcSaveData('cohortgroups');
                 mcRenderCohortGroups();
                 pflxPlaySfx && pflxPlaySfx('save');
@@ -43702,6 +43712,24 @@ RESPONSE RULES:
                     return MODES.indexOf(m) >= 0 ? m : 'host';
                 } catch (e) { return 'host'; }
             }
+            // Dormant learning abilities that light up once a player activates.
+            // Hosts choose which ones a cohort gets (cg.ai.abilities); default all on.
+            var ABILITIES = [
+                { id: 'studyBuddy', label: '📚 Study Buddy', send: 'Be my study buddy. Ask me what I\'m working on in PFLX right now, then quiz me on it one question at a time to help it stick.' },
+                { id: 'explain', label: '🧭 Explain This', send: 'Explain, simply, what I can do on the PFLX screen I\'m currently on, and suggest one good next step.' },
+                { id: 'questHint', label: '💡 Quest Hint', send: 'Give me a helpful hint for my current Core Pathways quest or checkpoint — a nudge in the right direction, not the full answer.' },
+                { id: 'writingCoach', label: '✍️ Writing Coach', send: 'Be my writing coach. Ask me for the text I\'m working on, then give kind, specific feedback and guiding questions to improve it — do not rewrite it for me.' }
+            ];
+            function cohortAbilities(cohortName) {
+                try {
+                    var name = cohortName || activeCohort();
+                    var groups = (typeof mcCohortGroups !== 'undefined' && Array.isArray(mcCohortGroups)) ? mcCohortGroups : [];
+                    var cg = groups.find(function (g) { return g && norm(g.name) === norm(name); });
+                    return (cg && cg.ai && cg.ai.abilities) || {};
+                } catch (e) { return {}; }
+            }
+            function abilityEnabled(id, cohortName) { return cohortAbilities(cohortName)[id] !== false; } // default on
+            function enabledAbilities() { return ABILITIES.filter(function (a) { return abilityEnabled(a.id); }); }
             function getConnection() { try { return JSON.parse(localStorage.getItem(LS) || 'null'); } catch (e) { return null; } }
             function saveConnection(c) { try { if (c) localStorage.setItem(LS, JSON.stringify(c)); else localStorage.removeItem(LS); } catch (e) {} }
             function hasConnection() { var c = getConnection(); return !!(c && (c.key || c.localUrl)); }
@@ -43859,7 +43887,8 @@ RESPONSE RULES:
                 MODES: MODES, cohortAiMode: cohortAiMode, activeCohort: activeCohort, isHostSession: isHostSession,
                 isActivated: isActivated, applyToEngine: applyToEngine, safetyPrompt: safetyPrompt,
                 connect: connect, disconnect: disconnect, getConnection: getConnection, hasConnection: hasConnection,
-                testConnection: testConnection, openConnect: openConnect
+                testConnection: testConnection, openConnect: openConnect,
+                ABILITIES: ABILITIES, abilityEnabled: abilityEnabled, enabledAbilities: enabledAbilities
             };
         })();
         window.pflxPlayerAI = pflxPlayerAI;
@@ -44852,11 +44881,9 @@ RESPONSE RULES:
                 { label: '🎯 Missions', action: 'missions' },
                 { label: '🏆 My Rank', action: 'rank' }
             ];
-            if (isPlayer && activated && byo) {
-                chips.push({ label: '📚 Study Buddy', send: 'Be my study buddy. Ask me what I\'m working on in PFLX right now, then quiz me on it one question at a time to help it stick.' });
-                chips.push({ label: '🧭 Explain This', send: 'Explain, simply, what I can do on the PFLX screen I\'m currently on, and suggest one good next step.' });
-                chips.push({ label: '💡 Quest Hint', send: 'Give me a helpful hint for my current Core Pathways quest or checkpoint — a nudge in the right direction, not the full answer.' });
-                chips.push({ label: '✍️ Writing Coach', send: 'Be my writing coach. Ask me for the text I\'m working on, then give kind, specific feedback and guiding questions to improve it — do not rewrite it for me.' });
+            if (isPlayer && activated && byo && byo.enabledAbilities) {
+                // only the abilities the host enabled for this cohort
+                byo.enabledAbilities().forEach(function (a) { chips.push({ label: a.label, send: a.send }); });
             }
             chips.push({ label: '❓ Help', action: 'help' });
             qa.style.display = 'flex';
