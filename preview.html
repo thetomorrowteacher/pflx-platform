@@ -14493,6 +14493,7 @@
         let hmcLockdownActive = false;
 
         function hmcRefreshDashboard() {
+            try { pflxApplyPlusGating(); } catch (e) {}
             const players = PLAYERS.filter(p => p.role === 'player');
             const claimed = players.filter(p => p.claimed);
             const totalXC = players.reduce((sum, p) => sum + (p.xc || 0), 0);
@@ -15061,7 +15062,43 @@
             hmcAddBroadcast('🔄 All apps reloaded');
         }
 
+        // ══ Plus-feature gate (Phase 4) — Master Host only ══════════════
+        // Master is the only tier holding any plus.* capability. These guards
+        // FAIL OPEN when the tier engine isn't loaded (window.pflxCan absent),
+        // so legacy behavior is preserved if the engine ever fails to boot.
+        function pflxRequirePlus(cap, label) {
+            try {
+                if (window.pflxCan && !window.pflxCan(cap)) {
+                    if (typeof pflxToast === 'function') pflxToast('🔒 ' + (label || 'This') + ' is a Master Host feature.', 'error');
+                    return false;
+                }
+            } catch (e) {}
+            return true;
+        }
+        window.pflxRequirePlus = pflxRequirePlus;
+        // Hide/disable the Master-only plus controls in the Host panel for
+        // non-Master hosts. Called from hmcRefreshDashboard so it re-applies
+        // every time the panel renders.
+        function pflxApplyPlusGating() {
+            try {
+                var canFn = window.pflxCan;
+                var master = !canFn ? true : (canFn('plus.backup') || canFn('plus.override'));
+                var sp = document.getElementById('hmc-savepoint-btn');
+                if (sp) sp.style.display = master ? '' : 'none';
+                ['xcoin', 'pathways', 'arena', 'darkcampus'].forEach(function (app) {
+                    var t = document.getElementById('hmc-lock-' + app);
+                    if (t) { t.disabled = !master; var row = t.closest ? t.closest('.hmc-lock-row') : null; if (row) row.style.opacity = master ? '1' : '0.4'; }
+                });
+                Array.prototype.forEach.call(document.querySelectorAll('button'), function (b) {
+                    var oc = b.getAttribute && b.getAttribute('onclick');
+                    if (oc && /hmcFreezeAll\(|hmcResumeAll\(|hmcLockdownToggle\(/.test(oc)) b.style.display = master ? '' : 'none';
+                });
+            } catch (e) {}
+        }
+        window.pflxApplyPlusGating = pflxApplyPlusGating;
+
         function hmcToggleAppLock(app, unlocked) {
+            if (!pflxRequirePlus('plus.override', 'App lockdown')) return;
             const navBtn = document.querySelector(`[data-view="${app}"]`);
             if (navBtn) {
                 navBtn.style.opacity = unlocked ? '1' : '0.3';
@@ -15071,6 +15108,7 @@
         }
 
         function hmcLockdownToggle() {
+            if (!pflxRequirePlus('plus.override', 'Lockdown Mode')) return;
             pflxPlaySfx('click');
             hmcLockdownActive = !hmcLockdownActive;
             ['xcoin', 'pathways', 'arena', 'darkcampus'].forEach(app => {
@@ -15086,6 +15124,7 @@
         // Downloads a JSON file (same format as the restore backups) and
         // writes a small pflx_last_savepoint marker row.
         window.pflxCreateSavePoint = async function () {
+            if (!pflxRequirePlus('plus.backup', 'Create Save Point')) return;
             var btn = document.getElementById('hmc-savepoint-btn');
             try {
                 var sb = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
@@ -15250,6 +15289,7 @@
         // ── Freeze / Resume All ──
         window.hmcFreezeActive = false;
         function hmcFreezeAll() {
+            if (!pflxRequirePlus('plus.override', 'Freeze All Players')) return;
             var msg = prompt('Optional message to show on the frozen screens (leave blank for none):', '');
             if (msg === null) return; // cancelled
             window.hmcFreezeActive = true;
@@ -15258,6 +15298,7 @@
             if (typeof showTicker === 'function') showTicker('🧊 FREEZE! All player actions paused.');
         }
         function hmcResumeAll() {
+            if (!pflxRequirePlus('plus.override', 'Resume All')) return;
             window.hmcFreezeActive = false;
             pflxDispatchHostControl('resume', {});
             hmcAddBroadcast('▶ RESUME — All player screens unlocked');
