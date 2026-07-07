@@ -52851,6 +52851,151 @@ RESPONSE RULES:
         }
         window.pflxNormalizeRole = normalizeRole;
 
+        // ═══════════════════════════════════════════════════════════════════
+        // TIERED HOST ACCESS — Phase 1 foundation (July 6 2026, Opus)
+        //   Five host tiers layered on the 4-role system. A tier is resolved
+        //   from an explicit session.hostTier if present, else DERIVED from the
+        //   legacy role so existing accounts keep working unchanged:
+        //     role 'admin' → 'master' (existing admins keep EVERYTHING incl.
+        //                    plus features), role 'host' → 'admin' (full console,
+        //                    no plus), role 'instructor'/'teacher' → 'instructor'.
+        //   Co-Host and Guest Instructor only ever come from an explicit
+        //   hostTier assignment (Player Manager UI — Phase 2).
+        //   This block is PURELY ADDITIVE: it changes no existing gate. Phase 3
+        //   swaps call sites over to pflxCan(); Phase 4 gates the plus features.
+        // ═══════════════════════════════════════════════════════════════════
+        (function () {
+            var TIER_META = {
+                master:     { label: 'Master Host',      rank: 5, plus: true,
+                              scope: 'global',
+                              desc: 'Full control of every Console function, plus history, auto-backup, system override and restore.' },
+                admin:      { label: 'Admin Host',       rank: 4, plus: false,
+                              scope: 'global',
+                              desc: 'Full control of every Console function and the complete Approvals suite (all X-Tracker requests, all Core Pathway nodes, all MC submissions). No plus features.' },
+                cohost:     { label: 'Co-Host',          rank: 3, plus: false,
+                              scope: 'cohorts',
+                              desc: 'Limited control of multiple cohorts’ Mission Control or specified Core Pathway nodes/modules. Approves nodes, X-Coin trades and task submissions.' },
+                instructor: { label: 'Instructor',       rank: 2, plus: false,
+                              scope: 'cohort',
+                              desc: 'Limited control of a single cohort’s Mission Control or specified Core Pathway nodes/modules. Approves nodes, X-Coin barter & trades, and task submissions.' },
+                guest:      { label: 'Guest Instructor', rank: 1, plus: false,
+                              scope: 'project',
+                              desc: 'Limited control over one MC Project or specified Core Pathway node/module with approval controls.' }
+            };
+            var TIER_ORDER = ['guest', 'instructor', 'cohost', 'admin', 'master'];
+
+            // capability → tiers that hold it. Scope (WHICH cohort/node/project)
+            // is enforced separately by inScope() once assignments exist (Phase 3).
+            var CAP = {
+                'console.full':   ['master', 'admin'],
+                // plus features — Master only
+                'plus.history':   ['master'],
+                'plus.backup':    ['master'],
+                'plus.override':  ['master'],
+                'plus.restore':   ['master'],
+                // approvals suite
+                'approve.reward': ['master', 'admin'],                                 // X-Tracker reward requests
+                'approve.task':   ['master', 'admin', 'cohost', 'instructor', 'guest'],// MC task submissions
+                'approve.node':   ['master', 'admin', 'cohost', 'instructor', 'guest'],// Core Pathway node submissions
+                'approve.trade':  ['master', 'admin', 'cohost', 'instructor'],         // X-Coin trades
+                'approve.barter': ['master', 'admin', 'instructor'],                   // X-Coin barter (Instructor tier)
+                // management surfaces
+                'manage.cohorts': ['master', 'admin', 'cohost', 'instructor'],
+                'manage.project': ['master', 'admin', 'cohost', 'instructor', 'guest'],
+                'manage.nodes':   ['master', 'admin', 'cohost', 'instructor', 'guest'],
+                'manage.players': ['master', 'admin', 'cohost', 'instructor'],
+                'assign.tiers':   ['master', 'admin']                                  // who may promote/scope other hosts
+            };
+
+            function sessionOf(s) {
+                return s || (typeof activeSession !== 'undefined' ? activeSession : (window.activeSession || {}));
+            }
+
+            // Resolve the host tier for a session (or the active one). Returns one
+            // of master|admin|cohost|instructor|guest, or null for a non-host.
+            function hostTier(s) {
+                s = sessionOf(s);
+                var explicit = s && s.hostTier;
+                if (explicit && TIER_META[explicit]) return explicit;
+                var role = (typeof normalizeRole === 'function')
+                    ? normalizeRole(s && s.role)
+                    : String((s && s.role) || '').toLowerCase().trim();
+                if (role === 'admin') return 'master';       // existing admins keep everything
+                if (role === 'host') return 'admin';         // plain host → full console, no plus
+                if (role === 'instructor') return 'instructor';
+                return null;                                  // player / unknown
+            }
+            function isHostTier(s) { return !!hostTier(s); }
+            function tierMeta(t) { return TIER_META[t] || null; }
+            function tierRank(s) { var m = TIER_META[hostTier(s)]; return m ? m.rank : 0; }
+
+            // The scope arrays live on the session/player record (Phase 2 UI writes
+            // them): managedCohorts[] (cohost/instructor), managedNodes[] (any scoped
+            // tier), managedProjectId (guest). Missing scope = PERMISSIVE in Phase 1
+            // so nothing is prematurely restricted; Phase 3 flips these to strict.
+            function managedCohorts(s) { s = sessionOf(s); return (s && s.managedCohorts) || []; }
+            function managedNodes(s)   { s = sessionOf(s); return (s && s.managedNodes) || []; }
+            function managedProject(s) { s = sessionOf(s); return (s && s.managedProjectId) || null; }
+
+            function inScope(tier, ctx) {
+                if (tier === 'master' || tier === 'admin') return true; // global
+                if (!ctx) return true;                                   // no context → allow (Phase 3 tightens)
+                var cohorts = managedCohorts(), nodes = managedNodes(), proj = managedProject();
+                // node / module scope
+                if (ctx.nodeId != null) {
+                    if (nodes.length === 0) return true;                 // unset = permissive (Phase 1)
+                    return nodes.indexOf(ctx.nodeId) !== -1;
+                }
+                // project scope (guest)
+                if (ctx.projectId != null) {
+                    if (tier === 'guest') return proj ? String(proj) === String(ctx.projectId) : true;
+                    return true;
+                }
+                // cohort scope (cohost/instructor)
+                if (ctx.cohort != null) {
+                    if (cohorts.length === 0) return true;               // unset = permissive (Phase 1)
+                    var norm = function (x) { return String(x || '').toLowerCase().trim(); };
+                    return cohorts.some(function (c) { return norm(c) === norm(ctx.cohort); });
+                }
+                return true;
+            }
+
+            // pflxCan(capability [, context]) — the single gate for Phase 3+.
+            // context may carry { cohort, nodeId, projectId } for scoped checks.
+            function can(cap, ctx) {
+                var tier = hostTier();
+                if (!tier) return false;
+                var allowed = CAP[cap];
+                if (!allowed || allowed.indexOf(tier) === -1) return false;
+                return inScope(tier, ctx);
+            }
+
+            function hasPlus(s) { var m = TIER_META[hostTier(s)]; return !!(m && m.plus); }
+
+            // Handy console diagnostic for Ennis to verify a session's tier.
+            function debug(s) {
+                var t = hostTier(s);
+                var caps = Object.keys(CAP).filter(function (k) { return t && CAP[k].indexOf(t) !== -1; });
+                return { tier: t, label: t ? TIER_META[t].label : '(not a host)', plus: hasPlus(s),
+                         scope: t ? TIER_META[t].scope : null,
+                         managedCohorts: managedCohorts(s), managedNodes: managedNodes(s), managedProjectId: managedProject(s),
+                         capabilities: caps };
+            }
+
+            window.PFLX_TIER_META = TIER_META;
+            window.PFLX_TIER_ORDER = TIER_ORDER;
+            window.pflxHostTier = hostTier;
+            window.pflxIsHostTier = isHostTier;
+            window.pflxTierMeta = tierMeta;
+            window.pflxTierRank = tierRank;
+            window.pflxHasPlus = hasPlus;
+            window.pflxCan = can;
+            window.pflxAccessDebug = debug;
+            window.pflxAccess = { hostTier: hostTier, can: can, meta: tierMeta, hasPlus: hasPlus,
+                                  managedCohorts: managedCohorts, managedNodes: managedNodes, managedProject: managedProject,
+                                  TIER_META: TIER_META, CAP: CAP };
+        })();
+
         // ── One-time migration: walk PLAYERS and lowercase any roles that got
         //    capitalized by the v2 save handler before this fix. This recovers
         //    players who "disappeared" because their role was stored as
