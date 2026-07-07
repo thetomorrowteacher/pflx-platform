@@ -18562,6 +18562,55 @@
                 return p ? (p.brand || p.brandName || p.name) : null;
             } catch (e) { return null; }
         }
+        function _pflxPlayerCohortById(id) {
+            try {
+                if (typeof PLAYERS === 'undefined') return null;
+                var p = PLAYERS.find(function (x) { return x && x.id === id; });
+                return p ? (p.cohort || null) : null;
+            } catch (e) { return null; }
+        }
+        // ── Tiered access enforcement (Phase 3) ──
+        // Only SCOPED tiers (cohost/instructor/guest) get filtered; Master/Admin
+        // always see and act on everything (no regression for existing hosts).
+        function _pflxApprovalEnforce() {
+            var t = window.pflxHostTier ? window.pflxHostTier() : null;
+            return !!(t && t !== 'master' && t !== 'admin' && window.pflxCan);
+        }
+        function _scopedApprovalCan(cap, ctx) {
+            if (!window.pflxCan) return true;
+            return window.pflxCan(cap, ctx || null);
+        }
+        // Home-card item → capability + scope. it carries {kind, cohort?, nodeId?}
+        function _homeApprovalAllowed(it) {
+            switch (it.kind) {
+                case 'reward': return _scopedApprovalCan('approve.reward');
+                case 'task':   return _scopedApprovalCan('approve.task', it.cohort ? { cohort: it.cohort } : null);
+                case 'coinsub': return it.nodeId ? _scopedApprovalCan('approve.node', { nodeId: it.nodeId }) : _scopedApprovalCan('approve.reward');
+                case 'trade':  return _scopedApprovalCan('approve.trade', it.cohort ? { cohort: it.cohort } : null);
+                default: return true;
+            }
+        }
+        // Action-time backstop (the render filter hides out-of-scope items, this
+        // stops a stale/forged button from approving one anyway).
+        function _pflxApprovalActionAllowed(kind, id) {
+            try {
+                if (kind === 'reward') return _scopedApprovalCan('approve.reward');
+                if (kind === 'task') {
+                    var t = (typeof mcTasks !== 'undefined') ? mcTasks.find(function (x) { return x && x.id === id; }) : null;
+                    var sub = t && t.submission && t.submission.submittedBy;
+                    return _scopedApprovalCan('approve.task', sub ? { cohort: _pflxPlayerCohortById(sub) } : null);
+                }
+                if (kind === 'coinsub') {
+                    var s = (_pflxCloudSubs || []).find(function (x) { return x && x.id === id; });
+                    return (s && s.nodeId) ? _scopedApprovalCan('approve.node', { nodeId: s.nodeId }) : _scopedApprovalCan('approve.reward');
+                }
+                if (kind === 'trade') {
+                    var tr = (_pflxCloudTrades || []).find(function (x) { return x && x.id === id; });
+                    return _scopedApprovalCan('approve.trade', tr ? { cohort: _pflxPlayerCohortById(tr.fromId) } : null);
+                }
+            } catch (e) {}
+            return true;
+        }
         function renderApprovalsCard() {
             var listEl = document.getElementById('approvals-list');
             var badgeEl = document.getElementById('approvals-count-badge');
@@ -18594,6 +18643,7 @@
                         items.push({
                             kind: 'task',
                             id: t.id,
+                            cohort: t.cohort || _pflxPlayerCohortById(subBy),
                             submittedAt: t.submission && t.submission.submittedAt,
                             brand: _pflxPlayerBrandById(subBy) || 'Player',
                             title: '📋 Task: ' + (t.title || t.name || 'Untitled'),
@@ -18617,6 +18667,8 @@
                     items.push({
                         kind: 'coinsub',
                         id: s.id,
+                        nodeId: s.nodeId || null,
+                        cohort: _pflxPlayerCohortById(s.playerId),
                         submittedAt: s.submittedAt,
                         brand: s.brand || _pflxPlayerBrandById(s.playerId) || 'Player',
                         title: (isNode ? '🛰 Pathways: ' : '🏅 Badge: ') + (s.coinType || 'Digital Badge'),
@@ -18636,6 +18688,7 @@
                     items.push({
                         kind: 'trade',
                         id: t.id,
+                        cohort: _pflxPlayerCohortById(t.fromId),
                         submittedAt: t.createdAt,
                         brand: _pflxPlayerBrandById(t.fromId) || 'Player',
                         title: '🔁 Trade: ' + (t.amount || 0).toLocaleString() + ' XC → ' + (_pflxPlayerBrandById(t.toId) || 'Player'),
@@ -18650,6 +18703,10 @@
             items.sort(function (a, b) {
                 return new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0);
             });
+
+            // Tiered enforcement: scoped hosts only see approvals their tier +
+            // scope covers. Master/Admin are never filtered.
+            if (_pflxApprovalEnforce()) items = items.filter(_homeApprovalAllowed);
 
             if (badgeEl) badgeEl.textContent = String(items.length);
 
@@ -18694,6 +18751,10 @@
 
         window.pflxApproveSubmission = function (kind, id) {
             try {
+                if (_pflxApprovalEnforce() && !_pflxApprovalActionAllowed(kind, id)) {
+                    if (typeof pflxToast === 'function') pflxToast('Your access tier can’t approve this item.', 'error');
+                    return;
+                }
                 if (kind === 'reward') {
                     var queue = _pflxLoadRewardRequests();
                     var i = queue.findIndex(function (r) { return r && r.id === id; });
@@ -18807,6 +18868,10 @@
 
         window.pflxDenySubmission = function (kind, id) {
             try {
+                if (_pflxApprovalEnforce() && !_pflxApprovalActionAllowed(kind, id)) {
+                    if (typeof pflxToast === 'function') pflxToast('Your access tier can’t act on this item.', 'error');
+                    return;
+                }
                 var note = prompt('Optional: explain why this is being denied (the player will see it).', '') || '';
                 if (kind === 'reward') {
                     var queue = _pflxLoadRewardRequests();
@@ -41780,6 +41845,9 @@
                 items = items.filter(function(it) { return it.status === 'pending'; });
             }
 
+            // Tiered enforcement — scoped hosts only see items their tier covers.
+            if (_pflxApprovalEnforce()) items = items.filter(_mcApprovalAllowed);
+
             list.innerHTML = items.length === 0 ? '<div style="color:rgba(255,255,255,0.25);font-size:13px;">No items to show.</div>' :
                 items.map(function(it) {
                     var typeIcon = it.type === 'task' ? '&#x2705;' : it.type === 'arena_external' ? '&#x1F3AE;' : it.type === 'module_completion' ? '&#x1F393;' : '&#x1F4A1;';
@@ -41808,7 +41876,32 @@
                 }).join('');
         }
 
+        // Map an MC-tab approval item to capability + scope (task→cohort,
+        // pitch→node, arena_external→reward-class, module_completion→node).
+        function _mcApprovalAllowed(it) {
+            var ref = it && it.ref;
+            switch (it.type) {
+                case 'task':   return _scopedApprovalCan('approve.task', ref && ref.cohort ? { cohort: ref.cohort } : null);
+                case 'pitch':  return _scopedApprovalCan('approve.node');
+                case 'arena_external': return _scopedApprovalCan('approve.reward');
+                case 'module_completion': return _scopedApprovalCan('approve.node', ref && ref.nodeId ? { nodeId: ref.nodeId } : null);
+                default: return true;
+            }
+        }
+        function _mcApprovalActionAllowed(type, id) {
+            try {
+                if (type === 'task') { var t = mcTasks.find(function (x) { return x && x.id === id; }); return _scopedApprovalCan('approve.task', t && t.cohort ? { cohort: t.cohort } : null); }
+                if (type === 'pitch') return _scopedApprovalCan('approve.node');
+                if (type === 'arena_external') return _scopedApprovalCan('approve.reward');
+                if (type === 'module_completion') { var ma = mcApprovals.find(function (x) { return x && x.id === id; }); return _scopedApprovalCan('approve.node', ma && ma.nodeId ? { nodeId: ma.nodeId } : null); }
+            } catch (e) {}
+            return true;
+        }
         function mcApproveItem(type, id) {
+            if (_pflxApprovalEnforce() && !_mcApprovalActionAllowed(type, id)) {
+                if (typeof pflxToast === 'function') pflxToast('Your access tier can’t approve this item.', 'error');
+                return;
+            }
             if (type === 'task') {
                 var tIdx = mcTasks.findIndex(function(t) { return t.id === id; });
                 if (tIdx >= 0) {
@@ -41849,6 +41942,10 @@
         }
 
         function mcRejectItem(type, id) {
+            if (_pflxApprovalEnforce() && !_mcApprovalActionAllowed(type, id)) {
+                if (typeof pflxToast === 'function') pflxToast('Your access tier can’t act on this item.', 'error');
+                return;
+            }
             if (type === 'task') {
                 var t = mcTasks.find(function(t) { return t.id === id; });
                 if (t) { t.status = 'open'; mcSaveData('tasks'); }
@@ -53083,22 +53180,33 @@ RESPONSE RULES:
 
             function inScope(tier, ctx) {
                 if (tier === 'master' || tier === 'admin') return true; // global
-                if (!ctx) return true;                                   // no context → allow (Phase 3 tightens)
-                var cohorts = managedCohorts(), nodes = managedNodes(), proj = managedProject();
+                if (!ctx) return true;                                   // no context → allow
+                // Phase 3 semantics: read RAW session fields so we can tell
+                // "never assigned" (undefined → legacy grace, permissive) apart
+                // from "assigned, possibly empty" (array → STRICT membership).
+                // A scoped tier created through the Player Manager always has its
+                // arrays set, so an explicitly-empty scope manages nothing.
+                var s = sessionOf();
+                var norm = function (x) { return String(x || '').toLowerCase().trim(); };
                 // node / module scope
                 if (ctx.nodeId != null) {
-                    if (nodes.length === 0) return true;                 // unset = permissive (Phase 1)
-                    return nodes.indexOf(ctx.nodeId) !== -1;
+                    var nodes = s && s.managedNodes;
+                    if (nodes == null) return true;                       // never assigned → permissive
+                    return nodes.indexOf(ctx.nodeId) !== -1;              // assigned (even []) → strict
                 }
                 // project scope (guest)
                 if (ctx.projectId != null) {
-                    if (tier === 'guest') return proj ? String(proj) === String(ctx.projectId) : true;
+                    if (tier === 'guest') {
+                        var proj = s && s.managedProjectId;
+                        if (proj == null) return true;                    // never assigned → permissive
+                        return String(proj) === String(ctx.projectId);
+                    }
                     return true;
                 }
-                // cohort scope (cohost/instructor)
+                // cohort scope (cohost / instructor)
                 if (ctx.cohort != null) {
-                    if (cohorts.length === 0) return true;               // unset = permissive (Phase 1)
-                    var norm = function (x) { return String(x || '').toLowerCase().trim(); };
+                    var cohorts = s && s.managedCohorts;
+                    if (cohorts == null) return true;                     // never assigned → permissive
                     return cohorts.some(function (c) { return norm(c) === norm(ctx.cohort); });
                 }
                 return true;
