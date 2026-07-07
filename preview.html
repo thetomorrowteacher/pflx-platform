@@ -9390,6 +9390,7 @@
                                     <button class="mc-btn mc-btn-green" onclick="mcCreateCohortGroup()">+ New Cohort Group</button>
                                 </div>
                                 <div class="mc-stat-grid" id="mc-cohort-stats"></div>
+                                <div id="mc-ai-activation" style="display:none;margin-bottom:14px;font-family:'Rajdhani',sans-serif;font-size:13px;color:#e0e6ff;background:rgba(0,212,255,0.06);border:1px solid rgba(0,212,255,0.2);border-radius:8px;padding:8px 12px;"></div>
                                 <div id="mc-cohortgroups-list" style="display:flex;flex-direction:column;gap:14px;"></div>
                             </div>
 
@@ -33564,6 +33565,8 @@
                         '<button class="mc-btn" style="font-size:10px;padding:4px 10px;color:#00d4ff;border-color:rgba(0,212,255,0.4);" onclick="mcEditCohortChat(' + i + ')">💬 Chat Controls</button>' +
                         '<button class="mc-btn" style="font-size:10px;padding:4px 10px;color:#ef4444;border-color:rgba(239,68,68,0.3);" onclick="mcDeleteCohortGroup(' + i + ')">Delete</button></div></div>';
                 }).join('');
+            // BYO-LLM: async host readout of how many students have connected an AI.
+            try { if (window.pflxPlayerAI && pflxPlayerAI.paintActivation) pflxPlayerAI.paintActivation(); } catch (e) {}
         }
         // ── Cohort progress dashboard ──
         // Host clicks "View Progress" on any cohort card and gets a modal
@@ -43785,16 +43788,70 @@ RESPONSE RULES:
                 }
             }
             function _refreshUi() { try { if (window.xbotRefreshAbilities) window.xbotRefreshAbilities(); } catch (e) {} }
+
+            // ── Host visibility: report a NON-SECRET activation flag to the shared
+            //    cloud (never a key). Hosts read the summary. Row: pflx_player_ai_status
+            //    = { [playerId]: { connected, provider, brand, cohort, at } }. ──
+            var STATUS_ROW = 'pflx_player_ai_status';
+            function _playerId() { try { return (window.activeSession && (activeSession.id || activeSession.brand || activeSession.name)) || null; } catch (e) { return null; } }
+            function _sb() { try { return (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null; } catch (e) { return null; } }
+            async function reportStatus(connected) {
+                try {
+                    var sb = _sb(), id = _playerId(); if (!sb || !id) return;
+                    var conn = getConnection();
+                    var entry = { connected: !!connected, provider: (conn && conn.provider) || null, brand: (window.activeSession && activeSession.brand) || null, cohort: activeCohort(), at: Date.now() };
+                    var res = await sb.from('app_data').select('key,data').eq('key', STATUS_ROW);
+                    var row = res && res.data && res.data[0];
+                    var map = (row && row.data) || {};
+                    map[id] = entry;                                   // read-modify-write, only our own entry
+                    await sb.from('app_data').upsert({ key: STATUS_ROW, data: map, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+                } catch (e) {}
+            }
+            async function loadStatusMap() {
+                try { var sb = _sb(); if (!sb) return {}; var res = await sb.from('app_data').select('key,data').eq('key', STATUS_ROW); var row = res && res.data && res.data[0]; return (row && row.data) || {}; } catch (e) { return {}; }
+            }
+            // pure: count activated entries, optionally restricted to cohort names
+            function summarize(map, cohortFilter) {
+                var total = 0, activated = 0, byProvider = {};
+                var allow = cohortFilter ? cohortFilter.map(norm) : null;
+                Object.keys(map || {}).forEach(function (k) {
+                    var e = map[k]; if (!e) return;
+                    if (allow && allow.indexOf(norm(e.cohort)) === -1) return;
+                    total++;
+                    if (e.connected) { activated++; var p = e.provider || 'other'; byProvider[p] = (byProvider[p] || 0) + 1; }
+                });
+                return { total: total, activated: activated, byProvider: byProvider };
+            }
+            async function paintActivation() {
+                try {
+                    var el = document.getElementById('mc-ai-activation'); if (!el) return;
+                    var map = await loadStatusMap();
+                    var names = null;
+                    try {
+                        if (typeof mcCohortGroups !== 'undefined' && window._pflxCohortVisible) {
+                            names = mcCohortGroups.filter(function (g) { return g && window._pflxCohortVisible(g.name); }).map(function (g) { return g.name; });
+                        }
+                    } catch (e2) {}
+                    var s = summarize(map, names);
+                    if (s.total === 0) { el.style.display = 'none'; return; }
+                    var prov = Object.keys(s.byProvider).map(function (p) { return s.byProvider[p] + '× ' + p; }).join(' · ');
+                    el.style.display = 'block';
+                    el.innerHTML = '⚡ <b style="color:#00d4ff;">' + s.activated + '</b> of ' + s.total + ' students have connected an AI to X-Bot' + (prov ? ' <span style="color:rgba(255,255,255,0.4);">(' + prov + ')</span>' : '');
+                } catch (e) {}
+            }
+
             function connect(conn) {
                 saveConnection(Object.assign({ connectedAt: Date.now() }, conn || {}));
                 applyToEngine();
                 try { if (window.activeSession) activeSession.aiConnected = true; } catch (e) {}
                 _refreshUi();
+                reportStatus(true);
             }
             function disconnect() {
                 saveConnection(null);
                 try { if (window.activeSession) activeSession.aiConnected = false; } catch (e) {}
                 _refreshUi();
+                reportStatus(false);
             }
 
             // ── Connect modal (uses the shared openModal helper if available) ──
@@ -43888,7 +43945,8 @@ RESPONSE RULES:
                 isActivated: isActivated, applyToEngine: applyToEngine, safetyPrompt: safetyPrompt,
                 connect: connect, disconnect: disconnect, getConnection: getConnection, hasConnection: hasConnection,
                 testConnection: testConnection, openConnect: openConnect,
-                ABILITIES: ABILITIES, abilityEnabled: abilityEnabled, enabledAbilities: enabledAbilities
+                ABILITIES: ABILITIES, abilityEnabled: abilityEnabled, enabledAbilities: enabledAbilities,
+                reportStatus: reportStatus, loadStatusMap: loadStatusMap, summarize: summarize, paintActivation: paintActivation
             };
         })();
         window.pflxPlayerAI = pflxPlayerAI;
