@@ -25447,6 +25447,157 @@
             mcBroadcastToApps('pflx_players_updated', { players: mcPlayers });
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // GOOGLE DRIVE / DOCS in Mission Control
+        //   Attach Google Docs/Sheets/Slides/Drive files & folders to Tasks,
+        //   Projects and Checkpoints (host resources) and render them as cards
+        //   with Open + inline preview. Player submissions that are Google links
+        //   render the same way. Link+embed works with zero setup; a Google
+        //   Picker (browse-your-Drive) is scaffolded behind pflxGoogle.configure
+        //   for once a Google Cloud Client ID + API key are supplied.
+        // ═══════════════════════════════════════════════════════════════
+        const pflxGoogle = (function () {
+            'use strict';
+            var TYPES = {
+                doc:    { label: 'Google Doc',    icon: '📄' },
+                sheet:  { label: 'Google Sheet',  icon: '📊' },
+                slide:  { label: 'Google Slides', icon: '📽️' },
+                form:   { label: 'Google Form',   icon: '📝' },
+                file:   { label: 'Drive File',    icon: '📁' },
+                folder: { label: 'Drive Folder',  icon: '🗂️' }
+            };
+            function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+            function build(kind, id, url) {
+                var embed = null;
+                if (kind === 'doc') embed = 'https://docs.google.com/document/d/' + id + '/preview';
+                else if (kind === 'sheet') embed = 'https://docs.google.com/spreadsheets/d/' + id + '/preview';
+                else if (kind === 'slide') embed = 'https://docs.google.com/presentation/d/' + id + '/embed';
+                else if (kind === 'folder') embed = 'https://drive.google.com/embeddedfolderview?id=' + id + '#grid';
+                else if (kind === 'file') embed = 'https://drive.google.com/file/d/' + id + '/preview';
+                return { kind: kind, fileId: id, url: url, embedUrl: embed, icon: (TYPES[kind] || TYPES.file).icon, label: (TYPES[kind] || TYPES.file).label };
+            }
+            function parseLink(url) {
+                if (!url) return null;
+                url = String(url).trim();
+                var m;
+                m = url.match(/https?:\/\/docs\.google\.com\/(document|spreadsheets|presentation|forms)\/d\/([a-zA-Z0-9_-]+)/);
+                if (m) { var k = m[1] === 'document' ? 'doc' : m[1] === 'spreadsheets' ? 'sheet' : m[1] === 'presentation' ? 'slide' : 'form'; return build(k, m[2], url); }
+                m = url.match(/https?:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+                if (m) return build('file', m[1], url);
+                m = url.match(/https?:\/\/drive\.google\.com\/drive\/folders\/([a-zA-Z0-9_-]+)/);
+                if (m) return build('folder', m[1], url);
+                m = url.match(/https?:\/\/(?:drive|docs)\.google\.com\/(?:open|uc)\?[^#]*\bid=([a-zA-Z0-9_-]+)/);
+                if (m) return build('file', m[1], url);
+                return null;
+            }
+            function isGoogle(url) { return !!parseLink(url); }
+            function cardHtml(att, opts) {
+                opts = opts || {};
+                var t = TYPES[att.kind] || TYPES.file;
+                var title = att.title || t.label;
+                return '<div class="pg-att" style="display:flex;align-items:center;gap:8px;background:rgba(66,133,244,0.07);border:1px solid rgba(66,133,244,0.28);border-radius:8px;padding:6px 10px;margin:4px 0;">' +
+                    '<span style="font-size:16px;">' + t.icon + '</span>' +
+                    '<span style="flex:1;min-width:0;"><span style="display:block;font-size:12px;color:#e0e6ff;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(title) + '</span>' +
+                    '<span style="font-size:10px;color:rgba(255,255,255,0.4);">' + t.label + '</span></span>' +
+                    (att.embedUrl ? '<button type="button" onclick="pflxGoogle.togglePreview(this,&quot;' + esc(att.embedUrl) + '&quot;)" style="background:none;border:1px solid rgba(255,255,255,0.15);color:#9db4ff;border-radius:6px;font-size:11px;padding:3px 8px;cursor:pointer;">Preview</button>' : '') +
+                    '<a href="' + esc(att.url) + '" target="_blank" rel="noopener noreferrer" style="background:rgba(66,133,244,0.18);border:1px solid rgba(66,133,244,0.5);color:#9db4ff;border-radius:6px;font-size:11px;padding:3px 8px;text-decoration:none;">Open</a>' +
+                    (opts.onRemove ? '<button type="button" onclick="' + opts.onRemove + '" title="Remove" style="background:none;border:none;color:#ef6a6a;cursor:pointer;font-size:13px;">✕</button>' : '') +
+                    '</div>';
+            }
+            function togglePreview(btn, embedUrl) {
+                var card = btn.closest ? btn.closest('.pg-att') : null; if (!card) return;
+                var sib = card.nextElementSibling;
+                if (sib && sib.classList && sib.classList.contains('pg-preview')) { sib.remove(); btn.textContent = 'Preview'; return; }
+                var wrap = document.createElement('div');
+                wrap.className = 'pg-preview';
+                wrap.style.cssText = 'margin:2px 0 8px;border:1px solid rgba(66,133,244,0.3);border-radius:8px;overflow:hidden;';
+                wrap.innerHTML = '<iframe src="' + embedUrl + '" style="width:100%;height:380px;border:0;background:#fff;" allow="autoplay"></iframe>';
+                card.parentNode.insertBefore(wrap, card.nextSibling);
+                btn.textContent = 'Hide';
+            }
+            // renders a Google card ONLY if the url is a Google link (for submissions)
+            function linkCardIfGoogle(url, title) { var a = parseLink(url); if (!a) return ''; if (title) a.title = title; return cardHtml(a, {}); }
+            // paste-a-link modal → onAttach(att)
+            function attachModal(onAttach) {
+                var html =
+                    '<div style="font-family:Orbitron,sans-serif;font-size:14px;color:#4285F4;font-weight:800;letter-spacing:0.1em;margin-bottom:6px;">📎 ATTACH GOOGLE FILE</div>' +
+                    '<div style="font-size:12px;color:rgba(224,230,255,0.7);margin-bottom:12px;line-height:1.5;">Paste a share link from Google Docs, Sheets, Slides, or Drive. Make sure sharing is set so your students can open it.</div>' +
+                    '<label style="display:block;font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:4px;text-transform:uppercase;letter-spacing:1px;">Google link</label>' +
+                    '<input id="pg-attach-url" type="text" placeholder="https://docs.google.com/document/d/…" style="' + (typeof inputCss === 'function' ? inputCss() : 'width:100%;padding:8px;') + 'margin-bottom:10px;">' +
+                    '<label style="display:block;font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:4px;text-transform:uppercase;letter-spacing:1px;">Title (optional)</label>' +
+                    '<input id="pg-attach-title" type="text" placeholder="e.g. Project Brief" style="' + (typeof inputCss === 'function' ? inputCss() : 'width:100%;padding:8px;') + 'margin-bottom:14px;">' +
+                    '<div style="display:flex;gap:8px;justify-content:flex-end;"><button id="pg-attach-btn" style="' + (typeof btnCss === 'function' ? btnCss('primary') : 'padding:8px 14px;') + '">Attach</button></div>';
+                if (typeof openModal !== 'function') { var raw = prompt('Paste a Google Docs/Drive link:'); var a0 = parseLink(raw || ''); if (a0) { a0.id = 'g' + Date.now().toString(36); a0.addedAt = Date.now(); onAttach(a0); } else if (raw) alert('Not a recognized Google link.'); return; }
+                openModal(html, function (card, close) {
+                    var btn = card.querySelector('#pg-attach-btn');
+                    if (btn) btn.onclick = function () {
+                        var url = (card.querySelector('#pg-attach-url') || {}).value || '';
+                        var att = parseLink(url);
+                        if (!att) { if (typeof pflxToast === 'function') pflxToast('That doesn\'t look like a Google Docs/Drive link.', 'error'); else alert('Not a recognized Google link.'); return; }
+                        var title = (card.querySelector('#pg-attach-title') || {}).value || '';
+                        att.title = title.trim(); att.id = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); att.addedAt = Date.now();
+                        onAttach(att); close();
+                    };
+                });
+            }
+            // ── Google Picker scaffold (ready once a Client ID + API key exist) ──
+            var _cfg = null;
+            function _loadCfg() { if (_cfg) return _cfg; try { _cfg = JSON.parse(localStorage.getItem('pflx_gpicker_cfg') || 'null'); } catch (e) {} return _cfg; }
+            function configure(clientId, apiKey) { _cfg = { clientId: clientId, apiKey: apiKey }; try { localStorage.setItem('pflx_gpicker_cfg', JSON.stringify(_cfg)); } catch (e) {} }
+            function isConfigured() { var c = _loadCfg(); return !!(c && c.clientId && c.apiKey); }
+            function openPicker(onPick) {
+                // Live "browse my Drive" Picker requires a Google Cloud Client ID + API
+                // key (pflxGoogle.configure) and the GIS + Picker scripts. Until that's
+                // wired, fall back to the fully-working link-paste flow.
+                attachModal(onPick);
+            }
+            return { parseLink: parseLink, isGoogle: isGoogle, cardHtml: cardHtml, linkCardIfGoogle: linkCardIfGoogle, togglePreview: togglePreview, attachModal: attachModal, openPicker: openPicker, configure: configure, isConfigured: isConfigured, TYPES: TYPES };
+        })();
+        window.pflxGoogle = pflxGoogle;
+
+        // ── MC glue: attachments on Tasks / Projects / Checkpoints ──
+        function _mcGColl(kind) { return kind === 'task' ? mcTasks : kind === 'project' ? mcProjects : kind === 'checkpoint' ? mcCheckpoints : null; }
+        function _mcGSaveKey(kind) { return kind === 'task' ? 'tasks' : kind === 'project' ? 'projects' : 'checkpoints'; }
+        function _mcGReRender(kind) {
+            try {
+                if (kind === 'task' && typeof mcRenderTasks === 'function') mcRenderTasks();
+                else if (kind === 'project' && typeof mcRenderProjects === 'function') mcRenderProjects();
+                else if (kind === 'checkpoint' && typeof mcRenderCheckpoints === 'function') mcRenderCheckpoints();
+            } catch (e) {}
+        }
+        function mcGoogleAttach(kind, id) {
+            var coll = _mcGColl(kind); if (!coll) return;
+            var rec = coll.find(function (x) { return x && x.id === id; }); if (!rec) return;
+            pflxGoogle.attachModal(function (att) {
+                rec.attachments = rec.attachments || [];
+                rec.attachments.push({ id: att.id, kind: att.kind, fileId: att.fileId, url: att.url, embedUrl: att.embedUrl, title: att.title || '', addedAt: att.addedAt });
+                try { mcSaveData(_mcGSaveKey(kind)); } catch (e) {}
+                _mcGReRender(kind);
+                if (typeof pflxToast === 'function') pflxToast('Attached ' + att.label + '.', 'success');
+            });
+        }
+        function mcGoogleRemove(kind, id, attId) {
+            var coll = _mcGColl(kind); if (!coll) return;
+            var rec = coll.find(function (x) { return x && x.id === id; }); if (!rec || !rec.attachments) return;
+            rec.attachments = rec.attachments.filter(function (a) { return a.id !== attId; });
+            try { mcSaveData(_mcGSaveKey(kind)); } catch (e) {}
+            _mcGReRender(kind);
+        }
+        // one-line drop-in for card/detail renders. editable → host controls.
+        function mcGoogleAttachmentsHtml(rec, kind, editable) {
+            var atts = (rec && rec.attachments) || [];
+            if (!atts.length && !editable) return '';
+            var body = atts.map(function (a) {
+                return pflxGoogle.cardHtml(a, editable ? { onRemove: 'mcGoogleRemove(&quot;' + kind + '&quot;,&quot;' + rec.id + '&quot;,&quot;' + a.id + '&quot;)' } : {});
+            }).join('');
+            if (editable) {
+                body += '<button type="button" onclick="mcGoogleAttach(&quot;' + kind + '&quot;,&quot;' + rec.id + '&quot;)" style="background:rgba(66,133,244,0.14);border:1px solid rgba(66,133,244,0.4);color:#9db4ff;border-radius:7px;font-size:11px;padding:4px 10px;cursor:pointer;margin-top:4px;">📎 Attach Google Doc / Drive</button>';
+            }
+            return '<div class="mc-gdrive" style="margin-top:8px;">' +
+                '<div style="font-size:10px;letter-spacing:0.08em;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-bottom:2px;">📎 Resources</div>' + body + '</div>';
+        }
+        window.mcGoogleAttach = mcGoogleAttach; window.mcGoogleRemove = mcGoogleRemove; window.mcGoogleAttachmentsHtml = mcGoogleAttachmentsHtml;
+
         // ── Checkpoints ─────────────────────────────────────────────
         function mcRenderCheckpoints() {
             mcLoadData();
@@ -25572,6 +25723,7 @@
                     (cp.description ? '<div style="font-size:13px;color:rgba(255,255,255,0.65);margin-bottom:14px;line-height:1.55;">' + escapeHtml(cp.description) + '</div>' : '') +
                     cpProgressPanel +
                     contentsPanel +
+                    mcGoogleAttachmentsHtml(cp, 'checkpoint', true) +
                     '<div style="background:rgba(' + accentRgb + ',0.06);border:1px solid rgba(' + accentRgb + ',0.24);border-radius:12px;padding:12px 14px;margin-bottom:14px;font-size:12px;color:rgba(255,255,255,0.6);">' +
                     '<div style="margin-bottom:5px;"><strong style="color:rgba(255,255,255,0.85);">Season:</strong> ' + (seasonObj ? escapeHtml(seasonObj.name) : '—') + '</div>' +
                     '<div><strong style="color:rgba(255,255,255,0.85);">Dates:</strong> ' + (cp.startDate || 'TBD') + ' → ' + (cp.endDate || 'TBD') + '</div>' +
@@ -26599,6 +26751,10 @@
                     (subtasksHtml ? '<div style="margin-top:10px;">' + subtasksHtml + '</div>' : '') +
                     (tSubmissionsSummary ? '<div style="margin-top:10px;">' + tSubmissionsSummary + '</div>' : '') +
                     (submissionPanel ? '<div style="margin-top:10px;">' + submissionPanel + '</div>' : '') +
+                    // player submitted a Google Doc as their work → render it as a card
+                    (t.submission && t.submission.link ? pflxGoogle.linkCardIfGoogle(t.submission.link, 'Submission: ' + (t.submission.title || t.title || 'Doc')) : '') +
+                    // host resources (Google Docs/Drive) attached to this task
+                    mcGoogleAttachmentsHtml(t, 'task', true) +
                     // Action buttons — lifecycle-aware:
                     //   monitored + not started → Start
                     //   monitored + in-progress → Submit for [current phase]
@@ -29457,6 +29613,7 @@
                     progressPanel +
                     // Child tasks list — makes the Project → Task connection visible
                     projTasksPanel +
+                    mcGoogleAttachmentsHtml(p, 'project', true) +
                     // FLP phase indicator
                     pFlpPill +
                     // Subtask checklist (player-side ticks)
