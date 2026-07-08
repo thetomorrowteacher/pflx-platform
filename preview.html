@@ -20221,7 +20221,8 @@
                     tier: b.category || '',
                     category: b.category || '',
                     color: b.color || '#4f8ef7',
-                    icon: b.icon || '🎖'
+                    icon: b.icon || '🎖',
+                    image: ''
                 };
             });
             var dynamic = (typeof mcBadges !== 'undefined' && Array.isArray(mcBadges) ? mcBadges : []).map(function(b) {
@@ -20234,7 +20235,10 @@
                     tier: tier,
                     category: category,
                     color: b.color || '#00d4ff',
-                    icon: b.icon || '🎖'
+                    icon: b.icon || '🎖',
+                    // X-Coin's Digital Badge Management stores an artwork image —
+                    // carry it (various field names) so grants + portfolio show it.
+                    image: b.image || b.img || b.imageUrl || b.imageURL || b.photo || b.artwork || ''
                 };
             });
             // Dedupe — dynamic (X-Coin) wins over hardcoded for same name
@@ -20259,6 +20263,38 @@
                 return b.id === key || (b.name || '').toLowerCase() === lower;
             }) || null;
         }
+        // Map any catalog category label / tier to the canonical key that
+        // player.badgeCounts + the portfolio grid use.
+        function _pflxBadgeCategoryKey(cat) {
+            var s = String(cat || '').toLowerCase();
+            if (s.indexOf('signature') >= 0 || s.indexOf('cert') >= 0 || s.indexOf('mastery') >= 0) return 'signature';
+            if (s.indexOf('executive') >= 0 || s.indexOf('job') >= 0) return 'executive';
+            if (s.indexOf('premium') >= 0 || s.indexOf('achieve') >= 0) return 'premium';
+            return 'primary';
+        }
+        window._pflxBadgeCategoryKey = _pflxBadgeCategoryKey;
+
+        // Rebuild the OPEN task-form badge checklist from the live catalog,
+        // preserving the host's current selections. Called when X-Coin pushes a
+        // fresh badge catalog so an open form reflects new/edited badges live.
+        function mcRefreshBadgePickers() {
+            var badgesDiv = document.getElementById('mc-task-badges');
+            if (!badgesDiv || badgesDiv.offsetParent === null) return; // form not visible
+            var checkedVals = {};
+            badgesDiv.querySelectorAll('.mc-task-badge-cb:checked').forEach(function (cb) { checkedVals[cb.value] = 1; });
+            var allBadges = mcGetAllBadges();
+            badgesDiv.innerHTML = allBadges.length === 0 ? '<span style="font-size:11px;color:rgba(255,255,255,0.25);">No badges defined</span>' :
+                allBadges.map(function (b) {
+                    return '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;padding:3px 0;">' +
+                        '<input type="checkbox" class="mc-task-badge-cb" value="' + b.id + '" data-xc="' + (b.xc || 0) + '"' + (checkedVals[b.id] ? ' checked' : '') + ' onchange="mcTaskRecalcRewardTotal()"> ' +
+                        '<span style="flex:1;">' + escapeHtml(b.name) + '</span>' +
+                        '<span style="color:#f5c842;font-weight:700;font-size:11px;">' + (b.xc || 0) + ' XC</span>' +
+                        '</label>';
+                }).join('');
+            try { mcTaskRecalcRewardTotal(); } catch (e) {}
+        }
+        window.mcRefreshBadgePickers = mcRefreshBadgePickers;
+
         // Grant a badge (with its XC) to a player — idempotent. Returns xc granted.
         function mcGrantBadgeToPlayer(player, badgeRef, source) {
             if (!player) return 0;
@@ -21388,7 +21424,7 @@
                     if (msg.key === 'tasks' && msg.data && msg.data.length) { mcTasks = msg.data; mcSaveData('tasks'); dataUpdated = true; }
                     if (msg.key === 'projects' && msg.data && msg.data.length) { mcProjects = msg.data; mcSaveData('projects'); dataUpdated = true; }
                     if (msg.key === 'seasons' && msg.data && msg.data.length) { mcSeasons = msg.data; mcSaveData('seasons'); dataUpdated = true; }
-                    if (msg.key === 'badges' && msg.data && msg.data.length) { mcBadges = msg.data; mcSaveData('badges'); dataUpdated = true; }
+                    if (msg.key === 'badges' && msg.data && msg.data.length) { mcBadges = msg.data; mcSaveData('badges'); dataUpdated = true; try { mcRefreshBadgePickers(); } catch (e) {} }
                     if (msg.key === 'jobs' && msg.data && msg.data.length) { mcJobs = msg.data; mcSaveData('jobs'); dataUpdated = true; }
                     if (msg.key === 'cohortGroups' && msg.data && msg.data.length) { mcCohortGroups = msg.data; mcSaveData('cohortgroups'); dataUpdated = true; }
                     if (msg.key === 'pflxRanks' && msg.data && msg.data.length) { mcPflxRanks = msg.data; mcSaveData('pflxranks'); dataUpdated = true; }
@@ -27255,6 +27291,9 @@
         function mcShowTaskForm(index) {
             pflxPlaySfx('open');
             mcTaskEditIndex = index;
+            // Pull the freshest X-Coin badge catalog so the reward picker is live;
+            // the reply re-renders the open picker via mcRefreshBadgePickers.
+            try { if (typeof mcRequestXCoinData === 'function') mcRequestXCoinData(); } catch (e) {}
             var form = document.getElementById('mc-task-form');
             if (!form) return;
             form.style.display = 'block';
@@ -29447,10 +29486,19 @@
                     }
                     if (task.rewardBadges && task.rewardBadges.length > 0 && window.PflxDataBus) {
                         task.rewardBadges.forEach(function (badgeRef) {
-                            // badgeRef is either an id or a full badge object
-                            var b = (typeof badgeRef === 'string')
-                                ? { id: badgeRef, name: badgeRef }
-                                : { id: badgeRef.id, name: badgeRef.name || badgeRef.title || badgeRef.id, category: badgeRef.category || 'primary', xcValue: badgeRef.xcValue || badgeRef.xc || 0 };
+                            // Resolve against the LIVE badge catalog (X-Coin) so the badge
+                            // carries its XC value (→ credited to xc/totalXcoin), its
+                            // category key (→ badgeCounts + portfolio grid) and its image.
+                            var cat = (typeof mcFindBadge === 'function') ? mcFindBadge(badgeRef) : null;
+                            var raw = (badgeRef && typeof badgeRef === 'object') ? badgeRef : {};
+                            var name = (cat && cat.name) || raw.name || raw.title || (typeof badgeRef === 'string' ? badgeRef : raw.id) || 'Badge';
+                            var b = {
+                                id: (cat && cat.id) || raw.id || mcBadgeIdFromName(name),
+                                name: name,
+                                category: _pflxBadgeCategoryKey((cat && (cat.category || cat.tier)) || raw.category || raw.tier),
+                                xcValue: (cat && cat.xc) || raw.xcValue || raw.xc || 0,
+                                image: (cat && cat.image) || raw.image || ''
+                            };
                             window.PflxDataBus.award(submitterId, {
                                 badge: b,
                                 source: 'mc',
@@ -46247,7 +46295,17 @@ RESPONSE RULES:
 
             const totalBadges = (bc.primary || 0) + (bc.premium || 0) + (bc.executive || 0) + (bc.signature || 0);
 
-            if (totalBadges === 0) {
+            // Actual earned badge list (with artwork) — resolve the player's badge
+            // refs against the live catalog so we can show each badge's image.
+            var earnedRefs = [];
+            try {
+                if (activeSession && Array.isArray(activeSession.badges)) earnedRefs = activeSession.badges;
+                if (!earnedRefs.length) { var _u = JSON.parse(localStorage.getItem('pflx_user') || '{}'); if (Array.isArray(_u.badges)) earnedRefs = _u.badges; }
+                if (!earnedRefs.length && activeSession && Array.isArray(activeSession.digitalBadges)) earnedRefs = activeSession.digitalBadges; // legacy array shape
+            } catch (e) {}
+            var earned = earnedRefs.map(function (r) { return (typeof mcFindBadge === 'function') ? mcFindBadge(r) : (r && typeof r === 'object' ? r : null); }).filter(Boolean);
+
+            if (totalBadges === 0 && earned.length === 0) {
                 container.innerHTML = '<p style="color:rgba(255,255,255,0.3);font-size:13px;text-align:center;padding:30px 0;">No badges earned yet. Complete tasks in X-Coin to build your badge portfolio.</p>';
                 return;
             }
@@ -46273,6 +46331,22 @@ RESPONSE RULES:
                     </div>`;
             });
             html += '</div>';
+
+            // Earned badges — actual badge artwork from X-Coin's Digital Badge Management.
+            if (earned.length) {
+                html += '<div style="margin-top:20px;"><div style="font-size:11px;letter-spacing:0.1em;color:rgba(255,255,255,0.45);text-transform:uppercase;margin-bottom:12px;">🏅 Earned Badges (' + earned.length + ')</div>';
+                html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px;">';
+                earned.forEach(function (bg) {
+                    var hasImg = bg.image && /^(https?:|data:)/i.test(String(bg.image));
+                    var art = hasImg
+                        ? '<img src="' + escapeHtml(bg.image) + '" alt="" style="width:60px;height:60px;border-radius:12px;object-fit:cover;border:1px solid rgba(255,255,255,0.12);">'
+                        : '<div style="width:60px;height:60px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:30px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);">' + (bg.icon || '🎖') + '</div>';
+                    html += '<div style="text-align:center;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:14px;padding:12px 8px;">' + art +
+                        '<div style="font-size:11px;font-weight:700;color:#e0e6ff;margin-top:8px;line-height:1.25;">' + escapeHtml(bg.name || 'Badge') + '</div>' +
+                        (bg.xc ? '<div style="font-size:10px;color:#f5c842;margin-top:2px;">+' + bg.xc + ' XC</div>' : '') + '</div>';
+                });
+                html += '</div></div>';
+            }
             container.innerHTML = html;
         }
 
