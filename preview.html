@@ -6819,6 +6819,9 @@
                                     <span class="mc-icon">&#x1F4CB;</span> Tasks
                                     <span class="mc-badge" id="mc-task-count">0</span>
                                 </button>
+                                <button class="mc-nav-btn mc-host-only" data-mc="progress" onclick="mcNav('progress')">
+                                    <span class="mc-icon">&#x1F4CA;</span> Progress
+                                </button>
                                 <button class="mc-nav-btn" data-mc="jobboard" onclick="mcNav('jobboard')">
                                     <span class="mc-icon">&#x1F4BC;</span> Job Board
                                 </button>
@@ -9383,6 +9386,18 @@
                             </div>
 
                             <!-- ═══ COHORT GROUPS PANEL ═══ -->
+                            <!-- ═══ HOST PROGRESS PANEL ═══ -->
+                            <div class="mc-panel" id="mc-panel-progress">
+                                <h1 class="mc-page-title">📊 Progress</h1>
+                                <p class="mc-page-desc">Every player's progress within a Checkpoint — tasks and projects assigned to them, with per-task status. Scoped to the cohorts your access tier manages.</p>
+                                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px;">
+                                    <label style="font-size:12px;color:rgba(255,255,255,0.5);">Checkpoint:</label>
+                                    <select id="mc-progress-cp" onchange="mcRenderProgress()" style="background:rgba(10,18,40,0.7);border:1px solid rgba(0,212,255,0.3);color:#e0e6ff;padding:8px 12px;border-radius:8px;font-size:13px;min-width:220px;"></select>
+                                    <button class="mc-btn" onclick="mcRenderProgress()" style="font-size:12px;padding:7px 14px;">↻ Refresh</button>
+                                </div>
+                                <div id="mc-progress-body"></div>
+                            </div>
+
                             <div class="mc-panel" id="mc-panel-cohortgroups">
                                 <h1 class="mc-page-title">&#x1F465; Cohort Groups</h1>
                                 <p class="mc-page-desc">Organize players into cohorts and manage group assignments.</p>
@@ -22259,6 +22274,7 @@
             if (tab === 'badges') mcRenderBadges();
             // Task Management — individual native panels
             if (tab === 'checkpoints') mcRenderCheckpoints();
+            if (tab === 'progress') mcRenderProgress();
             if (tab === 'tasks') mcRenderTasks();
             if (tab === 'jobboard') mcRenderJobs();
             if (tab === 'projects') mcRenderProjects();
@@ -25898,6 +25914,101 @@
             var done = all.filter(_mcTaskIsApproved).length;
             return { approved: done, total: all.length, pct: all.length ? Math.round(done*100/all.length) : 0 };
         }
+        // ── PER-PLAYER progress (Host Progress dashboard) ──
+        function pflxPlayerCohorts(player) {
+            if (!player) return [];
+            if (Array.isArray(player.cohorts) && player.cohorts.length) return player.cohorts;
+            return player.cohort ? [player.cohort] : [];
+        }
+        // State of one task FOR a specific player: 'approved' | 'submitted' | 'open'.
+        // Prefers a per-player entry in task.submissions[] when present; otherwise
+        // falls back to the shared single-status model (task.status/submission).
+        function pflxTaskStateForPlayer(task, pid) {
+            if (!task) return 'open';
+            if (Array.isArray(task.submissions) && task.submissions.length) {
+                var s = task.submissions.find(function (x) { return x && (x.playerId === pid || x.submittedBy === pid || x.submittedById === pid); });
+                if (s) return s.status === 'approved' ? 'approved' : (s.status === 'rejected' ? 'open' : 'submitted');
+                if (_mcTaskIsApproved(task)) return 'approved'; // globally approved shared task
+                return 'open';
+            }
+            if (_mcTaskIsApproved(task)) return 'approved';
+            if (_mcTaskIsSubmitted(task) && task.submission && (task.submission.submittedById === pid || task.submission.submittedBy === pid)) return 'submitted';
+            return 'open';
+        }
+        // A player's progress within a Checkpoint: only tasks assigned/visible to
+        // that player (direct tasks + tasks via child projects), de-duplicated.
+        function pflxPlayerCheckpointProgress(cp, player) {
+            if (!cp || !player) return { total: 0, approved: 0, submitted: 0, pct: 0, tasks: [] };
+            var pid = player.id, cohorts = pflxPlayerCohorts(player);
+            function canSee(item) { try { return pflxPlayerCanSeeItem(item, pid, cohorts); } catch (e) { return false; } }
+            var seen = {}, tasks = [];
+            function push(t, viaProject) {
+                if (!t || !t.id || seen[t.id]) return;
+                seen[t.id] = 1;
+                tasks.push({ id: t.id, title: t.title || t.name || 'Task', state: pflxTaskStateForPlayer(t, pid), project: viaProject || null });
+            }
+            mcChildProjectsForCheckpoint(cp).forEach(function (pr) {
+                var projSeen = canSee(pr);
+                mcChildTasksForProject(pr).forEach(function (t) { if (projSeen || canSee(t)) push(t, pr.name || pr.title || 'Project'); });
+            });
+            mcChildTasksForCheckpoint(cp).forEach(function (t) { if (canSee(t)) push(t, null); });
+            var approved = tasks.filter(function (x) { return x.state === 'approved'; }).length;
+            var submitted = tasks.filter(function (x) { return x.state === 'submitted'; }).length;
+            return { total: tasks.length, approved: approved, submitted: submitted, pct: tasks.length ? Math.round(approved * 100 / tasks.length) : 0, tasks: tasks };
+        }
+        window.pflxPlayerCheckpointProgress = pflxPlayerCheckpointProgress;
+        window.pflxTaskStateForPlayer = pflxTaskStateForPlayer;
+
+        // ── Host Progress dashboard render ──
+        function mcProgressToggle(id) { var el = document.getElementById(id); if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none'; }
+        window.mcProgressToggle = mcProgressToggle;
+        function mcRenderProgress() {
+            mcLoadData();
+            var body = document.getElementById('mc-progress-body'); if (!body) return;
+            var cps = (mcCheckpoints || []).slice();
+            var sel = document.getElementById('mc-progress-cp');
+            var selId = (sel && sel.value) || (cps[0] && cps[0].id) || '';
+            if (sel) {
+                sel.innerHTML = cps.length ? cps.map(function (c) { return '<option value="' + c.id + '"' + (c.id === selId ? ' selected' : '') + '>' + escapeHtml(c.name || 'Checkpoint') + '</option>'; }).join('') : '<option value="">— no checkpoints —</option>';
+                if (selId) sel.value = selId;
+            }
+            var cp = cps.find(function (c) { return c.id === selId; }) || cps[0];
+            if (!cp) { body.innerHTML = '<div style="color:rgba(255,255,255,0.3);padding:24px;text-align:center;">No checkpoints yet. Create one in Checkpoints and attach tasks/projects, then progress shows here.</div>'; return; }
+            var players = (mcPlayers || []).filter(function (p) { return p && p.role === 'player' && (!window._pflxPlayerVisible || _pflxPlayerVisible(p)); });
+            var rows = players.map(function (p) { return { p: p, prog: pflxPlayerCheckpointProgress(cp, p) }; }).filter(function (r) { return r.prog.total > 0; });
+            rows.sort(function (a, b) { return a.prog.pct - b.prog.pct; });
+            var classPct = rows.length ? Math.round(rows.reduce(function (s, r) { return s + r.prog.pct; }, 0) / rows.length) : 0;
+            var fullyDone = rows.filter(function (r) { return r.prog.pct === 100; }).length;
+            var summary = '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:16px;padding:14px 16px;background:rgba(0,212,255,0.05);border:1px solid rgba(0,212,255,0.2);border-radius:12px;">' +
+                '<div style="flex:1;min-width:220px;"><div style="font-size:11px;letter-spacing:0.1em;color:rgba(255,255,255,0.5);text-transform:uppercase;margin-bottom:6px;">Class progress · ' + escapeHtml(cp.name || '') + '</div>' + _mcProgressBarHtml(classPct, { height: 12 }) + '</div>' +
+                '<div style="font-family:Orbitron,sans-serif;font-size:22px;font-weight:900;color:#00d4ff;">' + classPct + '%</div>' +
+                '<div style="font-size:12px;color:rgba(255,255,255,0.6);">' + rows.length + ' players · ' + fullyDone + ' complete</div>' +
+                '</div>';
+            if (!rows.length) { body.innerHTML = summary + '<div style="color:rgba(255,255,255,0.3);padding:24px;text-align:center;">No players are assigned tasks in this checkpoint yet.</div>'; return; }
+            var STATE = { approved: { c: '#22c55e', g: '✓' }, submitted: { c: '#f5c842', g: '◐' }, open: { c: 'rgba(255,255,255,0.3)', g: '○' } };
+            var rowsHtml = rows.map(function (r, i) {
+                var p = r.p, pr = r.prog, detId = 'mc-prog-det-' + i;
+                var chips = pr.tasks.map(function (t) {
+                    var st = STATE[t.state] || STATE.open;
+                    return '<div style="display:flex;align-items:center;gap:8px;padding:4px 8px;border-bottom:1px solid rgba(255,255,255,0.04);">' +
+                        '<span style="color:' + st.c + ';font-weight:800;">' + st.g + '</span>' +
+                        '<span style="flex:1;font-size:12px;color:rgba(255,255,255,0.8);">' + escapeHtml(t.title) + (t.project ? ' <span style="color:rgba(255,255,255,0.35);font-size:10px;">· ' + escapeHtml(t.project) + '</span>' : '') + '</span>' +
+                        '<span style="font-size:10px;color:' + st.c + ';text-transform:uppercase;letter-spacing:0.06em;">' + t.state + '</span></div>';
+                }).join('');
+                var img = p.image ? '<img src="' + p.image + '" style="width:30px;height:30px;border-radius:50%;object-fit:cover;">' : '<div style="width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#4f8ef7,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;color:#fff;">' + escapeHtml((p.brand || p.name || '?').charAt(0).toUpperCase()) + '</div>';
+                return '<div style="background:rgba(22,22,31,0.55);border:1px solid rgba(255,255,255,0.06);border-radius:12px;margin-bottom:8px;overflow:hidden;">' +
+                    '<div onclick="mcProgressToggle(&quot;' + detId + '&quot;)" style="display:flex;align-items:center;gap:12px;padding:12px 14px;cursor:pointer;">' + img +
+                        '<div style="min-width:130px;"><div style="font-weight:700;font-size:13px;color:#e6f8ff;">' + escapeHtml(p.name || p.brand || 'Player') + '</div><div style="font-size:10px;color:rgba(255,255,255,0.4);">' + escapeHtml(p.cohort || '') + '</div></div>' +
+                        '<div style="flex:1;">' + _mcProgressBarHtml(pr.pct, { height: 8 }) + '</div>' +
+                        '<div style="font-family:monospace;font-size:12px;color:rgba(255,255,255,0.7);min-width:74px;text-align:right;">' + pr.approved + '/' + pr.total + (pr.submitted ? ' <span style="color:#f5c842;">+' + pr.submitted + '◐</span>' : '') + '</div>' +
+                        '<div style="font-family:Orbitron,sans-serif;font-size:14px;font-weight:900;color:' + (pr.pct === 100 ? '#22c55e' : '#00d4ff') + ';min-width:44px;text-align:right;">' + pr.pct + '%</div>' +
+                        '<span style="color:rgba(255,255,255,0.4);">▸</span></div>' +
+                    '<div id="' + detId + '" style="display:none;padding:4px 14px 10px 56px;">' + chips + '</div></div>';
+            }).join('');
+            body.innerHTML = summary + rowsHtml;
+        }
+        window.mcRenderProgress = mcRenderProgress;
+
         // Compact reward summary for a Task/Project/Checkpoint.
         function _mcRewardSummary(item) {
             if (!item) return { xc: 0, badges: 0 };
