@@ -33738,6 +33738,14 @@
                     var on = !(cg.ai && cg.ai.abilities && cg.ai.abilities[a[0]] === false);
                     return '<label style="display:inline-flex;align-items:center;gap:6px;margin:6px 12px 0 0;font-size:11px;cursor:pointer;"><input type="checkbox" data-ability="' + a[0] + '"' + (on ? ' checked' : '') + ' style="accent-color:#00d4ff;"> ' + a[1] + '</label>';
                 }).join('') +
+                '<div style="margin-top:12px;padding-top:10px;border-top:1px dashed rgba(255,255,255,0.1);">' +
+                '<div style="font-size:11px;color:rgba(255,255,255,0.55);margin-bottom:6px;">🔐 Cohort AI key (optional — powers <b>Host</b>/<b>Both</b> mode with your school\'s own account; encrypted server-side, never stored raw):</div>' +
+                '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
+                '<select id="mc-ai-keyprov" style="background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.1);color:#e0e6ff;padding:6px;border-radius:6px;font-size:11px;"><option value="claude">Claude</option><option value="openai">OpenAI</option><option value="gemini">Gemini</option></select>' +
+                '<input id="mc-ai-keyval" type="password" placeholder="Paste school API key" style="flex:1;min-width:150px;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.1);color:#e0e6ff;padding:6px;border-radius:6px;font-size:11px;">' +
+                '<button id="mc-ai-keysave" class="mc-btn" style="font-size:10px;padding:5px 10px;color:#00d4ff;border-color:rgba(0,212,255,0.4);">Save Key</button>' +
+                '<button id="mc-ai-keyclear" class="mc-btn" style="font-size:10px;padding:5px 10px;color:#ef4444;border-color:rgba(239,68,68,0.3);">Clear</button>' +
+                '</div><div id="mc-ai-keystatus" style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:4px;"></div></div>' +
                 '</div>' +
                 '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
                 '<button id="mc-chat-caps-cancel" class="mc-btn" style="font-size:11px;padding:6px 14px;">Cancel</button>' +
@@ -33763,6 +33771,35 @@
                 if (typeof pflxToast === 'function') pflxToast('Cohort controls saved for ' + cg.name, 'success');
                 backdrop.remove();
             };
+            // ── Cohort AI key setter (encrypted server-side; raw key never stored) ──
+            function _paintKeyStatus() {
+                var el = backdrop.querySelector('#mc-ai-keystatus');
+                if (!el || !window.pflxPlayerAI || !pflxPlayerAI.cohortKeyStatus) return;
+                pflxPlayerAI.cohortKeyStatus().then(function (map) {
+                    var p = map && map[cg.name];
+                    el.textContent = p ? ('✓ Key set (' + p + ') — Host/Both mode uses it.') : 'No cohort key — Host mode uses the platform default.';
+                });
+            }
+            var _keySave = backdrop.querySelector('#mc-ai-keysave');
+            if (_keySave) _keySave.onclick = async function () {
+                var prov = (backdrop.querySelector('#mc-ai-keyprov') || {}).value || 'claude';
+                var val = (backdrop.querySelector('#mc-ai-keyval') || {}).value || '';
+                if (!val.trim()) { if (typeof pflxToast === 'function') pflxToast('Paste the school API key first.', 'error'); return; }
+                _keySave.disabled = true; _keySave.textContent = 'Saving…';
+                try {
+                    await pflxPlayerAI.setCohortKey(cg.name, prov, val.trim());
+                    if (typeof pflxToast === 'function') pflxToast('Cohort AI key saved (encrypted).', 'success');
+                    var vEl = backdrop.querySelector('#mc-ai-keyval'); if (vEl) vEl.value = '';
+                    _paintKeyStatus();
+                } catch (e) { if (typeof pflxToast === 'function') pflxToast('Couldn\'t save key: ' + (e.message || e), 'error'); }
+                _keySave.disabled = false; _keySave.textContent = 'Save Key';
+            };
+            var _keyClear = backdrop.querySelector('#mc-ai-keyclear');
+            if (_keyClear) _keyClear.onclick = async function () {
+                try { await pflxPlayerAI.clearCohortKey(cg.name); if (typeof pflxToast === 'function') pflxToast('Cohort AI key cleared.', 'info'); _paintKeyStatus(); }
+                catch (e) { if (typeof pflxToast === 'function') pflxToast('Couldn\'t clear key.', 'error'); }
+            };
+            _paintKeyStatus();
         };
 
         function mcCreateCohortGroup() {
@@ -43447,7 +43484,9 @@ RESPONSE RULES:
                         provider,
                         system: systemPrompt,
                         messages: messages.map(m => ({ role: m.role, content: m.content })),
-                        maxTokens: 512
+                        maxTokens: 512,
+                        // when a per-cohort host key is configured, the proxy uses it
+                        cohort: (function () { try { return (window.pflxPlayerAI && pflxPlayerAI.activeCohort && pflxPlayerAI.activeCohort()) || (window.activeSession && activeSession.cohort) || ''; } catch (e) { return ''; } })()
                     })
                 });
                 const data = await resp.json().catch(() => ({}));
@@ -43762,6 +43801,48 @@ RESPONSE RULES:
                 } catch (e) {}
             }
             function safetyPrompt() { return SAFETY; }
+
+            // ── Per-cohort HOST key (host-set spend control). The raw key is
+            //    posted ONCE to the proxy which returns ciphertext; only the
+            //    ciphertext is stored (app_data pflx_cohort_ai_keys). The proxy
+            //    decrypts it server-side at call time — the key never reaches a
+            //    student's browser. ──
+            var COHORT_KEY_ROW = 'pflx_cohort_ai_keys';
+            async function setCohortKey(cohort, provider, key, adminSecret) {
+                var sb = _sb(); if (!sb) throw new Error('cloud unavailable');
+                if (typeof XBOT_AI === 'undefined') throw new Error('engine unavailable');
+                var er = await fetch(XBOT_AI.PROXY_URL, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'encrypt', provider: provider, key: key, adminSecret: adminSecret || undefined })
+                });
+                var ej = await er.json().catch(function () { return {}; });
+                if (!er.ok || !ej.enc) throw new Error(ej.error || ('encrypt failed (' + er.status + ')'));
+                var res = await sb.from('app_data').select('key,data').eq('key', COHORT_KEY_ROW);
+                var row = res && res.data && res.data[0];
+                var map = (row && row.data) || {};
+                map[cohort] = { provider: provider, enc: ej.enc, at: Date.now() };   // never the raw key
+                await sb.from('app_data').upsert({ key: COHORT_KEY_ROW, data: map, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+                return true;
+            }
+            async function clearCohortKey(cohort) {
+                var sb = _sb(); if (!sb) throw new Error('cloud unavailable');
+                var res = await sb.from('app_data').select('key,data').eq('key', COHORT_KEY_ROW);
+                var row = res && res.data && res.data[0];
+                var map = (row && row.data) || {};
+                delete map[cohort];
+                await sb.from('app_data').upsert({ key: COHORT_KEY_ROW, data: map, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+                return true;
+            }
+            // returns { [cohort]: provider } — provider names only, never ciphertext/keys
+            async function cohortKeyStatus() {
+                try {
+                    var sb = _sb(); if (!sb) return {};
+                    var res = await sb.from('app_data').select('key,data').eq('key', COHORT_KEY_ROW);
+                    var row = res && res.data && res.data[0]; var map = (row && row.data) || {};
+                    var out = {}; Object.keys(map).forEach(function (k) { out[k] = map[k] && map[k].provider; });
+                    return out;
+                } catch (e) { return {}; }
+            }
             // Live validation: prove the connection works before we activate.
             // host mode → probe the server proxy; BYO → a tiny real call with the
             // candidate key, restoring the engine's keys on failure.
@@ -43946,7 +44027,8 @@ RESPONSE RULES:
                 connect: connect, disconnect: disconnect, getConnection: getConnection, hasConnection: hasConnection,
                 testConnection: testConnection, openConnect: openConnect,
                 ABILITIES: ABILITIES, abilityEnabled: abilityEnabled, enabledAbilities: enabledAbilities,
-                reportStatus: reportStatus, loadStatusMap: loadStatusMap, summarize: summarize, paintActivation: paintActivation
+                reportStatus: reportStatus, loadStatusMap: loadStatusMap, summarize: summarize, paintActivation: paintActivation,
+                setCohortKey: setCohortKey, clearCohortKey: clearCohortKey, cohortKeyStatus: cohortKeyStatus
             };
         })();
         window.pflxPlayerAI = pflxPlayerAI;
