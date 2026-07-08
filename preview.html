@@ -20514,6 +20514,31 @@
                 try { localStorage.setItem('pflx_mc_seeded', '1'); } catch (e) {}
             }
 
+            // ── Keep the MC player MIRROR in sync with the authoritative PLAYERS
+            //    roster (what Player Management shows). The mirror (pflx_mc_players)
+            //    can go empty/stale independently of PLAYERS — when it does, Cohort
+            //    Groups / Progress / the task-form player picker all read zero even
+            //    though real players exist. This is NOT a mock re-seed (PLAYERS is
+            //    the live roster), so it's safe even after the seed guard is set.
+            //    Also carries p.cohorts[] which the original seed map dropped —
+            //    a second reason cohort membership never matched. ──
+            try {
+                if ((!Array.isArray(mcPlayers) || mcPlayers.length === 0) &&
+                    typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS) && PLAYERS.length) {
+                    mcPlayers = PLAYERS.map(function (p) {
+                        return {
+                            id: p.id, name: p.name, brand: p.brand, email: p.email, pin: p.pin,
+                            cohort: p.cohort, cohorts: p.cohorts, role: p.role,
+                            xc: p.xc || 0, digitalBadges: p.digitalBadges || 0, claimed: p.claimed || false,
+                            image: p.image || '', level: p.level || 1, studioId: p.studioId || '',
+                            hostTier: p.hostTier, managedCohorts: p.managedCohorts, managedNodes: p.managedNodes, managedProjectId: p.managedProjectId,
+                            badgeCounts: p.badgeCounts || { primary: 0, premium: 0, executive: 0, signature: 0 }
+                        };
+                    });
+                    try { mcSaveData('players'); } catch (e) {}
+                }
+            } catch (e) {}
+
             // Seed cohort groups from existing cohorts — first boot only.
             // Prior to June 2026, this ran on every mcLoadData() where the
             // local list was empty. That defeats fresh Supabase seeds and
@@ -33827,6 +33852,26 @@
         }
         window.pflxEditProposal = pflxEditProposal;
 
+        // Count real players in a cohort group. Robust: matches the group by
+        // NAME or id against a player's cohort (string) OR cohorts[] (array),
+        // normalized. Reads the MC mirror, falling back to the authoritative
+        // PLAYERS roster if the mirror is momentarily empty.
+        function mcCohortMemberCount(cg) {
+            if (!cg) return 0;
+            var norm = function (x) { return String(x == null ? '' : x).toLowerCase().trim(); };
+            var accept = new Set([norm(cg.name), norm(cg.id)]);
+            var pool = (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers) && mcPlayers.length) ? mcPlayers
+                     : (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS) ? PLAYERS : []);
+            return pool.filter(function (p) {
+                if (!p || (p.role || 'player') === 'admin') return false;
+                var tags = [];
+                if (p.cohort) tags.push(p.cohort);
+                if (Array.isArray(p.cohorts)) tags = tags.concat(p.cohorts);
+                return tags.some(function (c) { return accept.has(norm(c)); });
+            }).length;
+        }
+        window.mcCohortMemberCount = mcCohortMemberCount;
+
         // ── Cohort Groups ────────────────────────────────────────────
         function mcRenderCohortGroups() {
             mcLoadData();
@@ -33834,7 +33879,7 @@
             if (stats) {
                 stats.innerHTML = [
                     { label: 'TOTAL GROUPS', value: mcCohortGroups.length, color: 'var(--cyan)', icon: '&#x1F465;' },
-                    { label: 'TOTAL PLAYERS', value: mcPlayers.filter(function(p) { return p.role !== 'admin'; }).length, color: '#4f8ef7', icon: '&#x1F464;' }
+                    { label: 'TOTAL PLAYERS', value: ((Array.isArray(mcPlayers) && mcPlayers.length) ? mcPlayers : (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS) ? PLAYERS : [])).filter(function(p) { return p && (p.role || 'player') !== 'admin'; }).length, color: '#4f8ef7', icon: '&#x1F464;' }
                 ].map(function(s) {
                     return '<div class="mc-stat-card"><div class="mc-stat-icon" style="color:' + s.color + ';">' + s.icon + '</div><div class="mc-stat-value">' + s.value + '</div><div class="mc-stat-label">' + s.label + '</div></div>';
                 }).join('');
@@ -33847,7 +33892,7 @@
             list.innerHTML = !_cgAnyVisible ? '<div style="color:rgba(255,255,255,0.25);font-size:13px;">No cohort groups in your scope.</div>' :
                 mcCohortGroups.map(function(cg, i) {
                     if (!_pflxCohortVisible(cg && cg.name)) return ''; // out of scope — keep index i intact
-                    var count = mcPlayers.filter(function(p) { return p.cohort === cg.name; }).length;
+                    var count = mcCohortMemberCount(cg);
                     // Chat caps summary — show which features are off (nothing shown means all on).
                     var chat = cg.chat || {};
                     var offs = [];
