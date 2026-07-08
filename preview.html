@@ -26019,7 +26019,7 @@
             }
             var cp = cps.find(function (c) { return c.id === selId; }) || cps[0];
             if (!cp) { body.innerHTML = '<div style="color:rgba(255,255,255,0.3);padding:24px;text-align:center;">No checkpoints yet. Create one in Checkpoints and attach tasks/projects, then progress shows here.</div>'; return; }
-            var players = (mcPlayers || []).filter(function (p) { return p && p.role === 'player' && (!window._pflxPlayerVisible || _pflxPlayerVisible(p)); });
+            var players = _mcRoster().filter(function (p) { return p && (p.role || 'player') === 'player' && (!window._pflxPlayerVisible || _pflxPlayerVisible(p)); });
             var rows = players.map(function (p) { return { p: p, prog: pflxPlayerCheckpointProgress(cp, p) }; }).filter(function (r) { return r.prog.total > 0; });
             rows.sort(function (a, b) { return a.prog.pct - b.prog.pct; });
             var classPct = rows.length ? Math.round(rows.reduce(function (s, r) { return s + r.prog.pct; }, 0) / rows.length) : 0;
@@ -28480,7 +28480,7 @@
                 if (Array.isArray(p.cohorts)) out = out.concat(p.cohorts);
                 return out;
             }
-            var pool = (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) ? mcPlayers : [];
+            var pool = (typeof _mcRoster === 'function') ? _mcRoster() : ((typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) ? mcPlayers : []);
             var scoped = acceptable.size
                 ? pool.filter(function (p) { return p && (p.role || 'player') === 'player' && playerCohortTags(p).some(function (c) { return acceptable.has(norm(c)); }); })
                 : pool.filter(function (p) { return p && (p.role || 'player') === 'player'; });
@@ -33852,16 +33852,25 @@
         }
         window.pflxEditProposal = pflxEditProposal;
 
+        // Authoritative player roster. PLAYERS is what the Settings Player Manager
+        // AND the Settings Cohort Manager read (both count correctly), so we prefer
+        // it whenever it has data; the MC mirror (mcPlayers) can drift stale, so it
+        // is only the fallback. This makes every MC cohort/progress surface agree
+        // with Player Management + Host Controls.
+        function _mcRoster() {
+            try { if (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS) && PLAYERS.length) return PLAYERS; } catch (e) {}
+            return (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) ? mcPlayers : [];
+        }
+        window._mcRoster = _mcRoster;
+
         // Count real players in a cohort group. Robust: matches the group by
         // NAME or id against a player's cohort (string) OR cohorts[] (array),
-        // normalized. Reads the MC mirror, falling back to the authoritative
-        // PLAYERS roster if the mirror is momentarily empty.
+        // normalized. Reads the authoritative roster.
         function mcCohortMemberCount(cg) {
             if (!cg) return 0;
             var norm = function (x) { return String(x == null ? '' : x).toLowerCase().trim(); };
             var accept = new Set([norm(cg.name), norm(cg.id)]);
-            var pool = (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers) && mcPlayers.length) ? mcPlayers
-                     : (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS) ? PLAYERS : []);
+            var pool = _mcRoster();
             return pool.filter(function (p) {
                 if (!p || (p.role || 'player') === 'admin') return false;
                 var tags = [];
@@ -33879,7 +33888,7 @@
             if (stats) {
                 stats.innerHTML = [
                     { label: 'TOTAL GROUPS', value: mcCohortGroups.length, color: 'var(--cyan)', icon: '&#x1F465;' },
-                    { label: 'TOTAL PLAYERS', value: ((Array.isArray(mcPlayers) && mcPlayers.length) ? mcPlayers : (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS) ? PLAYERS : [])).filter(function(p) { return p && (p.role || 'player') !== 'admin'; }).length, color: '#4f8ef7', icon: '&#x1F464;' }
+                    { label: 'TOTAL PLAYERS', value: _mcRoster().filter(function(p) { return p && (p.role || 'player') !== 'admin'; }).length, color: '#4f8ef7', icon: '&#x1F464;' }
                 ].map(function(s) {
                     return '<div class="mc-stat-card"><div class="mc-stat-icon" style="color:' + s.color + ';">' + s.icon + '</div><div class="mc-stat-value">' + s.value + '</div><div class="mc-stat-label">' + s.label + '</div></div>';
                 }).join('');
