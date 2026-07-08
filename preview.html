@@ -20909,7 +20909,27 @@
             }
             return null;
         }
+        // Receive the LIVE pathway/node catalog broadcast by Core Pathways
+        // (pathway.html) and cache it so the task-form node dropdown reflects
+        // real, active nodes instead of the stale hardcoded base list.
+        window.addEventListener('message', function (e) {
+            var m; try { m = typeof e.data === 'object' ? e.data : JSON.parse(e.data); } catch (x) { return; }
+            if (m && m.type === 'pflx_pathway_catalog' && Array.isArray(m.catalog) && m.catalog.length) {
+                try {
+                    localStorage.setItem('pflx_mc_pathway_catalog', JSON.stringify(m.catalog));
+                    if (typeof mcPopulateTaskPathwayNodeDropdown === 'function') mcPopulateTaskPathwayNodeDropdown();
+                } catch (ex) {}
+            }
+        });
+        function mcRequestPathwayCatalog() {
+            try {
+                var f = document.getElementById('corepathways-frame') || document.getElementById('pathways-frame');
+                if (f && f.contentWindow) f.contentWindow.postMessage({ type: 'pflx_request_pathway_catalog' }, '*');
+            } catch (e) {}
+        }
+        window.mcRequestPathwayCatalog = mcRequestPathwayCatalog;
         function mcPopulateTaskPathwayNodeDropdown() {
+            mcRequestPathwayCatalog(); // pull fresh live nodes if the Pathways iframe is loaded
             var sel = document.getElementById('mc-task-pathway-node-select');
             if (!sel) return;
             var cat = mcGetPathwayCatalog();
@@ -28415,17 +28435,31 @@
         window.mcRenderTaskAssignedPlayers = function () {
             var list = document.getElementById('mc-task-players');
             if (!list) return;
-            var checkedCohortIds = [];
-            document.querySelectorAll('.mc-task-cohort-cb:checked').forEach(function (cb) { checkedCohortIds.push(cb.value); });
-            // Cohort ids → cohort names via mcCohortGroups. Player.cohort is stored as name.
-            var cohortNames = [];
+            var checked = [];
+            document.querySelectorAll('.mc-task-cohort-cb:checked').forEach(function (cb) { checked.push(cb.value); });
+            // Build a NORMALIZED set of every acceptable cohort tag. The checkbox
+            // value is a cohort-group id, but players may store their cohort by
+            // NAME (p.cohort) or as an array (p.cohorts), and casing/whitespace
+            // can drift — so we accept the group's id AND name (and any raw
+            // checked value), all normalized, and match a player if ANY of their
+            // cohorts is in the set. (Same reconciliation as pflxItemCohortsMatch.)
+            var norm = function (x) { return String(x == null ? '' : x).toLowerCase().trim(); };
+            var acceptable = new Set();
             (mcCohortGroups || []).forEach(function (g) {
-                if (checkedCohortIds.indexOf(g.id) !== -1) cohortNames.push(g.name);
+                if (g && (checked.indexOf(g.id) !== -1 || checked.indexOf(g.name) !== -1)) { acceptable.add(norm(g.id)); acceptable.add(norm(g.name)); }
             });
+            checked.forEach(function (v) { acceptable.add(norm(v)); });
+            function playerCohortTags(p) {
+                var out = [];
+                if (p.cohort) out.push(p.cohort);
+                if (Array.isArray(p.cohorts)) out = out.concat(p.cohorts);
+                return out;
+            }
             var pool = (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) ? mcPlayers : [];
-            var scoped = cohortNames.length
-                ? pool.filter(function (p) { return p && cohortNames.indexOf(p.cohort) !== -1 && (p.role || 'player') === 'player'; })
+            var scoped = acceptable.size
+                ? pool.filter(function (p) { return p && (p.role || 'player') === 'player' && playerCohortTags(p).some(function (c) { return acceptable.has(norm(c)); }); })
                 : pool.filter(function (p) { return p && (p.role || 'player') === 'player'; });
+            var cohortNames = checked; // for the empty-state message below
             var q = (document.getElementById('mc-task-players-search')?.value || '').toLowerCase().trim();
             if (q) {
                 scoped = scoped.filter(function (p) {
