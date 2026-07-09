@@ -12708,6 +12708,8 @@
           <span class="ticker-msg">Welcome to PFLX — Initializing...</span>
         </div>
       </div>
+      <button id="ticker-settings-btn" title="Ticker settings" onclick="pflxTickerSettingsOpen()"
+        style="display:none;flex-shrink:0;background:transparent;border:none;color:rgba(255,255,255,0.5);cursor:pointer;font-size:14px;padding:0 10px;">⚙</button>
     </div>
     <script>
     // ═══ PFLX Unified Ticker Engine ═══
@@ -12719,7 +12721,57 @@
         var _arenaEvents = [];        // Cached Battle Arena events
         var _dcEvents = [];           // Cached DarkCampus events
         var _pathwayEvents = [];      // Cached Core Pathway events
+        var _liveEvents = [];         // Live X-Coin happenings (badge/upgrade/fine) pushed from the engine
         var _lastRender = 0;
+
+        // ── Host ticker settings ──────────────────────────────────────────
+        // { enabled, hideNamesAll, sound, perCohort: { [cohort]: { enabled, hideNames } } }
+        function tickerSettings() {
+            try {
+                var s = JSON.parse(localStorage.getItem('pflx_ticker_settings') || '{}');
+                return {
+                    enabled: s.enabled !== false,
+                    hideNamesAll: !!s.hideNamesAll,
+                    sound: s.sound !== false,
+                    perCohort: s.perCohort || {}
+                };
+            } catch (e) { return { enabled: true, hideNamesAll: false, sound: true, perCohort: {} }; }
+        }
+        window.pflxGetTickerSettings = tickerSettings;
+
+        // Per-cohort override wins over the global default.
+        function cohortRule(cohort) {
+            var s = tickerSettings();
+            var pc = (cohort && s.perCohort && s.perCohort[cohort]) ? s.perCohort[cohort] : null;
+            return {
+                enabled: pc ? (pc.enabled !== false) : s.enabled,
+                hideNames: pc ? !!pc.hideNames : s.hideNamesAll
+            };
+        }
+
+        // Engine calls this on every badge / upgrade / fine. Honors per-cohort
+        // enable + name-hiding, appends to the live feed, chimes, and re-renders.
+        window.pflxTickerPush = function (ev) {
+            try {
+                if (!ev || ev.type !== 'pflx_xcoin_event') return;
+                var cohort = (ev.player && ev.player.cohort) || '';
+                var rule = cohortRule(cohort);
+                if (!rule.enabled) return;
+                var name = (ev.player && ev.player.name) || 'A player';
+                var who = rule.hideNames ? 'A player' : ('@' + name);
+                var meta = ev.kind === 'fine'
+                    ? { icon: '⚠️', color: '#ef4444', verb: 'was fined', suffix: (ev.xc ? ' (' + ev.xc.toLocaleString() + ' XC)' : '') }
+                    : ev.kind === 'upgrade'
+                    ? { icon: '⚡', color: '#22d3ee', verb: 'activated', suffix: '' }
+                    : { icon: '🏅', color: '#f5c842', verb: 'earned', suffix: (ev.xc ? ' (+' + ev.xc.toLocaleString() + ' XC)' : '') };
+                var text = who + ' ' + meta.verb + ' ' + (ev.title || '') + meta.suffix;
+                _liveEvents.unshift({ icon: meta.icon, color: meta.color, text: text, source: 'xcoin-live', date: new Date(ev.ts || Date.now()).toISOString() });
+                if (_liveEvents.length > 40) _liveEvents = _liveEvents.slice(0, 40);
+                var s = tickerSettings();
+                if (s.sound && typeof pflxPlaySfx === 'function') { try { pflxPlaySfx('ticker'); } catch (e) {} }
+                pflxRenderTicker();
+            } catch (e) {}
+        };
 
         // ── Build Console-native events from MC data ──
         function buildMCTickerEvents() {
@@ -12798,9 +12850,9 @@
             var el = document.getElementById('ticker-scroll-content');
             if (!el) return;
 
-            // Merge events from ALL PFLX apps
+            // Merge events from ALL PFLX apps (live X-Coin happenings first)
             var mcEvents = buildMCTickerEvents();
-            var allEvents = mcEvents.concat(_xcoinEvents, _arenaEvents, _dcEvents, _pathwayEvents);
+            var allEvents = _liveEvents.concat(mcEvents, _xcoinEvents, _arenaEvents, _dcEvents, _pathwayEvents);
 
             // ── FRESHNESS WINDOW ── timestamped events older than 48h drop
             // off the bar. State lines (active checkpoint, live stream,
@@ -12894,6 +12946,94 @@
         // Expose for manual refresh
         window.pflxRenderTicker = pflxRenderTicker;
     })();
+
+    // ── Host ticker settings modal + gear visibility ──────────────────────
+    // The gear on the ticker bar shows only for hosts/masters. It configures:
+    // ticker on/off, hide player names (anonymize), a chime on each update, and
+    // the same per-cohort so a host can silence or anonymize one class only.
+    function pflxTickerGearVisibility() {
+        try {
+            var btn = document.getElementById('ticker-settings-btn');
+            if (!btn) return;
+            var role = String((window.activeSession && activeSession.role) || '').toLowerCase();
+            var isHost = role === 'host' || role === 'admin' || role === 'instructor' || role === 'master';
+            btn.style.display = isHost ? '' : 'none';
+        } catch (e) {}
+    }
+    window.pflxTickerGearVisibility = pflxTickerGearVisibility;
+    document.addEventListener('DOMContentLoaded', pflxTickerGearVisibility);
+
+    function pflxTickerSettingsOpen() {
+        var s = (typeof window.pflxGetTickerSettings === 'function') ? window.pflxGetTickerSettings() : { enabled: true, hideNamesAll: false, sound: true, perCohort: {} };
+        // Gather cohorts from the roster
+        var cohorts = [];
+        try {
+            var roster = (typeof PLAYERS !== 'undefined' && PLAYERS.length) ? PLAYERS : (typeof mcPlayers !== 'undefined' ? mcPlayers : []);
+            var seen = {};
+            roster.forEach(function (p) {
+                var cs = Array.isArray(p.cohorts) ? p.cohorts : (p.cohort ? [p.cohort] : []);
+                cs.forEach(function (c) { if (c && !seen[c]) { seen[c] = 1; cohorts.push(c); } });
+            });
+        } catch (e) {}
+        cohorts.sort();
+
+        var row = function (label, checked, id, sub) {
+            return '<label style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,0.06);">' +
+                '<span><div style="font-size:13px;color:#eaf2ff;font-weight:600;">' + label + '</div>' + (sub ? '<div style="font-size:11px;color:#8a93b0;">' + sub + '</div>' : '') + '</span>' +
+                '<input type="checkbox" id="' + id + '"' + (checked ? ' checked' : '') + ' style="width:18px;height:18px;accent-color:#22d3ee;">' +
+                '</label>';
+        };
+        var perCohortHtml = cohorts.map(function (c) {
+            var pc = (s.perCohort && s.perCohort[c]) || {};
+            var en = pc.enabled !== false;
+            var hn = !!pc.hideNames;
+            var cid = 'tk-c-' + btoa(unescape(encodeURIComponent(c))).replace(/[^a-z0-9]/gi, '');
+            return '<div data-cohort="' + encodeURIComponent(c) + '" style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">' +
+                '<div style="font-size:12px;color:#cfe0ff;font-weight:700;margin-bottom:5px;">' + c + '</div>' +
+                '<div style="display:flex;gap:18px;font-size:11px;color:#9fb0d0;">' +
+                '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" class="tk-c-en" id="' + cid + '-en"' + (en ? ' checked' : '') + ' style="accent-color:#22d3ee;"> Show on ticker</label>' +
+                '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" class="tk-c-hn" id="' + cid + '-hn"' + (hn ? ' checked' : '') + ' style="accent-color:#22d3ee;"> Hide names</label>' +
+                '</div></div>';
+        }).join('') || '<div style="font-size:12px;color:#6a7290;">No cohorts found.</div>';
+
+        var html =
+            '<div style="font-family:Orbitron,sans-serif;font-size:14px;letter-spacing:2px;color:#22d3ee;margin-bottom:4px;">TICKER SETTINGS</div>' +
+            '<div style="font-size:12px;color:#8a93b0;margin-bottom:16px;">Controls the bottom happenings bar. Per-cohort overrides win over the defaults below.</div>' +
+            row('Ticker enabled', s.enabled, 'tk-enabled', 'Master switch for the whole bar') +
+            row('Hide player names', s.hideNamesAll, 'tk-hidenames', 'Show “A player earned…” instead of @names') +
+            row('Chime on each update', s.sound, 'tk-sound', 'Play a short blip when new happenings post') +
+            '<div style="font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:1.5px;color:#8a93b0;margin:18px 0 8px;">PER-COHORT OVERRIDES</div>' +
+            '<div style="max-height:230px;overflow-y:auto;padding-right:4px;">' + perCohortHtml + '</div>' +
+            '<div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;">' +
+            '<button id="tk-cancel" style="padding:9px 18px;background:transparent;border:1px solid rgba(138,146,176,0.3);color:#e0e6ff;border-radius:8px;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:1.5px;cursor:pointer;">CANCEL</button>' +
+            '<button id="tk-save" style="padding:9px 18px;background:linear-gradient(135deg,#00d4ff,#7c3aed);border:none;color:#fff;border-radius:8px;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:1.5px;cursor:pointer;font-weight:700;">SAVE</button>' +
+            '</div>';
+
+        if (typeof openModal !== 'function') { return; }
+        openModal(html, function (card, close) {
+            card.querySelector('#tk-cancel').addEventListener('click', close);
+            card.querySelector('#tk-save').addEventListener('click', function () {
+                var out = {
+                    enabled: card.querySelector('#tk-enabled').checked,
+                    hideNamesAll: card.querySelector('#tk-hidenames').checked,
+                    sound: card.querySelector('#tk-sound').checked,
+                    perCohort: {}
+                };
+                card.querySelectorAll('[data-cohort]').forEach(function (d) {
+                    var c = decodeURIComponent(d.getAttribute('data-cohort'));
+                    out.perCohort[c] = {
+                        enabled: d.querySelector('.tk-c-en').checked,
+                        hideNames: d.querySelector('.tk-c-hn').checked
+                    };
+                });
+                try { localStorage.setItem('pflx_ticker_settings', JSON.stringify(out)); } catch (e) {}
+                try { if (typeof pflxPlaySfx === 'function') pflxPlaySfx('save'); } catch (e) {}
+                if (typeof window.pflxRenderTicker === 'function') window.pflxRenderTicker();
+                close();
+            });
+        });
+    }
+    window.pflxTickerSettingsOpen = pflxTickerSettingsOpen;
     </script>
 
     <!-- ═══ iPad / Safari Compatibility Shim ═══ -->
@@ -17833,6 +17973,7 @@
             // Replay any X-Coin popups (badge / upgrade / fine) this player missed
             // while offline. Deferred so the dashboard mounts first.
             try { if (window.pflxNotify) setTimeout(function () { window.pflxNotify.drainForCurrent(); }, 1200); } catch (e) {}
+            try { if (typeof pflxTickerGearVisibility === 'function') pflxTickerGearVisibility(); } catch (e) {}
 
             // ── Auto-award PFLX User Certification (Signature) on first login ──
             // Every player who onboards + logs in receives this once. Skips
