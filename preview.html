@@ -19115,6 +19115,14 @@
                             if (mcTasks[idx].submission) mcTasks[idx].submission.hostNote = note;
                             try { mcSaveData('tasks'); } catch (e) {}
                             if (typeof pflxToast === 'function') pflxToast('Task submission rejected', 'info');
+                            // Auto-modifiers bound to incomplete_submission (e.g. Incomplete Submission Tax).
+                            try {
+                                var _rt = mcTasks[idx];
+                                var _rpid = (_rt.submission && _rt.submission.submittedBy)
+                                    || (Array.isArray(_rt.submissions) && _rt.submissions.length ? (_rt.submissions[_rt.submissions.length - 1].playerId || _rt.submissions[_rt.submissions.length - 1].submittedBy) : null)
+                                    || _rt.playerId || (Array.isArray(_rt.assignedTo) && _rt.assignedTo.length === 1 ? _rt.assignedTo[0] : null);
+                                if (_rpid && window.pflxModifiers) window.pflxModifiers.fireEvent('incomplete_submission', { playerId: _rpid, targetType: 'task', targetId: _rt.id, cohort: _rt.cohort });
+                            } catch (eIm) {}
                         }
                     }
                 } else if (kind === 'coinsub') {
@@ -26654,6 +26662,8 @@
                                 var b = _pflxResolveAwardBadge(badgeRef);
                                 window.PflxDataBus.award(pid, { badge: b, source: 'mc', reason: 'checkpoint:' + obj.id });
                             });
+                            // Auto-modifiers bound to checkpoint_completed (e.g. Checkpoint Bonus).
+                            if (window.pflxModifiers) window.pflxModifiers.fireEvent('checkpoint_completed', { playerId: pid, targetType: 'checkpoint', targetId: obj.id, cohort: obj.cohort });
                         } catch (eA) { console.warn('[mc checkpoint reward] award failed for', pid, eA); }
                     });
                     obj._cpRewardedAt = new Date().toISOString();
@@ -29747,6 +29757,16 @@
                     xcReward: task.xcReward || 0
                 });
             } catch (eAuto) {}
+
+            // ── X-Coin auto-modifiers ── fire any autoApply modifier bound to
+            // task_approved (e.g. Task Completion Booster: +50 bonus XC).
+            try {
+                if (submitterId && window.pflxModifiers) {
+                    window.pflxModifiers.fireEvent('task_approved', {
+                        playerId: submitterId, targetType: 'task', targetId: task.id, cohort: task.cohort
+                    });
+                }
+            } catch (eMod) {}
 
             // Save task list (and propagate via pflx_mc_changed automatically)
             mcSaveData('tasks');
@@ -54542,6 +54562,54 @@ RESPONSE RULES:
             });
         }
         window.pflxApplyModifierPicker = pflxApplyModifierPicker;
+
+        // ── Missed-deadline sweep → fires *_missed_deadline auto-modifiers ──
+        //   Host-authoritative (only a host/master client runs it, so a fine
+        //   fires once) and deduped per-player via a persisted _missFired marker
+        //   on the item so re-scans never double-charge.
+        function pflxScanDeadlines() {
+            try {
+                if (!window.pflxModifiers) return;
+                var _s = (typeof activeSession !== 'undefined' && activeSession) ? activeSession : (window.activeSession || null);
+                var role = String((_s && _s.role) || '').toLowerCase();
+                if (!(role === 'host' || role === 'admin' || role === 'instructor' || role === 'master')) return;
+                var now = Date.now();
+                var dirty = { tasks: false, checkpoints: false };
+                function dueTs(it) { var d = it.dueDate || it.deadline || it.endDate; var t = d ? new Date(d).getTime() : NaN; return isFinite(t) ? t : null; }
+                function assignedIds(it) {
+                    var ids = {};
+                    if (Array.isArray(it.assignedTo)) it.assignedTo.forEach(function (x) { if (x) ids[x] = 1; });
+                    if (it.playerId) ids[it.playerId] = 1;
+                    if (Array.isArray(it.hired)) it.hired.forEach(function (x) { if (x) ids[x] = 1; });
+                    return Object.keys(ids);
+                }
+                function sweep(arr, trigger, targetType, flag) {
+                    if (!Array.isArray(arr)) return;
+                    arr.forEach(function (it) {
+                        if (!it) return;
+                        var st = String(it.status || '').toLowerCase();
+                        if (st === 'approved' || st === 'completed' || st === 'rejected' || st === 'done') return;
+                        var t = dueTs(it); if (t == null || t > now) return;
+                        var fired = it._missFired || {};
+                        assignedIds(it).forEach(function (pid) {
+                            if (fired[pid]) return;
+                            fired[pid] = true; dirty[flag] = true;
+                            window.pflxModifiers.fireEvent(trigger, { playerId: pid, targetType: targetType, targetId: it.id, cohort: it.cohort });
+                        });
+                        it._missFired = fired;
+                    });
+                }
+                sweep(typeof mcTasks !== 'undefined' ? mcTasks : null, 'task_missed_deadline', 'task', 'tasks');
+                sweep(typeof mcCheckpoints !== 'undefined' ? mcCheckpoints : null, 'checkpoint_missed_deadline', 'checkpoint', 'checkpoints');
+                sweep(typeof mcJobs !== 'undefined' ? mcJobs : null, 'job_missed_deadline', 'job', 'tasks');
+                try { if (dirty.tasks) mcSaveData('tasks'); if (dirty.checkpoints) mcSaveData('checkpoints'); } catch (e) {}
+            } catch (e) { console.warn('[pflxScanDeadlines]', e); }
+        }
+        window.pflxScanDeadlines = pflxScanDeadlines;
+        // Periodic sweep (host clients only, guarded inside). First run deferred
+        // so the roster + catalog are loaded.
+        setTimeout(pflxScanDeadlines, 15000);
+        setInterval(pflxScanDeadlines, 5 * 60 * 1000);
 
         // ═══════════════════════════════════════════════════════════════════
         // PER-PLAYER X-COIN NOTIFICATION — pflxNotify  (July 9 2026, Opus)
