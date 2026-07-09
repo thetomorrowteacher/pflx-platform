@@ -11241,6 +11241,7 @@
                                         <button class="hmc-btn-sm hmc-btn-red" id="hmc-detail-deduct-btn">📉 Deduct XC</button>
                                         <button class="hmc-btn-sm hmc-btn-purple" id="hmc-detail-promote-btn">⬆ Promote</button>
                                         <button class="hmc-btn-sm hmc-btn-ghost" id="hmc-detail-freeze-btn">🧊 Freeze Account</button>
+                                        <button class="hmc-btn-sm hmc-btn-ghost" id="hmc-detail-modifier-btn" onclick="(function(){ var pid = document.getElementById('hmc-player-detail')?.dataset?.playerId; if (pid) pflxApplyModifierPicker(pid); })()">🎁 Apply Modifier</button>
                                         <button class="hmc-btn-sm hmc-btn-ghost" id="hmc-detail-reset-pin-btn">🔑 Reset PIN</button>
                                         <button class="hmc-btn-sm hmc-btn-ghost" id="hmc-detail-save-slots-btn" onclick="(function(){ var pid = document.getElementById('hmc-player-detail')?.dataset?.playerId; if (pid) pflxOpenPlayerSaveSlots(pid); })()">💾 Save Slots</button>
                                         <button class="hmc-btn-sm hmc-btn-ghost" id="hmc-detail-tier-history-btn" onclick="(function(){ var pid = document.getElementById('hmc-player-detail')?.dataset?.playerId; if (pid) pflxOpenTierHistory(pid); })()">🎚 Tier History</button>
@@ -54473,6 +54474,74 @@ RESPONSE RULES:
                 grantsFor: grantsFor
             };
         })();
+
+        // ── Host: apply a modifier (upgrade / fine / penalty) to a player ──
+        //   Opens a picker of the LIVE X-Coin modifier catalog grouped into
+        //   Upgrades & Bonuses vs Fines & Penalties, each with its artwork/icon
+        //   and effect summary. Selecting one fires pflxModifiers.applyToPlayer,
+        //   which routes the effect through the canonical authorities and emits
+        //   the player popup + ticker update.
+        function pflxApplyModifierPicker(playerId) {
+            if (!playerId || !window.pflxModifiers) return;
+            var cat = window.pflxModifiers.catalog();
+            if (!cat || !cat.length) { if (typeof pflxToast === 'function') pflxToast('No modifiers synced from X-Coin yet.', 'info'); return; }
+            var p = (window.PflxDataBus && PflxDataBus.get) ? PflxDataBus.get(playerId) : null;
+            var pname = p ? (p.brand || p.name || 'player') : 'player';
+            var effSummary = function (m) {
+                var v = (typeof m.effectValue === 'number') ? m.effectValue : (m.costXcoin || 0);
+                switch (m.effectType) {
+                    case 'xc_add': return '+' + v.toLocaleString() + ' XC';
+                    case 'xc_deduct': return '-' + v.toLocaleString() + ' XC';
+                    case 'xc_multiply': return '×' + v + ' XC (' + (m.duration || 'temp') + ')';
+                    case 'deadline_extend': return '+' + v + 'h deadline';
+                    case 'freeze': return 'Freeze ' + (v || '') + (v ? 'h' : '');
+                    default: return m.effectType || '';
+                }
+            };
+            var artOf = function (m) {
+                if (m.image && /^(https?:|data:)/i.test(m.image)) return '<img src="' + m.image + '" style="width:38px;height:38px;object-fit:cover;border-radius:8px;flex-shrink:0;">';
+                return '<div style="width:38px;height:38px;border-radius:8px;background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;">' + (m.icon || '🎁') + '</div>';
+            };
+            var card = function (raw) {
+                var m = window.pflxModifiers.resolve(raw);
+                var isTax = m.type === 'tax';
+                var col = isTax ? '#ef4444' : '#22d3ee';
+                return '<button class="pflx-mod-pick" data-mod="' + encodeURIComponent(m.id) + '" style="display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:10px 12px;margin-bottom:8px;background:rgba(255,255,255,0.03);border:1px solid ' + col + '33;border-radius:10px;color:#e0e6ff;cursor:pointer;">' +
+                    artOf(m) +
+                    '<span style="flex:1;min-width:0;"><div style="font-size:13px;font-weight:700;color:#eaf2ff;">' + m.name + '</div>' +
+                    '<div style="font-size:11px;color:#8a93b0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (m.description || '') + '</div></span>' +
+                    '<span style="font-family:\'Share Tech Mono\',monospace;font-size:12px;font-weight:700;color:' + col + ';flex-shrink:0;">' + effSummary(m) + '</span>' +
+                    (m.autoApply ? '<span style="font-size:9px;color:#22d3ee;flex-shrink:0;">AUTO</span>' : '') +
+                    '</button>';
+            };
+            var ups = cat.filter(function (m) { return (m.type || 'tax') === 'upgrade'; });
+            var tax = cat.filter(function (m) { return (m.type || 'tax') === 'tax'; });
+            var section = function (label, arr, color) {
+                if (!arr.length) return '';
+                return '<div style="font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:1.5px;color:' + color + ';margin:14px 0 8px;">' + label + '</div>' + arr.map(card).join('');
+            };
+            var html =
+                '<div style="font-family:Orbitron,sans-serif;font-size:14px;letter-spacing:2px;color:#22d3ee;margin-bottom:4px;">APPLY MODIFIER</div>' +
+                '<div style="font-size:12px;color:#8a93b0;margin-bottom:6px;">To <b style="color:#eaf2ff;">' + pname + '</b> — applies instantly and notifies the player.</div>' +
+                '<div style="max-height:52vh;overflow-y:auto;padding-right:4px;">' +
+                section('⚡ UPGRADES & BONUSES', ups, '#22d3ee') +
+                section('⚠️ FINES & PENALTIES', tax, '#ef4444') +
+                '</div>';
+            if (typeof openModal !== 'function') return;
+            openModal(html, function (cardEl, close) {
+                cardEl.querySelectorAll('.pflx-mod-pick').forEach(function (b) {
+                    b.addEventListener('click', function () {
+                        var modId = decodeURIComponent(b.getAttribute('data-mod'));
+                        var r = window.pflxModifiers.applyToPlayer(modId, playerId, { reason: 'Applied by host', source: 'host-manual' });
+                        try { if (typeof pflxPlaySfx === 'function') pflxPlaySfx(r && r.kind === 'fine' ? 'fine' : 'upgrade'); } catch (e) {}
+                        if (typeof pflxToast === 'function' && r && r.ok) pflxToast((r.kind === 'fine' ? 'Penalty' : 'Upgrade') + ' applied to ' + pname, 'success');
+                        try { if (typeof hmcRenderPlayers === 'function') hmcRenderPlayers(); } catch (e) {}
+                        close();
+                    });
+                });
+            });
+        }
+        window.pflxApplyModifierPicker = pflxApplyModifierPicker;
 
         // ═══════════════════════════════════════════════════════════════════
         // PER-PLAYER X-COIN NOTIFICATION — pflxNotify  (July 9 2026, Opus)
