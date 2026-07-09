@@ -4548,6 +4548,13 @@
             from { transform: translateX(0); }
             to   { transform: translateX(-50%); }
         }
+        /* X-Coin per-player notification popup */
+        @keyframes pflxNoteFade { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes pflxNotePop {
+            from { opacity: 0; transform: translateY(14px) scale(0.92); }
+            to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes pflxNoteTimer { from { transform: scaleX(1); } to { transform: scaleX(0); } }
         .ticker-msg {
             font-family: 'Share Tech Mono', monospace;
             font-size: 11px;
@@ -17823,6 +17830,9 @@
             try { localStorage.setItem('pflx_active_brand', activeSession.brand || ''); } catch(e) {}
 
             console.log('[PFLX SSO] Session active:', activeSession);
+            // Replay any X-Coin popups (badge / upgrade / fine) this player missed
+            // while offline. Deferred so the dashboard mounts first.
+            try { if (window.pflxNotify) setTimeout(function () { window.pflxNotify.drainForCurrent(); }, 1200); } catch (e) {}
 
             // ── Auto-award PFLX User Certification (Signature) on first login ──
             // Every player who onboards + logs in receives this once. Skips
@@ -53824,7 +53834,11 @@ RESPONSE RULES:
                 xc: 1, totalXcoin: 1, digitalBadges: 1, badgeCounts: 1,
                 badges: 1, slogan: 1, image: 1, interests: 1,
                 studioId: 1, pathway: 1, diagnosticResult: 1,
-                level: 1, rankOverride: 1, activity: 1
+                level: 1, rankOverride: 1, activity: 1,
+                // Queue of X-Coin event popups a player hasn't seen yet (they were
+                // offline when the badge/upgrade/fine landed). Cloud-syncs on the
+                // player record so it replays on their next login, any device.
+                pendingXcoinEvents: 1
             };
 
             function getPlayer(playerId) {
@@ -54317,6 +54331,132 @@ RESPONSE RULES:
                 ledger: loadLedger,
                 grantsFor: grantsFor
             };
+        })();
+
+        // ═══════════════════════════════════════════════════════════════════
+        // PER-PLAYER X-COIN NOTIFICATION — pflxNotify  (July 9 2026, Opus)
+        //   Listens for the canonical pflx_xcoin_event and shows the AFFECTED
+        //   player a centered, detached popup over a dimmed console with the
+        //   item's uploaded artwork and a sound unique to the kind (badge /
+        //   upgrade / fine). Player ✕-es out or it auto-dismisses after 10s.
+        //   If the player is offline when it fires, it is queued on their
+        //   (cloud-synced) record and replayed on their next login. Only the
+        //   affected player ever sees their popup; hosts do not.
+        // ═══════════════════════════════════════════════════════════════════
+        window.pflxNotify = (function () {
+            var AUTO_MS = 10000;
+            var _queue = [];        // events waiting to be shown on THIS client
+            var _showing = false;
+
+            function currentId() {
+                return (typeof activeSession !== 'undefined' && activeSession && activeSession.id) ? activeSession.id : null;
+            }
+
+            // Persist an unseen event onto the player's record so it replays at
+            // next login (any device). Deduped by txId, capped at 20.
+            function enqueueToRecord(ev) {
+                try {
+                    if (typeof PLAYERS === 'undefined') return;
+                    var p = PLAYERS.find(function (x) { return x && x.id === ev.playerId; });
+                    if (!p) return;
+                    var list = Array.isArray(p.pendingXcoinEvents) ? p.pendingXcoinEvents : [];
+                    if (list.some(function (e) { return e.txId === ev.txId; })) return;
+                    list.push(ev);
+                    if (list.length > 20) list = list.slice(-20);
+                    p.pendingXcoinEvents = list;
+                    if (typeof persistPlayers === 'function') persistPlayers();
+                } catch (e) {}
+            }
+
+            function clearRecord(playerId) {
+                try {
+                    if (typeof PLAYERS === 'undefined') return;
+                    var p = PLAYERS.find(function (x) { return x && x.id === playerId; });
+                    if (p && p.pendingXcoinEvents && p.pendingXcoinEvents.length) {
+                        p.pendingXcoinEvents = [];
+                        if (typeof persistPlayers === 'function') persistPlayers();
+                    }
+                } catch (e) {}
+            }
+
+            function kindMeta(kind) {
+                if (kind === 'fine') return { sfx: 'fine', color: '#ef4444', glow: 'rgba(239,68,68,0.55)', label: 'PENALTY APPLIED', fallback: '⚠️' };
+                if (kind === 'upgrade') return { sfx: 'upgrade', color: '#22d3ee', glow: 'rgba(34,211,238,0.55)', label: 'UPGRADE ACTIVATED', fallback: '⚡' };
+                return { sfx: 'badge', color: '#f5c842', glow: 'rgba(245,200,66,0.55)', label: 'BADGE EARNED', fallback: '🏅' };
+            }
+
+            function render(ev) {
+                _showing = true;
+                var meta = kindMeta(ev.kind);
+                var overlay = document.createElement('div');
+                overlay.className = 'pflx-xcoin-note-overlay';
+                overlay.style.cssText = 'position:fixed;inset:0;z-index:100050;background:rgba(2,6,23,0.82);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;animation:pflxNoteFade .25s ease;';
+                var xc = ev.xc || 0;
+                var xcHtml = xc ? ('<div style="font-family:\'Share Tech Mono\',monospace;font-size:20px;font-weight:700;color:' + (xc < 0 ? '#ef4444' : '#4ade80') + ';margin-top:6px;">' + (xc < 0 ? '' : '+') + xc.toLocaleString() + ' XC</div>') : '';
+                var art = (ev.image && /^(https?:|data:)/i.test(ev.image))
+                    ? '<img src="' + ev.image + '" alt="" style="width:120px;height:120px;object-fit:cover;border-radius:18px;border:2px solid ' + meta.color + ';box-shadow:0 0 32px ' + meta.glow + ';">'
+                    : '<div style="width:120px;height:120px;border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:60px;background:rgba(255,255,255,0.05);border:2px solid ' + meta.color + ';box-shadow:0 0 32px ' + meta.glow + ';">' + (ev.icon || meta.fallback) + '</div>';
+                var card = document.createElement('div');
+                card.style.cssText = 'position:relative;background:linear-gradient(150deg,#0a1228,#0d1730);border:1px solid ' + meta.color + '66;border-radius:22px;padding:34px 40px 30px;width:min(420px,90vw);text-align:center;box-shadow:0 24px 80px rgba(0,0,0,0.7),0 0 60px ' + meta.glow + ';animation:pflxNotePop .35s cubic-bezier(.2,1.3,.5,1);';
+                card.innerHTML =
+                    '<button aria-label="Close" style="position:absolute;top:12px;right:14px;background:transparent;border:none;color:rgba(255,255,255,0.45);font-size:22px;line-height:1;cursor:pointer;">×</button>' +
+                    '<div style="font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:3px;color:' + meta.color + ';margin-bottom:18px;">' + meta.label + '</div>' +
+                    '<div style="display:flex;justify-content:center;margin-bottom:16px;">' + art + '</div>' +
+                    '<div style="font-family:Rajdhani,sans-serif;font-size:22px;font-weight:700;color:#eaf2ff;line-height:1.2;">' + (ev.title || '') + '</div>' +
+                    (ev.desc ? '<div style="font-size:12px;color:#8a93b0;margin-top:8px;line-height:1.4;">' + ev.desc + '</div>' : '') +
+                    xcHtml +
+                    '<div style="margin-top:20px;"><button class="pflx-note-dismiss" style="padding:9px 26px;background:' + meta.color + '1f;border:1px solid ' + meta.color + '66;color:' + meta.color + ';border-radius:9px;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:1.5px;cursor:pointer;font-weight:700;">GOT IT</button></div>' +
+                    '<div class="pflx-note-timer" style="position:absolute;left:0;bottom:0;height:3px;width:100%;background:' + meta.color + ';border-radius:0 0 22px 22px;transform-origin:left;animation:pflxNoteTimer ' + (AUTO_MS / 1000) + 's linear forwards;"></div>';
+                overlay.appendChild(card);
+                document.body.appendChild(overlay);
+                try { if (typeof pflxPlaySfx === 'function') pflxPlaySfx(meta.sfx); } catch (e) {}
+
+                var closed = false, timer = null;
+                function close() {
+                    if (closed) return; closed = true;
+                    if (timer) clearTimeout(timer);
+                    overlay.style.animation = 'pflxNoteFade .2s ease reverse';
+                    setTimeout(function () { overlay.remove(); _showing = false; next(); }, 180);
+                }
+                timer = setTimeout(close, AUTO_MS);
+                card.querySelector('button[aria-label="Close"]').addEventListener('click', close);
+                card.querySelector('.pflx-note-dismiss').addEventListener('click', close);
+                overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+            }
+
+            function next() {
+                if (_showing || !_queue.length) return;
+                if (document.readyState === 'loading') { setTimeout(next, 300); return; }
+                render(_queue.shift());
+            }
+
+            // Show live to the current player (queues behind any active popup).
+            function show(ev) { _queue.push(ev); next(); }
+
+            // Route an incoming event: show live if it's the current player on
+            // this client, else stash on their record for next login.
+            function route(ev) {
+                if (!ev || !ev.playerId) return;
+                if (currentId() && ev.playerId === currentId()) { show(ev); }
+                else { enqueueToRecord(ev); }
+            }
+
+            // Replay everything queued on the current player's record (called at
+            // login). Clears the record once surfaced on this client.
+            function drainForCurrent() {
+                var id = currentId();
+                if (!id || typeof PLAYERS === 'undefined') return;
+                var p = PLAYERS.find(function (x) { return x && x.id === id; });
+                if (!p || !Array.isArray(p.pendingXcoinEvents) || !p.pendingXcoinEvents.length) return;
+                var pend = p.pendingXcoinEvents.slice();
+                clearRecord(id);
+                pend.forEach(function (ev) { _queue.push(ev); });
+                next();
+            }
+
+            window.addEventListener('pflx_xcoin_event', function (e) { try { route(e.detail); } catch (err) {} });
+
+            return { show: show, route: route, drainForCurrent: drainForCurrent };
         })();
 
         // ── Activity log: append to player's journey ──
