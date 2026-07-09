@@ -47218,6 +47218,34 @@ RESPONSE RULES:
                         gain.gain.setValueAtTime(vol * 0.32, ctx.currentTime);
                         gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.7);
                         osc.start(); osc.stop(ctx.currentTime + 0.75); break;
+                    case 'upgrade':
+                        // Power-up: bright rising arpeggio with a shimmer tail
+                        osc.type = 'triangle';
+                        osc.frequency.setValueAtTime(523, ctx.currentTime);
+                        osc.frequency.setValueAtTime(698, ctx.currentTime + 0.09);
+                        osc.frequency.setValueAtTime(880, ctx.currentTime + 0.18);
+                        osc.frequency.exponentialRampToValueAtTime(1319, ctx.currentTime + 0.34);
+                        gain.gain.setValueAtTime(vol * 0.32, ctx.currentTime);
+                        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+                        osc.start(); osc.stop(ctx.currentTime + 0.55); break;
+                    case 'fine':
+                        // Penalty: heavy two-note descending buzz
+                        osc.type = 'sawtooth';
+                        osc.frequency.setValueAtTime(300, ctx.currentTime);
+                        osc.frequency.exponentialRampToValueAtTime(160, ctx.currentTime + 0.18);
+                        osc.frequency.setValueAtTime(220, ctx.currentTime + 0.2);
+                        osc.frequency.exponentialRampToValueAtTime(90, ctx.currentTime + 0.42);
+                        gain.gain.setValueAtTime(vol * 0.34, ctx.currentTime);
+                        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+                        osc.start(); osc.stop(ctx.currentTime + 0.55); break;
+                    case 'ticker':
+                        // Short neutral blip — "something new on the ticker"
+                        osc.type = 'sine';
+                        osc.frequency.setValueAtTime(1046, ctx.currentTime);
+                        osc.frequency.exponentialRampToValueAtTime(1568, ctx.currentTime + 0.06);
+                        gain.gain.setValueAtTime(vol * 0.22, ctx.currentTime);
+                        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+                        osc.start(); osc.stop(ctx.currentTime + 0.14); break;
                     default:
                         osc.type = 'sine'; osc.frequency.setValueAtTime(660, ctx.currentTime);
                         gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
@@ -53948,6 +53976,18 @@ RESPONSE RULES:
                 if (!p) { console.warn('[PflxDataBus.award] unknown player', playerId); return null; }
                 var changes = {};
                 var deltaXC = typeof awardObj.xc === 'number' ? awardObj.xc : 0;
+                // Active XC multiplier (from xc_multiply modifier upgrades) applies
+                // to positive EARNED XC only — never to spends, modifier-sourced
+                // grants, or awards that opt out. Centralizing it here means every
+                // award path, including sub-apps that funnel through the bus,
+                // honors the multiplier automatically.
+                if (deltaXC > 0 && awardObj.source !== 'modifier' && !awardObj.noMultiplier &&
+                    window.pflxModifiers && typeof window.pflxModifiers.activeMultiplier === 'function') {
+                    try {
+                        var _mult = window.pflxModifiers.activeMultiplier(playerId);
+                        if (_mult && _mult !== 1) deltaXC = Math.round(deltaXC * _mult);
+                    } catch (e) {}
+                }
                 if (deltaXC !== 0) {
                     changes.xc = Math.max(0, (p.xc || 0) + deltaXC);
                     // totalXcoin only goes up — never decrements for spends
@@ -53989,6 +54029,22 @@ RESPONSE RULES:
                     player: updated
                 });
                 try { logActivity(playerId, 'award_granted', { xc: deltaXC, badge: awardObj.badge ? awardObj.badge.id : null, source: awardObj.source, reason: awardObj.reason, txId: txId }); } catch (e) {}
+                // Canonical X-Coin event for a BADGE grant — the single choke
+                // point every badge award (task/checkpoint/project/node/xcoin/
+                // coinsub) funnels through, so the per-player popup + ticker fire
+                // once with the badge's uploaded artwork.
+                if (awardObj.badge && awardObj.badge.id && typeof window.pflxEmitXcoinEvent === 'function') {
+                    try {
+                        var _bcat = (typeof mcFindBadge === 'function') ? mcFindBadge(awardObj.badge) : null;
+                        window.pflxEmitXcoinEvent(playerId, 'badge', {
+                            title: awardObj.badge.name || (_bcat && _bcat.name) || 'Digital Badge',
+                            desc: awardObj.reason || '',
+                            image: (awardObj.badge.image) || (_bcat && _bcat.image) || '',
+                            icon: '🏅',
+                            xc: (typeof awardObj.badge.xcValue === 'number' ? awardObj.badge.xcValue : 0)
+                        });
+                    } catch (e) {}
+                }
                 return updated;
             }
 
@@ -54004,6 +54060,262 @@ RESPONSE RULES:
                 },
                 broadcastTo: broadcastTo,
                 broadcastAll: broadcastAll
+            };
+        })();
+
+        // ═══════════════════════════════════════════════════════════════════
+        // X-COIN MODIFIER ENGINE — pflxModifiers  (July 9 2026, Opus)
+        //   Upgrades / Modifiers / Fines / Penalties ORIGINATE in X-Coin but
+        //   must FUNCTION across the whole platform. X-Coin only edits them;
+        //   this engine reads each modifier's logic (effectType / effectValue /
+        //   scope / duration) and actually APPLIES it through the canonical
+        //   authorities:
+        //     xc_add / xc_deduct → PflxDataBus.award (+/- XC, floors at 0)
+        //     xc_multiply        → time-boxed grant; award() multiplies earned XC
+        //     deadline_extend    → shifts the target task/checkpoint due date
+        //     freeze             → per-player screen freeze for the duration
+        //     badge_add/deduct   → grant / revoke a digital badge
+        //   Every application emits ONE canonical `pflx_xcoin_event` (kind
+        //   badge | upgrade | fine) that the per-player notification and the
+        //   bottom ticker consume, and is recorded in the mcPlayerModifiers
+        //   ledger. autoApply is honored as-is — the auto-trigger dispatcher
+        //   (fireEvent, Slice 3) only fires modifiers flagged autoApply.
+        // ═══════════════════════════════════════════════════════════════════
+
+        // Canonical X-Coin event emitter — the single choke point that both the
+        // per-player popup and the ticker listen on. Fires a DOM CustomEvent for
+        // in-Console consumers AND broadcasts to every sub-app iframe.
+        window.pflxEmitXcoinEvent = function (playerId, kind, item) {
+            item = item || {};
+            try {
+                var p = (window.PflxDataBus && PflxDataBus.get) ? (PflxDataBus.get(playerId) || {}) : {};
+                var payload = {
+                    type: 'pflx_xcoin_event',
+                    playerId: playerId,
+                    kind: kind,                                  // 'badge' | 'upgrade' | 'fine'
+                    title: item.title || '',
+                    desc: item.desc || '',
+                    image: item.image || '',                     // uploaded artwork (badge/modifier)
+                    icon: item.icon || (kind === 'fine' ? '⚠️' : kind === 'upgrade' ? '⚡' : '🏅'),
+                    xc: (typeof item.xc === 'number' ? item.xc : 0),
+                    player: { name: p.brand || p.brandName || p.name || 'Player', cohort: p.cohort || (Array.isArray(p.cohorts) ? p.cohorts[0] : '') || '' },
+                    ts: Date.now(),
+                    txId: 'xe-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7)
+                };
+                try { window.dispatchEvent(new CustomEvent('pflx_xcoin_event', { detail: payload })); } catch (e) {}
+                if (window.PflxDataBus && PflxDataBus.broadcastAll) PflxDataBus.broadcastAll(payload);
+                if (typeof window.pflxTickerPush === 'function') { try { window.pflxTickerPush(payload); } catch (e) {} }
+                return payload;
+            } catch (e) { console.warn('[pflxEmitXcoinEvent] failed', e); return null; }
+        };
+
+        window.pflxModifiers = (function () {
+            var LEDGER_KEY = 'pflx_mc_player_modifiers';
+
+            // ── Live catalog (synced flat from X-Coin mockModifiers) ──
+            function catalog() {
+                return (typeof mcModifiers !== 'undefined' && Array.isArray(mcModifiers)) ? mcModifiers : [];
+            }
+
+            // Resolve any ref (id / name / object) → a normalized modifier record.
+            function resolve(ref) {
+                if (!ref) return null;
+                var raw = (typeof ref === 'object') ? ref : null;
+                var key = raw ? (raw.id || raw.modifierId || raw.name) : ref;
+                var lower = String(key || '').toLowerCase();
+                var found = catalog().find(function (m) {
+                    return m && (m.id === key || String(m.name || '').toLowerCase() === lower);
+                }) || raw;
+                if (!found) return null;
+                return {
+                    id: found.id || ('mod-' + lower.replace(/[^a-z0-9]+/g, '-')),
+                    type: found.type || 'tax',                       // 'upgrade' | 'tax'
+                    name: found.name || found.id || 'Modifier',
+                    description: found.description || '',
+                    icon: found.icon || '',
+                    image: found.image || found.img || found.imageUrl || found.photo || '',
+                    effectType: found.effectType || (found.type === 'upgrade' ? 'xc_add' : 'xc_deduct'),
+                    effectValue: (typeof found.effectValue === 'number') ? found.effectValue
+                                 : (typeof found.costXcoin === 'number' ? found.costXcoin : 0),
+                    triggerEvent: found.triggerEvent || 'manual',
+                    autoApply: !!found.autoApply,
+                    scope: found.scope || 'all',
+                    duration: found.duration || 'immediate',
+                    costXcoin: found.costXcoin || 0,
+                    costBadge: found.costBadge || 0
+                };
+            }
+
+            // duration string → expiry ms from now (null = permanent, 0 = instant)
+            function durationMs(mod) {
+                var d = String(mod.duration || '').toLowerCase();
+                if (d === 'permanent') return null;
+                if (d === 'immediate' || d === 'single-use') return 0;
+                var m = d.match(/^(\d+)\s*([hdw])$/);
+                if (m) {
+                    var n = parseInt(m[1], 10);
+                    var unit = m[2];
+                    return n * (unit === 'h' ? 3600e3 : unit === 'd' ? 86400e3 : 604800e3);
+                }
+                // freeze / multiply with no parseable duration → use effectValue as hours
+                if ((mod.effectType === 'freeze' || mod.effectType === 'xc_multiply') && mod.effectValue > 0) {
+                    return mod.effectValue * 3600e3;
+                }
+                return 0;
+            }
+
+            // ── Ledger (per-player applied / active grants) ──
+            function loadLedger() {
+                if (!Array.isArray(window.mcPlayerModifiers)) {
+                    try { window.mcPlayerModifiers = JSON.parse(localStorage.getItem(LEDGER_KEY) || '[]'); }
+                    catch (e) { window.mcPlayerModifiers = []; }
+                }
+                return window.mcPlayerModifiers;
+            }
+            function saveLedger() {
+                try { localStorage.setItem(LEDGER_KEY, JSON.stringify(window.mcPlayerModifiers || [])); } catch (e) {}
+            }
+            function record(playerId, mod, status, extra) {
+                var led = loadLedger();
+                var ms = durationMs(mod);
+                var entry = {
+                    id: 'pm-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+                    playerId: playerId,
+                    modifierId: mod.id,
+                    name: mod.name,
+                    type: mod.type,
+                    effectType: mod.effectType,
+                    effectValue: mod.effectValue,
+                    appliedAt: Date.now(),
+                    expiresAt: (ms == null) ? null : (ms > 0 ? Date.now() + ms : Date.now()),
+                    status: status || 'used'
+                };
+                if (extra) Object.assign(entry, extra);
+                led.push(entry);
+                if (led.length > 2000) window.mcPlayerModifiers = led.slice(-2000);
+                saveLedger();
+                return entry;
+            }
+            function grantsFor(playerId, effectType) {
+                var now = Date.now();
+                return loadLedger().filter(function (g) {
+                    if (g.playerId !== playerId || g.status !== 'active') return false;
+                    if (effectType && g.effectType !== effectType) return false;
+                    if (g.expiresAt != null && g.expiresAt <= now) { g.status = 'expired'; return false; }
+                    return true;
+                });
+            }
+
+            // Product of all active XC multipliers for a player (1 = none).
+            function activeMultiplier(playerId) {
+                var g = grantsFor(playerId, 'xc_multiply');
+                if (!g.length) return 1;
+                var m = 1;
+                g.forEach(function (x) { if (typeof x.effectValue === 'number' && x.effectValue > 0) m *= x.effectValue; });
+                saveLedger();
+                return m;
+            }
+            function isFrozen(playerId) { return grantsFor(playerId, 'freeze').length > 0; }
+
+            // Extend a task/checkpoint due date by N hours.
+            function extendDeadline(targetType, targetId, hours) {
+                if (!targetId || !hours) return false;
+                var pools = { task: (typeof mcTasks !== 'undefined' ? mcTasks : null),
+                              checkpoint: (typeof mcCheckpoints !== 'undefined' ? mcCheckpoints : null) };
+                var arr = pools[targetType] || (typeof mcTasks !== 'undefined' ? mcTasks : null);
+                if (!Array.isArray(arr)) return false;
+                var it = arr.find(function (x) { return x && x.id === targetId; });
+                if (!it) return false;
+                var field = it.dueDate ? 'dueDate' : (it.deadline ? 'deadline' : (it.endDate ? 'endDate' : 'dueDate'));
+                var base = new Date(it[field] || Date.now()).getTime();
+                if (!isFinite(base)) base = Date.now();
+                it[field] = new Date(base + hours * 3600e3).toISOString();
+                try { if (typeof mcSaveData === 'function') mcSaveData(targetType === 'checkpoint' ? 'checkpoints' : 'tasks'); } catch (e) {}
+                return true;
+            }
+
+            // ── APPLY a modifier to one player ──
+            //   opts: { reason, targetType, targetId, source, silent }
+            function applyToPlayer(ref, playerId, opts) {
+                opts = opts || {};
+                var mod = resolve(ref);
+                if (!mod || !playerId) return { ok: false, error: 'unresolved' };
+                var val = mod.effectValue || 0;
+                var signedXc = 0;
+                var reason = opts.reason || ((mod.type === 'tax' ? 'Fine: ' : 'Upgrade: ') + mod.name);
+                var src = opts.source || 'modifier';
+
+                switch (mod.effectType) {
+                    case 'xc_add':
+                        signedXc = val;
+                        if (window.PflxDataBus) PflxDataBus.award(playerId, { xc: val, source: 'modifier', reason: reason, noMultiplier: true });
+                        record(playerId, mod, 'used'); break;
+                    case 'xc_deduct':
+                        signedXc = -val;
+                        if (window.PflxDataBus) PflxDataBus.award(playerId, { xc: -val, source: 'modifier', reason: reason });
+                        record(playerId, mod, 'used'); break;
+                    case 'xc_multiply':
+                        record(playerId, mod, 'active'); break;                 // consulted by award()
+                    case 'deadline_extend':
+                        extendDeadline(opts.targetType, opts.targetId, val);
+                        record(playerId, mod, 'used', { targetId: opts.targetId || null }); break;
+                    case 'freeze':
+                        record(playerId, mod, 'active');
+                        try {
+                            if (typeof mcBroadcastToApps === 'function')
+                                mcBroadcastToApps('pflx_player_freeze', { playerId: playerId, minutes: val || 5, reason: reason });
+                        } catch (e) {}
+                        break;
+                    case 'badge_add':
+                        if (opts.badge && window.PflxDataBus) PflxDataBus.award(playerId, { badge: opts.badge, source: 'modifier', reason: reason });
+                        record(playerId, mod, 'used'); break;
+                    case 'badge_deduct':
+                        record(playerId, mod, 'used'); break;
+                    default:
+                        record(playerId, mod, 'used'); break;
+                }
+
+                var kind = (mod.type === 'tax') ? 'fine' : 'upgrade';
+                if (!opts.silent && typeof window.pflxEmitXcoinEvent === 'function') {
+                    window.pflxEmitXcoinEvent(playerId, kind, {
+                        title: mod.name, desc: mod.description,
+                        image: mod.image, icon: mod.icon, xc: signedXc
+                    });
+                }
+                return { ok: true, modifier: mod, kind: kind, xc: signedXc };
+            }
+
+            // ── Auto-trigger dispatcher (Slice 3 wires the call sites) ──
+            //   fireEvent('task_approved', { playerId, targetType, targetId, cohort })
+            //   Fires every autoApply modifier whose triggerEvent matches (scope-
+            //   filtered). Honors autoApply exactly as set in X-Coin.
+            function fireEvent(triggerEvent, ctx) {
+                ctx = ctx || {};
+                if (!ctx.playerId) return [];
+                var fired = [];
+                catalog().forEach(function (raw) {
+                    if (!raw || !raw.autoApply) return;
+                    if ((raw.triggerEvent || 'manual') !== triggerEvent) return;
+                    var mod = resolve(raw);
+                    if (ctx.targetType && mod.scope && mod.scope !== 'all' && mod.scope !== ctx.targetType) return;
+                    var r = applyToPlayer(mod, ctx.playerId, {
+                        reason: (mod.type === 'tax' ? 'Auto-fine: ' : 'Auto-bonus: ') + mod.name + ' (' + triggerEvent + ')',
+                        targetType: ctx.targetType, targetId: ctx.targetId, source: 'auto:' + triggerEvent
+                    });
+                    if (r.ok) fired.push(r);
+                });
+                return fired;
+            }
+
+            return {
+                catalog: catalog,
+                resolve: resolve,
+                applyToPlayer: applyToPlayer,
+                fireEvent: fireEvent,
+                activeMultiplier: activeMultiplier,
+                isFrozen: isFrozen,
+                ledger: loadLedger,
+                grantsFor: grantsFor
             };
         })();
 
