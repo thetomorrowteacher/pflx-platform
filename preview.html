@@ -18844,12 +18844,10 @@
                                 reason: 'xtracker.reward_request:' + r.id
                             });
                         } else if (r.type === 'badge') {
+                            var _xtb = _pflxResolveAwardBadge({ name: r.badgeName || r.badgeCategory || 'Digital Badge', category: r.badgeCategory });
+                            if (!_xtb.id) _xtb.id = 'b-xt-' + r.id;
                             window.PflxDataBus.award(r.playerId, {
-                                badge: {
-                                    id: 'b-xt-' + r.id,
-                                    name: r.badgeName || r.badgeCategory || 'Digital Badge',
-                                    category: r.badgeCategory || 'primary'
-                                },
+                                badge: _xtb,
                                 source: 'xtracker',
                                 reason: 'xtracker.reward_request:' + r.id
                             });
@@ -18917,9 +18915,12 @@
             s.feedback = status === 'approved' ? 'Approved by Host (Console)' : (note || 'Rejected by Host (Console)');
             if (status === 'approved' && window.PflxDataBus && s.playerId) {
                 var def = _pflxCoinDef(s.coinType);
+                var _cb = _pflxResolveAwardBadge({ name: s.coinType || 'Digital Badge', category: def.category });
+                _cb.xcValue = 0; // XC is credited via the explicit xc field below — don't double-count
+                if (!_cb.id) _cb.id = 'b-sub-' + s.id;
                 window.PflxDataBus.award(s.playerId, {
                     xc: def.xc * (s.amount || 1),
-                    badge: { id: 'b-sub-' + s.id, name: s.coinType || 'Digital Badge', category: def.category },
+                    badge: _cb,
                     source: s.nodeId ? 'pathways' : 'xcoin-submission',
                     reason: 'submission:' + s.id
                 });
@@ -20273,6 +20274,25 @@
             return 'primary';
         }
         window._pflxBadgeCategoryKey = _pflxBadgeCategoryKey;
+
+        // Resolve any badge reference (id / name / partial object) against the
+        // LIVE badge catalog into the shape PflxDataBus.award needs so the badge
+        // XC is credited, badgeCounts increments (correct category key) and the
+        // artwork image flows through. Used by EVERY award path (task, checkpoint,
+        // project, module/node completion, automation).
+        function _pflxResolveAwardBadge(badgeRef) {
+            var cat = (typeof mcFindBadge === 'function') ? mcFindBadge(badgeRef) : null;
+            var raw = (badgeRef && typeof badgeRef === 'object') ? badgeRef : {};
+            var name = (cat && cat.name) || raw.name || raw.title || (typeof badgeRef === 'string' ? badgeRef : raw.id) || 'Badge';
+            return {
+                id: (cat && cat.id) || raw.id || mcBadgeIdFromName(name),
+                name: name,
+                category: _pflxBadgeCategoryKey((cat && (cat.category || cat.tier)) || raw.category || raw.tier),
+                xcValue: (cat && cat.xc) || raw.xcValue || raw.xc || 0,
+                image: (cat && cat.image) || raw.image || ''
+            };
+        }
+        window._pflxResolveAwardBadge = _pflxResolveAwardBadge;
 
         // Rebuild the OPEN task-form badge checklist from the live catalog,
         // preserving the host's current selections. Called when X-Coin pushes a
@@ -21640,7 +21660,7 @@
                             }
                             if (node.badge && window.PflxDataBus) {
                                 window.PflxDataBus.award(node.playerId, {
-                                    badge: node.badge,
+                                    badge: _pflxResolveAwardBadge(node.badge),
                                     source: 'pathways',
                                     reason: 'pathway:node:' + (node.nodeId || node.pathwayId || 'unknown')
                                 });
@@ -26442,9 +26462,7 @@
                         try {
                             if (cpXc > 0) window.PflxDataBus.award(pid, { xc: cpXc, source: 'mc', reason: 'checkpoint:' + obj.id });
                             (obj.rewardBadges || []).forEach(function (badgeRef) {
-                                var b = (typeof badgeRef === 'string')
-                                    ? { id: badgeRef, name: badgeRef }
-                                    : { id: badgeRef.id, name: badgeRef.name || badgeRef.title || badgeRef.id, category: badgeRef.category || 'primary', xcValue: badgeRef.xcValue || badgeRef.xc || 0 };
+                                var b = _pflxResolveAwardBadge(badgeRef);
                                 window.PflxDataBus.award(pid, { badge: b, source: 'mc', reason: 'checkpoint:' + obj.id });
                             });
                         } catch (eA) { console.warn('[mc checkpoint reward] award failed for', pid, eA); }
@@ -29014,7 +29032,7 @@
                             break;
                         case 'award_badge':
                             if (pid && window.PflxDataBus) {
-                                window.PflxDataBus.award(pid, { badge: { id: String(act.value), name: String(act.value) }, source: 'automation', reason: 'automation:' + rule.id });
+                                window.PflxDataBus.award(pid, { badge: _pflxResolveAwardBadge(String(act.value)), source: 'automation', reason: 'automation:' + rule.id });
                             }
                             break;
                         case 'toast':
@@ -29486,21 +29504,10 @@
                     }
                     if (task.rewardBadges && task.rewardBadges.length > 0 && window.PflxDataBus) {
                         task.rewardBadges.forEach(function (badgeRef) {
-                            // Resolve against the LIVE badge catalog (X-Coin) so the badge
-                            // carries its XC value (→ credited to xc/totalXcoin), its
-                            // category key (→ badgeCounts + portfolio grid) and its image.
-                            var cat = (typeof mcFindBadge === 'function') ? mcFindBadge(badgeRef) : null;
-                            var raw = (badgeRef && typeof badgeRef === 'object') ? badgeRef : {};
-                            var name = (cat && cat.name) || raw.name || raw.title || (typeof badgeRef === 'string' ? badgeRef : raw.id) || 'Badge';
-                            var b = {
-                                id: (cat && cat.id) || raw.id || mcBadgeIdFromName(name),
-                                name: name,
-                                category: _pflxBadgeCategoryKey((cat && (cat.category || cat.tier)) || raw.category || raw.tier),
-                                xcValue: (cat && cat.xc) || raw.xcValue || raw.xc || 0,
-                                image: (cat && cat.image) || raw.image || ''
-                            };
+                            // Resolve against the LIVE badge catalog so the badge carries XC
+                            // (→ credited to totals), category key (→ badgeCounts) and image.
                             window.PflxDataBus.award(submitterId, {
-                                badge: b,
+                                badge: _pflxResolveAwardBadge(badgeRef),
                                 source: 'mc',
                                 reason: 'task:' + task.id
                             });
@@ -30284,9 +30291,7 @@
                                 window.PflxDataBus.award(pid, { xc: xcAmt, source: 'mc', reason: 'project:' + obj.id });
                             }
                             (obj.rewardBadges || []).forEach(function (badgeRef) {
-                                var b = (typeof badgeRef === 'string')
-                                    ? { id: badgeRef, name: badgeRef }
-                                    : { id: badgeRef.id, name: badgeRef.name || badgeRef.title || badgeRef.id, category: badgeRef.category || 'primary', xcValue: badgeRef.xcValue || badgeRef.xc || 0 };
+                                var b = _pflxResolveAwardBadge(badgeRef);
                                 window.PflxDataBus.award(pid, { badge: b, source: 'mc', reason: 'project:' + obj.id });
                             });
                         } catch (eA) { console.warn('[mc project reward] award failed for', pid, eA); }
@@ -42458,7 +42463,7 @@
                         if (ma.playerId && ma.reward && window.PflxDataBus) {
                             if (ma.reward.xc) window.PflxDataBus.award(ma.playerId, { xc: ma.reward.xc, source: 'mc', reason: 'module:' + ma.moduleId });
                             (ma.reward.badgeIds || []).forEach(function(bid) {
-                                window.PflxDataBus.award(ma.playerId, { badge: { id: bid, name: bid }, source: 'mc', reason: 'module:' + ma.moduleId });
+                                window.PflxDataBus.award(ma.playerId, { badge: _pflxResolveAwardBadge(bid), source: 'mc', reason: 'module:' + ma.moduleId });
                             });
                         }
                     } catch (eMod) { console.warn('[MC] module reward award failed', eMod); }
