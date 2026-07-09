@@ -18888,19 +18888,14 @@
         function _pflxCoinDef(coinType) {
             var out = { xc: 100, category: 'primary' };
             try {
-                var cats = (typeof mcBadges !== 'undefined' && Array.isArray(mcBadges)) ? mcBadges : [];
-                for (var i = 0; i < cats.length; i++) {
-                    var coins = cats[i].coins || [];
-                    for (var j = 0; j < coins.length; j++) {
-                        if (coins[j].name === coinType) {
-                            if (typeof coins[j].xc === 'number') out.xc = coins[j].xc;
-                            var cn = String(cats[i].name || '').toLowerCase();
-                            if (cn.indexOf('premium') >= 0) out.category = 'premium';
-                            else if (cn.indexOf('executive') >= 0) out.category = 'executive';
-                            else if (cn.indexOf('signature') >= 0) out.category = 'signature';
-                            return out;
-                        }
-                    }
+                // mcBadges is now a FLAT catalog — resolve through the unified
+                // lookup (X-Coin-synced badges + hardcoded defaults) so XC + the
+                // canonical category key come straight from live badge data.
+                var b = (typeof mcFindBadge === 'function') ? mcFindBadge(coinType) : null;
+                if (b) {
+                    if (typeof b.xc === 'number' && b.xc) out.xc = b.xc;
+                    out.category = (typeof _pflxBadgeCategoryKey === 'function')
+                        ? _pflxBadgeCategoryKey(b.category || b.tier) : out.category;
                 }
             } catch (e) {}
             return out;
@@ -20213,6 +20208,48 @@
         function mcBadgeIdFromName(name) {
             return 'badge-' + String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
         }
+        // X-Coin ships the badge catalog as NESTED COIN_CATEGORIES —
+        // [{ name, coins:[{ name, xc, image, description }] }] — but MC's mcBadges
+        // is a FLAT list ({ id, name, xc, tier, category, color, icon, image }),
+        // which mcGetAllBadges / mcFindBadge / the pickers / the portfolio grid /
+        // the XC resolver all read. Storing the nested payload raw stranded every
+        // real badge (and its uploaded artwork + xc) inside cat.coins[], so the
+        // catalog surfaced only category shells with no image/xc. This flattens
+        // the nested shape on receipt, carrying each coin's image + xc through and
+        // deriving color/icon/tier from its category. Already-flat input (a prior
+        // save, or MC's own badge editor) is detected and passed through untouched.
+        function mcNormalizeBadges(data) {
+            if (!Array.isArray(data)) return [];
+            var isNested = data.some(function(x) { return x && Array.isArray(x.coins); });
+            if (!isNested) return data;
+            var style = {};
+            (typeof MC_COIN_CATEGORIES !== 'undefined' ? MC_COIN_CATEGORIES : []).forEach(function(c) {
+                style[String(c.name || '').toLowerCase()] = { color: c.color, icon: c.icon };
+            });
+            var out = [];
+            data.forEach(function(cat) {
+                if (!cat || !Array.isArray(cat.coins)) return;
+                var catName = cat.name || '';
+                var tier = (typeof _pflxBadgeCategoryKey === 'function') ? _pflxBadgeCategoryKey(catName) : '';
+                var st = style[String(catName).toLowerCase()] || {};
+                cat.coins.forEach(function(c) {
+                    if (!c || !c.name) return;
+                    out.push({
+                        id: mcBadgeIdFromName(c.name),
+                        name: c.name,
+                        description: c.description || '',
+                        xc: c.xc || c.xcReward || c.xcValue || 0,
+                        tier: tier,
+                        category: catName,
+                        color: c.color || cat.color || st.color || '#00d4ff',
+                        icon: c.icon || cat.icon || st.icon || '🎖',
+                        image: c.image || c.img || c.imageUrl || c.imageURL || c.photo || c.artwork || ''
+                    });
+                });
+            });
+            return out;
+        }
+        window.mcNormalizeBadges = mcNormalizeBadges;
         function mcGetAllBadges() {
             var hardcoded = MC_ALL_BADGES.map(function(b) {
                 return {
@@ -20517,7 +20554,7 @@
                     } catch (e) {}
                 })();
                 mcAnnouncements = JSON.parse(localStorage.getItem('pflx_mc_announcements') || '[]');
-                mcBadges = JSON.parse(localStorage.getItem('pflx_mc_badges') || '[]');
+                mcBadges = mcNormalizeBadges(JSON.parse(localStorage.getItem('pflx_mc_badges') || '[]'));
                 mcJobs = JSON.parse(localStorage.getItem('pflx_mc_jobs') || '[]');
                 mcPitches = JSON.parse(localStorage.getItem('pflx_mc_pitches') || '[]');
                 mcStudios = JSON.parse(localStorage.getItem('pflx_mc_studios') || '[]');
@@ -21106,7 +21143,7 @@
                 case 'projects': mcProjects = items; break;
                 case 'seasons': mcSeasons = items; break;
                 case 'announcements': mcAnnouncements = items; break;
-                case 'badges': mcBadges = items; break;
+                case 'badges': mcBadges = mcNormalizeBadges(items); break;
                 case 'jobs': mcJobs = items; break;
                 case 'pitches': mcPitches = items; break;
                 case 'studios': mcStudios = items; break;
@@ -21444,7 +21481,7 @@
                     if (msg.key === 'tasks' && msg.data && msg.data.length) { mcTasks = msg.data; mcSaveData('tasks'); dataUpdated = true; }
                     if (msg.key === 'projects' && msg.data && msg.data.length) { mcProjects = msg.data; mcSaveData('projects'); dataUpdated = true; }
                     if (msg.key === 'seasons' && msg.data && msg.data.length) { mcSeasons = msg.data; mcSaveData('seasons'); dataUpdated = true; }
-                    if (msg.key === 'badges' && msg.data && msg.data.length) { mcBadges = msg.data; mcSaveData('badges'); dataUpdated = true; try { mcRefreshBadgePickers(); } catch (e) {} }
+                    if (msg.key === 'badges' && msg.data && msg.data.length) { mcBadges = mcNormalizeBadges(msg.data); mcSaveData('badges'); dataUpdated = true; try { mcRefreshBadgePickers(); } catch (e) {} }
                     if (msg.key === 'jobs' && msg.data && msg.data.length) { mcJobs = msg.data; mcSaveData('jobs'); dataUpdated = true; }
                     if (msg.key === 'cohortGroups' && msg.data && msg.data.length) { mcCohortGroups = msg.data; mcSaveData('cohortgroups'); dataUpdated = true; }
                     if (msg.key === 'pflxRanks' && msg.data && msg.data.length) { mcPflxRanks = msg.data; mcSaveData('pflxranks'); dataUpdated = true; }
