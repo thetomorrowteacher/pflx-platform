@@ -14010,6 +14010,10 @@
                         activeSession.image         = p.image || '';
                         activeSession.slogan        = p.slogan || activeSession.slogan || '';
                         activeSession.rankOverride  = p.rankOverride || null;
+                        // Access level — explicit hostTier assignment from the
+                        // Player Manager wins over the role-derived default.
+                        activeSession.hostTier      = p.hostTier || null;
+                        if (p.role) activeSession.role = p.role;
                     }
                 }
             } catch (e) {}
@@ -15624,7 +15628,11 @@
                 if (currentVal) cohortSelect.value = currentVal;
             }
 
-            let players = PLAYERS.filter(p => p.role === 'player');
+            // List players AND host-tier accounts (Guest/Instructor/Admin/Master
+            // Host) so an elevated user can always be found and demoted here.
+            // The godTier system account (PrototypeFLX) stays hidden.
+            let players = PLAYERS.filter(p => p && !p.godTier &&
+                (p.role === 'player' || (window.pflxIsHostRole && window.pflxIsHostRole(p.role))));
             players = players.filter(_pflxPlayerVisible); // Phase 3b: cohort/scope visibility
             if (cohortFilter !== 'all') players = players.filter(p => p.cohort === cohortFilter);
             if (search) players = players.filter(p =>
@@ -54236,6 +54244,32 @@ RESPONSE RULES:
             // (last-write-wins) instead of letting a stale cloud row win.
             try { player.updatedAt = Date.now(); } catch (e) {}
             persistPlayers();
+            // Mirror the canonical record into mcPlayers (MC roster + cloud
+            // 'users' row) so ACCESS LEVEL / studio / role edits propagate to
+            // every sub-app immediately, not just the per-player rows.
+            try {
+                if (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) {
+                    var __mi = mcPlayers.findIndex(function (mp) { return mp && mp.id === player.id; });
+                    if (__mi >= 0) {
+                        mcPlayers[__mi] = Object.assign({}, mcPlayers[__mi], {
+                            name: player.name, brand: player.brand, email: player.email, pin: player.pin,
+                            cohort: player.cohort, cohorts: player.cohorts,
+                            role: player.role, roleDisplay: player.roleDisplay,
+                            hostTier: player.hostTier || null,
+                            managedCohorts: player.managedCohorts, managedNodes: player.managedNodes, managedProjectId: player.managedProjectId,
+                            studioId: (player.studioId !== undefined ? (player.studioId || '') : (mcPlayers[__mi].studioId || '')),
+                            xc: player.xc || 0, digitalBadges: player.digitalBadges || 0,
+                            badgeCounts: player.badgeCounts || mcPlayers[__mi].badgeCounts,
+                            rankOverride: player.rankOverride || null,
+                            frozen: !!player.frozen, claimed: !!player.claimed,
+                            onboardingComplete: player.onboardingComplete !== false,
+                            image: player.image || mcPlayers[__mi].image || '',
+                            slogan: player.slogan || mcPlayers[__mi].slogan || ''
+                        });
+                        if (typeof mcSaveData === 'function') mcSaveData('players');
+                    }
+                }
+            } catch (e) {}
             // If the changed player IS the active session, sync activeSession + toolbar
             if (window.activeSession && (window.activeSession.id === player.id || window.activeSession.brand === player.brand)) {
                 window.activeSession.xc = player.xc || 0;
@@ -54248,6 +54282,9 @@ RESPONSE RULES:
                 window.activeSession.image = player.image || window.activeSession.image || '';
                 window.activeSession.slogan = player.slogan || window.activeSession.slogan || '';
                 window.activeSession.interests = player.interests || window.activeSession.interests || [];
+                // Access level takes effect live for the edited user's session
+                window.activeSession.hostTier = player.hostTier || null;
+                if (player.role) window.activeSession.role = player.role;
                 // Resolve rank (override wins, else by XC) and propagate the full rank object
                 var resolvedRank = null;
                 if (player.rankOverride && typeof mcPflxRanks !== 'undefined' && Array.isArray(mcPflxRanks)) {
@@ -55423,6 +55460,60 @@ RESPONSE RULES:
         }
         window.pflxNormalizeRole = normalizeRole;
 
+        // ═══════════ ACCESS LEVELS (July 10) — replaces the Role picker ═══════════
+        // Five user-facing access levels that determine what a user can do
+        // across the entire platform. Values map onto the tier engine
+        // (pflxHostTier/pflxCan): player → no tier, guest/instructor/admin/
+        // master → hostTier. role stays lowercase-derived for back-compat
+        // with every existing `role === 'player'` / isHostRole gate.
+        var ACCESS_LEVELS = [
+            { value: 'player',     label: 'Player (Default User)', short: 'Player',          color: '#a78bfa',
+              desc: 'Standard account — player dashboards, games, portfolio, X-Coin wallet. No host controls.' },
+            { value: 'guest',      label: 'Guest Host',            short: 'Guest Host',      color: '#4ade80',
+              desc: 'Limited control over one MC Project or specified Core Pathway node/module, with approval controls (tasks + nodes).' },
+            { value: 'instructor', label: 'Instructor Host',       short: 'Instructor Host', color: '#38bdf8',
+              desc: 'Limited control of a single cohort’s Mission Control or specified nodes/modules. Approves nodes, X-Coin barter & trades, and task submissions.' },
+            { value: 'admin',      label: 'Admin Host',            short: 'Admin Host',      color: '#facc15',
+              desc: 'Full control of every Console function and the complete Approvals suite. No plus features.' },
+            { value: 'master',     label: 'Master Host',           short: 'Master Host',     color: '#f97316',
+              desc: 'Full control of everything, plus history, auto-backup, system override and restore. Only Master Hosts grant Admin/Master access.' }
+        ];
+        var ACCESS_RANK = { player: 0, guest: 1, instructor: 2, cohost: 3, admin: 4, master: 5 };
+        function accessOf(p) {
+            if (!p) return 'player';
+            if (p.hostTier && ACCESS_RANK[p.hostTier] !== undefined) {
+                return p.hostTier === 'cohost' ? 'instructor' : p.hostTier; // cohost is legacy — shows as Instructor Host
+            }
+            var r = normalizeRole(p.role);
+            if (r === 'admin') return 'master';
+            if (r === 'host') return 'admin';
+            if (r === 'instructor') return 'instructor';
+            return 'player';
+        }
+        function roleForAccess(a) {
+            return a === 'master' ? 'admin' : a === 'admin' ? 'host' :
+                   (a === 'instructor' || a === 'guest') ? 'instructor' : 'player';
+        }
+        function accessMetaOf(a) {
+            for (var i = 0; i < ACCESS_LEVELS.length; i++) if (ACCESS_LEVELS[i].value === a) return ACCESS_LEVELS[i];
+            return ACCESS_LEVELS[0];
+        }
+        function accessSelectHtml(elId, current) {
+            var opts = ACCESS_LEVELS.map(function (l) {
+                return '<option value="' + l.value + '"' + (l.value === current ? ' selected' : '') + '>' + l.label + '</option>';
+            }).join('');
+            return '<div style="display:flex;flex-direction:column;gap:4px;font-family:Rajdhani,sans-serif;font-size:11px;color:#8a92b0;grid-column:1 / span 2;">ACCESS LEVEL (determines this user’s access across PFLX)' +
+                '<select id="' + elId + '" style="' + inputCss() + '">' + opts + '</select>' +
+                '<div id="' + elId + '-desc" style="font-size:11px;color:#6a7290;line-height:1.5;">' + accessMetaOf(current).desc + '</div></div>';
+        }
+        function wireAccessSelect(card, elId) {
+            var sel = card.querySelector('#' + elId);
+            var d = card.querySelector('#' + elId + '-desc');
+            if (sel && d) sel.addEventListener('change', function () { d.textContent = accessMetaOf(sel.value).desc; });
+        }
+        window.pflxAccessOf = accessOf;
+        window.pflxAccessMeta = accessMetaOf;
+
         // ═══════════════════════════════════════════════════════════════════
         // TIERED HOST ACCESS — Phase 1 foundation (July 6 2026, Opus)
         //   Five host tiers layered on the 4-role system. A tier is resolved
@@ -55447,10 +55538,10 @@ RESPONSE RULES:
                 cohost:     { label: 'Co-Host',          rank: 3, plus: false,
                               scope: 'cohorts',
                               desc: 'Limited control of multiple cohorts’ Mission Control or specified Core Pathway nodes/modules. Approves nodes, X-Coin trades and task submissions.' },
-                instructor: { label: 'Instructor',       rank: 2, plus: false,
+                instructor: { label: 'Instructor Host',  rank: 2, plus: false,
                               scope: 'cohort',
                               desc: 'Limited control of a single cohort’s Mission Control or specified Core Pathway nodes/modules. Approves nodes, X-Coin barter & trades, and task submissions.' },
-                guest:      { label: 'Guest Instructor', rank: 1, plus: false,
+                guest:      { label: 'Guest Host',       rank: 1, plus: false,
                               scope: 'project',
                               desc: 'Limited control over one MC Project or specified Core Pathway node/module with approval controls.' }
             };
@@ -55677,7 +55768,7 @@ RESPONSE RULES:
                   pinFieldHtml('pm-add-pin', 'PIN (4-digit; auto-generated if blank)', '') +
                   fld('pm-add-email',    'Email (host-only)', '1 / span 2', '', 'email') +
                   cohortMultiSelectHtml('pm-add-cohorts', ['PlayerPool']) +
-                  selFld('pm-add-role',  'Role', ROLES_CANONICAL, 'Player') +
+                  accessSelectHtml('pm-add-access', 'player') +
                   fld('pm-add-xc',       'Starting XC', null, '0', 'number') +
                   fld('pm-add-slogan',   'Slogan (optional, ≤60)', '1 / span 2', '"Building the future..."') +
                   '<div style="grid-column:1 / span 2;display:flex;flex-direction:column;gap:4px;font-family:Rajdhani,sans-serif;font-size:11px;color:#8a92b0;">INTERESTS (optional, multi)<div id="pm-add-interests" style="display:flex;flex-wrap:wrap;gap:6px;">' +
@@ -55692,6 +55783,7 @@ RESPONSE RULES:
                 function (card, close) {
                     wireCohortAdder(card);
                     wirePinToggles(card);
+                    wireAccessSelect(card, 'pm-add-access');
                     card.querySelector('#pm-add-cancel').onclick = close;
                     card.querySelector('#pm-add-save').onclick = function () {
                         var name = (card.querySelector('#pm-add-fullname').value || '').trim();
@@ -55700,7 +55792,13 @@ RESPONSE RULES:
                         var email = (card.querySelector('#pm-add-email').value || '').trim();
                         var cohorts = readCohortPicks('pm-add-cohorts');
                         if (cohorts.length === 0) cohorts = ['PlayerPool'];
-                        var role = card.querySelector('#pm-add-role').value || 'Player';
+                        var pickedAccess = (card.querySelector('#pm-add-access') || { value: 'player' }).value || 'player';
+                        // ELEVATION GUARD — only a Master Host may create Admin/Master accounts
+                        var myTier = (typeof window.pflxHostTier === 'function') ? (window.pflxHostTier() || null) : 'master';
+                        if (ACCESS_RANK[pickedAccess] >= 4 && myTier !== 'master') {
+                            alert('Only a Master Host can create Admin Host / Master Host accounts. Creating as Instructor Host instead.');
+                            pickedAccess = 'instructor';
+                        }
                         var xc = parseInt(card.querySelector('#pm-add-xc').value, 10) || 0;
                         var slogan = (card.querySelector('#pm-add-slogan').value || '').trim();
                         var interests = Array.prototype.slice.call(card.querySelectorAll('input[data-int]:checked')).map(function (cb) { return cb.getAttribute('data-int'); });
@@ -55711,8 +55809,9 @@ RESPONSE RULES:
                             id: 'player-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
                             brand: brand, pin: pin, name: name, email: email,
                             cohort: cohorts.join(', '), cohorts: cohorts,
-                            role: normalizeRole(role),     // store lowercase so the existing list renderer picks them up
-                            roleDisplay: role,             // keep the canonical UI label too
+                            role: roleForAccess(pickedAccess), // store lowercase so the existing list renderer picks them up
+                            roleDisplay: accessMetaOf(pickedAccess).short,
+                            hostTier: pickedAccess === 'player' ? null : pickedAccess,
                             xc: xc, totalXcoin: xc, digitalBadges: 0,
                             badges: [], badgeCounts: { signature: 0, primary: 0, premium: 0, executive: 0 },
                             slogan: slogan, interests: interests,
@@ -55805,13 +55904,15 @@ RESPONSE RULES:
                 return '<option value="' + r.id + '"' + (p.rankOverride === r.id ? ' selected' : '') + '>' + (r.icon || '') + ' L' + r.level + ' · ' + r.name + '</option>';
             }).join('');
 
-            // Map legacy role → canonical for display
-            var roleNow = p.role || 'Player';
-            var lc = roleNow.toLowerCase();
-            if (lc === 'admin') roleNow = 'Master Host';
-            else if (lc === 'host') roleNow = 'Host';
-            else if (lc === 'teacher' || lc === 'instructor') roleNow = 'Instructor';
-            else if (lc === 'student' || lc === 'creator' || lc === 'educator' || lc === 'explorer' || lc === 'player') roleNow = 'Player';
+            // Current access level (replaces the legacy Role mapping)
+            var accessNow = accessOf(p);
+            // Startup Studio (house) options
+            var studioOpts = '<option value=""' + (!p.studioId ? ' selected' : '') + '>— Unassigned (auto-placed by diagnostic at next login) —</option>';
+            try {
+                (typeof PFLX_STUDIOS !== 'undefined' ? PFLX_STUDIOS : []).forEach(function (s) {
+                    studioOpts += '<option value="' + s.id + '"' + (p.studioId === s.id ? ' selected' : '') + '>' + (s.name || s.id) + '</option>';
+                });
+            } catch (e) {}
 
             // Ensure player has badges array (legacy badgeCounts → synthesized entries)
             if (!Array.isArray(p.badges)) {
@@ -55853,9 +55954,10 @@ RESPONSE RULES:
                   pinFieldHtml('pm-ed-pin', 'PIN', p.pin || '') +
                   fld('pm-ed-email',    'Email (host-only)', '1 / span 2', '', 'email', p.email || '') +
                   cohortMultiSelectHtml('pm-ed-cohorts', cohortsArr) +
-                  selFld('pm-ed-role',  'Role', ROLES_CANONICAL, roleNow) +
-                  fld('pm-ed-xc',       'XC', null, '', 'number', String(p.xc || 0)) +
+                  accessSelectHtml('pm-ed-access', accessNow) +
+                  fld('pm-ed-xc',       'XC', '1 / span 2', '', 'number', String(p.xc || 0)) +
                   '<div style="display:flex;flex-direction:column;gap:4px;font-family:Rajdhani,sans-serif;font-size:11px;color:#8a92b0;grid-column:1 / span 2;">RANK OVERRIDE (optional — if set, overrides XC-derived rank)<select id="pm-ed-rank" style="' + inputCss() + '">' + rankOpts + '</select></div>' +
+                  '<div style="display:flex;flex-direction:column;gap:4px;font-family:Rajdhani,sans-serif;font-size:11px;color:#8a92b0;grid-column:1 / span 2;">STARTUP STUDIO (house)<select id="pm-ed-studio" style="' + inputCss() + '">' + studioOpts + '</select></div>' +
                   '<label style="grid-column:1 / span 2;display:flex;align-items:center;gap:8px;font-family:Rajdhani,sans-serif;font-size:13px;color:#8a92b0;"><input type="checkbox" id="pm-ed-bypass"' + (p.onboardingComplete !== false ? ' checked' : '') + '> Onboarding complete (bypass wizard at next login)</label>' +
                   '<label style="grid-column:1 / span 2;display:flex;align-items:center;gap:8px;font-family:Rajdhani,sans-serif;font-size:13px;color:#8a92b0;"><input type="checkbox" id="pm-ed-frozen"' + (p.frozen ? ' checked' : '') + '> Account frozen</label>' +
                 '</div>' +
@@ -55907,6 +56009,7 @@ RESPONSE RULES:
                 function (card, close) {
                     wireCohortAdder(card);
                     wirePinToggles(card);
+                    wireAccessSelect(card, 'pm-ed-access');
                     card.querySelector('#pm-ed-cancel').onclick = close;
 
                     // Profile picture
@@ -56010,13 +56113,26 @@ RESPONSE RULES:
                         if (cohorts.length === 0) cohorts = ['PlayerPool'];
                         p.cohorts = cohorts;
                         p.cohort = cohorts.join(', ');
-                        var pickedRole = card.querySelector('#pm-ed-role').value || 'Player';
-                        p.role = normalizeRole(pickedRole);  // store lowercase for renderer compatibility
-                        p.roleDisplay = pickedRole;          // keep the canonical UI label
+                        var pickedAccess = (card.querySelector('#pm-ed-access') || { value: 'player' }).value || 'player';
+                        // ── ELEVATION GUARD — only a Master Host may grant or
+                        // revoke Admin Host / Master Host access.
+                        var myTier = (typeof window.pflxHostTier === 'function') ? (window.pflxHostTier() || null) : 'master';
+                        if (pickedAccess !== accessNow &&
+                            (ACCESS_RANK[pickedAccess] >= 4 || ACCESS_RANK[accessNow] >= 4) &&
+                            myTier !== 'master') {
+                            alert('Only a Master Host can grant or revoke Admin Host / Master Host access. Access level left unchanged.');
+                            pickedAccess = accessNow;
+                        }
+                        p.hostTier = pickedAccess === 'player' ? null : pickedAccess;
+                        p.role = roleForAccess(pickedAccess); // lowercase storage keeps every existing role gate working
+                        p.roleDisplay = accessMetaOf(pickedAccess).short;
                         p.xc = parseInt(card.querySelector('#pm-ed-xc').value, 10) || 0;
                         // Level removed from UI — derived from rank now
                         var rOv = card.querySelector('#pm-ed-rank').value;
                         p.rankOverride = rOv || null;
+                        // Startup Studio (house) reassignment
+                        var sSel = card.querySelector('#pm-ed-studio');
+                        if (sSel) p.studioId = sSel.value || null;
                         p.onboardingComplete = card.querySelector('#pm-ed-bypass').checked;
                         p.claimed = p.claimed || p.onboardingComplete;
                         p.frozen = card.querySelector('#pm-ed-frozen').checked;
@@ -56158,14 +56274,8 @@ RESPONSE RULES:
                     rank = mcPflxRanks.find(function (r) { return r.id === p.rankOverride; });
                 }
                 if (!rank) rank = (typeof getRankForXC === 'function') ? getRankForXC(p.xc || 0) : { icon: '', name: '' };
-                var roleLabel = (p.roleDisplay || '').trim();
-                if (!roleLabel) {
-                    var rl = String(p.role || '').toLowerCase();
-                    if (rl === 'admin') roleLabel = 'Master Host';
-                    else if (rl === 'host') roleLabel = 'Host';
-                    else if (rl === 'instructor' || rl === 'teacher') roleLabel = 'Instructor';
-                    else roleLabel = 'Player';
-                }
+                // Access-level chip — derived live so stale roleDisplay never lies
+                var roleLabel = accessMetaOf(accessOf(p)).short;
                 var isHost = isHostRole(p.role);
                 var roleColor = isHost ? '#facc15' : '#a78bfa';
                 var statusHtml = p.claimed
