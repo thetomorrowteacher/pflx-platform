@@ -11858,6 +11858,20 @@
                                     <!-- Populated by JS -->
                                 </div>
 
+                                <!-- ═══ COHORT HUB — the ONE place cohorts are created, renamed, merged, deleted & assigned to orgs ═══ -->
+                                <div class="dashboard-card" style="margin-top: 16px;">
+                                    <h4 style="color: var(--cyan); margin-bottom: 4px; font-family: 'Orbitron', sans-serif; font-size: 12px; letter-spacing: 1px;">COHORT MANAGER <span style="color:#a78bfa;">· ALL COHORTS</span></h4>
+                                    <p style="color: #6a7290; font-size: 11px; margin-bottom: 12px; font-family: 'Jura', sans-serif;">Single source of truth. Every cohort found anywhere on the platform — org rosters, the access registry, and player records — in one table. Renames and merges rewrite every player record automatically. App/feature permissions per cohort stay in Settings → Cohort Manager.</p>
+                                    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+                                        <input type="text" id="hmc-cohort-new-name" placeholder="+ New cohort name…" style="flex:1;min-width:180px;background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.12);color:#e0e6ff;padding:8px 12px;border-radius:6px;font-family:'Rajdhani',sans-serif;">
+                                        <select id="hmc-cohort-new-org" style="background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.12);color:#e0e6ff;padding:8px 12px;border-radius:6px;font-family:'Rajdhani',sans-serif;"></select>
+                                        <button onclick="hmcCohortHubAdd()" class="hmc-btn-sm hmc-btn-cyan" style="padding:8px 18px;">+ ADD COHORT</button>
+                                    </div>
+                                    <div id="hmc-cohort-hub" style="display:flex;flex-direction:column;gap:6px;">
+                                        <!-- Populated by JS -->
+                                    </div>
+                                </div>
+
                                 <!-- Add Organization -->
                                 <div class="dashboard-card" style="margin-top: 16px;">
                                     <h4 style="color: var(--cyan); margin-bottom: 12px; font-family: 'Orbitron', sans-serif; font-size: 12px; letter-spacing: 1px;">ADD ORGANIZATION</h4>
@@ -13621,7 +13635,9 @@
             'Falcon Studios': { name: 'Falcon Studios', type: 'org', org: 'ASD', desc: 'Falcon Studios — ASD', tier: 'enterprise', minRank: 0, subscription: 'org-sponsored', apps: { xcoin: true, pathways: true, arena: true, darkcampus: true }, pathwayFull: true, arenaFull: true, seasons: true, projects: true, internships: true },
             'Falcon Studios (MS Division)': { name: 'Falcon Studios (MS Division)', type: 'org', org: 'ASD', desc: 'Falcon Studios — ASD Middle School Division', tier: 'enterprise', minRank: 0, subscription: 'org-sponsored', apps: { xcoin: true, pathways: true, arena: true, darkcampus: true }, pathwayFull: true, arenaFull: true, seasons: true, projects: true, internships: true },
             'PlayerPool': { name: 'PlayerPool', type: 'base', org: 'STANDALONE', desc: 'Default player pool — standalone and inactive players', tier: 'free', minRank: 0, subscription: 'none', apps: { xcoin: true, pathways: true, arena: true, darkcampus: true }, pathwayFull: false, arenaFull: false, seasons: false, projects: false, internships: false },
-            'Player Pool': { name: 'Player Pool', type: 'base', org: 'STANDALONE', desc: 'Default player pool — standalone and inactive players', tier: 'free', minRank: 0, subscription: 'none', apps: { xcoin: true, pathways: true, arena: true, darkcampus: true }, pathwayFull: false, arenaFull: false, seasons: false, projects: false, internships: false },
+            // 'Player Pool' duplicate seed removed July 10 — it made every picker
+            // show two player pools. Players still carrying the spaced spelling
+            // surface in the Cohort Hub as a possible duplicate with 1-click merge.
             'N/A': { name: 'N/A', type: 'host', org: 'PFLX_INTERNAL', desc: 'System / Host accounts', tier: 'enterprise', minRank: 0, subscription: 'org-sponsored', apps: { xcoin: true, pathways: true, arena: true, darkcampus: true }, pathwayFull: true, arenaFull: true, seasons: true, projects: true, internships: true }
         };
 
@@ -14420,7 +14436,7 @@
                 var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
                 if (client) {
                     client.from('app_data').upsert(
-                        { key: 'pflx_organizations', data: { orgs: ORGANIZATIONS, updatedAt: Date.now() }, updated_at: new Date().toISOString() },
+                        { key: 'pflx_organizations', data: { orgs: ORGANIZATIONS, cohortPatch: (typeof PFLX_COHORT_PATCH !== 'undefined' ? PFLX_COHORT_PATCH : undefined), updatedAt: Date.now() }, updated_at: new Date().toISOString() },
                         { onConflict: 'key' }
                     ).then(function (res) {
                         if (res && res.error) console.warn('[org] cloud save error:', res.error.message);
@@ -14433,6 +14449,8 @@
             try {
                 var orgs = (payload && payload.orgs !== undefined) ? payload.orgs : payload;
                 if (!orgs || typeof orgs !== 'object') return false;
+                // Cohort registry patch (added/removed cohorts) rides on the same row
+                try { if (payload && payload.cohortPatch && typeof pflxCohortPatchMerge === 'function') pflxCohortPatchMerge(payload.cohortPatch); } catch (e) {}
                 _hmcApplyingCloudOrgs = true;
                 Object.keys(orgs).forEach(function (k) {
                     if (orgs[k] && typeof orgs[k] === 'object') {
@@ -14459,6 +14477,335 @@
                 });
             } catch (e) {}
         }, 850);
+
+        // ═══════════ COHORT HUB — single source of truth for cohorts (July 10) ═══════════
+        // Before this, cohorts lived in THREE places that drifted apart: the
+        // hard-coded COHORTS registry, ORGANIZATIONS[*].cohorts arrays, and
+        // free-text cohort strings typed onto player records. The hub unions
+        // all three, dedupes, and is the ONLY mutation path (register /
+        // assign-org / rename / merge / delete) — every mutation rewrites
+        // player records + org arrays + registry together and persists.
+        // Registry changes survive reloads via a patch (added/removed) stored
+        // in localStorage AND on the pflx_organizations cloud row.
+        var PFLX_COHORT_PATCH_KEY = 'pflx_cohort_patch_v1';
+        var PFLX_COHORT_PATCH = { added: {}, removed: [] };
+        function pflxCohortPatchApply() {
+            try {
+                (PFLX_COHORT_PATCH.removed || []).forEach(function (n) { delete COHORTS[n]; });
+                Object.keys(PFLX_COHORT_PATCH.added || {}).forEach(function (n) {
+                    COHORTS[n] = Object.assign({}, COHORTS[n] || {}, PFLX_COHORT_PATCH.added[n]);
+                });
+            } catch (e) {}
+        }
+        function pflxCohortPatchMerge(patch) {
+            if (!patch || typeof patch !== 'object') return;
+            try {
+                Object.keys(patch.added || {}).forEach(function (n) { PFLX_COHORT_PATCH.added[n] = patch.added[n]; });
+                (patch.removed || []).forEach(function (n) {
+                    if (PFLX_COHORT_PATCH.removed.indexOf(n) < 0) PFLX_COHORT_PATCH.removed.push(n);
+                });
+                pflxCohortPatchApply();
+            } catch (e) {}
+        }
+        try {
+            var __cp = JSON.parse(localStorage.getItem(PFLX_COHORT_PATCH_KEY) || 'null');
+            if (__cp) { PFLX_COHORT_PATCH = { added: __cp.added || {}, removed: __cp.removed || [] }; pflxCohortPatchApply(); }
+        } catch (e) {}
+        function pflxCohortPatchSave() {
+            try { localStorage.setItem(PFLX_COHORT_PATCH_KEY, JSON.stringify(PFLX_COHORT_PATCH)); } catch (e) {}
+            try { hmcSaveOrgs(); } catch (e) {}   // org cloud row carries the patch everywhere
+        }
+
+        window.pflxCohortHub = (function () {
+            function norm(s) { return String(s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+            function tight(s) { return norm(s).replace(/\s+/g, ''); }   // duplicate detector ('Player Pool' ≈ 'PlayerPool')
+            function roster() { return (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) ? PLAYERS : []; }
+            function playerCohortsOf(p) {
+                if (Array.isArray(p.cohorts) && p.cohorts.length) return p.cohorts;
+                return String(p.cohort || '').split(/[,;]/).map(function (s) { return s.trim(); }).filter(Boolean);
+            }
+            function defaultDef(name, orgKey) {
+                return { name: name, type: orgKey ? 'org' : 'base', org: orgKey || null,
+                         desc: name + (orgKey && ORGANIZATIONS[orgKey] ? ' — ' + (ORGANIZATIONS[orgKey].shortName || orgKey) : ''),
+                         tier: (orgKey && ORGANIZATIONS[orgKey] && ORGANIZATIONS[orgKey].subscription) || 'standard',
+                         minRank: 0, subscription: orgKey ? 'org-sponsored' : 'none',
+                         apps: { xcoin: true, pathways: true, arena: true, darkcampus: true },
+                         pathwayFull: false, arenaFull: false, seasons: false, projects: false, internships: false };
+            }
+            function orgOfName(name) {
+                var hit = null, n = norm(name);
+                Object.keys(ORGANIZATIONS).forEach(function (k) {
+                    if ((ORGANIZATIONS[k].cohorts || []).some(function (c) { return norm(c) === n; })) hit = k;
+                });
+                if (hit) return hit;
+                var def = COHORTS[name];
+                return (def && def.org && ORGANIZATIONS[def.org]) ? def.org : null;
+            }
+            // Union of every cohort known anywhere, deduped by normalized name.
+            function list() {
+                var map = {};
+                function touch(name, src) {
+                    var n = norm(name); if (!n) return null;
+                    if (!map[n]) map[n] = { name: name, norm: n, tight: tight(name), variants: [], members: 0, registered: false, org: null };
+                    var it = map[n];
+                    if (it.variants.indexOf(name) < 0) it.variants.push(name);
+                    return it;
+                }
+                Object.keys(COHORTS).forEach(function (k) { var it = touch(k); if (it) { it.registered = true; it.name = k; } });
+                Object.keys(ORGANIZATIONS).forEach(function (o) {
+                    (ORGANIZATIONS[o].cohorts || []).forEach(function (c) { var it = touch(c); if (it && !it.registered) it.name = c; });
+                });
+                roster().forEach(function (p) {
+                    if (!p || p.godTier) return;
+                    playerCohortsOf(p).forEach(function (c) { var it = touch(c); if (it) it.members++; });
+                });
+                var arr = Object.keys(map).map(function (n) { var it = map[n]; it.org = orgOfName(it.name); return it; });
+                // flag possible duplicates (same tight form, different norm — e.g. spacing)
+                arr.forEach(function (a) {
+                    a.dupOf = null;
+                    arr.forEach(function (b) {
+                        if (a === b || a.tight !== b.tight) return;
+                        // the registered / larger cohort is the canonical one
+                        if ((b.registered && !a.registered) || (b.registered === a.registered && b.members > a.members)) a.dupOf = b.name;
+                    });
+                });
+                arr.sort(function (a, b) { return String(a.org || '~').localeCompare(String(b.org || '~')) || a.name.localeCompare(b.name); });
+                return arr;
+            }
+            function names() { return list().map(function (it) { return it.name; }); }
+            // Rewrite every player record carrying `fromName` → `toName` (null = drop → PlayerPool)
+            function rewritePlayers(fromName, toName) {
+                var n = norm(fromName), changed = 0;
+                function fix(p) {
+                    if (!p) return;
+                    var arr = playerCohortsOf(p), out = [], hit = false;
+                    arr.forEach(function (c) {
+                        if (norm(c) === n) { hit = true; if (toName && out.indexOf(toName) < 0) out.push(toName); }
+                        else if (out.indexOf(c) < 0) out.push(c);
+                    });
+                    if (!hit) return;
+                    if (out.length === 0) out = ['PlayerPool'];
+                    p.cohorts = out; p.cohort = out.join(', ');
+                    changed++;
+                }
+                roster().forEach(fix);
+                try { if (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) mcPlayers.forEach(fix); } catch (e) {}
+                if (changed) {
+                    try { if (typeof window.pflxPersistPlayers === 'function') window.pflxPersistPlayers(); } catch (e) {}
+                    try { if (typeof mcSaveData === 'function') mcSaveData('players'); } catch (e) {}
+                }
+                return changed;
+            }
+            function removeFromAllOrgs(name) {
+                var n = norm(name);
+                Object.keys(ORGANIZATIONS).forEach(function (k) {
+                    var o = ORGANIZATIONS[k];
+                    if (Array.isArray(o.cohorts)) o.cohorts = o.cohorts.filter(function (c) { return norm(c) !== n; });
+                });
+            }
+            // MC cohort GROUPS (folders) reference cohorts by name too — keep them consistent
+            function rewriteGroups(fromName, toName) {
+                try {
+                    if (typeof mcCohortGroups === 'undefined' || !Array.isArray(mcCohortGroups)) return;
+                    var n = norm(fromName), dirty = false;
+                    mcCohortGroups.forEach(function (g) {
+                        if (!g || !Array.isArray(g.cohorts)) return;
+                        var out = [];
+                        g.cohorts.forEach(function (c) {
+                            if (norm(c) === n) { if (toName && out.indexOf(toName) < 0) out.push(toName); dirty = true; }
+                            else if (out.indexOf(c) < 0) out.push(c);
+                        });
+                        g.cohorts = out;
+                    });
+                    if (dirty && typeof mcSaveData === 'function') mcSaveData('cohortgroups');
+                } catch (e) {}
+            }
+            function changedSignal() {
+                try { window.dispatchEvent(new CustomEvent('pflx-cohort-settings-changed')); } catch (e) {}
+                try { if (typeof populateCohortSelect === 'function' && document.getElementById('cohort-manager-select')) populateCohortSelect(); } catch (e) {}
+                try { if (typeof hmcRenderOrgs === 'function') hmcRenderOrgs(); } catch (e) {}
+                try { if (typeof hmcRenderPlayers === 'function') hmcRenderPlayers(); } catch (e) {}
+            }
+            function register(name, orgKey) {
+                name = String(name || '').trim(); if (!name) return false;
+                var existing = list().filter(function (it) { return it.norm === norm(name); })[0];
+                var canonicalName = existing ? existing.name : name;
+                if (!COHORTS[canonicalName]) {
+                    var def = defaultDef(canonicalName, orgKey || null);
+                    COHORTS[canonicalName] = def;
+                    PFLX_COHORT_PATCH.added[canonicalName] = def;
+                    PFLX_COHORT_PATCH.removed = PFLX_COHORT_PATCH.removed.filter(function (x) { return norm(x) !== norm(canonicalName); });
+                }
+                assignOrg(canonicalName, orgKey || null, true);
+                pflxCohortPatchSave();
+                changedSignal();
+                return true;
+            }
+            function assignOrg(name, orgKey, skipSave) {
+                removeFromAllOrgs(name);
+                if (orgKey && ORGANIZATIONS[orgKey]) {
+                    ORGANIZATIONS[orgKey].cohorts = ORGANIZATIONS[orgKey].cohorts || [];
+                    if (ORGANIZATIONS[orgKey].cohorts.indexOf(name) < 0) ORGANIZATIONS[orgKey].cohorts.push(name);
+                }
+                if (COHORTS[name]) {
+                    COHORTS[name].org = orgKey || null;
+                    if (PFLX_COHORT_PATCH.added[name]) PFLX_COHORT_PATCH.added[name].org = orgKey || null;
+                }
+                if (!skipSave) { try { hmcSaveOrgs(); } catch (e) {} changedSignal(); }
+            }
+            // Rename — or MERGE when the new name already exists (case/space-insensitive)
+            function renameOrMerge(oldName, newName) {
+                newName = String(newName || '').trim();
+                if (!newName || newName === oldName) return 0;
+                var target = list().filter(function (it) { return it.norm === norm(newName) && it.norm !== norm(oldName); })[0];
+                var canonicalNew = target ? target.name : newName;
+                var org = orgOfName(canonicalNew) || orgOfName(oldName);
+                // carry the old registry entry's settings to the new key if it has none
+                var oldDef = COHORTS[oldName] || null;
+                if (!COHORTS[canonicalNew]) {
+                    var nd = oldDef ? Object.assign({}, oldDef, { name: canonicalNew }) : defaultDef(canonicalNew, org);
+                    COHORTS[canonicalNew] = nd;
+                    PFLX_COHORT_PATCH.added[canonicalNew] = nd;
+                }
+                if (COHORTS[oldName] && oldName !== canonicalNew) {
+                    delete COHORTS[oldName];
+                    delete PFLX_COHORT_PATCH.added[oldName];
+                    if (PFLX_COHORT_PATCH.removed.indexOf(oldName) < 0) PFLX_COHORT_PATCH.removed.push(oldName);
+                }
+                removeFromAllOrgs(oldName);
+                assignOrg(canonicalNew, org, true);
+                var moved = rewritePlayers(oldName, canonicalNew);
+                rewriteGroups(oldName, canonicalNew);
+                pflxCohortPatchSave();
+                changedSignal();
+                return moved;
+            }
+            function remove(name, moveTo) {
+                moveTo = String(moveTo || 'PlayerPool').trim() || 'PlayerPool';
+                var moved = rewritePlayers(name, norm(name) === norm(moveTo) ? null : moveTo);
+                rewriteGroups(name, null);
+                removeFromAllOrgs(name);
+                if (COHORTS[name]) {
+                    delete COHORTS[name];
+                    delete PFLX_COHORT_PATCH.added[name];
+                    if (PFLX_COHORT_PATCH.removed.indexOf(name) < 0) PFLX_COHORT_PATCH.removed.push(name);
+                }
+                pflxCohortPatchSave();
+                changedSignal();
+                return moved;
+            }
+            return { list: list, names: names, register: register, assignOrg: assignOrg,
+                     renameOrMerge: renameOrMerge, remove: remove, norm: norm, orgOfName: orgOfName };
+        })();
+
+        // ── COHORT HUB UI (Organizations panel) ─────────────────────────
+        var _hmcCohortHubItems = [];
+        window.hmcRenderCohortHub = function () {
+            var box = document.getElementById('hmc-cohort-hub');
+            if (!box) return;
+            // org dropdown for the add-row
+            var addOrg = document.getElementById('hmc-cohort-new-org');
+            if (addOrg) {
+                var cur = addOrg.value;
+                addOrg.innerHTML = '<option value="">— Independent —</option>' + Object.keys(ORGANIZATIONS).map(function (k) {
+                    return '<option value="' + escapeHtml(k) + '">' + escapeHtml(ORGANIZATIONS[k].shortName || ORGANIZATIONS[k].name || k) + '</option>';
+                }).join('');
+                if (cur) addOrg.value = cur;
+            }
+            var items = pflxCohortHub.list();
+            _hmcCohortHubItems = items;
+            if (!items.length) { box.innerHTML = '<div style="color:#6a7290;font-size:12px;font-family:Rajdhani,sans-serif;">No cohorts yet.</div>'; return; }
+            var orgSelHtml = function (it, idx) {
+                return '<select data-hub-org="' + idx + '" style="background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.12);color:#e0e6ff;padding:5px 8px;border-radius:6px;font-family:Rajdhani,sans-serif;font-size:12px;max-width:150px;">' +
+                    '<option value=""' + (!it.org ? ' selected' : '') + '>— Independent —</option>' +
+                    Object.keys(ORGANIZATIONS).map(function (k) {
+                        return '<option value="' + escapeHtml(k) + '"' + (it.org === k ? ' selected' : '') + '>' + escapeHtml(ORGANIZATIONS[k].shortName || k) + '</option>';
+                    }).join('') + '</select>';
+            };
+            box.innerHTML = items.map(function (it, idx) {
+                var statusChip = it.registered
+                    ? '<span style="font-size:9px;padding:2px 8px;border-radius:4px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:#4ade80;font-family:Share Tech Mono,monospace;letter-spacing:0.06em;">REGISTERED</span>'
+                    : '<span style="font-size:9px;padding:2px 8px;border-radius:4px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.35);color:#f59e0b;font-family:Share Tech Mono,monospace;letter-spacing:0.06em;">PLAYERS ONLY</span> ' +
+                      '<button data-hub-register="' + idx + '" class="hmc-btn-sm hmc-btn-cyan" style="padding:2px 8px;font-size:9px;">REGISTER</button>';
+                var dupChip = it.dupOf
+                    ? '<div style="margin-top:3px;font-size:10px;color:#f59e0b;font-family:Rajdhani,sans-serif;">⚠ possible duplicate of <b>' + escapeHtml(it.dupOf) + '</b> <button data-hub-mergedup="' + idx + '" class="hmc-btn-sm" style="padding:1px 8px;font-size:9px;border:1px solid rgba(245,158,11,0.5);color:#f59e0b;background:rgba(245,158,11,0.08);">MERGE INTO ' + escapeHtml(it.dupOf.toUpperCase()) + '</button></div>'
+                    : '';
+                var variantNote = it.variants.length > 1
+                    ? '<div style="margin-top:2px;font-size:9px;color:#6a7290;font-family:Share Tech Mono,monospace;">spellings in use: ' + it.variants.map(escapeHtml).join(' · ') + '</div>'
+                    : '';
+                return '<div style="display:grid;grid-template-columns:minmax(160px,1fr) 160px 70px 170px auto;gap:10px;align-items:center;padding:8px 12px;background:rgba(10,18,40,0.5);border:1px solid rgba(0,240,255,0.08);border-radius:8px;">' +
+                    '<div><span style="color:#e0e6ff;font-family:Rajdhani,sans-serif;font-size:13px;font-weight:700;">' + escapeHtml(it.name) + '</span>' + dupChip + variantNote + '</div>' +
+                    '<div>' + orgSelHtml(it, idx) + '</div>' +
+                    '<div style="font-family:Share Tech Mono,monospace;font-size:12px;color:var(--gold);">👥 ' + it.members + '</div>' +
+                    '<div>' + statusChip + '</div>' +
+                    '<div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap;">' +
+                        '<button data-hub-rename="' + idx + '" class="hmc-btn-sm" style="padding:3px 10px;font-size:9px;">RENAME</button>' +
+                        '<button data-hub-merge="' + idx + '" class="hmc-btn-sm" style="padding:3px 10px;font-size:9px;">MERGE</button>' +
+                        '<button data-hub-delete="' + idx + '" class="hmc-btn-sm hmc-btn-red" style="padding:3px 10px;font-size:9px;">DELETE</button>' +
+                    '</div>' +
+                '</div>';
+            }).join('');
+            // wire actions
+            box.querySelectorAll('select[data-hub-org]').forEach(function (sel) {
+                sel.onchange = function () {
+                    var it = _hmcCohortHubItems[parseInt(sel.getAttribute('data-hub-org'), 10)];
+                    if (!it) return;
+                    if (!it.registered) pflxCohortHub.register(it.name, sel.value || null);
+                    else pflxCohortHub.assignOrg(it.name, sel.value || null);
+                    hmcRenderCohortHub();
+                    try { window.pflxShowSaveToast && window.pflxShowSaveToast(it.name + ' → ' + (sel.value || 'Independent')); } catch (e) {}
+                };
+            });
+            function hook(attr, fn) {
+                box.querySelectorAll('button[' + attr + ']').forEach(function (btn) {
+                    btn.onclick = function () {
+                        var it = _hmcCohortHubItems[parseInt(btn.getAttribute(attr), 10)];
+                        if (it) fn(it);
+                    };
+                });
+            }
+            hook('data-hub-register', function (it) {
+                pflxCohortHub.register(it.name, it.org || null);
+                hmcRenderCohortHub();
+            });
+            hook('data-hub-rename', function (it) {
+                var nn = prompt('Rename cohort "' + it.name + '" to:\n(If the new name already exists, the two cohorts will be MERGED.)', it.name);
+                if (nn === null) return;
+                var moved = pflxCohortHub.renameOrMerge(it.name, nn);
+                hmcRenderCohortHub();
+                try { window.pflxShowSaveToast && window.pflxShowSaveToast('Renamed · ' + moved + ' player record(s) updated'); } catch (e) {}
+            });
+            hook('data-hub-merge', function (it) {
+                var tgt = prompt('Merge "' + it.name + '" INTO which cohort?\nAll ' + it.members + ' member(s) move there; "' + it.name + '" disappears.\n\nExisting cohorts:\n' + _hmcCohortHubItems.map(function (x) { return x.name; }).join(', '));
+                if (!tgt) return;
+                var moved = pflxCohortHub.renameOrMerge(it.name, tgt);
+                hmcRenderCohortHub();
+                try { window.pflxShowSaveToast && window.pflxShowSaveToast('Merged · ' + moved + ' player record(s) moved'); } catch (e) {}
+            });
+            hook('data-hub-mergedup', function (it) {
+                if (!it.dupOf) return;
+                if (!confirm('Merge "' + it.name + '" into "' + it.dupOf + '"?\n' + it.members + ' member record(s) will be rewritten.')) return;
+                var moved = pflxCohortHub.renameOrMerge(it.name, it.dupOf);
+                hmcRenderCohortHub();
+                try { window.pflxShowSaveToast && window.pflxShowSaveToast('Merged · ' + moved + ' player record(s) moved'); } catch (e) {}
+            });
+            hook('data-hub-delete', function (it) {
+                if (!confirm('Delete cohort "' + it.name + '"?\nIts ' + it.members + ' member(s) will be moved to PlayerPool.')) return;
+                var moved = pflxCohortHub.remove(it.name, 'PlayerPool');
+                hmcRenderCohortHub();
+                try { window.pflxShowSaveToast && window.pflxShowSaveToast('Deleted · ' + moved + ' player record(s) moved to PlayerPool'); } catch (e) {}
+            });
+        };
+        window.hmcCohortHubAdd = function () {
+            var nameEl = document.getElementById('hmc-cohort-new-name');
+            var orgEl = document.getElementById('hmc-cohort-new-org');
+            var name = (nameEl && nameEl.value || '').trim();
+            if (!name) return;
+            pflxCohortHub.register(name, (orgEl && orgEl.value) || null);
+            if (nameEl) nameEl.value = '';
+            hmcRenderCohortHub();
+            try { window.pflxShowSaveToast && window.pflxShowSaveToast('Cohort added · ' + name); } catch (e) {}
+        };
 
         function hmcRenderOrgs() {
             const container = document.getElementById('hmc-org-cards');
@@ -14510,6 +14857,8 @@
                 `;
                 container.appendChild(card);
             });
+            // COHORT HUB table renders with the org cards (same panel)
+            try { if (typeof hmcRenderCohortHub === 'function') hmcRenderCohortHub(); } catch (e) {}
         }
 
         // ── Org editor modal ─────────────────────────────────────────────
@@ -14522,10 +14871,15 @@
         window.hmcOpenOrgEditor = function (orgKey) {
             var org = ORGANIZATIONS[orgKey];
             if (!org) return;
-            // Build the cohort list — every cohort known in COHORTS plus any
-            // legacy strings that exist on org.cohorts but aren't in COHORTS.
-            var allCohorts = Object.keys(COHORTS || {});
-            (org.cohorts || []).forEach(function (c) { if (allCohorts.indexOf(c) < 0) allCohorts.push(c); });
+            // Build the cohort list from the COHORT HUB — the same deduped
+            // union every other picker uses (registry + org rosters + player
+            // records), so cohorts that only exist on players show up here too.
+            var allCohorts;
+            try { allCohorts = window.pflxCohortHub.names(); } catch (e) { allCohorts = null; }
+            if (!allCohorts || !allCohorts.length) {
+                allCohorts = Object.keys(COHORTS || {});
+                (org.cohorts || []).forEach(function (c) { if (allCohorts.indexOf(c) < 0) allCohorts.push(c); });
+            }
             allCohorts.sort();
             // Note which other orgs claim each cohort (so the UI can warn)
             var cohortClaimedBy = {};
@@ -16178,12 +16532,28 @@
         function populateCohortSelect() {
             const sel = document.getElementById('cohort-manager-select');
             sel.innerHTML = '<option value="">— Choose a cohort —</option>';
-            // Group cohorts by organization
+            // COHORT HUB (July 10) — group the SAME deduped union every other
+            // picker uses. Org membership comes from ORGANIZATIONS rosters
+            // (hub-resolved), so this dropdown can no longer drift from Org
+            // Management. Unregistered (players-only) cohorts are listed
+            // disabled with a pointer to the hub.
             const grouped = {};
             const noOrg = [];
-            Object.keys(COHORTS).forEach(key => {
+            const unregistered = [];
+            let hubItems = null;
+            try { hubItems = window.pflxCohortHub ? window.pflxCohortHub.list() : null; } catch (e) {}
+            if (hubItems && hubItems.length) {
+                hubItems.forEach(function (it) {
+                    if (!it.registered) { unregistered.push(it.name); return; }
+                    if (it.org && ORGANIZATIONS[it.org]) {
+                        if (!grouped[it.org]) grouped[it.org] = [];
+                        grouped[it.org].push(it.name);
+                    } else {
+                        noOrg.push(it.name);
+                    }
+                });
+            } else Object.keys(COHORTS).forEach(key => {
                 const c = COHORTS[key];
-                if (key === 'Player Pool' && COHORTS['PlayerPool']) return; // skip duplicate
                 if (c.org && ORGANIZATIONS[c.org]) {
                     if (!grouped[c.org]) grouped[c.org] = [];
                     grouped[c.org].push(key);
@@ -16210,10 +16580,24 @@
                 const group = document.createElement('optgroup');
                 group.label = 'Passes & Subscriptions';
                 noOrg.forEach(key => {
-                    const c = COHORTS[key];
+                    const c = COHORTS[key] || { name: key, type: 'base' };
                     const opt = document.createElement('option');
                     opt.value = key;
                     opt.textContent = `${c.name}  (${c.type})`;
+                    group.appendChild(opt);
+                });
+                sel.appendChild(group);
+            }
+            // Unregistered — exist only on player records. Register them in
+            // Host Controls → Organizations → Cohort Manager to configure access.
+            if (typeof unregistered !== 'undefined' && unregistered.length > 0) {
+                const group = document.createElement('optgroup');
+                group.label = '⚠ Unregistered (register in Org Management)';
+                unregistered.forEach(key => {
+                    const opt = document.createElement('option');
+                    opt.value = key;
+                    opt.disabled = true;
+                    opt.textContent = key;
                     group.appendChild(opt);
                 });
                 sel.appendChild(group);
@@ -54079,6 +54463,16 @@ RESPONSE RULES:
 
         // ── List of all cohorts known to the system (drawn from PLAYERS) ──
         function getAllCohorts() {
+            // COHORT HUB (July 10) — single source of truth. The player editor
+            // now shows the SAME deduped list as Org Management and Settings →
+            // Cohort Manager (registry + org rosters + player records).
+            try {
+                if (window.pflxCohortHub) {
+                    var names = window.pflxCohortHub.names().filter(Boolean);
+                    if (names.length) return names.sort();
+                }
+            } catch (e) {}
+            // Fallback: legacy player-record scan
             try {
                 if (typeof PLAYERS === 'undefined') return [];
                 var set = new Set();
