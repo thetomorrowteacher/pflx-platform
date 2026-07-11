@@ -5528,6 +5528,21 @@
             transform: translateX(18px);
         }
 
+        /* ═══ Date inputs — CALENDAR DROPDOWN (July 10) ═══
+           The native indicator was near-invisible on the dark theme, so
+           hosts ended up typing digits. Bright cyan icon + pointer cursor,
+           and a global click handler (pflx-date-picker script) opens the
+           calendar dropdown on click anywhere in the field. */
+        input[type="date"] { cursor: pointer; }
+        input[type="date"]::-webkit-calendar-picker-indicator {
+            cursor: pointer;
+            width: 18px; height: 18px;
+            opacity: 0.95;
+            /* tint the glyph cyan to match the console */
+            filter: invert(0.75) sepia(1) saturate(6) hue-rotate(150deg) brightness(1.15);
+        }
+        input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: 1; transform: scale(1.12); }
+
         /* Cohort Manager */
         .cohort-manager {
             max-width: 680px;
@@ -8851,6 +8866,18 @@
                                         </div>
                                         <div style="font-size:11px;color:rgba(255,255,255,0.5);line-height:1.5;padding:8px 10px;background:rgba(0,212,255,0.04);border-left:2px solid rgba(0,212,255,0.4);border-radius:4px;margin-top:8px;">
                                             Monitored projects progress through <strong style="color:#00d4ff;">Engagement → Development → Enhancement → Fulfillment</strong>. Phase weights and messaging live in <em>Settings → FLP Protocol</em>.
+                                        </div>
+                                    </div>
+                                    <!-- Dates (July 10) — drive FLP monitoring urgency (startedAt/dueDate)
+                                         and the My Work overdue-projects widget. -->
+                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Start Date</label>
+                                            <input type="date" id="mc-project-start" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                        </div>
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Due Date</label>
+                                            <input type="date" id="mc-project-due" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
                                         </div>
                                     </div>
                                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
@@ -14505,6 +14532,19 @@
                 });
             } catch (e) {}
         }, 850);
+
+        // ═══ CALENDAR DROPDOWN for every date input (July 10) ═══
+        // One delegated listener covers ALL MC pillars — Seasons, Checkpoints,
+        // Projects, Jobs, Tasks, Sessions — including forms rendered later.
+        // Clicking anywhere in a date field opens the native calendar dropdown
+        // (showPicker, Chrome 99+ / Safari 16+); typing still works.
+        document.addEventListener('click', function (e) {
+            try {
+                var t = e.target;
+                if (!t || t.tagName !== 'INPUT' || t.type !== 'date') return;
+                if (typeof t.showPicker === 'function') t.showPicker();
+            } catch (err) { /* NotAllowedError etc. — typing still works */ }
+        }, true);
 
         // ═══════════ COHORT HUB — single source of truth for cohorts (July 10) ═══════════
         // Before this, cohorts lived in THREE places that drifted apart: the
@@ -31140,6 +31180,14 @@
                 var p = mcProjects[index];
                 var el;
                 el = document.getElementById('mc-project-title'); if (el) el.value = p.name || '';
+                // Dates — startedAt may be a ms timestamp or a YYYY-MM-DD string
+                el = document.getElementById('mc-project-start');
+                if (el) {
+                    var __ps = p.startedAt || '';
+                    if (typeof __ps === 'number') { try { __ps = new Date(__ps).toISOString().split('T')[0]; } catch (e) { __ps = ''; } }
+                    el.value = __ps || '';
+                }
+                el = document.getElementById('mc-project-due'); if (el) el.value = p.dueDate || '';
                 el = document.getElementById('mc-project-desc'); if (el) el.value = p.description || '';
                 // Subtask checklist — restore prior items including completion state
                 // so the editor can preserve it on save.
@@ -31217,7 +31265,7 @@
                     if (cohortListDiv) cohortListDiv.style.display = 'none';
                 }
             } else {
-                ['mc-project-title','mc-project-desc','mc-project-team','mc-project-link','mc-project-objectives','mc-project-deliverables'].forEach(function(id) {
+                ['mc-project-title','mc-project-desc','mc-project-team','mc-project-link','mc-project-objectives','mc-project-deliverables','mc-project-start','mc-project-due'].forEach(function(id) {
                     var el = document.getElementById(id); if (el) el.value = '';
                 });
                 // Clear the subtask editor for new projects.
@@ -31288,6 +31336,11 @@
                 name: title,
                 description: document.getElementById('mc-project-desc')?.value || '',
                 status: document.getElementById('mc-project-status')?.value || 'planning',
+                // Dates — startedAt + dueDate feed pflxComputeFlpStatus + My Work overdue
+                startedAt: document.getElementById('mc-project-start')?.value ||
+                           (mcProjectEditIndex >= 0 ? (mcProjects[mcProjectEditIndex].startedAt || '') : ''),
+                dueDate:   document.getElementById('mc-project-due')?.value ||
+                           (mcProjectEditIndex >= 0 ? (mcProjects[mcProjectEditIndex].dueDate || '') : ''),
                 // FLP tracking mode mirrors the Tasks model — bypass = simple project,
                 // monitoring = task moves through E→D→Enh→F over its duration with
                 // urgency colors from pflxComputeFlpStatus().
