@@ -23174,6 +23174,9 @@
                     : '') +
             '</div>';
 
+            // ── Startup Studio recruitment: invites to me + scouting list ──
+            try { html += pflxStudioRecruitHtml(myPlayer); } catch (e) {}
+
             // ── Active checkpoint hero + Next Up strip ────────────────────
             // Surface the active checkpoint front and center with its banner,
             // a phase pill computed from start/end dates, and a horizontal
@@ -24884,7 +24887,118 @@
         window.pflxStudioMarket = pflxStudioMarket;
         window.pflxStudioChipHtml = pflxStudioChipHtml;
         // boot: market + backfill ride along once MC data is in
-        setTimeout(function () { try { pflxStudioMarket.load(); pflxStudioBackfill(); } catch (e) {} }, 2500);
+        setTimeout(function () { try { pflxStudioMarket.load(); pflxStudioBackfill(); pflxStudioRecruit.load(); } catch (e) {} }, 2500);
+
+        // ── Recruitment: high-evo members scout quality portfolios into their house ──
+        // Fraternity dynamic: rank ≥ RECRUIT_MIN_RANK members see a scouting list
+        // (best unaffiliated-or-rival portfolios) on Home Base; invitees get an
+        // accept/decline card. One house change per season (or 30-day cooldown).
+        const pflxStudioRecruit = {
+            KEY: 'pflx_studio_recruit', MIN_RANK: 5, invites: [], loaded: false,
+            async load() {
+                try {
+                    const d = await supabaseLoad(this.KEY);
+                    this.invites = (d && Array.isArray(d.invites)) ? d.invites : [];
+                } catch (e) { this.invites = []; }
+                this.loaded = true;
+            },
+            async persist() {
+                try { await supabaseSave(this.KEY, { invites: this.invites.slice(0, 200), updatedAt: Date.now() }); } catch (e) {}
+            },
+            forPlayer(pid) { return this.invites.filter(function (i) { return i.playerId === pid && i.status === 'pending'; }); },
+            portfolioScore(p) { return (p.digitalBadges || 0) * 50 + (p.totalXcoin || p.xcoin || 0) / 20 + (p.level || 1) * 30; },
+            canRecruit(me) { return me && (me.rank || me.level || 1) >= this.MIN_RANK && me.studioId; },
+            prospects(me, limit) {
+                const self = this;
+                return (mcPlayers || [])
+                    .filter(function (p) { return p && !p.isHost && p.role !== 'admin' && p.id !== me.id && p.studioId !== me.studioId; })
+                    .filter(function (p) { return !self.invites.some(function (i) { return i.playerId === p.id && i.studioId === me.studioId && i.status === 'pending'; }); })
+                    .sort(function (a, b) { return self.portfolioScore(b) - self.portfolioScore(a); })
+                    .slice(0, limit || 5);
+            },
+            async send(recruiter, targetId) {
+                const t = (mcPlayers || []).find(function (p) { return p.id === targetId; });
+                if (!t || !this.canRecruit(recruiter)) return false;
+                this.invites.unshift({ id: 'ri_' + Math.random().toString(36).slice(2, 9), playerId: targetId,
+                    studioId: recruiter.studioId, byId: recruiter.id, byName: recruiter.brandName || recruiter.name,
+                    at: Date.now(), status: 'pending' });
+                await this.persist();
+                return true;
+            },
+            changeBlocked(p) {
+                try {
+                    const season = (typeof mcSeasons !== 'undefined' && mcSeasons.find) ? (mcSeasons.find(function (s) { return s && s.active; }) || null) : null;
+                    if (season && p.studioChangeSeason === season.id) return 'You already changed houses this season.';
+                    if (!season && p.studioChangedAt && Date.now() - p.studioChangedAt < 30 * 86400000) return 'House changes are limited — try again later.';
+                } catch (e) {}
+                return null;
+            },
+            async respond(inviteId, accept) {
+                const inv = this.invites.find(function (i) { return i.id === inviteId; });
+                if (!inv || inv.status !== 'pending') return;
+                const p = (mcPlayers || []).find(function (x) { return x.id === inv.playerId; });
+                if (accept && p) {
+                    const blocked = this.changeBlocked(p);
+                    if (blocked) { alert(blocked); return; }
+                    p.studioId = inv.studioId;
+                    p.studioChangedAt = Date.now();
+                    try {
+                        const season = (typeof mcSeasons !== 'undefined' && mcSeasons.find) ? (mcSeasons.find(function (s) { return s && s.active; }) || null) : null;
+                        if (season) p.studioChangeSeason = season.id;
+                    } catch (e) {}
+                    try { mcSaveData('players'); } catch (e) {}
+                }
+                inv.status = accept ? 'accepted' : 'declined';
+                inv.respondedAt = Date.now();
+                await this.persist();
+                try { if (typeof pflxRenderHomeLive === 'function') pflxRenderHomeLive(); } catch (e) {}
+                try { if (typeof navigateTo === 'function' && window._pflxCurrentView === 'home') navigateTo('home'); } catch (e) {}
+            }
+        };
+        window.pflxStudioRecruit = pflxStudioRecruit;
+        window.pflxRecruitSend = function (targetId) {
+            const me = (typeof _ppGetActivePlayerRecord === 'function') ? _ppGetActivePlayerRecord() : null;
+            if (!me) return;
+            pflxStudioRecruit.send(me, targetId).then(function (ok) {
+                if (ok) { try { alert('Recruitment invite sent — they will see it on their Home Base.'); } catch (e) {} }
+            });
+        };
+        window.pflxRecruitRespond = function (id, accept) { pflxStudioRecruit.respond(id, accept); };
+        // Home Base sections (invitee card + scouting list) — returns HTML.
+        function pflxStudioRecruitHtml(myPlayer) {
+            if (!myPlayer || !pflxStudioRecruit.loaded) return '';
+            let html = '';
+            // 1) invites TO me
+            pflxStudioRecruit.forPlayer(myPlayer.id).slice(0, 2).forEach(function (inv) {
+                const m = pflxStudioMeta(inv.studioId);
+                if (!m) return;
+                html += '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:linear-gradient(135deg,' + m.color + '22,' + m.color + '0d);border:1px solid ' + m.color + '66;border-radius:14px;padding:14px 16px;margin-bottom:16px;">' +
+                    pflxStudioChipHtml(inv.studioId, { size: 38 }) +
+                    '<div style="flex:1;min-width:180px;"><div style="font-family:Rajdhani,sans-serif;font-weight:800;font-size:15px;color:#fff;">You\'ve been scouted!</div>' +
+                    '<div style="font-size:12px;color:rgba(255,255,255,0.7);">' + escapeHtml(inv.byName || 'A senior member') + ' wants you in ' + escapeHtml(m.name) + '.</div></div>' +
+                    '<div style="display:flex;gap:8px;">' +
+                    '<button onclick="pflxRecruitRespond(\'' + inv.id + '\', true)" style="background:' + m.color + ';border:none;color:#fff;font-family:Orbitron,sans-serif;font-size:10px;font-weight:800;letter-spacing:0.08em;padding:9px 16px;border-radius:9px;cursor:pointer;">JOIN HOUSE</button>' +
+                    '<button onclick="pflxRecruitRespond(\'' + inv.id + '\', false)" style="background:transparent;border:1px solid rgba(255,255,255,0.25);color:#aab;font-family:Orbitron,sans-serif;font-size:10px;padding:9px 14px;border-radius:9px;cursor:pointer;">DECLINE</button>' +
+                    '</div></div>';
+            });
+            // 2) scouting list for senior members
+            if (pflxStudioRecruit.canRecruit(myPlayer)) {
+                const pros = pflxStudioRecruit.prospects(myPlayer, 4);
+                if (pros.length) {
+                    const m = pflxStudioMeta(myPlayer.studioId);
+                    html += '<div style="background:rgba(22,22,31,0.55);border:1px solid rgba(255,255,255,0.09);border-radius:14px;padding:14px 16px;margin-bottom:16px;">' +
+                        '<div style="font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:0.16em;color:' + (m ? m.color : '#00f0ff') + ';font-weight:800;margin-bottom:10px;">🏢 SCOUTING — GROW ' + escapeHtml((m ? m.name : 'YOUR HOUSE').toUpperCase()) + '</div>' +
+                        pros.map(function (p) {
+                            return '<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);">' +
+                                '<div style="flex:1;min-width:0;"><span style="color:#e8ecff;font-weight:700;">' + escapeHtml(p.brandName || p.name) + '</span>' +
+                                ' <span style="font-size:11px;color:#6a7290;">· ' + (p.digitalBadges || 0) + ' badges · ' + ((p.totalXcoin || p.xcoin || 0)).toLocaleString() + ' XC · portfolio score ' + Math.round(pflxStudioRecruit.portfolioScore(p)) + '</span></div>' +
+                                '<button onclick="pflxRecruitSend(\'' + p.id + '\')" style="background:transparent;border:1px solid ' + (m ? m.color : '#00f0ff') + '88;color:' + (m ? m.color : '#00f0ff') + ';font-family:Orbitron,sans-serif;font-size:9px;font-weight:800;letter-spacing:0.08em;padding:6px 12px;border-radius:8px;cursor:pointer;">RECRUIT</button></div>';
+                        }).join('') + '</div>';
+                }
+            }
+            return html;
+        }
+        window.pflxStudioRecruitHtml = pflxStudioRecruitHtml;
 
         function mcGeneratePin() {
             return String(Math.floor(1000 + Math.random() * 9000));
