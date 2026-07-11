@@ -9066,6 +9066,18 @@
                                             </select>
                                         </div>
                                     </div>
+                                    <!-- ═══ Checkpoints in this Season (July 10 — top-down linking) ═══ -->
+                                    <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.1em;margin:16px 0 8px;text-transform:uppercase;">&#x1F3C1; Checkpoints in this Season</div>
+                                    <div style="background:rgba(245,200,66,0.03);border:1px solid rgba(245,200,66,0.14);border-radius:8px;padding:12px;margin-bottom:12px;">
+                                        <div id="mc-season-cps-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;"></div>
+                                        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                                            <select id="mc-season-cp-picker" style="flex:1;min-width:170px;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;"></select>
+                                            <button type="button" onclick="mcSeasonAttachCheckpoint()" style="padding:8px 16px;background:rgba(245,200,66,0.12);border:1px solid rgba(245,200,66,0.4);color:#f5c842;border-radius:6px;font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:0.06em;cursor:pointer;">LINK</button>
+                                            <button type="button" onclick="mcSeasonNewCheckpoint()" style="padding:8px 16px;background:rgba(0,212,255,0.12);border:1px solid rgba(0,212,255,0.4);color:#00d4ff;border-radius:6px;font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:0.06em;cursor:pointer;">+ NEW CHECKPOINT</button>
+                                        </div>
+                                        <div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:6px;">Works both ways — a checkpoint's own Season dropdown (Checkpoints tab) links back here. A checkpoint only counts as ACTIVE when its status is active (or its dates include today) and it isn't completed.</div>
+                                    </div>
+
                                     <!-- ═══ Cohort Access ═══ -->
                                     <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.1em;margin:16px 0 8px;text-transform:uppercase;">&#x1F465; Cohort Access</div>
                                     <div style="background:rgba(79,142,247,0.03);border:1px solid rgba(79,142,247,0.12);border-radius:8px;padding:12px;margin-bottom:12px;">
@@ -22913,7 +22925,7 @@
                     || (mcSeasons || [])[0] || null;
                 // Season cohort scope — the form saves allCohorts (bool) + cohorts[]
                 var scopedCohorts = (activeSeason && activeSeason.allCohorts === false && Array.isArray(activeSeason.cohorts) && activeSeason.cohorts.length)
-                    ? activeSeason.cohorts : null;
+                    ? ((typeof pflxSeasonCohortNames === 'function') ? pflxSeasonCohortNames(activeSeason) : activeSeason.cohorts) : null;
                 function __normC(x) { return String(x || '').trim().toLowerCase().replace(/\s+/g, ' '); }
                 var scopedNorm = scopedCohorts ? scopedCohorts.map(__normC) : null;
                 function __inScope(p) {
@@ -31496,6 +31508,9 @@
             if (allCb) allCb.checked = allCohorts;
             mcSeasonRenderCohortsList(s ? (s.cohorts || []) : [], allCohorts);
 
+            // Checkpoints linked to this season (top-down linking)
+            try { mcSeasonRenderCheckpoints(); } catch (e) {}
+
             // Season Pass
             var sp = (s && s.seasonPass) ? s.seasonPass : { enabled: false, cost: 2000, multiplier: 2 };
             var spCb = document.getElementById('mc-season-pass-enabled');
@@ -31547,22 +31562,119 @@
             var wrap = document.getElementById('mc-season-cohorts');
             if (wrap) wrap.style.display = cb.checked ? 'none' : 'flex';
         }
+        // ── Season cohort scope resolver (July 10) ──
+        // Legacy seasons stored cohort-GROUP IDs ('cg-seed-gdi') because the
+        // picker was built from mcCohortGroups. Resolve any stored entry to
+        // real cohort NAMES: group id/name → the group's cohorts (or its name,
+        // since seeded groups mirror cohorts 1:1) — else the value itself.
+        function pflxSeasonCohortNames(season) {
+            var raw = (season && Array.isArray(season.cohorts)) ? season.cohorts : [];
+            var out = [];
+            raw.forEach(function (v) {
+                var g = (typeof mcCohortGroups !== 'undefined' && Array.isArray(mcCohortGroups))
+                    ? mcCohortGroups.find(function (x) { return x && (x.id === v || x.name === v); }) : null;
+                var names = g ? ((Array.isArray(g.cohorts) && g.cohorts.length) ? g.cohorts : [g.name]) : [v];
+                names.forEach(function (n) { if (n && out.indexOf(n) < 0) out.push(n); });
+            });
+            return out;
+        }
+        window.pflxSeasonCohortNames = pflxSeasonCohortNames;
         function mcSeasonRenderCohortsList(selected, allCohorts) {
             var wrap = document.getElementById('mc-season-cohorts');
             if (!wrap) return;
             wrap.style.display = allCohorts ? 'none' : 'flex';
-            var groups = (typeof mcCohortGroups !== 'undefined' && mcCohortGroups.length) ? mcCohortGroups : [];
-            if (!groups.length) { wrap.innerHTML = '<div style="font-size:11px;color:rgba(255,255,255,0.35);">No cohorts defined yet.</div>'; return; }
-            wrap.innerHTML = groups.map(function(g) {
-                var id = g.id || g.name;
-                var checked = selected.indexOf(id) >= 0 ? 'checked' : '';
+            // COHORT HUB is the source (real cohort names — the same list as
+            // Org Management and the player editor). Was mcCohortGroups, which
+            // stored group IDs that matched no player record (scope showed
+            // 'cg-seed-gdi', players count read 0).
+            var names = [];
+            try { names = window.pflxCohortHub ? window.pflxCohortHub.names() : []; } catch (e) {}
+            if (!names.length && typeof mcCohortGroups !== 'undefined') names = mcCohortGroups.map(function (g) { return g.name || g.id; });
+            // resolve any legacy group-id selections to names so re-editing keeps them checked
+            var selNames = pflxSeasonCohortNames({ cohorts: selected || [] });
+            if (!names.length) { wrap.innerHTML = '<div style="font-size:11px;color:rgba(255,255,255,0.35);">No cohorts defined yet.</div>'; return; }
+            wrap.innerHTML = names.map(function(n) {
+                var checked = selNames.indexOf(n) >= 0 ? 'checked' : '';
+                var safe = String(n).replace(/"/g, '&quot;');
                 return '<label style="display:inline-flex;align-items:center;gap:4px;background:rgba(79,142,247,0.08);padding:4px 8px;border-radius:12px;font-size:11px;color:#e0e6ff;cursor:pointer;">' +
-                       '<input type="checkbox" class="mc-season-cohort-cb" value="' + id + '" ' + checked + '> ' + (g.name || id) + '</label>';
+                       '<input type="checkbox" class="mc-season-cohort-cb" value="' + safe + '" ' + checked + '> ' + escapeHtml(n) + '</label>';
             }).join('');
         }
         function mcSeasonCollectCohorts() {
             return Array.prototype.map.call(document.querySelectorAll('.mc-season-cohort-cb:checked'), function(cb) { return cb.value; });
         }
+
+        // ── Checkpoints-in-season (July 10) — top-down half of both-ways linking.
+        // Truth stays the checkpoint's seasonId field (same one the Checkpoints
+        // tab dropdown writes), so the two directions can never disagree.
+        function mcSeasonCurrentId() {
+            return (mcSeasonEditIndex >= 0 && mcSeasons[mcSeasonEditIndex]) ? mcSeasons[mcSeasonEditIndex].id : null;
+        }
+        function mcSeasonRenderCheckpoints() {
+            var list = document.getElementById('mc-season-cps-list');
+            var picker = document.getElementById('mc-season-cp-picker');
+            if (!list || !picker) return;
+            var sid = mcSeasonCurrentId();
+            if (!sid) {
+                list.innerHTML = '<div style="font-size:11px;color:rgba(255,255,255,0.35);">Save the season first, then re-open EDIT to attach checkpoints.</div>';
+                picker.innerHTML = '<option value="">— save the season first —</option>';
+                return;
+            }
+            var linked = (mcCheckpoints || []).filter(function (c) { return c && c.seasonId === sid; });
+            var unlinked = (mcCheckpoints || []).filter(function (c) { return c && c.seasonId !== sid; });
+            list.innerHTML = linked.length ? linked.map(function (c) {
+                var i = mcCheckpoints.indexOf(c);
+                var col = c.status === 'active' ? '#4ade80' : (c.status === 'completed' ? '#8a92b0' : '#fbbf24');
+                var warn = c.status === 'completed' ? ' <span style="color:#f59e0b;">⚠ completed — not counted as active</span>' : '';
+                return '<div style="display:flex;align-items:center;gap:10px;padding:6px 10px;background:rgba(10,18,40,0.6);border:1px solid rgba(245,200,66,0.15);border-radius:6px;flex-wrap:wrap;">' +
+                    '<span style="flex:1;min-width:120px;font-size:12px;color:#e0e6ff;font-weight:700;">&#x1F3C1; ' + escapeHtml(c.name || 'Checkpoint') + '</span>' +
+                    '<span style="font-size:10px;color:' + col + ';font-family:\'Share Tech Mono\',monospace;letter-spacing:0.06em;">' + escapeHtml((c.status || '').toUpperCase()) + warn + '</span>' +
+                    '<span style="font-size:10px;color:rgba(255,255,255,0.3);font-family:\'Share Tech Mono\',monospace;">' + escapeHtml((c.startDate || '') + (c.endDate ? ' → ' + c.endDate : '')) + '</span>' +
+                    '<span style="font-size:10px;color:rgba(255,255,255,0.35);">' + ((c.taskIds || []).length) + ' task(s) · ' + ((c.projectIds || []).length) + ' project(s)</span>' +
+                    '<button type="button" onclick="mcEditCheckpointFromSeason(' + i + ')" style="padding:3px 10px;background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.3);color:#00d4ff;border-radius:5px;font-size:9px;font-family:\'Share Tech Mono\',monospace;cursor:pointer;">EDIT</button>' +
+                    '<button type="button" onclick="mcSeasonUnlinkCheckpoint(' + i + ')" style="padding:3px 10px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.3);color:#fca5a5;border-radius:5px;font-size:9px;font-family:\'Share Tech Mono\',monospace;cursor:pointer;">UNLINK</button>' +
+                '</div>';
+            }).join('') : '<div style="font-size:11px;color:rgba(255,255,255,0.35);">No checkpoints linked yet — link an existing one below or create a new one.</div>';
+            picker.innerHTML = '<option value="">+ Link an existing checkpoint…</option>' + unlinked.map(function (c) {
+                return '<option value="' + escapeHtml(c.id) + '">&#x1F3C1; ' + escapeHtml(c.name || c.id) + (c.status ? ' (' + escapeHtml(c.status) + ')' : '') + '</option>';
+            }).join('');
+        }
+        window.mcSeasonAttachCheckpoint = function () {
+            var sid = mcSeasonCurrentId();
+            var picker = document.getElementById('mc-season-cp-picker');
+            var cid = picker ? picker.value : '';
+            if (!sid || !cid) return;
+            var c = (mcCheckpoints || []).find(function (x) { return x && x.id === cid; });
+            if (!c) return;
+            c.seasonId = sid;
+            mcSaveData('checkpoints');
+            mcSeasonRenderCheckpoints();
+            try { pflxRenderSeasonBar(); } catch (e) {}
+            try { window.pflxShowSaveToast && window.pflxShowSaveToast('Checkpoint linked · ' + (c.name || '')); } catch (e) {}
+        };
+        window.mcSeasonUnlinkCheckpoint = function (i) {
+            var c = (mcCheckpoints || [])[i];
+            if (!c) return;
+            c.seasonId = '';
+            mcSaveData('checkpoints');
+            mcSeasonRenderCheckpoints();
+            try { pflxRenderSeasonBar(); } catch (e) {}
+        };
+        window.mcEditCheckpointFromSeason = function (i) {
+            try { if (typeof mcNav === 'function') mcNav('checkpoints'); } catch (e) {}
+            setTimeout(function () { try { mcShowCPForm(i); } catch (e) {} }, 150);
+        };
+        window.mcSeasonNewCheckpoint = function () {
+            var sid = mcSeasonCurrentId();
+            try { if (typeof mcNav === 'function') mcNav('checkpoints'); } catch (e) {}
+            setTimeout(function () {
+                try {
+                    mcShowCPForm(-1);
+                    var ssel = document.getElementById('mc-cp-season');
+                    if (ssel && sid) ssel.value = sid;
+                } catch (e) {}
+            }, 150);
+        };
 
         function mcSeasonPopulatePickers() {
             // Badges grouped by category/tier — unified catalog (defaults + X-Coin live)
