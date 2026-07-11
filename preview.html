@@ -21112,6 +21112,10 @@
                     console.warn('[MC→X-Coin sync] ✋ blocked for "' + k + '" — local copy empty, cloud had ' + _mcCloudBaseline[k] + ' items.');
                     return;
                 }
+                if (_mcShrinkBlocked(k, n)) {
+                    console.warn('[MC→X-Coin sync] ✋ SHRINK-blocked for "' + k + '" — local has ' + n + ' vs cloud baseline ' + _mcCloudBaseline[k] + '. Looks like default/mock state. Set window._mcAllowShrink = true to override.');
+                    return;
+                }
                 xcoinFrame.contentWindow.postMessage(JSON.stringify({
                     type: 'pflx_cloud_save', key: syncMap[k].key, data: d
                 }), '*');
@@ -21303,6 +21307,24 @@
         //     row that had items at pull time (per-type baseline counts).
         var _mcCloudPulledOnce = false;
         var _mcCloudBaseline = {};        // type → item count seen at last pull
+        // ── STOMP GUARD 4 — SHRINK GUARD (July 10 roster-wipe incident) ──
+        // The empty-only guard (guard 2) let a 2-admin default roster overwrite
+        // the 97-user cloud row: n=2 is not 0, so it sailed through. Rule: a
+        // local collection that is LESS THAN HALF of the cloud baseline (and
+        // the baseline had 10+ items) is presumed to be default/mock state and
+        // must never be pushed. Legit single deletes (97→96) still pass.
+        // Intentional bulk clears can opt out via window._mcAllowShrink = true.
+        function _mcShrinkBlocked(t, n) {
+            try {
+                if (window._mcAllowShrink) return false;
+                var base = _mcCloudBaseline[t] || 0;
+                return base >= 10 && n > 0 && n < Math.ceil(base * 0.5);
+            } catch (e) { return false; }
+        }
+        // Exposed for out-of-scope writers (e.g. the delete-mirror users upsert).
+        window._mcRosterWriteAllowed = function (n) {
+            return _mcCloudPulledOnce && !_mcShrinkBlocked('players', n);
+        };
 
         function _mcCollectionFor(type) {
             switch (type) {
@@ -21421,6 +21443,10 @@
                       : (coll && typeof coll === 'object') ? Object.keys(coll).length : 0;
                 if (n === 0 && (_mcCloudBaseline[t] || 0) > 0) {
                     console.warn('[MC cloud] ✋ push blocked for "' + t + '" — local copy is EMPTY but cloud had ' + _mcCloudBaseline[t] + ' items. Refusing to wipe.');
+                    return;
+                }
+                if (_mcShrinkBlocked(t, n)) {
+                    console.warn('[MC cloud] ✋ SHRINK-blocked for "' + t + '" — local has ' + n + ' vs cloud baseline ' + _mcCloudBaseline[t] + '. Looks like default/mock state. Set window._mcAllowShrink = true to override.');
                     return;
                 }
                 _mcCloudQueue[t] = coll;
@@ -21646,6 +21672,18 @@
                         return;
                     }
                     var dataUpdated = false;
+                    // ── SHRINK GUARD on the X-Coin users bridge (July 10 incident) ──
+                    // X-Coin's hardcoded default roster is exactly 2 admins. When its
+                    // Supabase load fails it can push those defaults here; adopting
+                    // them replaced a 97-user roster and re-saved the wipe everywhere.
+                    // Never adopt a users payload that is less than half our roster.
+                    if (msg.key === 'users' && msg.data && msg.data.length &&
+                        Array.isArray(mcPlayers) && mcPlayers.length >= 10 &&
+                        msg.data.length < Math.ceil(mcPlayers.length * 0.5) &&
+                        !window._mcAllowShrink) {
+                        console.warn('[MC] ✋ SHRINK-blocked users bridge payload — X-Coin sent ' + msg.data.length + ' users but MC roster has ' + mcPlayers.length + '. Looks like X-Coin default/mock state.');
+                        return;
+                    }
                     if (msg.key === 'users' && msg.data && msg.data.length) {
                         // X-Coin uses brandName; Console uses brand. Normalize so the brand
                         // column in Player Management isn't blanked out on every sync.
@@ -54141,8 +54179,18 @@ RESPONSE RULES:
                 }
             }
             // 2) Push trimmed list to cloud users row (X-Coin's source).
+            // SHRINK GUARD (July 10 incident): this direct upsert had no
+            // guard at all — a default 2-admin in-memory roster here would
+            // silently replace the full cloud roster. Refuse unless the boot
+            // pull completed AND the trimmed list is a sane size.
             try {
                 var sb = (typeof pflxSupabase === 'function') ? pflxSupabase() : null;
+                if (sb && Array.isArray(window.mcPlayers) &&
+                    typeof window._mcRosterWriteAllowed === 'function' &&
+                    !window._mcRosterWriteAllowed(mcPlayers.length)) {
+                    console.warn('[delete-mirror] ✋ users upsert blocked — roster write not allowed (boot pull incomplete or shrink guard). Local count: ' + mcPlayers.length);
+                    sb = null;
+                }
                 if (sb && Array.isArray(window.mcPlayers)) {
                     sb.from('app_data').upsert({
                         key: 'users',
