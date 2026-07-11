@@ -22893,7 +22893,34 @@
             try {
                 var bar = document.getElementById('mc-season-bar');
                 if (!bar) return;
-                var activeSeason = (mcSeasons || []).find(function (s) { return s && s.active; }) || (mcSeasons || [])[0] || null;
+                // Active season — SAME rule as the rest of the platform:
+                // status 'active' (or legacy .active flag) AND, when dates are
+                // set, today inside the start/end window. (Was `s.active`,
+                // a field the season form never writes — the bar always fell
+                // back to mcSeasons[0] and ignored real season settings.)
+                var __now = Date.now();
+                function __seasonLive(s) {
+                    if (!s) return false;
+                    var flagged = (s.status === 'active') || s.active === true;
+                    if (!flagged) return false;
+                    var st = s.startDate ? Date.parse(s.startDate) : -Infinity;
+                    var en = s.endDate ? (Date.parse(s.endDate) + 86399999) : Infinity;
+                    if (isNaN(st)) st = -Infinity; if (isNaN(en)) en = Infinity;
+                    return __now >= st && __now <= en;
+                }
+                var activeSeason = (mcSeasons || []).find(__seasonLive)
+                    || (mcSeasons || []).find(function (s) { return s && (s.status === 'active' || s.active === true); })
+                    || (mcSeasons || [])[0] || null;
+                // Season cohort scope — the form saves allCohorts (bool) + cohorts[]
+                var scopedCohorts = (activeSeason && activeSeason.allCohorts === false && Array.isArray(activeSeason.cohorts) && activeSeason.cohorts.length)
+                    ? activeSeason.cohorts : null;
+                function __normC(x) { return String(x || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+                var scopedNorm = scopedCohorts ? scopedCohorts.map(__normC) : null;
+                function __inScope(p) {
+                    if (!scopedNorm) return true;
+                    var arr = Array.isArray(p.cohorts) ? p.cohorts : String(p.cohort || '').split(/[,;]/);
+                    return arr.some(function (c) { return scopedNorm.indexOf(__normC(c)) >= 0; });
+                }
                 // NOTE: was 'mc-season-name' — that ID belongs to the season FORM
                 // input. The duplicate made getElementById return this display div,
                 // so the form's name always read empty ("Season name is required"
@@ -22902,10 +22929,23 @@
                 var statsEl = document.getElementById('mc-season-stats');
                 var cohortEl = document.getElementById('mc-season-cohort');
                 if (nameEl) nameEl.textContent = activeSeason ? (activeSeason.name || 'Untitled Season') : 'No Season Set';
-                var activeCps = (mcCheckpoints || []).filter(function (c) { return c && c.status === 'active'; }).length;
+                // Checkpoints — count the ones LIVE for this season: linked to it
+                // (or unlinked/legacy), and either status 'active' or inside their
+                // own date window while not completed.
+                function __cpLive(c) {
+                    if (!c || c.status === 'completed' || c.status === 'archived') return false;
+                    if (activeSeason && c.seasonId && c.seasonId !== activeSeason.id) return false;
+                    if (c.status === 'active') return true;
+                    var st = c.startDate ? Date.parse(c.startDate) : NaN;
+                    var en = c.endDate ? (Date.parse(c.endDate) + 86399999) : NaN;
+                    if (!isNaN(st) && !isNaN(en)) return __now >= st && __now <= en;
+                    return false;
+                }
+                var activeCps = (mcCheckpoints || []).filter(__cpLive).length;
                 var openTasks = (mcTasks || []).filter(function (t) { return t && t.status !== 'approved'; }).length;
                 var awaiting  = (mcTasks || []).filter(function (t) { return t && t.status === 'submitted'; }).length;
-                var playersN  = (mcPlayers || []).filter(function (p) { return p && p.role !== 'admin'; }).length;
+                // Players — scoped to the season's cohorts when it isn't all-cohorts
+                var playersN  = (mcPlayers || []).filter(function (p) { return p && p.role !== 'admin' && !p.isHost && __inScope(p); }).length;
                 var pillCss = 'padding:5px 10px;border-radius:10px;font-size:11px;font-weight:700;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.75);';
                 if (statsEl) {
                     statsEl.innerHTML =
@@ -22915,9 +22955,11 @@
                         (awaiting > 0 ? '<span style="padding:5px 10px;border-radius:10px;font-size:11px;font-weight:800;background:rgba(245,165,0,0.16);border:1px solid rgba(245,165,0,0.4);color:#f5a500;">📤 ' + awaiting + ' awaiting approval</span>' : '');
                 }
                 if (cohortEl) {
-                    // Season Pass cohort scope — if the active Season has a
-                    // cohortScope field, show it; otherwise "All cohorts".
-                    var scope = (activeSeason && activeSeason.cohortScope) || 'All Cohorts';
+                    // Season cohort scope — real fields (allCohorts + cohorts[]),
+                    // with legacy cohortScope fallback. (Was cohortScope-only, a
+                    // field the season form never writes — pill was stuck on
+                    // "All Cohorts".)
+                    var scope = scopedCohorts || (activeSeason && activeSeason.cohortScope) || 'All Cohorts';
                     var scopeArr = Array.isArray(scope) ? scope : [scope];
                     cohortEl.innerHTML =
                         '<span style="font-size:9px;letter-spacing:0.14em;color:rgba(255,255,255,0.35);font-weight:800;font-family:Orbitron,sans-serif;">SCOPE</span>' +
@@ -31822,6 +31864,8 @@
             mcCancelSeasonForm();
             mcRenderSeasons();
             mcRenderSettingsSeasons();
+            // Season banner reflects the save immediately (not just on next nav)
+            try { if (typeof pflxRenderSeasonBar === 'function') pflxRenderSeasonBar(); } catch (e) {}
         }
 
         // ═══════════════════════════════════════════════════════════
