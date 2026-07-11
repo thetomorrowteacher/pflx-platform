@@ -24840,6 +24840,49 @@
                 });
                 return t;
             },
+            // ── Stake ladder: the cut of every XC gain that a member invests
+            // into their studio's fund. Rises with Evo rank — seniors carry
+            // (and own) more of the house. Rank 1-2→5%, 3-4→7%, 5-6→10%,
+            // 7-8→12%, 9+→15%.
+            stakeRate(p) {
+                const r = (p && (p.rank || p.level)) || 1;
+                return r >= 9 ? 0.15 : r >= 7 ? 0.12 : r >= 5 ? 0.10 : r >= 3 ? 0.07 : 0.05;
+            },
+            // Collect stakes on each member's XC gained since the last tick:
+            // deduct from spendable xcoin, credit the studio fund, and grow
+            // the player's personal equity (studioStakeXC / studioStakePercent).
+            collectStakes() {
+                if (!this.row.psnap) this.row.psnap = {};
+                if (!this.row.funds) { this.row.funds = {}; Object.keys(PFLX_STUDIO_VISUAL).forEach(function (sid) { this.row.funds[sid] = 0; }, this); }
+                const psnap = this.row.psnap, funds = this.row.funds, self = this;
+                const fundDelta = {}; Object.keys(funds).forEach(function (sid) { fundDelta[sid] = 0; });
+                let touched = 0;
+                (mcPlayers || []).forEach(function (p) {
+                    if (!p || !p.studioId || funds[p.studioId] === undefined || p.isHost || p.role === 'admin') return;
+                    const now = p.totalXcoin || p.xcoin || 0;
+                    const prev = psnap[p.id] !== undefined ? psnap[p.id] : now;
+                    const gained = Math.max(0, now - prev);
+                    psnap[p.id] = now;
+                    if (gained <= 0) return;
+                    const stake = Math.round(gained * self.stakeRate(p));
+                    if (stake <= 0) return;
+                    p.xcoin = Math.max(0, (p.xcoin || 0) - stake);   // invested, not spendable
+                    p.studioStakeXC = (p.studioStakeXC || 0) + stake;
+                    funds[p.studioId] += stake;
+                    fundDelta[p.studioId] += stake;
+                    touched++;
+                });
+                // refresh each member's equity % of their studio's fund
+                if (touched) {
+                    (mcPlayers || []).forEach(function (p) {
+                        if (p && p.studioId && funds[p.studioId] > 0 && p.studioStakeXC) {
+                            p.studioStakePercent = Math.round((p.studioStakeXC / funds[p.studioId]) * 1000) / 10;
+                        }
+                    });
+                    try { mcSaveData('players'); } catch (e) {}
+                }
+                return fundDelta;
+            },
             async tick() {
                 try {
                     if (!this.row) return;
@@ -24847,7 +24890,9 @@
                     const last = hist[hist.length - 1];
                     if (Date.now() - last.t < 6 * 3600000) return;         // one tick per 6h
                     const totals = this.totalsNow();
+                    const fundDelta = this.collectStakes();               // rank-scaled member stakes → studio fund
                     const snap = this.row.snap || {};
+                    const funds = this.row.funds || {};
                     const sids = Object.keys(PFLX_STUDIO_VISUAL);
                     const deltas = {}; let sum = 0;
                     sids.forEach(function (sid) { deltas[sid] = Math.max(0, (totals[sid] || 0) - (snap[sid] || 0)); sum += deltas[sid]; });
@@ -24855,13 +24900,33 @@
                     const v = {};
                     sids.forEach(function (sid, i) {
                         const share = sum > 0 ? deltas[sid] / sum : 1 / sids.length;
-                        const drive = Math.max(-0.05, Math.min(0.08, (share - 1 / sids.length) * 0.6));   // real activity
+                        const drive = Math.max(-0.05, Math.min(0.08, (share - 1 / sids.length) * 0.6));   // real activity vs the field
+                        const capital = Math.min(0.05, ((fundDelta && fundDelta[sid]) || 0) / Math.max(200, funds[sid] || 0) * 0.5); // fresh investment
                         const wobble = Math.sin(day * 1.7 + i * 2.3) * 0.012;                              // market texture
-                        v[sid] = Math.max(20, (last.v[sid] || 100) * (1 + drive + wobble));
+                        v[sid] = Math.max(20, (last.v[sid] || 100) * (1 + drive + capital + wobble));
                     });
                     hist.push({ t: Date.now(), v: v });
                     if (hist.length > 160) hist.splice(0, hist.length - 160);
                     this.row.snap = totals;
+                    // ── House Pride Dividend: each new ISO week, the top-priced
+                    // studio's members each earn +25 XC. Winning matters weekly.
+                    try {
+                        const week = Math.floor((Date.now() - 4 * 86400000) / (7 * 86400000));
+                        if (this.row.lastDividendWeek !== week && hist.length > 1) {
+                            const champ = sids.slice().sort(function (a, b) { return v[b] - v[a]; })[0];
+                            let paid = 0;
+                            (mcPlayers || []).forEach(function (pl) {
+                                if (pl && pl.studioId === champ && !pl.isHost && pl.role !== 'admin') {
+                                    pl.xcoin = (pl.xcoin || 0) + 25;
+                                    pl.totalXcoin = (pl.totalXcoin || 0) + 25;
+                                    paid++;
+                                }
+                            });
+                            if (paid) { try { mcSaveData('players'); } catch (e) {} }
+                            this.row.lastDividendWeek = week;
+                            this.row.lastDividend = { week: week, studioId: champ, members: paid, at: Date.now() };
+                        }
+                    } catch (e) {}
                     this.row.updatedAt = Date.now();
                     await supabaseSave(this.KEY, this.row);
                 } catch (e) {}
@@ -34723,7 +34788,8 @@
                                 '<span style="font-family:Orbitron,sans-serif;font-size:10px;color:' + m.color + ';font-weight:800;">' + (m.name || sid).replace(' Studios', '').toUpperCase() + '</span></div>' +
                                 '<div class="mc-stat-value" style="font-size:18px;">' + q.value.toFixed(1) + ' <span style="font-size:11px;color:' + (up ? '#22c55e' : dn ? '#ef4444' : '#8a92b0') + ';">' + (up ? '\u25B2' : dn ? '\u25BC' : '\u25AA') + (Math.abs(q.delta) * 100).toFixed(1) + '%</span></div>' +
                                 '<div style="display:flex;justify-content:center;">' + pflxStudioMarket.sparkHtml(sid, 100, 22) + '</div>' +
-                                '<div class="mc-stat-label">STUDIO INDEX</div></div>';
+                                '<div style="font-family:Jura,sans-serif;font-size:10px;color:#f5c842;">💰 fund ' + (((pflxStudioMarket.row || {}).funds || {})[sid] || 0).toLocaleString() + ' XC</div>' +
+                                '<div class="mc-stat-label">STUDIO INDEX' + (pflxStudioMarket.row && pflxStudioMarket.row.lastDividend && pflxStudioMarket.row.lastDividend.studioId === sid ? ' · 👑 WEEKLY CHAMPION' : '') + '</div></div>';
                         }).join('');
                     }
                 } catch (e) {}
