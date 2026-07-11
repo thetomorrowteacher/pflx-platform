@@ -9401,6 +9401,7 @@
                                     <label style="font-size:12px;color:rgba(255,255,255,0.5);">Checkpoint:</label>
                                     <select id="mc-progress-cp" onchange="mcRenderProgress()" style="background:rgba(10,18,40,0.7);border:1px solid rgba(0,212,255,0.3);color:#e0e6ff;padding:8px 12px;border-radius:8px;font-size:13px;min-width:220px;"></select>
                                     <button class="mc-btn" onclick="mcRenderProgress()" style="font-size:12px;padding:7px 14px;">↻ Refresh</button>
+                                    <button class="mc-btn" onclick="pflxXcoinReportOpen()" style="font-size:12px;padding:7px 14px;color:#f5c842;border-color:rgba(245,200,66,0.4);">📜 X-Coin History</button>
                                 </div>
                                 <div id="mc-progress-body"></div>
                             </div>
@@ -17144,9 +17145,9 @@
                     id:'studio-mindforge',
                     name:'MindForge Studios',
                     tagline:'Fueling Purpose. Forging Identity.',
-                    icon:'\u{1F534}',
-                    color:'#ef4444',
-                    colorRgb:'239,68,68',
+                    icon:'\u26AA',
+                    color:'#94a3b8',
+                    colorRgb:'148,163,184',
                     description:'MindForge is the powerhouse of diversity, identity, and social impact. Brands here are rooted in culture, representation, and personal truth. If your work focuses on equity, activism, self-expression, or advocacy, MindForge is your home.',
                     themes:['Diversity','Inclusion','Identity','Heritage','Empowerment'],
                     subsidiaries:['Apparel lines','Documentaries','Cultural media','Awareness campaigns'],
@@ -23160,6 +23161,7 @@
                 '<div style="font-family:\'Rajdhani\',sans-serif;font-size:20px;font-weight:900;color:#fff;">Welcome back, ' + escapeHtml(displayName) + '</div>' +
                 '<div style="font-family:\'Jura\',sans-serif;font-size:11px;color:#6a7290;letter-spacing:1px;">' + escapeHtml(cohort) + ' · ' + xc.toLocaleString() + ' XC</div>' +
                 '</div>' +
+                ((myPlayer && myPlayer.studioId) ? pflxStudioChipHtml(myPlayer.studioId, { size: 40 }) : '') +
                 // Streak badge — flame icon + current streak. Shows longest streak below when > 0.
                 (streakN > 0 || longestStreak > 0
                     ? '<div title="Approval streak — every 5 grants bonus XC" style="display:flex;align-items:center;gap:10px;padding:8px 14px;background:linear-gradient(135deg, rgba(245,165,0,0.14), rgba(239,68,68,0.10));border:1px solid rgba(245,165,0,0.4);border-radius:12px;box-shadow:0 0 14px rgba(245,165,0,0.14);">' +
@@ -24749,6 +24751,140 @@
             'studio-gentech': 'Gentech',
             'studio-innov8': 'Innov8'
         };
+
+        // ═══════════ STARTUP STUDIOS — cross-app identity, market & assignment ═══════════
+        // Studios are PFLX's houses/factions (fraternity model): every player
+        // belongs to one, cross-cohort. Truth lives on player.studioId in the
+        // shared 'users' KV row (console → X-Coin roster → Arena → DarkCampus).
+        const PFLX_STUDIO_VISUAL = {
+            'studio-mindforge':   { logo: 'public/studio-mindforge.png',   color: '#94a3b8' },
+            'studio-emagination': { logo: 'public/studio-emagination.png', color: '#2563eb' },
+            'studio-gentech':     { logo: 'public/studio-gentech.png',     color: '#06b6d4' },
+            'studio-innov8':      { logo: 'public/studio-innov8.png',      color: '#9333ea' }
+        };
+        function pflxStudioMeta(sid) {
+            const def = (typeof PFLX_STUDIOS !== 'undefined' ? PFLX_STUDIOS : []).find(function (s) { return s.id === sid; }) || null;
+            const vis = PFLX_STUDIO_VISUAL[sid] || {};
+            return def ? Object.assign({}, def, vis) : (vis.logo ? Object.assign({ id: sid, name: MC_STUDIO_LABELS[sid] || sid, tagline: '' }, vis) : null);
+        }
+        // The logo-in-color chip (Ennis reference cards): studio logo on its color.
+        function pflxStudioChipHtml(sid, opts) {
+            opts = opts || {};
+            const m = pflxStudioMeta(sid);
+            if (!m) return '';
+            const h = opts.size || 44;
+            const mkt = (typeof pflxStudioMarket !== 'undefined') ? pflxStudioMarket.quote(sid) : null;
+            const delta = mkt ? mkt.delta : 0;
+            const arrow = !mkt ? '' : (delta > 0.001 ? '▲' : (delta < -0.001 ? '▼' : '▪'));
+            const dColor = delta > 0.001 ? '#22c55e' : (delta < -0.001 ? '#ef4444' : '#8a92b0');
+            return '<div title="' + escapeHtml(m.name + ' — ' + (m.tagline || '')) + '" style="display:flex;align-items:center;gap:10px;padding:6px 12px 6px 6px;border-radius:12px;' +
+                'background:linear-gradient(135deg,' + m.color + ',' + m.color + 'cc);border:1px solid rgba(255,255,255,0.25);box-shadow:0 4px 14px ' + m.color + '55;">' +
+                '<div style="width:' + h + 'px;height:' + h + 'px;border-radius:9px;background:rgba(255,255,255,0.88);display:flex;align-items:center;justify-content:center;overflow:hidden;">' +
+                '<img src="' + m.logo + '" alt="" style="width:86%;height:86%;object-fit:contain;" onerror="this.replaceWith(document.createTextNode(\'🏢\'))"></div>' +
+                '<div style="line-height:1.15;min-width:0;">' +
+                '<div style="font-family:Orbitron,sans-serif;font-size:11px;font-weight:800;color:#fff;letter-spacing:0.06em;white-space:nowrap;">' + escapeHtml((m.name || '').replace(' Studios', '').toUpperCase()) + '</div>' +
+                (mkt ? '<div style="font-family:Jura,sans-serif;font-size:10px;color:rgba(255,255,255,0.9);">' + mkt.value.toFixed(1) + ' <span style="color:' + dColor + ';font-weight:800;">' + arrow + ' ' + (Math.abs(delta) * 100).toFixed(1) + '%</span></div>'
+                     : '<div style="font-family:Jura,sans-serif;font-size:9px;color:rgba(255,255,255,0.75);letter-spacing:0.08em;">STARTUP STUDIO</div>') +
+                '</div></div>';
+        }
+        // ── Auto-assignment backfill: nobody floats studio-less ──
+        // Onboarding assigns via the diagnostic (cadAssignStudio). Any player
+        // that skipped it gets a deterministic, balanced assignment matching
+        // their pathway to the studios' corePathways.
+        function pflxStudioBackfill() {
+            try {
+                if (typeof mcPlayers === 'undefined' || !Array.isArray(mcPlayers) || typeof PFLX_STUDIOS === 'undefined') return 0;
+                const counts = {};
+                PFLX_STUDIOS.forEach(function (s) { counts[s.id] = 0; });
+                mcPlayers.forEach(function (p) { if (p && p.studioId && counts[p.studioId] !== undefined) counts[p.studioId]++; });
+                let changed = 0;
+                mcPlayers.forEach(function (p) {
+                    if (!p || p.studioId || p.role === 'admin' || p.isHost) return;
+                    const pw = (p.pathway || '').toLowerCase();
+                    let best = null, bestScore = -1;
+                    PFLX_STUDIOS.forEach(function (s) {
+                        let sc = (s.corePathways || []).indexOf(pw) !== -1 ? 10 : 0;
+                        sc -= counts[s.id] * 2;                                  // balance the houses
+                        sc += (String(p.id).split('').reduce(function (a, c) { return a + c.charCodeAt(0); }, 0) + s.id.length) % 3; // stable tiebreak
+                        if (sc > bestScore) { bestScore = sc; best = s; }
+                    });
+                    if (best) { p.studioId = best.id; counts[best.id]++; changed++; }
+                });
+                if (changed) { try { mcSaveData('players'); } catch (e) {} }
+                return changed;
+            } catch (e) { return 0; }
+        }
+        // ── Studio market: XC valuation that moves like a stock ──
+        // Each studio's index starts at 100. Every tick (max 1 per 6h, run by
+        // whichever host loads the console) re-prices on REAL member activity:
+        // the studio's share of all XC earned since the last tick, vs an even
+        // split, moves its price — plus a small deterministic daily wobble.
+        const pflxStudioMarket = {
+            KEY: 'pflx_studio_market', row: null, loaded: false,
+            async load() {
+                try { this.row = await supabaseLoad(this.KEY); } catch (e) { this.row = null; }
+                if (!this.row || !Array.isArray(this.row.history)) {
+                    const v0 = {}; Object.keys(PFLX_STUDIO_VISUAL).forEach(function (sid) { v0[sid] = 100; });
+                    this.row = { history: [{ t: Date.now(), v: v0 }], snap: {}, updatedAt: Date.now() };
+                }
+                this.loaded = true;
+                await this.tick();
+            },
+            totalsNow() {
+                const t = {}; Object.keys(PFLX_STUDIO_VISUAL).forEach(function (sid) { t[sid] = 0; });
+                (mcPlayers || []).forEach(function (p) {
+                    if (p && p.studioId && t[p.studioId] !== undefined) t[p.studioId] += (p.totalXcoin || p.xcoin || 0);
+                });
+                return t;
+            },
+            async tick() {
+                try {
+                    if (!this.row) return;
+                    const hist = this.row.history;
+                    const last = hist[hist.length - 1];
+                    if (Date.now() - last.t < 6 * 3600000) return;         // one tick per 6h
+                    const totals = this.totalsNow();
+                    const snap = this.row.snap || {};
+                    const sids = Object.keys(PFLX_STUDIO_VISUAL);
+                    const deltas = {}; let sum = 0;
+                    sids.forEach(function (sid) { deltas[sid] = Math.max(0, (totals[sid] || 0) - (snap[sid] || 0)); sum += deltas[sid]; });
+                    const day = Math.floor(Date.now() / 86400000);
+                    const v = {};
+                    sids.forEach(function (sid, i) {
+                        const share = sum > 0 ? deltas[sid] / sum : 1 / sids.length;
+                        const drive = Math.max(-0.05, Math.min(0.08, (share - 1 / sids.length) * 0.6));   // real activity
+                        const wobble = Math.sin(day * 1.7 + i * 2.3) * 0.012;                              // market texture
+                        v[sid] = Math.max(20, (last.v[sid] || 100) * (1 + drive + wobble));
+                    });
+                    hist.push({ t: Date.now(), v: v });
+                    if (hist.length > 160) hist.splice(0, hist.length - 160);
+                    this.row.snap = totals;
+                    this.row.updatedAt = Date.now();
+                    await supabaseSave(this.KEY, this.row);
+                } catch (e) {}
+            },
+            quote(sid) {
+                if (!this.row || !this.row.history.length) return null;
+                const h = this.row.history;
+                const now = h[h.length - 1].v[sid];
+                if (now === undefined) return null;
+                const prev = h.length > 1 ? h[h.length - 2].v[sid] : now;
+                return { value: now, prev: prev, delta: prev ? (now - prev) / prev : 0 };
+            },
+            sparkHtml(sid, w, hgt) {
+                if (!this.row) return '';
+                const pts = this.row.history.slice(-30).map(function (x) { return x.v[sid] || 100; });
+                if (pts.length < 2) return '';
+                const min = Math.min.apply(null, pts), max = Math.max.apply(null, pts), rng = (max - min) || 1;
+                const m = pflxStudioMeta(sid) || { color: '#00f0ff' };
+                const path = pts.map(function (v, i) { return (i ? 'L' : 'M') + (i / (pts.length - 1) * (w || 90)).toFixed(1) + ',' + ((hgt || 24) - ((v - min) / rng) * (hgt || 24)).toFixed(1); }).join(' ');
+                return '<svg width="' + (w || 90) + '" height="' + (hgt || 24) + '" style="overflow:visible;"><path d="' + path + '" fill="none" stroke="' + m.color + '" stroke-width="2" stroke-linecap="round"/></svg>';
+            }
+        };
+        window.pflxStudioMarket = pflxStudioMarket;
+        window.pflxStudioChipHtml = pflxStudioChipHtml;
+        // boot: market + backfill ride along once MC data is in
+        setTimeout(function () { try { pflxStudioMarket.load(); pflxStudioBackfill(); } catch (e) {} }, 2500);
 
         function mcGeneratePin() {
             return String(Math.floor(1000 + Math.random() * 9000));
@@ -34460,6 +34596,23 @@
                 ].map(function(s) {
                     return '<div class="mc-stat-card"><div class="mc-stat-icon" style="color:' + s.color + ';">' + s.icon + '</div><div class="mc-stat-value">' + s.value + '</div><div class="mc-stat-label">' + s.label + '</div></div>';
                 }).join('');
+                // ── Studio Market strip: each house priced like a stock, moved by member activity ──
+                try {
+                    if (window.pflxStudioMarket && pflxStudioMarket.loaded) {
+                        stats.innerHTML += Object.keys(PFLX_STUDIO_VISUAL).map(function (sid) {
+                            var m = pflxStudioMeta(sid), q = pflxStudioMarket.quote(sid);
+                            if (!m || !q) return '';
+                            var up = q.delta > 0.001, dn = q.delta < -0.001;
+                            return '<div class="mc-stat-card" style="border-color:' + m.color + '55;">' +
+                                '<div style="display:flex;align-items:center;gap:8px;justify-content:center;margin-bottom:4px;">' +
+                                '<img src="' + m.logo + '" style="width:22px;height:22px;object-fit:contain;background:rgba(255,255,255,0.85);border-radius:5px;padding:2px;" onerror="this.style.display=\'none\'">' +
+                                '<span style="font-family:Orbitron,sans-serif;font-size:10px;color:' + m.color + ';font-weight:800;">' + (m.name || sid).replace(' Studios', '').toUpperCase() + '</span></div>' +
+                                '<div class="mc-stat-value" style="font-size:18px;">' + q.value.toFixed(1) + ' <span style="font-size:11px;color:' + (up ? '#22c55e' : dn ? '#ef4444' : '#8a92b0') + ';">' + (up ? '\u25B2' : dn ? '\u25BC' : '\u25AA') + (Math.abs(q.delta) * 100).toFixed(1) + '%</span></div>' +
+                                '<div style="display:flex;justify-content:center;">' + pflxStudioMarket.sparkHtml(sid, 100, 22) + '</div>' +
+                                '<div class="mc-stat-label">STUDIO INDEX</div></div>';
+                        }).join('');
+                    }
+                } catch (e) {}
             }
 
             var list = document.getElementById('mc-studios-list');
@@ -54610,6 +54763,197 @@ RESPONSE RULES:
         // so the roster + catalog are loaded.
         setTimeout(pflxScanDeadlines, 15000);
         setInterval(pflxScanDeadlines, 5 * 60 * 1000);
+
+        // ═══════════════════════════════════════════════════════════════════
+        // HOST X-COIN HISTORY REPORT — pflxXcoinReport  (July 9 2026, Opus)
+        //   A tier-scoped history of every X-Coin happening (badge / upgrade /
+        //   fine / XC award) across players. Master sees every player's full
+        //   timeline; scoped tiers see only the cohorts they manage
+        //   (_pflxPlayerVisible). Filter by a season / checkpoint / project /
+        //   task duration. Downloadable as CSV.
+        //   Sources merged: each player's activity log (award_granted) + the
+        //   pflxModifiers ledger (fines/upgrades incl. non-XC effects).
+        // ═══════════════════════════════════════════════════════════════════
+        function _pflxReportPlayers() {
+            var roster = (typeof PLAYERS !== 'undefined' && PLAYERS.length) ? PLAYERS : (typeof mcPlayers !== 'undefined' ? mcPlayers : []);
+            return roster.filter(function (p) { return p && (typeof _pflxPlayerVisible !== 'function' || _pflxPlayerVisible(p)); });
+        }
+
+        // Build the happenings rows (optionally windowed to [from,to] ms).
+        function pflxXcoinHistory(from, to) {
+            var rows = [];
+            var players = _pflxReportPlayers();
+            var pMap = {}; players.forEach(function (p) { pMap[p.id] = p; });
+            var nameOf = function (p) { return p ? (p.brand || p.brandName || p.name || p.id) : ''; };
+            var cohortOf = function (p) { return p ? (Array.isArray(p.cohorts) ? p.cohorts.join('|') : (p.cohort || '')) : ''; };
+
+            // 1. Activity award_granted (badges + XC that did NOT come from a modifier)
+            players.forEach(function (p) {
+                (Array.isArray(p.activity) ? p.activity : []).forEach(function (a) {
+                    if (!a || a.type !== 'award_granted') return;
+                    var pl = a.payload || {};
+                    if (String(pl.source || '') === 'modifier') return;   // ledger owns those
+                    var isBadge = !!pl.badge;
+                    var item = '';
+                    if (isBadge) {
+                        var b = (typeof mcFindBadge === 'function') ? mcFindBadge(pl.badge) : null;
+                        item = (b && b.name) || pl.badge;
+                    } else {
+                        item = pl.reason || pl.source || 'XC';
+                    }
+                    rows.push({
+                        ts: a.ts || 0, playerId: p.id, playerName: nameOf(p), cohort: cohortOf(p),
+                        kind: isBadge ? 'badge' : 'xc', item: item,
+                        xc: (typeof pl.xc === 'number' ? pl.xc : 0),
+                        detail: pl.source || ''
+                    });
+                });
+            });
+
+            // 2. Modifier ledger (fines + upgrades, incl. freeze/multiply/deadline)
+            var ledger = (window.pflxModifiers && window.pflxModifiers.ledger) ? window.pflxModifiers.ledger() : (Array.isArray(window.mcPlayerModifiers) ? window.mcPlayerModifiers : []);
+            ledger.forEach(function (g) {
+                if (!g || !pMap[g.playerId]) return;                        // tier scope
+                var p = pMap[g.playerId];
+                var signed = 0;
+                if (g.effectType === 'xc_deduct') signed = -(g.effectValue || 0);
+                else if (g.effectType === 'xc_add') signed = (g.effectValue || 0);
+                rows.push({
+                    ts: g.appliedAt || 0, playerId: g.playerId, playerName: nameOf(p), cohort: cohortOf(p),
+                    kind: g.type === 'tax' ? 'fine' : 'upgrade', item: g.name || g.modifierId,
+                    xc: signed, detail: g.effectType || ''
+                });
+            });
+
+            if (from != null || to != null) {
+                rows = rows.filter(function (r) {
+                    if (from != null && r.ts < from) return false;
+                    if (to != null && r.ts > to) return false;
+                    return true;
+                });
+            }
+            rows.sort(function (a, b) { return b.ts - a.ts; });
+            return rows;
+        }
+        window.pflxXcoinHistory = pflxXcoinHistory;
+
+        // Duration scopes the host can filter by (all time + season/checkpoint/
+        // project/task windows derived from their date fields).
+        function _pflxReportScopes() {
+            var scopes = [{ id: 'all', label: 'All time', from: null, to: null }];
+            var span = function (it) {
+                var s = it.startDate || it.createdAt || it.start || null;
+                var e = it.endDate || it.dueDate || it.deadline || it.completedAt || null;
+                var from = s ? new Date(s).getTime() : null;
+                var to = e ? new Date(e).getTime() : null;
+                if (from != null && !isFinite(from)) from = null;
+                if (to != null && !isFinite(to)) to = null;
+                return { from: from, to: to };
+            };
+            var add = function (arr, type, icon) {
+                (Array.isArray(arr) ? arr : []).forEach(function (it) {
+                    if (!it || !it.id) return;
+                    var sp = span(it);
+                    scopes.push({ id: type + ':' + it.id, label: icon + ' ' + (it.name || it.title || it.id), from: sp.from, to: sp.to });
+                });
+            };
+            try { add(typeof mcSeasons !== 'undefined' ? mcSeasons : null, 'season', '🗓'); } catch (e) {}
+            try { add(typeof mcCheckpoints !== 'undefined' ? mcCheckpoints : null, 'checkpoint', '📍'); } catch (e) {}
+            try { add(typeof mcProjects !== 'undefined' ? mcProjects : null, 'project', '📁'); } catch (e) {}
+            try { add(typeof mcTasks !== 'undefined' ? mcTasks : null, 'task', '✅'); } catch (e) {}
+            return scopes;
+        }
+
+        function _pflxCsvEscape(v) {
+            var s = (v == null) ? '' : String(v);
+            return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+        }
+        function pflxXcoinHistoryCsv(rows) {
+            var head = ['Date', 'Player', 'Cohort', 'Type', 'Item', 'XC', 'Detail'];
+            var lines = [head.join(',')];
+            rows.forEach(function (r) {
+                lines.push([
+                    _pflxCsvEscape(r.ts ? new Date(r.ts).toISOString() : ''),
+                    _pflxCsvEscape(r.playerName), _pflxCsvEscape(r.cohort),
+                    _pflxCsvEscape(r.kind), _pflxCsvEscape(r.item),
+                    _pflxCsvEscape(r.xc), _pflxCsvEscape(r.detail)
+                ].join(','));
+            });
+            return lines.join('\n');
+        }
+
+        function pflxXcoinReportOpen() {
+            if (typeof openModal !== 'function') return;
+            var scopes = _pflxReportScopes();
+            var tier = (window.pflxHostTier ? window.pflxHostTier() : '') || '';
+            var isMaster = tier === 'master' || String((typeof activeSession !== 'undefined' && activeSession && activeSession.role) || '').toLowerCase() === 'admin';
+            var scopeNote = isMaster ? 'Master access — every player, full timeline.' : 'Scoped to the cohorts your tier manages.';
+
+            var kindPill = function (k) {
+                var c = k === 'fine' ? '#ef4444' : k === 'upgrade' ? '#22d3ee' : k === 'badge' ? '#f5c842' : '#8a93b0';
+                return '<span style="font-size:10px;font-weight:700;color:' + c + ';background:' + c + '1a;border:1px solid ' + c + '44;padding:1px 7px;border-radius:5px;text-transform:uppercase;">' + k + '</span>';
+            };
+
+            var html =
+                '<div style="font-family:Orbitron,sans-serif;font-size:14px;letter-spacing:2px;color:#f5c842;margin-bottom:4px;">📜 X-COIN HISTORY</div>' +
+                '<div style="font-size:12px;color:#8a93b0;margin-bottom:14px;">' + scopeNote + '</div>' +
+                '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">' +
+                '<label style="font-size:12px;color:#9fb0d0;">Duration:</label>' +
+                '<select id="pflx-rep-scope" style="background:rgba(10,18,40,0.8);border:1px solid rgba(0,240,255,0.25);color:#e0e6ff;padding:7px 10px;border-radius:8px;font-size:13px;min-width:230px;">' +
+                scopes.map(function (s, i) { return '<option value="' + i + '">' + s.label + '</option>'; }).join('') +
+                '</select>' +
+                '<button id="pflx-rep-csv" style="margin-left:auto;padding:8px 16px;background:linear-gradient(135deg,#00d4ff,#7c3aed);border:none;color:#fff;border-radius:8px;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:1.5px;cursor:pointer;font-weight:700;">⬇ CSV</button>' +
+                '</div>' +
+                '<div id="pflx-rep-summary" style="font-size:11px;color:#6a7290;margin-bottom:8px;"></div>' +
+                '<div id="pflx-rep-table" style="max-height:48vh;overflow-y:auto;border:1px solid rgba(255,255,255,0.06);border-radius:10px;"></div>';
+
+            openModal(html, function (card, close) {
+                var sel = card.querySelector('#pflx-rep-scope');
+                var current = [];
+                function draw() {
+                    var sc = scopes[parseInt(sel.value, 10) || 0];
+                    current = pflxXcoinHistory(sc.from, sc.to);
+                    card.querySelector('#pflx-rep-summary').textContent =
+                        current.length + ' happening' + (current.length === 1 ? '' : 's') +
+                        (sc.from || sc.to ? ' in ' + sc.label : ' (all time)');
+                    var body = card.querySelector('#pflx-rep-table');
+                    if (!current.length) { body.innerHTML = '<div style="padding:20px;text-align:center;color:#6a7290;font-size:12px;">No happenings in this window.</div>'; return; }
+                    var rowsHtml = current.slice(0, 300).map(function (r) {
+                        var xcCol = r.xc ? '<span style="color:' + (r.xc < 0 ? '#ef4444' : '#4ade80') + ';font-family:\'Share Tech Mono\',monospace;">' + (r.xc < 0 ? '' : '+') + r.xc.toLocaleString() + '</span>' : '<span style="color:#4a5270;">—</span>';
+                        return '<tr style="border-bottom:1px solid rgba(255,255,255,0.04);">' +
+                            '<td style="padding:7px 10px;font-size:11px;color:#8a93b0;white-space:nowrap;">' + (r.ts ? new Date(r.ts).toLocaleString() : '') + '</td>' +
+                            '<td style="padding:7px 10px;font-size:12px;color:#eaf2ff;">' + r.playerName + '</td>' +
+                            '<td style="padding:7px 10px;font-size:11px;color:#9fb0d0;">' + (r.cohort || '') + '</td>' +
+                            '<td style="padding:7px 10px;">' + kindPill(r.kind) + '</td>' +
+                            '<td style="padding:7px 10px;font-size:12px;color:#cfe0ff;">' + r.item + '</td>' +
+                            '<td style="padding:7px 10px;font-size:12px;text-align:right;">' + xcCol + '</td>' +
+                            '</tr>';
+                    }).join('');
+                    body.innerHTML = '<table style="width:100%;border-collapse:collapse;">' +
+                        '<thead><tr style="position:sticky;top:0;background:#0b1327;">' +
+                        ['Date', 'Player', 'Cohort', 'Type', 'Item', 'XC'].map(function (h) { return '<th style="padding:8px 10px;text-align:left;font-size:10px;letter-spacing:1px;color:#6a7290;font-family:Orbitron,sans-serif;">' + h + '</th>'; }).join('') +
+                        '</tr></thead><tbody>' + rowsHtml + '</tbody></table>' +
+                        (current.length > 300 ? '<div style="padding:8px;text-align:center;color:#6a7290;font-size:11px;">Showing latest 300 of ' + current.length + ' — export CSV for the full set.</div>' : '');
+                }
+                sel.addEventListener('change', draw);
+                card.querySelector('#pflx-rep-csv').addEventListener('click', function () {
+                    var sc = scopes[parseInt(sel.value, 10) || 0];
+                    var csv = pflxXcoinHistoryCsv(current.length ? current : pflxXcoinHistory(sc.from, sc.to));
+                    try {
+                        var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                        var url = URL.createObjectURL(blob);
+                        var a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'pflx-xcoin-history-' + (sc.id === 'all' ? 'all' : sc.id.replace(/[^a-z0-9]+/gi, '-')) + '-' + new Date().toISOString().slice(0, 10) + '.csv';
+                        document.body.appendChild(a); a.click();
+                        setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 200);
+                        if (typeof pflxPlaySfx === 'function') pflxPlaySfx('save');
+                    } catch (e) { if (typeof pflxToast === 'function') pflxToast('CSV export failed', 'error'); }
+                });
+                draw();
+            });
+        }
+        window.pflxXcoinReportOpen = pflxXcoinReportOpen;
 
         // ═══════════════════════════════════════════════════════════════════
         // PER-PLAYER X-COIN NOTIFICATION — pflxNotify  (July 9 2026, Opus)
