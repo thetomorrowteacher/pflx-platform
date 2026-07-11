@@ -12775,6 +12775,19 @@
             } catch (e) {}
         };
 
+        // Generic live push — any PFLX system can drop a line onto the ticker
+        // the moment something happens (studio market moves, dividends,
+        // recruitment, house changes...).
+        window.pflxTickerRaw = function (icon, color, text) {
+            try {
+                _liveEvents.unshift({ icon: icon || '📣', color: color || '#00f0ff', text: String(text || ''), source: 'live', date: new Date().toISOString() });
+                if (_liveEvents.length > 40) _liveEvents = _liveEvents.slice(0, 40);
+                var s = tickerSettings();
+                if (s.sound && typeof pflxPlaySfx === 'function') { try { pflxPlaySfx('ticker'); } catch (e) {} }
+                pflxRenderTicker();
+            } catch (e) {}
+        };
+
         // ── Build Console-native events from MC data ──
         function buildMCTickerEvents() {
             var events = [];
@@ -12788,6 +12801,25 @@
 
             // Active checkpoint
             if (typeof mcCheckpoints !== 'undefined' && mcCheckpoints.length > 0) {
+                // Studio Market quotes — every house's index rides the ticker
+                try {
+                    if (window.pflxStudioMarket && pflxStudioMarket.loaded && pflxStudioMarket.row) {
+                        Object.keys(PFLX_STUDIO_VISUAL).forEach(function (sid) {
+                            var m = pflxStudioMeta(sid), q = pflxStudioMarket.quote(sid);
+                            if (!m || !q) return;
+                            var up = q.delta > 0.001, dn = q.delta < -0.001;
+                            events.push({ icon: '🏢', color: m.color,
+                                text: (m.name || '').replace(' Studios', '').toUpperCase() + ' ' + q.value.toFixed(1) + ' ' + (up ? '▲' : dn ? '▼' : '▪') + (Math.abs(q.delta) * 100).toFixed(1) + '%' + ' · fund ' + (((pflxStudioMarket.row.funds || {})[sid] || 0)).toLocaleString() + ' XC',
+                                source: 'studios', date: now });
+                        });
+                        var ld = pflxStudioMarket.row.lastDividend;
+                        if (ld && ld.studioId && pflxStudioMeta(ld.studioId)) {
+                            events.push({ icon: '👑', color: '#f5c842',
+                                text: 'House Pride: ' + pflxStudioMeta(ld.studioId).name + ' won the week — members paid +25 XC',
+                                source: 'studios', date: now });
+                        }
+                    }
+                } catch (e) {}
                 var activeCP = mcCheckpoints.find(function(c) { return c.active || c.status === 'active'; });
                 if (activeCP) {
                     events.push({ icon: '📍', color: '#00f0ff', text: 'Active Checkpoint: ' + (activeCP.name || activeCP.title || 'Checkpoint'), source: 'mc', date: now });
@@ -24907,6 +24939,16 @@
                     });
                     hist.push({ t: Date.now(), v: v });
                     if (hist.length > 160) hist.splice(0, hist.length - 160);
+                    // ticker: announce the biggest mover the moment the market re-prices
+                    try {
+                        var mover = sids.slice().sort(function (a, b) { return Math.abs(v[b] / (last.v[b] || 100) - 1) - Math.abs(v[a] / (last.v[a] || 100) - 1); })[0];
+                        var mDelta = v[mover] / (last.v[mover] || 100) - 1;
+                        var mm = pflxStudioMeta(mover);
+                        if (mm && typeof window.pflxTickerRaw === 'function') {
+                            window.pflxTickerRaw(mDelta >= 0 ? '📈' : '📉', mm.color,
+                                'STUDIO MARKET: ' + mm.name.replace(' Studios', '').toUpperCase() + ' ' + (mDelta >= 0 ? '+' : '') + (mDelta * 100).toFixed(1) + '% → ' + v[mover].toFixed(1));
+                        }
+                    } catch (e) {}
                     this.row.snap = totals;
                     // ── House Pride Dividend: each new ISO week, the top-priced
                     // studio's members each earn +25 XC. Winning matters weekly.
@@ -24922,7 +24964,10 @@
                                     paid++;
                                 }
                             });
-                            if (paid) { try { mcSaveData('players'); } catch (e) {} }
+                            if (paid) {
+                                try { mcSaveData('players'); } catch (e) {}
+                                try { if (typeof window.pflxTickerRaw === 'function') window.pflxTickerRaw('👑', '#f5c842', 'HOUSE PRIDE DIVIDEND: ' + (pflxStudioMeta(champ) || { name: champ }).name + ' members each collect +25 XC'); } catch (e) {}
+                            }
                             this.row.lastDividendWeek = week;
                             this.row.lastDividend = { week: week, studioId: champ, members: paid, at: Date.now() };
                         }
@@ -24988,6 +25033,10 @@
                     studioId: recruiter.studioId, byId: recruiter.id, byName: recruiter.brandName || recruiter.name,
                     at: Date.now(), status: 'pending' });
                 await this.persist();
+                try {
+                    var sm = pflxStudioMeta(recruiter.studioId);
+                    if (sm && typeof window.pflxTickerRaw === 'function') window.pflxTickerRaw('🏢', sm.color, sm.name.replace(' Studios', '').toUpperCase() + ' is scouting new talent…');
+                } catch (e) {}
                 return true;
             },
             changeBlocked(p) {
@@ -25016,6 +25065,12 @@
                 inv.status = accept ? 'accepted' : 'declined';
                 inv.respondedAt = Date.now();
                 await this.persist();
+                try {
+                    if (accept && p) {
+                        var sm2 = pflxStudioMeta(inv.studioId);
+                        if (sm2 && typeof window.pflxTickerRaw === 'function') window.pflxTickerRaw('🎉', sm2.color, '@' + (p.brandName || p.name) + ' joined ' + sm2.name + '!');
+                    }
+                } catch (e) {}
                 try { if (typeof pflxRenderHomeLive === 'function') pflxRenderHomeLive(); } catch (e) {}
                 try { if (typeof navigateTo === 'function' && window._pflxCurrentView === 'home') navigateTo('home'); } catch (e) {}
             }
