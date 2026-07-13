@@ -21449,7 +21449,24 @@
         // projects, avatars on players), retry once with those stripped so
         // the LOCAL cache stays consistent. The cloud row still gets the
         // full payload — this is a disk-cache degradation, not data loss.
+        var _MC_STRIP_BANNER_KEYS = { 'pflx_mc_checkpoints': 1, 'pflx_mc_seasons': 1, 'pflx_mc_projects': 1 };
         function _mcSetItemSafe(key, coll) {
+            // BANNER POLICY (July 12): banner images NEVER go into localStorage.
+            // Before this, they were stripped only when the 5MB quota blew —
+            // and that stripped copy loaded first on the next boot, raced the
+            // slow cloud pull, and could win (stomp guard 3) → "I added more
+            // checkpoints and the images disappeared". Local cache is for
+            // boot speed; the cloud row is the banner truth, and mcCloudPull's
+            // banner backfill re-hydrates memory on every boot.
+            if (_MC_STRIP_BANNER_KEYS[key] && Array.isArray(coll)) {
+                coll = coll.map(function (item) {
+                    if (!item || typeof item !== 'object') return item;
+                    if (typeof item.bannerImage === 'string' && item.bannerImage.length > 20000) {
+                        var c = Object.assign({}, item); c.bannerImage = ''; return c;
+                    }
+                    return item;
+                });
+            }
             var payload;
             try {
                 payload = JSON.stringify(coll);
@@ -22034,6 +22051,31 @@
                         changed.push(String(row.key).replace('pflx_mc_', ''));
                     }
                 });
+                // ── BANNER BACKFILL (July 12) ── the local cache never stores
+                // banners (see _mcSetItemSafe), and a stomp guard may refuse a
+                // full cloud apply after recent local writes. Either way, adopt
+                // cloud bannerImages into memory items that lack one so images
+                // survive every reload. Memory-only: the next natural save
+                // pushes the full (now compressed) banners back up.
+                try {
+                    ['seasons', 'checkpoints', 'projects'].forEach(function (t) {
+                        var row = (res.data || []).find(function (r) { return r && r.key === 'pflx_mc_' + t; });
+                        if (!row) return;
+                        var items = (row.data && row.data.items !== undefined) ? row.data.items : row.data;
+                        var coll = _mcCollectionFor(t);
+                        if (!Array.isArray(items) || !Array.isArray(coll)) return;
+                        var n = 0;
+                        items.forEach(function (ci) {
+                            if (!ci || !ci.bannerImage) return;
+                            var li = coll.find(function (x) { return x && x.id === ci.id; });
+                            if (li && !li.bannerImage) { li.bannerImage = ci.bannerImage; n++; }
+                        });
+                        if (n) {
+                            console.log('[MC cloud] ✓ banner backfill: restored ' + n + ' ' + t + ' image(s) from cloud');
+                            if (changed.indexOf(t) < 0) changed.push(t);
+                        }
+                    });
+                } catch (e) { console.warn('[MC cloud] banner backfill failed', e); }
                 // Pull completed (even with zero rows on a fresh org) —
                 // pushes are now allowed (STOMP GUARD 1).
                 _mcCloudPulledOnce = true;
