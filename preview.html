@@ -27542,9 +27542,9 @@
             // banners "didn't save"). See mcUploadSeasonBanner.
             if (typeof _mcDownscaleImageDataUrl === 'function') {
                 _mcDownscaleImageDataUrl(file, 1600, 900, 0.82).then(function (dataUrl) {
-                    apply(dataUrl);
                     console.log('[MC banner] ✓ checkpoint banner resized to ' + Math.round(dataUrl.length / 1024) + 'KB');
-                }).catch(function () {
+                    return pflxUploadBannerToStorage(dataUrl, 'checkpoint');
+                }).then(function (v) { if (v) apply(v); }).catch(function () {
                     var reader = new FileReader();
                     reader.onload = function (e) { apply(e.target.result); };
                     reader.readAsDataURL(file);
@@ -31138,6 +31138,48 @@
         //   maxW × maxH: target dimensions (aspect ratio preserved)
         //   quality:     0-1 JPEG quality
         // Returns a Promise resolving to the resized dataURL.
+        // ── BANNER → SUPABASE STORAGE (July 12) ──
+        // Upload a banner dataURL to the public 'pflx-banners' bucket and
+        // resolve to its tiny public URL. Rows then carry ~90 chars instead
+        // of ~200KB base64 → UNLIMITED checkpoints/projects/seasons with
+        // images, instant cloud pushes, no localStorage pressure. Falls back
+        // to the inline dataURL if storage is unreachable, so banners always
+        // work — they're just smaller and unlimited when storage succeeds.
+        function pflxUploadBannerToStorage(dataUrl, kind) {
+            return new Promise(function (resolve) {
+                try {
+                    var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                    if (!client || !client.storage || !dataUrl || dataUrl.indexOf('data:') !== 0) return resolve(dataUrl);
+                    var m = dataUrl.match(/^data:(image\/[a-z.+-]+);base64,(.*)$/i);
+                    if (!m) return resolve(dataUrl);
+                    var mime = m[1].toLowerCase();
+                    var bin = atob(m[2]);
+                    var bytes = new Uint8Array(bin.length);
+                    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                    var ext = mime.indexOf('png') >= 0 ? 'png' : (mime.indexOf('webp') >= 0 ? 'webp' : 'jpg');
+                    var path = (kind || 'banner') + '/' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.' + ext;
+                    client.storage.from('pflx-banners')
+                        .upload(path, new Blob([bytes], { type: mime }), { contentType: mime, upsert: true })
+                        .then(function (res) {
+                            if (res && res.error) {
+                                console.warn('[banner-storage] upload failed → inline fallback:', res.error.message);
+                                return resolve(dataUrl);
+                            }
+                            try {
+                                var pub = client.storage.from('pflx-banners').getPublicUrl(path);
+                                var url = pub && pub.data && pub.data.publicUrl;
+                                if (url) { console.log('[banner-storage] ✓ ' + (kind || 'banner') + ' → ' + url); return resolve(url); }
+                            } catch (e) {}
+                            resolve(dataUrl);
+                        }, function (err) {
+                            console.warn('[banner-storage] upload threw → inline fallback:', err);
+                            resolve(dataUrl);
+                        });
+                } catch (e) { resolve(dataUrl); }
+            });
+        }
+        window.pflxUploadBannerToStorage = pflxUploadBannerToStorage;
+
         function _mcDownscaleImageDataUrl(fileOrDataUrl, maxW, maxH, quality) {
             return new Promise(function (resolve, reject) {
                 var img = new Image();
@@ -31179,13 +31221,16 @@
             // ~380×213 css px so this is 2x retina — plenty sharp — while
             // slashing the dataURL from megabytes to ~150-300 KB.
             _mcDownscaleImageDataUrl(file, 1600, 900, 0.82).then(function (dataUrl) {
-                mcProjectBannerData = dataUrl;
+                var kb = Math.round(dataUrl.length / 1024);
+                console.log('[MC banner] ✓ resized banner to ' + kb + 'KB (was ' + Math.round(file.size / 1024) + 'KB)');
+                return pflxUploadBannerToStorage(dataUrl, 'project');
+            }).then(function (v) {
+                if (!v) return;
+                mcProjectBannerData = v;
                 var img = document.getElementById('mc-project-banner-img');
                 var ph = document.getElementById('mc-project-banner-placeholder');
                 if (img) { img.src = mcProjectBannerData; img.style.display = 'block'; }
                 if (ph) ph.style.display = 'none';
-                var kb = Math.round(dataUrl.length / 1024);
-                console.log('[MC banner] ✓ resized banner to ' + kb + 'KB (was ' + Math.round(file.size / 1024) + 'KB)');
             }).catch(function (err) {
                 console.error('[MC banner] resize failed, falling back to raw file:', err);
                 // Fallback: keep the raw dataURL if canvas resize fails
@@ -32051,9 +32096,9 @@
             // why season banners "didn't save". ~150-300 KB always lands.
             if (typeof _mcDownscaleImageDataUrl === 'function') {
                 _mcDownscaleImageDataUrl(file, 1600, 900, 0.82).then(function (dataUrl) {
-                    apply(dataUrl);
                     console.log('[MC banner] ✓ season banner resized to ' + Math.round(dataUrl.length / 1024) + 'KB');
-                }).catch(function () {
+                    return pflxUploadBannerToStorage(dataUrl, 'season');
+                }).then(function (v) { if (v) apply(v); }).catch(function () {
                     var reader = new FileReader();
                     reader.onload = function (e) { apply(e.target.result); };
                     reader.readAsDataURL(file);
