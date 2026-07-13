@@ -21901,10 +21901,23 @@
                 }
             });
             _mcCloudQueue = {};
+            // Keep a copy so a failed push can be re-queued instead of lost.
+            // (Read from `rows` — _mcCloudQueue was already cleared above.)
+            var queuedCopy = {};
+            rows.forEach(function (r) {
+                if (r && r.key && r.key.indexOf('pflx_mc_') === 0 && r.data) queuedCopy[r.key.slice(8)] = r.data.items;
+            });
+            function _requeue(reason) {
+                console.warn('[MC cloud] ✗ push failed (' + reason + ') — re-queued ' + types.join(', ') + ' for retry');
+                types.forEach(function (t) { if (_mcCloudQueue[t] === undefined) _mcCloudQueue[t] = queuedCopy[t]; });
+                if (_mcCloudTimer) clearTimeout(_mcCloudTimer);
+                _mcCloudTimer = setTimeout(_mcCloudFlush, 5000);
+                try { if (typeof pflxToast === 'function') pflxToast('⚠ Cloud save failed — retrying…', 'error'); } catch (e) {}
+            }
             client.from('app_data').upsert(rows, { onConflict: 'key' }).then(function (res) {
-                if (res && res.error) console.warn('[MC cloud] save error:', res.error.message);
+                if (res && res.error) _requeue(res.error.message);
                 else console.log('[MC cloud] ✓ pushed', types.join(', '));
-            }, function (err) { console.warn('[MC cloud] save threw', err); });
+            }, function (err) { _requeue(String(err && err.message || err)); });
         }
         function mcCloudPush(type) {
             if (_mcApplyingCloud) return;   // don't echo a cloud pull straight back
@@ -27477,12 +27490,28 @@
 
         function mcUploadCPBanner(input) {
             if (!input.files || !input.files[0]) return;
-            var reader = new FileReader();
-            reader.onload = function(e) {
-                document.getElementById('mc-cp-banner-preview').innerHTML = '<img src="' + e.target.result + '" style="max-width:100%;max-height:120px;border-radius:8px;">';
-                document.getElementById('mc-cp-banner-preview').dataset.src = e.target.result;
-            };
-            reader.readAsDataURL(input.files[0]);
+            var file = input.files[0];
+            function apply(dataUrl) {
+                document.getElementById('mc-cp-banner-preview').innerHTML = '<img src="' + dataUrl + '" style="max-width:100%;max-height:120px;border-radius:8px;">';
+                document.getElementById('mc-cp-banner-preview').dataset.src = dataUrl;
+            }
+            // Downscale to 1600×900 JPEG — raw multi-MB dataURLs made the
+            // cloud upsert time out silently on slow connections (checkpoint
+            // banners "didn't save"). See mcUploadSeasonBanner.
+            if (typeof _mcDownscaleImageDataUrl === 'function') {
+                _mcDownscaleImageDataUrl(file, 1600, 900, 0.82).then(function (dataUrl) {
+                    apply(dataUrl);
+                    console.log('[MC banner] ✓ checkpoint banner resized to ' + Math.round(dataUrl.length / 1024) + 'KB');
+                }).catch(function () {
+                    var reader = new FileReader();
+                    reader.onload = function (e) { apply(e.target.result); };
+                    reader.readAsDataURL(file);
+                });
+            } else {
+                var reader = new FileReader();
+                reader.onload = function (e) { apply(e.target.result); };
+                reader.readAsDataURL(file);
+            }
         }
 
         function mcSaveCPForm() {
@@ -31966,15 +31995,32 @@
 
         function mcUploadSeasonBanner(input) {
             if (!input.files || !input.files[0]) return;
-            var reader = new FileReader();
-            reader.onload = function(e) {
-                mcSeasonBannerData = e.target.result;
+            var file = input.files[0];
+            function apply(dataUrl) {
+                mcSeasonBannerData = dataUrl;
                 var img = document.getElementById('mc-season-banner-img');
                 var ph = document.getElementById('mc-season-banner-placeholder');
                 if (img) { img.src = mcSeasonBannerData; img.style.display = 'block'; }
                 if (ph) ph.style.display = 'none';
-            };
-            reader.readAsDataURL(input.files[0]);
+            }
+            // Downscale to 1600×900 JPEG (same as project banners). A raw
+            // screenshot dataURL is 3-6 MB — big enough that the debounced
+            // cloud upsert silently timed out on slow connections, which is
+            // why season banners "didn't save". ~150-300 KB always lands.
+            if (typeof _mcDownscaleImageDataUrl === 'function') {
+                _mcDownscaleImageDataUrl(file, 1600, 900, 0.82).then(function (dataUrl) {
+                    apply(dataUrl);
+                    console.log('[MC banner] ✓ season banner resized to ' + Math.round(dataUrl.length / 1024) + 'KB');
+                }).catch(function () {
+                    var reader = new FileReader();
+                    reader.onload = function (e) { apply(e.target.result); };
+                    reader.readAsDataURL(file);
+                });
+            } else {
+                var reader = new FileReader();
+                reader.onload = function (e) { apply(e.target.result); };
+                reader.readAsDataURL(file);
+            }
         }
 
         function mcRemoveSeasonBanner() {
