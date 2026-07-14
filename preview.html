@@ -22323,6 +22323,10 @@
         // Re-render whatever's on screen after MC data changes underneath us.
         function _mcAfterCloudChange(types) {
             try { if (typeof pflxRefreshHomePanels === 'function') pflxRefreshHomePanels(); } catch (e) {}
+            // Season banner bar — was only re-rendered on tab nav, so the
+            // first paint (before the boot pull) showed "—" forever on views
+            // that never navigate (player portal). Refresh on every cloud apply.
+            try { if (typeof pflxRenderSeasonBar === 'function') pflxRenderSeasonBar(); } catch (e) {}
             // Tell sub-app iframes their cached MC lists are stale.
             try {
                 if (window.PflxDataBus && window.PflxDataBus.mc) {
@@ -23216,17 +23220,15 @@
                     var arr = Array.isArray(p.cohorts) ? p.cohorts : String(p.cohort || '').split(/[,;]/);
                     return arr.some(function (c) { return scopedNorm.indexOf(__normC(c)) >= 0; });
                 }
-                // NOTE: was 'mc-season-name' — that ID belongs to the season FORM
-                // input. The duplicate made getElementById return this display div,
-                // so the form's name always read empty ("Season name is required"
-                // even with a name typed) and edit-populate wrote nowhere.
-                var nameEl = document.getElementById('mc-season-bar-name');
-                var statsEl = document.getElementById('mc-season-stats');
-                var cohortEl = document.getElementById('mc-season-cohort');
-                if (nameEl) nameEl.textContent = activeSeason ? (activeSeason.name || 'Untitled Season') : 'No Season Set';
-                // Checkpoints — count the ones LIVE for this season: linked to it
-                // (or unlinked/legacy), and either status 'active' or inside their
-                // own date window while not completed.
+                // ── BANNER-CARD BAR (July 12) ── same design as the Home Base
+                // indicator: season banner image backdrop + gradient, name,
+                // dates, live counts, scope pill, DAYS LEFT + progress bar.
+                var __banner = (activeSeason && activeSeason.bannerImage) || '';
+                var __end = (activeSeason && activeSeason.endDate) ? (Date.parse(activeSeason.endDate) + 86399999) : NaN;
+                var __st0 = (activeSeason && activeSeason.startDate) ? Date.parse(activeSeason.startDate) : NaN;
+                var __daysLeft = isFinite(__end) ? Math.max(0, Math.ceil((__end - __now) / 86400000)) : null;
+                var __pct = (isFinite(__st0) && isFinite(__end) && __end > __st0)
+                    ? Math.min(100, Math.max(0, Math.round((__now - __st0) / (__end - __st0) * 100))) : null;
                 function __cpLive(c) {
                     if (!c || c.status === 'completed' || c.status === 'archived') return false;
                     if (activeSeason && c.seasonId && c.seasonId !== activeSeason.id) return false;
@@ -23239,27 +23241,45 @@
                 var activeCps = (mcCheckpoints || []).filter(__cpLive).length;
                 var openTasks = (mcTasks || []).filter(function (t) { return t && t.status !== 'approved'; }).length;
                 var awaiting  = (mcTasks || []).filter(function (t) { return t && t.status === 'submitted'; }).length;
-                // Players — scoped to the season's cohorts when it isn't all-cohorts
                 var playersN  = (mcPlayers || []).filter(function (p) { return p && p.role !== 'admin' && !p.isHost && __inScope(p); }).length;
-                var pillCss = 'padding:5px 10px;border-radius:10px;font-size:11px;font-weight:700;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.75);';
-                if (statsEl) {
-                    statsEl.innerHTML =
-                        '<span style="' + pillCss + '">👥 ' + playersN + ' players</span>' +
-                        '<span style="' + pillCss + '">🏁 ' + activeCps + ' active checkpoint' + (activeCps === 1 ? '' : 's') + '</span>' +
-                        '<span style="' + pillCss + '">📋 ' + openTasks + ' open task' + (openTasks === 1 ? '' : 's') + '</span>' +
-                        (awaiting > 0 ? '<span style="padding:5px 10px;border-radius:10px;font-size:11px;font-weight:800;background:rgba(245,165,0,0.16);border:1px solid rgba(245,165,0,0.4);color:#f5a500;">📤 ' + awaiting + ' awaiting approval</span>' : '');
-                }
-                if (cohortEl) {
-                    // Season cohort scope — real fields (allCohorts + cohorts[]),
-                    // with legacy cohortScope fallback. (Was cohortScope-only, a
-                    // field the season form never writes — pill was stuck on
-                    // "All Cohorts".)
-                    var scope = scopedCohorts || (activeSeason && activeSeason.cohortScope) || 'All Cohorts';
-                    var scopeArr = Array.isArray(scope) ? scope : [scope];
-                    cohortEl.innerHTML =
-                        '<span style="font-size:9px;letter-spacing:0.14em;color:rgba(255,255,255,0.35);font-weight:800;font-family:Orbitron,sans-serif;">SCOPE</span>' +
-                        '<span style="padding:5px 10px;border-radius:10px;background:rgba(139,92,246,0.14);border:1px solid rgba(139,92,246,0.35);color:#c4b5fd;font-weight:700;">🎫 ' + escapeHtml(scopeArr.join(' · ')) + '</span>';
-                }
+                var pillCss = 'padding:5px 10px;border-radius:10px;font-size:11px;font-weight:700;background:rgba(8,10,18,0.55);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.85);backdrop-filter:blur(3px);';
+                var scopeArr = scopedCohorts || ['All Cohorts'];
+                bar.style.position = 'relative';
+                bar.style.overflow = 'hidden';
+                bar.innerHTML =
+                    (__banner ? '<img src="' + escapeHtml(__banner) + '" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0.5;">' : '') +
+                    '<div style="position:absolute;inset:0;background:linear-gradient(90deg, rgba(8,10,18,0.92) 0%, rgba(8,10,18,0.55) 60%, rgba(8,10,18,0.3) 100%);"></div>' +
+                    '<div style="position:relative;display:flex;flex-wrap:wrap;align-items:center;gap:14px;width:100%;">' +
+                        '<div style="display:flex;align-items:center;gap:10px;">' +
+                            '<span style="font-size:18px;filter:drop-shadow(0 0 8px rgba(245,200,66,0.6));">🏆</span>' +
+                            '<div>' +
+                                '<div style="font-family:Orbitron,sans-serif;font-size:9px;color:rgba(245,200,66,0.85);letter-spacing:0.14em;font-weight:800;">ACTIVE SEASON</div>' +
+                                '<div id="mc-season-bar-name" style="font-family:Orbitron,sans-serif;font-size:14px;color:#f5c842;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;text-shadow:0 1px 8px rgba(0,0,0,0.85);">' +
+                                    (activeSeason ? escapeHtml(activeSeason.name || 'Untitled Season') : 'No Season Set') + '</div>' +
+                                (activeSeason && (activeSeason.startDate || activeSeason.endDate)
+                                    ? '<div style="font-family:\'Share Tech Mono\',monospace;font-size:9px;color:rgba(255,255,255,0.75);margin-top:1px;">' + escapeHtml((activeSeason.startDate || '') + (activeSeason.endDate ? ' → ' + activeSeason.endDate : '')) + '</div>'
+                                    : '') +
+                            '</div>' +
+                        '</div>' +
+                        '<div style="width:1px;height:32px;background:rgba(255,255,255,0.15);"></div>' +
+                        '<div style="display:flex;flex-wrap:wrap;gap:8px;flex:1;" id="mc-season-stats">' +
+                            '<span style="' + pillCss + '">👥 ' + playersN + ' players</span>' +
+                            '<span style="' + pillCss + '">🏁 ' + activeCps + ' active checkpoint' + (activeCps === 1 ? '' : 's') + '</span>' +
+                            '<span style="' + pillCss + '">📋 ' + openTasks + ' open task' + (openTasks === 1 ? '' : 's') + '</span>' +
+                            (awaiting > 0 ? '<span style="padding:5px 10px;border-radius:10px;font-size:11px;font-weight:800;background:rgba(245,165,0,0.2);border:1px solid rgba(245,165,0,0.5);color:#ffc861;">📤 ' + awaiting + ' awaiting approval</span>' : '') +
+                        '</div>' +
+                        '<div id="mc-season-cohort" style="display:flex;align-items:center;gap:8px;">' +
+                            '<span style="font-size:9px;letter-spacing:0.14em;color:rgba(255,255,255,0.45);font-weight:800;font-family:Orbitron,sans-serif;">SCOPE</span>' +
+                            '<span style="padding:5px 10px;border-radius:10px;background:rgba(139,92,246,0.2);border:1px solid rgba(139,92,246,0.45);color:#d6c7ff;font-weight:700;font-size:11px;">🎫 ' + escapeHtml(scopeArr.join(' · ')) + '</span>' +
+                        '</div>' +
+                        (__daysLeft !== null
+                            ? '<div style="text-align:center;padding:5px 12px;background:rgba(245,200,66,0.16);border:1px solid rgba(245,200,66,0.45);border-radius:10px;backdrop-filter:blur(3px);">' +
+                                '<div style="font-family:Orbitron,sans-serif;font-size:16px;font-weight:900;color:#f5c842;">' + __daysLeft + '</div>' +
+                                '<div style="font-size:7px;color:rgba(255,255,255,0.85);letter-spacing:0.14em;font-weight:700;">DAYS LEFT</div>' +
+                              '</div>'
+                            : '') +
+                    '</div>' +
+                    (__pct !== null ? '<div style="position:absolute;left:0;bottom:0;height:3px;width:' + __pct + '%;background:linear-gradient(90deg,#f5c842,#a78bfa);box-shadow:0 0 8px rgba(245,200,66,0.6);"></div>' : '');
             } catch (e) { console.warn('[season-bar] render failed', e); }
         }
         window.pflxRenderSeasonBar = pflxRenderSeasonBar;
