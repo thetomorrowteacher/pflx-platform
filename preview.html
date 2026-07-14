@@ -22327,6 +22327,7 @@
             // first paint (before the boot pull) showed "—" forever on views
             // that never navigate (player portal). Refresh on every cloud apply.
             try { if (typeof pflxRenderSeasonBar === 'function') pflxRenderSeasonBar(); } catch (e) {}
+            try { if (typeof pflxUpdateHomeSeasonCard === 'function') pflxUpdateHomeSeasonCard(); } catch (e) {}
             // Tell sub-app iframes their cached MC lists are stale.
             try {
                 if (window.PflxDataBus && window.PflxDataBus.mc) {
@@ -23344,6 +23345,24 @@
             } catch (e) { return ''; }
         }
         window.pflxSeasonCardHtml = pflxSeasonCardHtml;
+
+        // Fill/refresh the Home Base season card container. Called after the
+        // dashboard builds AND from _mcAfterCloudChange — Home Base renders
+        // before the boot pull, so the first pass usually sees no seasons yet.
+        function pflxUpdateHomeSeasonCard() {
+            try {
+                var box = document.getElementById('home-season-card');
+                if (!box) return;
+                var s = window.activeSession || {};
+                var myCoh = Array.isArray(s.cohorts) ? s.cohorts : String(s.cohort || '').split(/[,;]/);
+                var isHost = /admin|host|instructor|teacher/i.test(String(s.role || ''));
+                var html = (typeof pflxSeasonCardHtml === 'function')
+                    ? pflxSeasonCardHtml({ myCohorts: myCoh, isHost: isHost, marginBottom: '0px' }) : '';
+                box.innerHTML = html;
+                box.style.display = html ? '' : 'none';
+            } catch (e) {}
+        }
+        window.pflxUpdateHomeSeasonCard = pflxUpdateHomeSeasonCard;
 
         // ── My Work widget ──
         // Personalized landing block on the MC Dashboard.
@@ -50516,21 +50535,20 @@ RESPONSE RULES:
             dashboard.appendChild(playerHeader);
 
             // ── ACTIVE SEASON indicator (July 12) — full-width banner card
-            //    between the profile hero and Launch Apps. Shared builder
-            //    with MC (pflxSeasonCardHtml); hides for players outside a
-            //    cohort-scoped season.
+            //    between the profile hero and Launch Apps. The container is
+            //    ALWAYS mounted and filled by pflxUpdateHomeSeasonCard, which
+            //    also re-runs when the cloud boot pull lands — Home Base
+            //    builds before mcSeasons is populated, so a one-shot render
+            //    here permanently missed the season.
             try {
-                if (typeof pflxSeasonCardHtml === 'function') {
-                    var __myCoh = Array.isArray(s.cohorts) ? s.cohorts : String(s.cohort || cohort || '').split(/[,;]/);
-                    var __isHost = /admin|host|instructor|teacher/i.test(String(s.role || role || ''));
-                    var __seasonHtml = pflxSeasonCardHtml({ myCohorts: __myCoh, isHost: __isHost, marginBottom: '0px' });
-                    if (__seasonHtml) {
-                        var __seasonCard = document.createElement('div');
-                        __seasonCard.style.cssText = 'grid-column:1 / -1;';
-                        __seasonCard.innerHTML = __seasonHtml;
-                        dashboard.appendChild(__seasonCard);
-                    }
-                }
+                var __seasonCard = document.createElement('div');
+                __seasonCard.id = 'home-season-card';
+                __seasonCard.style.cssText = 'grid-column:1 / -1;display:none;';
+                dashboard.appendChild(__seasonCard);
+                if (typeof pflxUpdateHomeSeasonCard === 'function') pflxUpdateHomeSeasonCard();
+                // Retry shortly after in case the boot pull is mid-flight
+                setTimeout(function () { try { pflxUpdateHomeSeasonCard(); } catch (e) {} }, 2500);
+                setTimeout(function () { try { pflxUpdateHomeSeasonCard(); } catch (e) {} }, 6000);
             } catch (e) { console.warn('[home-season] render error', e); }
 
             // ── App Hub ── Big-tile launcher. Pinned right under the
