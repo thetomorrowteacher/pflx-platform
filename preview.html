@@ -23284,6 +23284,67 @@
         }
         window.pflxRenderSeasonBar = pflxRenderSeasonBar;
 
+        // ── Shared ACTIVE SEASON card builder (July 12) ──
+        // One renderer for every surface (Home Base, MC player home): banner
+        // image backdrop, name, dates, DAYS LEFT pill, progress line. Returns
+        // '' when there's no live season or the viewer is outside a cohort-
+        // scoped season (hosts always see it).
+        function pflxSeasonCardHtml(opts) {
+            try {
+                opts = opts || {};
+                if (typeof mcSeasons === 'undefined' || !Array.isArray(mcSeasons)) return '';
+                var now = Date.now();
+                function live(sn) {
+                    if (!sn) return false;
+                    var flagged = sn.status === 'active' || sn.active === true;
+                    if (!flagged) return false;
+                    var st = sn.startDate ? Date.parse(sn.startDate) : -Infinity;
+                    var en = sn.endDate ? (Date.parse(sn.endDate) + 86399999) : Infinity;
+                    if (isNaN(st)) st = -Infinity; if (isNaN(en)) en = Infinity;
+                    return now >= st && now <= en;
+                }
+                var season = mcSeasons.find(live)
+                    || mcSeasons.find(function (x) { return x && (x.status === 'active' || x.active === true); })
+                    || null;
+                if (!season) return '';
+                var scope = (typeof pflxSeasonCohortNames === 'function') ? pflxSeasonCohortNames(season) : (Array.isArray(season.cohorts) ? season.cohorts : []);
+                if (season.allCohorts === false && scope.length && !opts.isHost) {
+                    var norm = function (x) { return String(x || '').trim().toLowerCase().replace(/\s+/g, ' '); };
+                    var mine = (opts.myCohorts || []).map(norm).filter(Boolean);
+                    var sn2 = scope.map(norm);
+                    if (!mine.some(function (c) { return sn2.indexOf(c) >= 0; })) return '';
+                }
+                var end = season.endDate ? (Date.parse(season.endDate) + 86399999) : NaN;
+                var st0 = season.startDate ? Date.parse(season.startDate) : NaN;
+                var daysLeft = isFinite(end) ? Math.max(0, Math.ceil((end - now) / 86400000)) : null;
+                var pct = (isFinite(st0) && isFinite(end) && end > st0)
+                    ? Math.min(100, Math.max(0, Math.round((now - st0) / (end - st0) * 100))) : null;
+                var banner = season.bannerImage || '';
+                return '<div style="position:relative;overflow:hidden;border-radius:14px;border:1px solid rgba(245,200,66,0.35);margin-bottom:' + (opts.marginBottom || '18px') + ';min-height:86px;display:flex;align-items:center;box-shadow:0 0 22px rgba(245,200,66,0.10);">' +
+                    (banner ? '<img src="' + escapeHtml(banner) + '" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0.55;">' : '') +
+                    '<div style="position:absolute;inset:0;background:linear-gradient(90deg, rgba(8,10,18,0.92) 0%, rgba(8,10,18,0.55) 55%, rgba(8,10,18,0.25) 100%);"></div>' +
+                    '<div style="position:relative;display:flex;align-items:center;gap:16px;padding:14px 18px;width:100%;flex-wrap:wrap;">' +
+                        '<span style="font-size:26px;filter:drop-shadow(0 0 8px rgba(245,200,66,0.6));">🏆</span>' +
+                        '<div style="flex:1;min-width:150px;">' +
+                            '<div style="font-family:Orbitron,sans-serif;font-size:9px;color:rgba(245,200,66,0.85);letter-spacing:0.16em;font-weight:800;">ACTIVE SEASON</div>' +
+                            '<div style="font-family:Orbitron,sans-serif;font-size:16px;font-weight:900;color:#f5c842;letter-spacing:0.05em;text-transform:uppercase;text-shadow:0 1px 10px rgba(0,0,0,0.85);">' + escapeHtml(season.name || 'Season') + '</div>' +
+                            ((season.startDate || season.endDate)
+                                ? '<div style="font-family:\'Share Tech Mono\',monospace;font-size:10px;color:rgba(255,255,255,0.8);margin-top:2px;text-shadow:0 1px 6px rgba(0,0,0,0.8);">' + escapeHtml((season.startDate || '') + (season.endDate ? ' → ' + season.endDate : '')) + '</div>'
+                                : '') +
+                        '</div>' +
+                        (daysLeft !== null
+                            ? '<div style="text-align:center;padding:6px 14px;background:rgba(245,200,66,0.16);border:1px solid rgba(245,200,66,0.45);border-radius:10px;backdrop-filter:blur(4px);">' +
+                                '<div style="font-family:Orbitron,sans-serif;font-size:18px;font-weight:900;color:#f5c842;">' + daysLeft + '</div>' +
+                                '<div style="font-size:8px;color:rgba(255,255,255,0.85);letter-spacing:0.14em;font-weight:700;">DAYS LEFT</div>' +
+                              '</div>'
+                            : '') +
+                    '</div>' +
+                    (pct !== null ? '<div style="position:absolute;left:0;bottom:0;height:3px;width:' + pct + '%;background:linear-gradient(90deg,#f5c842,#a78bfa);box-shadow:0 0 8px rgba(245,200,66,0.6);"></div>' : '') +
+                '</div>';
+            } catch (e) { return ''; }
+        }
+        window.pflxSeasonCardHtml = pflxSeasonCardHtml;
+
         // ── My Work widget ──
         // Personalized landing block on the MC Dashboard.
         //   Host: 'Awaiting your approval' (submitted tasks) + 'Overdue open tasks'
@@ -50453,6 +50514,24 @@ RESPONSE RULES:
                 </div>
             `;
             dashboard.appendChild(playerHeader);
+
+            // ── ACTIVE SEASON indicator (July 12) — full-width banner card
+            //    between the profile hero and Launch Apps. Shared builder
+            //    with MC (pflxSeasonCardHtml); hides for players outside a
+            //    cohort-scoped season.
+            try {
+                if (typeof pflxSeasonCardHtml === 'function') {
+                    var __myCoh = Array.isArray(s.cohorts) ? s.cohorts : String(s.cohort || cohort || '').split(/[,;]/);
+                    var __isHost = /admin|host|instructor|teacher/i.test(String(s.role || role || ''));
+                    var __seasonHtml = pflxSeasonCardHtml({ myCohorts: __myCoh, isHost: __isHost, marginBottom: '0px' });
+                    if (__seasonHtml) {
+                        var __seasonCard = document.createElement('div');
+                        __seasonCard.style.cssText = 'grid-column:1 / -1;';
+                        __seasonCard.innerHTML = __seasonHtml;
+                        dashboard.appendChild(__seasonCard);
+                    }
+                }
+            } catch (e) { console.warn('[home-season] render error', e); }
 
             // ── App Hub ── Big-tile launcher. Pinned right under the
             // player header so it always occupies the top of Home Base.
