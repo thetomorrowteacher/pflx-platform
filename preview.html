@@ -22076,6 +22076,27 @@
                         }
                     });
                 } catch (e) { console.warn('[MC cloud] banner backfill failed', e); }
+                // ── COHORT GROUP HEAL (July 12) ── the seeded groups were
+                // created 1:1 with cohorts but never given member lists
+                // (cohorts: null). Every group-based assignment — checkpoint
+                // group chips, task/project/job cohort checkboxes (value =
+                // group id) — resolved to NOTHING. Backfill each empty group
+                // whose name matches a real cohort with itself as the member.
+                try {
+                    var __healed = 0;
+                    var __hubNames = (window.pflxCohortHub ? window.pflxCohortHub.names() : []);
+                    var __hn = {};
+                    __hubNames.forEach(function (n) { __hn[String(n).trim().toLowerCase().replace(/\s+/g, ' ')] = n; });
+                    (typeof mcCohortGroups !== 'undefined' ? mcCohortGroups : []).forEach(function (g) {
+                        if (!g || (Array.isArray(g.cohorts) && g.cohorts.length)) return;
+                        var match = __hn[String(g.name || '').trim().toLowerCase().replace(/\s+/g, ' ')];
+                        if (match) { g.cohorts = [match]; __healed++; }
+                    });
+                    if (__healed) {
+                        console.log('[MC cloud] ✓ cohort-group heal: ' + __healed + ' empty group(s) linked to their cohort');
+                        try { mcSaveData('cohortgroups'); } catch (e) {}
+                    }
+                } catch (e) { console.warn('[MC cloud] group heal failed', e); }
                 // Pull completed (even with zero rows on a fresh org) —
                 // pushes are now allowed (STOMP GUARD 1).
                 _mcCloudPulledOnce = true;
@@ -27444,39 +27465,64 @@
             // Banner preview
             var preview = document.getElementById('mc-cp-banner-preview');
             if (preview) preview.innerHTML = cp && cp.bannerImage ? '<img src="' + cp.bannerImage + '" style="max-width:100%;max-height:120px;border-radius:8px;">' : '<span style="color:rgba(255,255,255,0.2);font-size:11px;">No banner</span>';
-            // Cohort + Group chip selector
-            var cohortBox = document.getElementById('mc-cp-cohorts');
-            if (cohortBox) {
-                var cohorts = [...new Set(mcPlayers.map(function(p) { return p.cohort; }).filter(Boolean))];
-                var assigned = cp && cp.assignedTo && cp.assignedTo !== 'all' ? cp.assignedTo : [];
-                var isAll = !assigned.length;
-                // "All" chip
-                var html = '<div onclick="mcToggleCPCohortAll()" id="mc-cp-all-chip" style="cursor:pointer;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:0.05em;' + (isAll ? 'background:rgba(34,197,94,0.2);border:1px solid rgba(34,197,94,0.5);color:#22c55e;' : 'background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.4);') + '">ALL</div>';
-                // Cohort group chips
-                if (mcCohortGroups.length > 0) {
-                    mcCohortGroups.forEach(function(g) {
-                        var allInGroup = g.cohorts && g.cohorts.every(function(c) { return assigned.includes(c); });
-                        html += '<div onclick="mcToggleCPCohortGroup(\'' + escapeHtml(g.name).replace(/'/g, "\\'") + '\')" style="cursor:pointer;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:0.05em;' + (allInGroup ? 'background:rgba(139,92,246,0.2);border:1px solid rgba(139,92,246,0.5);color:#8b5cf6;' : 'background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.4);') + '">' + escapeHtml(g.name) + '</div>';
-                    });
-                }
-                // Individual cohort chips
-                cohorts.forEach(function(c) {
-                    var active = assigned.includes(c);
-                    html += '<div onclick="mcToggleCPCohort(\'' + escapeHtml(c).replace(/'/g, "\\'") + '\')" class="mc-cp-cohort-chip" data-cohort="' + escapeHtml(c) + '" style="cursor:pointer;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:600;' + (active ? 'background:rgba(79,142,247,0.2);border:1px solid rgba(79,142,247,0.5);color:#4f8ef7;' : 'background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.4);') + '">' + escapeHtml(c) + '</div>';
-                });
-                cohortBox.innerHTML = html;
-            }
+            // Cohort chip selector — COHORT HUB edition (July 12).
+            // Previous version had three bugs that made "select a cohort"
+            // impossible: (1) the first row of chips were cohort GROUPS with
+            // no member lists — clicks silently no-oped, and they were
+            // visually identical to real cohort chips; (2) the real cohort
+            // list came from raw player strings (duplicates + comma-joined
+            // junk like "Falcon Studios, Global Digital Intern" as ONE chip);
+            // (3) selection state was never seeded from the record, so edits
+            // reverted to ALL on save.
+            mcCPAssignedCohorts = (cp && Array.isArray(cp.assignedTo)) ? cp.assignedTo.slice() : [];
+            mcCPAllCohorts = mcCPAssignedCohorts.length === 0;
+            mcRenderCPCohortChips();
             mcCalcCPDuration();
             mcCalcCPTotalXC();
             form.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
-        // Cohort chip toggle helpers
+        // Cohort chip toggle helpers — live state + chip-only re-render.
+        // (The old ALL/group toggles re-rendered the WHOLE form via
+        // mcShowCPForm, wiping any unsaved name/description edits.)
         var mcCPAssignedCohorts = [];
         var mcCPAllCohorts = true;
+        function mcRenderCPCohortChips() {
+            var cohortBox = document.getElementById('mc-cp-cohorts');
+            if (!cohortBox) return;
+            // Canonical deduped cohort names from the COHORT HUB — same list
+            // as Org Management, the player editor and the season form.
+            var names = [];
+            try { names = window.pflxCohortHub ? window.pflxCohortHub.names() : []; } catch (e) {}
+            if (!names.length) {
+                var set = {};
+                (mcPlayers || []).forEach(function (p) {
+                    if (!p) return;
+                    String(p.cohort || '').split(/[,;]/).forEach(function (c) { c = c.trim(); if (c) set[c] = 1; });
+                });
+                names = Object.keys(set).sort();
+            }
+            var offCss = 'background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.4);';
+            var html = '<div onclick="mcToggleCPCohortAll()" id="mc-cp-all-chip" style="cursor:pointer;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:0.05em;' +
+                (mcCPAllCohorts ? 'background:rgba(34,197,94,0.2);border:1px solid rgba(34,197,94,0.5);color:#22c55e;' : offCss) + '">ALL</div>';
+            // Group chips — only groups that actually HAVE member cohorts
+            // (empty seeded groups used to render identical dead chips here).
+            (typeof mcCohortGroups !== 'undefined' ? mcCohortGroups : []).forEach(function (g) {
+                if (!g || !Array.isArray(g.cohorts) || !g.cohorts.length) return;
+                var allInGroup = g.cohorts.every(function (c) { return mcCPAssignedCohorts.includes(c); });
+                html += '<div onclick="mcToggleCPCohortGroup(\'' + escapeHtml(g.name).replace(/'/g, "\\'") + '\')" style="cursor:pointer;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:0.05em;' +
+                    (allInGroup ? 'background:rgba(139,92,246,0.2);border:1px solid rgba(139,92,246,0.5);color:#8b5cf6;' : offCss) + '">&#128193; ' + escapeHtml(g.name) + '</div>';
+            });
+            names.forEach(function (c) {
+                var active = mcCPAssignedCohorts.includes(c);
+                html += '<div onclick="mcToggleCPCohort(\'' + escapeHtml(c).replace(/'/g, "\\'") + '\')" class="mc-cp-cohort-chip" data-cohort="' + escapeHtml(c) + '" style="cursor:pointer;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:600;' +
+                    (active ? 'background:rgba(79,142,247,0.2);border:1px solid rgba(79,142,247,0.5);color:#4f8ef7;' : offCss) + '">' + escapeHtml(c) + '</div>';
+            });
+            cohortBox.innerHTML = html;
+        }
         function mcToggleCPCohortAll() {
             mcCPAllCohorts = true;
             mcCPAssignedCohorts = [];
-            mcShowCPForm(mcCPEditIndex); // re-render chips
+            mcRenderCPCohortChips();
         }
         function mcToggleCPCohort(cohort) {
             mcCPAllCohorts = false;
@@ -27484,33 +27530,20 @@
             if (idx >= 0) mcCPAssignedCohorts.splice(idx, 1);
             else mcCPAssignedCohorts.push(cohort);
             if (mcCPAssignedCohorts.length === 0) mcCPAllCohorts = true;
-            // Update chip visuals without full re-render
-            var allChip = document.getElementById('mc-cp-all-chip');
-            if (allChip) {
-                allChip.style.background = mcCPAllCohorts ? 'rgba(34,197,94,0.2)' : 'rgba(255,255,255,0.05)';
-                allChip.style.borderColor = mcCPAllCohorts ? 'rgba(34,197,94,0.5)' : 'rgba(255,255,255,0.1)';
-                allChip.style.color = mcCPAllCohorts ? '#22c55e' : 'rgba(255,255,255,0.4)';
-            }
-            document.querySelectorAll('.mc-cp-cohort-chip').forEach(function(el) {
-                var c = el.dataset.cohort;
-                var active = mcCPAssignedCohorts.includes(c);
-                el.style.background = active ? 'rgba(79,142,247,0.2)' : 'rgba(255,255,255,0.05)';
-                el.style.borderColor = active ? 'rgba(79,142,247,0.5)' : 'rgba(255,255,255,0.1)';
-                el.style.color = active ? '#4f8ef7' : 'rgba(255,255,255,0.4)';
-            });
+            mcRenderCPCohortChips();
         }
         function mcToggleCPCohortGroup(groupName) {
-            var group = mcCohortGroups.find(function(g) { return g.name === groupName; });
-            if (!group || !group.cohorts) return;
+            var group = (typeof mcCohortGroups !== 'undefined' ? mcCohortGroups : []).find(function (g) { return g && g.name === groupName; });
+            if (!group || !Array.isArray(group.cohorts) || !group.cohorts.length) return;
             mcCPAllCohorts = false;
-            var allIn = group.cohorts.every(function(c) { return mcCPAssignedCohorts.includes(c); });
+            var allIn = group.cohorts.every(function (c) { return mcCPAssignedCohorts.includes(c); });
             if (allIn) {
-                mcCPAssignedCohorts = mcCPAssignedCohorts.filter(function(c) { return !group.cohorts.includes(c); });
+                mcCPAssignedCohorts = mcCPAssignedCohorts.filter(function (c) { return !group.cohorts.includes(c); });
             } else {
-                group.cohorts.forEach(function(c) { if (!mcCPAssignedCohorts.includes(c)) mcCPAssignedCohorts.push(c); });
+                group.cohorts.forEach(function (c) { if (!mcCPAssignedCohorts.includes(c)) mcCPAssignedCohorts.push(c); });
             }
             if (mcCPAssignedCohorts.length === 0) mcCPAllCohorts = true;
-            mcShowCPForm(mcCPEditIndex); // re-render
+            mcRenderCPCohortChips();
         }
 
         function mcCancelCPForm() {
