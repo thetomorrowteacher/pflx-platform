@@ -22227,10 +22227,21 @@
         // than the local write. Bare-row payloads with no updatedAt
         // are treated as "old" if we wrote within the recent window
         // (default 4 seconds) — that's the typical echo case.
+        // July 15: PERSISTED across reloads. During the July 14 Supabase outage,
+        // a host edited tasks/projects/checkpoints all evening — every cloud save
+        // timed out, the edits lived only in localStorage, and because this map
+        // was memory-only, the next boot pull happily overwrote the newer local
+        // work with the stale cloud rows. Persisting the stamps lets Guard 3 do
+        // its job across sessions: stale cloud never beats newer offline edits.
+        var _MC_LASTWRITE_LS = 'pflx_mc_lastwrite_v1';
         var _mcLocalLastWrite = {};   // type → epoch ms of last local mcSaveData
+        try { _mcLocalLastWrite = JSON.parse(localStorage.getItem(_MC_LASTWRITE_LS) || '{}') || {}; } catch (e) { _mcLocalLastWrite = {}; }
         var _MC_ECHO_WINDOW_MS = 4000;
         function _mcMarkLocalWrite(type) {
-            try { _mcLocalLastWrite[type] = Date.now(); } catch (e) {}
+            try {
+                _mcLocalLastWrite[type] = Date.now();
+                localStorage.setItem(_MC_LASTWRITE_LS, JSON.stringify(_mcLocalLastWrite));
+            } catch (e) {}
         }
         window._mcMarkLocalWrite = _mcMarkLocalWrite;
 
@@ -22246,6 +22257,11 @@
             if (localStamp > 0) {
                 if (cloudStamp && cloudStamp < localStamp) {
                     console.warn('[MC cloud] ✋ ingest blocked for "' + type + '" — cloud stamp ' + cloudStamp + ' is older than local write ' + localStamp);
+                    // RESCUE PUSH (July 15): local is newer than the cloud —
+                    // typical after offline edits during an outage. Push the
+                    // local copy up (after the boot pull settles) so the cloud
+                    // catches up instead of staying stale forever.
+                    try { setTimeout(function () { try { mcCloudPush(type); } catch (e) {} }, 3000); } catch (e) {}
                     return false;
                 }
                 if (!cloudStamp && (Date.now() - localStamp) < _MC_ECHO_WINDOW_MS) {
@@ -22270,9 +22286,61 @@
 
         // Boot pull — fetch every MC collection once so this dashboard opens
         // with the shared, current data instead of a stale local copy.
+        // ── PRE-PULL SNAPSHOT (July 15) ── before the FIRST cloud pull of a
+        // session is allowed to replace local collections, save what this
+        // browser currently holds. If a pull ever clobbers offline work (as
+        // happened during the July 14 outage), the data is one command away:
+        //   pflxRescueLocal()            — restore ALL types from the snapshot + push to cloud
+        //   pflxRescueLocal(['tasks'])   — restore selected types only
+        var _MC_PREPULL_LS = 'pflx_mc_prepull_snapshot_v1';
+        function _mcTakePrePullSnapshot() {
+            try {
+                var snap = { at: Date.now(), data: {} };
+                MC_CLOUD_TYPES.forEach(function (t) {
+                    var coll = _mcCollectionFor(t);
+                    if (typeof coll === 'undefined' || coll === null) return;
+                    // Strip banners (multi-MB dataURLs would blow the quota).
+                    var thin = JSON.parse(JSON.stringify(coll, function (k, v) {
+                        return (k === 'bannerImage' && typeof v === 'string' && v.length > 2048) ? undefined : v;
+                    }));
+                    snap.data[t] = thin;
+                });
+                localStorage.setItem(_MC_PREPULL_LS, JSON.stringify(snap));
+                console.log('[MC cloud] 📸 pre-pull snapshot saved (' + Object.keys(snap.data).length + ' collections)');
+            } catch (e) { console.warn('[MC cloud] pre-pull snapshot failed', e); }
+        }
+        window.pflxRescueLocal = function (types) {
+            var snap = null;
+            try { snap = JSON.parse(localStorage.getItem(_MC_PREPULL_LS) || 'null'); } catch (e) {}
+            if (!snap || !snap.data) { console.warn('[rescue] no pre-pull snapshot found'); return false; }
+            var list = Array.isArray(types) && types.length ? types : Object.keys(snap.data);
+            var applied = [];
+            list.forEach(function (t) {
+                var items = snap.data[t];
+                if (items === undefined) return;
+                try {
+                    if (_mcApplyCollection(t, items)) {
+                        mcSaveData(t);
+                        _mcMarkLocalWrite(t);
+                        applied.push(t);
+                    }
+                } catch (e) { console.warn('[rescue] apply failed for', t, e); }
+            });
+            if (applied.length) {
+                window._mcAllowShrink = true;
+                try { applied.forEach(function (t) { mcCloudPush(t); }); } catch (e) {}
+                setTimeout(function () { window._mcAllowShrink = false; }, 15000);
+                console.log('[rescue] ✓ restored + pushing: ' + applied.join(', ') + ' (snapshot from ' + new Date(snap.at).toLocaleString() + ')');
+                if (typeof pflxToast === 'function') pflxToast('Restored ' + applied.join(', ') + ' from local snapshot — syncing to cloud', 'info', 6000);
+            } else {
+                console.warn('[rescue] nothing applied');
+            }
+            return applied;
+        };
         window.mcCloudPull = async function () {
             var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
             if (!client) return;
+            if (!_mcCloudPulledOnce) { _mcTakePrePullSnapshot(); }
             try {
                 var res = await client.from('app_data')
                     .select('key, data')
