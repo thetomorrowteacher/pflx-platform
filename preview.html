@@ -25117,8 +25117,8 @@
                 : '';
 
             // XC earned so far — sum XC of approved child tasks.
-            var xcEarnedSoFar = tasks.filter(function (t) { return t && (t.status === 'approved' || t.completed); }).reduce(function (s, t) { return s + (t.xcReward || t.xc || 0); }, 0);
-            var xcTotalPool   = tasks.reduce(function (s, t) { return s + (t.xcReward || t.xc || 0); }, 0) + (proj.xcRewardPool || proj.xcReward || 0);
+            var xcEarnedSoFar = tasks.filter(function (t) { return t && (t.status === 'approved' || t.completed); }).reduce(function (s, t) { return s + (t.xcReward || t.xc || 0) + (typeof pflxItemBadgeXC === 'function' ? pflxItemBadgeXC(t) : 0); }, 0);
+            var xcTotalPool   = tasks.reduce(function (s, t) { return s + (t.xcReward || t.xc || 0) + (typeof pflxItemBadgeXC === 'function' ? pflxItemBadgeXC(t) : 0); }, 0) + (proj.xcRewardPool || proj.xcReward || 0) + (typeof pflxItemBadgeXC === 'function' ? pflxItemBadgeXC(proj) : 0);
             var projUrg = (typeof _mcUrgencyForDueDate === 'function') ? _mcUrgencyForDueDate(proj.dueDate || proj.endDate || proj.deadline) : null;
 
             html += '<div class="mc-card" style="padding:0;margin-bottom:16px;border-left:3px solid #a78bfa;overflow:hidden;">' +
@@ -31376,6 +31376,25 @@
         window.mcPlayerSubmitTask = mcPlayerSubmitTask;
 
         // ── Projects ────────────────────────────────────────────────
+        // ── BADGE XC RESOLVER (July 12) — a task's/project's reward badges
+        // carry XC value too; the progress pool ignored them, so the "0/150"
+        // total didn't match what the host actually attached. Resolves badge
+        // ids against the unified catalog (mcGetAllBadges) and sums XC.
+        function pflxItemBadgeXC(item) {
+            try {
+                if (!item || !Array.isArray(item.rewardBadges) || !item.rewardBadges.length) return 0;
+                var all = (typeof mcGetAllBadges === 'function') ? mcGetAllBadges() : [];
+                var byId = {};
+                all.forEach(function (b) { if (b && b.id !== undefined) byId[b.id] = b; });
+                return item.rewardBadges.reduce(function (s, bid) {
+                    if (bid && typeof bid === 'object') return s + (bid.xc || bid.xcReward || 0);
+                    var b = byId[bid];
+                    return s + ((b && (b.xc || b.xcReward)) || 0);
+                }, 0);
+            } catch (e) { return 0; }
+        }
+        window.pflxItemBadgeXC = pflxItemBadgeXC;
+
         function mcRenderProjects() {
             // ── STOMP GUARD 5 (July 2026 incident) ──
             // Previously this called mcLoadData() which re-reads every MC
@@ -31475,8 +31494,10 @@
                 var progressColor = pct >= 100 ? '#22c55e' : pct > 50 ? '#f5c842' : '#00d4ff';
 
                 // XC earned so far — sum XC of approved tasks that carry a value.
-                var xcEarnedSoFar = assignedTasks.filter(_mcTaskIsApproved).reduce(function (s, tt) { return s + (tt && tt.xcReward ? tt.xcReward : 0); }, 0);
-                var xcTotalPool   = assignedTasks.reduce(function (s, tt) { return s + (tt && tt.xcReward ? tt.xcReward : 0); }, 0) + (p.xcReward || 0);
+                // Pool + earned include task XC, each task's badge XC, the
+                // project's own XC, and the project's badge XC (July 12).
+                var xcEarnedSoFar = assignedTasks.filter(_mcTaskIsApproved).reduce(function (s, tt) { return s + (tt && tt.xcReward ? tt.xcReward : 0) + pflxItemBadgeXC(tt); }, 0);
+                var xcTotalPool   = assignedTasks.reduce(function (s, tt) { return s + (tt && tt.xcReward ? tt.xcReward : 0) + pflxItemBadgeXC(tt); }, 0) + (p.xcReward || 0) + pflxItemBadgeXC(p);
                 // ── Progress hero panel ── the card's primary signal, rendered
                 // ABOVE the task list (Ennis, 2026-07-02) so the objective leads.
                 // Accent color tracks completion (cyan 0% → orange → gold →
