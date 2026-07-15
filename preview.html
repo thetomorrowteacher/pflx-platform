@@ -2219,9 +2219,30 @@
             align-items: center;
             gap: 10px;
             margin-left: auto;
-            padding-left: 10px;
-            border-left: 1px solid rgba(0, 240, 255, 0.12);
             flex-shrink: 0;
+            /* CLICK AFFORDANCE (July 12): the profile corner opens the player
+               menu but read as static text. Now a visible pill with hover
+               glow + a caret so it looks pressable. */
+            padding: 5px 12px 5px 8px;
+            border: 1px solid rgba(0, 240, 255, 0.22);
+            border-radius: 14px;
+            background: rgba(0, 240, 255, 0.04);
+            transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
+        }
+        .toolbar-profile:hover {
+            background: rgba(0, 240, 255, 0.10);
+            border-color: rgba(0, 240, 255, 0.55);
+            box-shadow: 0 0 14px rgba(0, 240, 255, 0.18);
+        }
+        .toolbar-profile .profile-caret {
+            font-size: 11px;
+            color: rgba(0, 240, 255, 0.65);
+            margin-left: 2px;
+            transition: transform 0.2s, color 0.2s;
+        }
+        .toolbar-profile:hover .profile-caret {
+            color: #00f0ff;
+            transform: translateY(2px);
         }
 
         .profile-avatar {
@@ -6329,6 +6350,7 @@
                     <div class="profile-name" id="toolbar-player-name">PLAYER</div>
                     <div class="profile-status">Online</div>
                 </div>
+                <span class="profile-caret">▾</span>
                 <!-- Quick player profile dropdown — replaces the old "click avatar → /portfolio" jump.
                      Anchored to .toolbar-profile (position:relative). Click outside closes; click inside
                      stays open. Populated on open via pflxRenderProfileDropdown(). -->
@@ -23387,6 +23409,18 @@
         // dashboard builds AND from _mcAfterCloudChange — Home Base renders
         // before the boot pull, so the first pass usually sees no seasons yet.
         function pflxUpdateHomeSeasonCard() {
+            // Studio chip beside the Home Base brand name — roster/backfill can
+            // land after the header builds, so refresh it with the same hooks.
+            try {
+                var chipBox = document.getElementById('home-studio-chip');
+                if (chipBox && !chipBox.innerHTML) {
+                    var ss = window.activeSession || {};
+                    var mp = (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers))
+                        ? mcPlayers.find(function (p) { return p && (p.id === ss.id || (ss.brand && p.brand === ss.brand)); }) : null;
+                    var sid2 = (mp && mp.studioId) || ss.studioId || '';
+                    if (sid2 && typeof window.pflxStudioChipHtml === 'function') chipBox.innerHTML = window.pflxStudioChipHtml(sid2, { size: 34 });
+                }
+            } catch (e) {}
             try {
                 var box = document.getElementById('home-season-card');
                 if (!box) return;
@@ -23400,6 +23434,54 @@
             } catch (e) {}
         }
         window.pflxUpdateHomeSeasonCard = pflxUpdateHomeSeasonCard;
+
+        // ── EDIT MY BRAND (July 12) — one path for renaming the player's
+        // public identity: uniqueness-checked, updates the canonical records
+        // (PLAYERS + mcPlayers + BRANDS pin map), persists + broadcasts so
+        // every surface and sub-app follows, and refreshes visible UI.
+        window.pflxEditMyBrand = function () {
+            try {
+                var s = window.activeSession || {};
+                var current = s.brand || s.brandName || '';
+                var nb = prompt('Update your brand name (2–16 characters, shown everywhere):', current);
+                if (nb === null) return;
+                nb = String(nb).trim().toUpperCase().slice(0, 16);
+                if (nb.length < 2) { alert('Brand name must be at least 2 characters.'); return; }
+                if (nb === current) return;
+                var taken = function (arr) {
+                    return Array.isArray(arr) && arr.some(function (p) { return p && p.brand === nb && p.id !== s.id; });
+                };
+                if (taken(typeof PLAYERS !== 'undefined' ? PLAYERS : null) || taken(typeof mcPlayers !== 'undefined' ? mcPlayers : null)) {
+                    alert('That brand name is already taken. Choose another.');
+                    return;
+                }
+                var oldB = current;
+                // canonical PLAYERS record (+ BRANDS pin map key)
+                try {
+                    var p = (typeof PLAYERS !== 'undefined' ? PLAYERS : []).find(function (x) { return x && x.id === s.id; });
+                    if (p) {
+                        p.brand = nb;
+                        try { if (typeof BRANDS !== 'undefined' && oldB && BRANDS[oldB] !== undefined) { BRANDS[nb] = BRANDS[oldB]; delete BRANDS[oldB]; } } catch (e) {}
+                        try { if (typeof window.pflxPersistPlayers === 'function') window.pflxPersistPlayers(); } catch (e) {}
+                    }
+                } catch (e) {}
+                // mcPlayers mirror → cloud users row
+                try {
+                    if (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) {
+                        var mp = mcPlayers.find(function (x) { return x && (x.id === s.id || (oldB && x.brand === oldB)); });
+                        if (mp) { mp.brand = nb; if (mp.brandName) mp.brandName = nb; }
+                        if (typeof mcSaveData === 'function') mcSaveData('players');
+                    }
+                } catch (e) {}
+                // session + visible UI
+                s.brand = nb; s.brandName = nb;
+                try { if (typeof window.pflxIdentityPersist === 'function') window.pflxIdentityPersist(s); } catch (e) {}
+                try { var el = document.getElementById('portfolio-brand'); if (el) el.textContent = nb; } catch (e) {}
+                try { if (typeof updateToolbarStatus === 'function') updateToolbarStatus(); } catch (e) {}
+                try { var tn = document.getElementById('toolbar-player-name'); if (tn) tn.textContent = nb; } catch (e) {}
+                try { pflxToast('✓ Brand updated · ' + nb, 'success'); } catch (e) {}
+            } catch (e) { console.warn('[brand-edit] failed', e); }
+        };
 
         // ── My Work widget ──
         // Personalized landing block on the MC Dashboard.
@@ -33013,6 +33095,15 @@
                     if (iframe.src !== embedUrl) iframe.src = embedUrl;
                     // playlist auto-advance needs YT events from the MAIN iframe
                     try { if (typeof pflxYTListen === 'function') pflxYTListen(iframe, 'pflxvt-main'); } catch (e) {}
+                    // PiP popup follows the playlist too — swap its video when
+                    // the current item changes (it used to be URL-mode only).
+                    try {
+                        var pipIf = document.getElementById('pip-iframe');
+                        if (pipIf && pipIf.src) {
+                            var pipBase = embedUrl.split('?')[0];
+                            if (pipIf.src.indexOf(pipBase) < 0) pipIf.src = embedUrl;
+                        }
+                    } catch (e) {}
                     offline.style.display = 'none';
                     embedWrap.style.display = 'block';
                     if (dot) { dot.classList.add('live'); }
@@ -33574,7 +33665,7 @@
         function vtHandleMCNav(tab) {
             try {
                 var s = typeof pflxGetLiveStream === 'function' ? pflxGetLiveStream() : null;
-                var streamLive = s && s.active && s.url;
+                var streamLive = s && s.active && ((typeof pflxStreamCurrentSource === 'function') ? pflxStreamCurrentSource(s).url : s.url);
                 if (tab === 'dashboard') {
                     // Returning to Home Theater — hide PiP, show inline theater, reset dismissed flag
                     vtPipDismissed = false;
@@ -33595,7 +33686,7 @@
         function vtHandlePlayerNav(view) {
             try {
                 var s = typeof pflxGetLiveStream === 'function' ? pflxGetLiveStream() : null;
-                var streamLive = s && s.active && s.url;
+                var streamLive = s && s.active && ((typeof pflxStreamCurrentSource === 'function') ? pflxStreamCurrentSource(s).url : s.url);
                 var playerSec = document.getElementById('mc-theater-player-section');
                 if (view === 'home') {
                     // Returning to Home Theater — hide PiP, show inline, reset dismissed
@@ -42724,7 +42815,7 @@
           window.pipCheckAutoActivate = function (viewName) {
             try {
               var s = typeof pflxGetLiveStream === 'function' ? pflxGetLiveStream() : null;
-              var streamLive = s && s.active && s.url;
+              var streamLive = s && s.active && ((typeof pflxStreamCurrentSource === 'function') ? pflxStreamCurrentSource(s).url : s.url);
 
               if (viewName === 'mission-control') {
                 // On MC dashboard: arm PIP for when they leave, hide PIP if showing
@@ -47911,6 +48002,20 @@ RESPONSE RULES:
             }
             const brandEl = document.getElementById('portfolio-brand');
             if (brandEl) brandEl.textContent = user.brand || user.name || 'Player';
+            // ── ✎ EDIT BRAND (July 12) — players can rename their brand from
+            // their portfolio (signup sets it in onboarding page 5; this is
+            // the post-signup edit path Ennis asked for).
+            try {
+                if (brandEl && !document.getElementById('portfolio-brand-edit')) {
+                    var __eb = document.createElement('button');
+                    __eb.id = 'portfolio-brand-edit';
+                    __eb.innerHTML = '&#x270E; EDIT';
+                    __eb.title = 'Change your brand name';
+                    __eb.style.cssText = 'margin-left:12px;vertical-align:middle;padding:4px 12px;background:rgba(0,240,255,0.08);border:1px solid rgba(0,240,255,0.35);color:#00f0ff;border-radius:8px;cursor:pointer;font-family:Orbitron,sans-serif;font-size:9px;letter-spacing:0.1em;';
+                    __eb.onclick = function () { if (typeof window.pflxEditMyBrand === 'function') window.pflxEditMyBrand(); };
+                    brandEl.insertAdjacentElement('afterend', __eb);
+                }
+            } catch (e) {}
 
             // Banner
             const bannerImg = document.getElementById('portfolio-banner-img');
@@ -50711,19 +50816,21 @@ RESPONSE RULES:
             const xc = s.xc || 0;
             const role = s.role || 'Student';
             const cohort = s.cohort || 'PlayerPool';
-            // ── Resolve startup studio ──
-            let studioName = '';
-            let studioData = null;
+            // ── Startup Studio chip (July 12) — the old lookup read
+            // s.studioId (often absent on the session) + a localStorage list
+            // that may be empty, so the badge never showed. Resolve from the
+            // canonical mcPlayers record and render the real logo-in-color
+            // chip BESIDE the brand name; a late refresh fills it once the
+            // roster/backfill lands.
+            const studioBadge = '';
+            let __homeSid = '';
             try {
-                if (s.studioId) {
-                    const studios = JSON.parse(localStorage.getItem('pflx_studios') || '[]');
-                    studioData = studios.find(function(st) { return st.id === s.studioId; }) || null;
-                    studioName = (studioData && studioData.name) || s.studioId;
-                }
-            } catch(e) {}
-            const studioBadge = studioName
-                ? ` · <span style="color:#f5c842;">🏢 ${studioName}</span>`
-                : '';
+                const __myP = (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers))
+                    ? mcPlayers.find(function (p) { return p && (p.id === s.id || (s.brand && p.brand === s.brand)); }) : null;
+                __homeSid = (__myP && __myP.studioId) || s.studioId || '';
+            } catch (e) {}
+            const studioChip = (__homeSid && typeof window.pflxStudioChipHtml === 'function')
+                ? window.pflxStudioChipHtml(__homeSid, { size: 34 }) : '';
             // Resolve the hero avatar — prefer the player's own uploaded image,
             // fall back to the PFLX core logo only when nothing is uploaded.
             const heroAvatarSrc = (s.image && String(s.image).length > 0)
@@ -50738,7 +50845,10 @@ RESPONSE RULES:
             playerHeader.innerHTML = `
                 <div class="player-avatar-lg"><img src="${heroAvatarSrc}" alt="${displayName}" style="width:100%;height:100%;border-radius:50%;object-fit:${heroAvatarFit};"></div>
                 <div class="player-identity">
-                    <div class="player-name">${displayName}</div>
+                    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+                        <div class="player-name">${displayName}</div>
+                        <span id="home-studio-chip">${studioChip}</span>
+                    </div>
                     <div class="player-subtitle" style="font-family:'Jura',sans-serif;font-size:12px;color:#8a92b0;letter-spacing:1px;margin-top:2px;">${role} · ${cohort}${studioBadge}</div>
                 </div>
             `;
@@ -53656,7 +53766,10 @@ RESPONSE RULES:
                 // Try to get the current live stream URL
                 try {
                     var s = typeof pflxGetLiveStream === 'function' ? pflxGetLiveStream() : null;
-                    if (s && s.active && s.url) youtubeUrl = s.url;
+                    if (s && s.active) {
+                        var _cur = (typeof pflxStreamCurrentSource === 'function') ? pflxStreamCurrentSource(s) : { url: s.url };
+                        if (_cur.url) youtubeUrl = _cur.url;
+                    }
                 } catch(e) {}
             }
             if (!youtubeUrl) return;
