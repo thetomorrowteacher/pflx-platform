@@ -9169,9 +9169,20 @@
                                     <div style="margin-bottom:12px;">
                                         <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Assign to Cohorts</label>
                                         <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;margin-bottom:8px;">
-                                            <input type="checkbox" id="mc-project-all-cohorts" checked onchange="var d=document.getElementById('mc-project-cohorts-list');if(d)d.style.display=this.checked?'none':'flex';"> All Cohorts
+                                            <input type="checkbox" id="mc-project-all-cohorts" checked onchange="var d=document.getElementById('mc-project-cohorts-list');if(d)d.style.display=this.checked?'none':'flex';if(typeof mcRenderProjectAssignedPlayers==='function')mcRenderProjectAssignedPlayers();"> All Cohorts
                                         </label>
                                         <div id="mc-project-cohorts-list" style="display:none;flex-wrap:wrap;gap:6px;"></div>
+                                    </div>
+                                    <!-- Player Scoping (July 12) — pick specific players inside the
+                                         selected cohorts, or leave empty for ALL. Child tasks inherit
+                                         this scope (pflxEffectiveAssignees). -->
+                                    <div style="margin-bottom:12px;padding:12px;background:rgba(167,139,250,0.03);border:1px solid rgba(167,139,250,0.12);border-radius:8px;">
+                                        <label style="display:block;font-size:11px;color:#a78bfa;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em;font-weight:700;">Assign Players (optional — empty = everyone in the selected cohorts)</label>
+                                        <div style="display:flex;gap:8px;margin-bottom:8px;">
+                                            <input type="text" id="mc-project-players-search" placeholder="Search players…" oninput="mcRenderProjectAssignedPlayers()" style="flex:1;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.1);color:#e0e6ff;padding:6px 10px;border-radius:6px;font-size:11px;">
+                                            <button type="button" onclick="document.querySelectorAll('.mc-project-player-cb:checked').forEach(function(cb){cb.checked=false;})" style="padding:6px 12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.5);border-radius:6px;cursor:pointer;font-size:10px;">CLEAR</button>
+                                        </div>
+                                        <div id="mc-project-players" style="display:flex;flex-direction:column;gap:2px;max-height:160px;overflow-y:auto;"></div>
                                     </div>
                                     <div style="margin-bottom:12px;padding:12px;background:rgba(34,197,94,0.03);border:1px solid rgba(34,197,94,0.1);border-radius:8px;">
                                         <div style="font-size:12px;font-weight:700;color:#22c55e;margin-bottom:10px;">NODE TYPE & CO-OP SETTINGS</div>
@@ -23926,6 +23937,42 @@
             return id ? (ss || []).find(function (s) { return s && s.id === id; }) : null;
         }
         // visit: avoid infinite loops if data is malformed (e.g. circular refs)
+        // ── EFFECTIVE ASSIGNEES (July 12) — an item's player scope is its own
+        // assignedPlayers, else INHERITED from its parent project (forward
+        // projectId or reverse taskIds), else the parent checkpoint. Empty =
+        // everyone in the item's cohort scope. This is the "select cohorts,
+        // then players within them" rule applied across the board.
+        function pflxEffectiveAssignees(item, visit) {
+            try {
+                if (!item) return [];
+                if (Array.isArray(item.assignedPlayers) && item.assignedPlayers.length) return item.assignedPlayers;
+                visit = visit || {};
+                var projects = ppGetProjects();
+                var proj = null;
+                if (item.projectId) proj = projects.find(function (p) { return p && p.id === item.projectId; });
+                if (!proj && item.id) proj = projects.find(function (p) { return p && Array.isArray(p.taskIds) && p.taskIds.indexOf(item.id) >= 0; });
+                if (proj && proj.id !== item.id && !visit['p:' + proj.id]) {
+                    visit['p:' + proj.id] = 1;
+                    var a = pflxEffectiveAssignees(proj, visit);
+                    if (a.length) return a;
+                }
+                var cps = ppGetCheckpoints();
+                var cpId = item.checkpointId || item.roundId;
+                var cp = null;
+                if (cpId) cp = cps.find(function (c) { return c && c.id === cpId; });
+                if (!cp && item.id) cp = cps.find(function (c) {
+                    return c && ((Array.isArray(c.taskIds) && c.taskIds.indexOf(item.id) >= 0) ||
+                                 (Array.isArray(c.projectIds) && c.projectIds.indexOf(item.id) >= 0));
+                });
+                if (cp && cp.id !== item.id && !visit['c:' + cp.id]) {
+                    visit['c:' + cp.id] = 1;
+                    var a2 = pflxEffectiveAssignees(cp, visit);
+                    if (a2.length) return a2;
+                }
+                return [];
+            } catch (e) { return []; }
+        }
+        window.pflxEffectiveAssignees = pflxEffectiveAssignees;
         function pflxPlayerCanSeeItem(item, pid, cohorts, ctx, visit) {
             if (!item) return false;
             visit = visit || {};
@@ -23941,6 +23988,14 @@
             }
             // 2. "Everyone" sentinel on item
             if (item.assignedTo === 'all' || item.cohort === 'all') return true;
+            // 2b. PLAYER-LEVEL scope (July 12) — when the item (or its parent
+            // project/checkpoint) names specific players, availability is HARD
+            // gated to them: a task inside a player-scoped project is only
+            // available to those players, across the board.
+            try {
+                var __effA = pflxEffectiveAssignees(item);
+                if (__effA.length && (!pid || __effA.indexOf(pid) === -1)) return false;
+            } catch (e) {}
             // 3. Own cohort matches
             if (pflxItemCohortsMatch(item, cohorts)) return true;
             // 4. Item has explicit cohorts but NONE matched — stop here, don't
@@ -23999,7 +24054,10 @@
         }
         function pflxTaskIsMine(t, pid) {
             if (!t) return false;
-            var a = pflxTaskAssignees(t);
+            // effective = own assignedPlayers OR inherited from the parent
+            // project/checkpoint (July 12) — so selecting players on a project
+            // marks its tasks as "mine" for exactly those players.
+            var a = (typeof pflxEffectiveAssignees === 'function') ? pflxEffectiveAssignees(t) : pflxTaskAssignees(t);
             if (a.length === 0) return true;    // empty = everyone in cohort
             if (!pid) return false;
             return a.indexOf(pid) !== -1;
@@ -30204,6 +30262,60 @@
                     '</label>';
             }).join('');
         };
+        // ── Project player picker (July 12) — same pattern as tasks: player
+        // list scoped to the checked cohorts (or all when All Cohorts is on),
+        // empty selection = everyone in scope. Child tasks inherit this via
+        // pflxEffectiveAssignees.
+        window.mcRenderProjectAssignedPlayers = function () {
+            var list = document.getElementById('mc-project-players');
+            if (!list) return;
+            var allCoh = document.getElementById('mc-project-all-cohorts');
+            var checked = [];
+            if (!allCoh || !allCoh.checked) {
+                document.querySelectorAll('.mc-project-cohort-cb:checked').forEach(function (cb) { checked.push(cb.value); });
+            }
+            var norm = function (x) { return String(x == null ? '' : x).toLowerCase().trim(); };
+            var acceptable = new Set();
+            (typeof mcCohortGroups !== 'undefined' ? mcCohortGroups : []).forEach(function (g) {
+                if (g && (checked.indexOf(g.id) !== -1 || checked.indexOf(g.name) !== -1)) {
+                    acceptable.add(norm(g.id)); acceptable.add(norm(g.name));
+                    (Array.isArray(g.cohorts) ? g.cohorts : []).forEach(function (c) { acceptable.add(norm(c)); });
+                }
+            });
+            checked.forEach(function (v) { acceptable.add(norm(v)); });
+            function tags(p) {
+                var out = [];
+                if (p.cohort) String(p.cohort).split(/[,;]/).forEach(function (c) { out.push(c.trim()); });
+                if (Array.isArray(p.cohorts)) out = out.concat(p.cohorts);
+                return out;
+            }
+            var pool = (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) ? mcPlayers : [];
+            var scoped = acceptable.size
+                ? pool.filter(function (p) { return p && (p.role || 'player') === 'player' && tags(p).some(function (c) { return acceptable.has(norm(c)); }); })
+                : pool.filter(function (p) { return p && (p.role || 'player') === 'player'; });
+            var q = (document.getElementById('mc-project-players-search')?.value || '').toLowerCase().trim();
+            if (q) scoped = scoped.filter(function (p) { return String(p.brand || p.brandName || p.name || '').toLowerCase().indexOf(q) !== -1; });
+            var prior = new Set();
+            list.querySelectorAll('.mc-project-player-cb:checked').forEach(function (cb) { prior.add(cb.value); });
+            var editTgt = (typeof mcProjectEditIndex !== 'undefined' && mcProjectEditIndex >= 0) ? mcProjects[mcProjectEditIndex] : null;
+            if (list.dataset.primed !== '1' && editTgt && Array.isArray(editTgt.assignedPlayers)) {
+                editTgt.assignedPlayers.forEach(function (pid) { prior.add(pid); });
+                list.dataset.primed = '1';
+            }
+            if (!scoped.length) {
+                list.innerHTML = '<div style="padding:10px;color:rgba(255,255,255,0.35);font-size:11px;text-align:center;">No players in the selected cohort(s).</div>';
+                return;
+            }
+            list.innerHTML = scoped.map(function (p) {
+                var isOn = prior.has(p.id);
+                var name = escapeHtml(p.brand || p.brandName || p.name || 'Player');
+                var chip = p.cohort ? '<span style="font-size:9px;color:rgba(255,255,255,0.35);margin-left:6px;">' + escapeHtml(p.cohort) + '</span>' : '';
+                return '<label style="display:flex;align-items:center;gap:8px;padding:4px 6px;cursor:pointer;font-size:11px;color:#e0e6ff;border-radius:4px;">' +
+                    '<input type="checkbox" class="mc-project-player-cb" value="' + escapeHtml(p.id) + '"' + (isOn ? ' checked' : '') + ' style="accent-color:#a78bfa;">' +
+                    '<span style="flex:1;">' + name + chip + '</span>' +
+                    '</label>';
+            }).join('');
+        };
         window.mcTaskAssignedPlayersClear = function () {
             document.querySelectorAll('.mc-task-player-cb:checked').forEach(function (cb) { cb.checked = false; });
         };
@@ -31710,12 +31822,19 @@
             }
 
             // Populate cohort checkboxes
+            // Player picker — reset priming so the edit target's saved
+            // assignedPlayers fold back in on this render.
+            try {
+                var __ppl = document.getElementById('mc-project-players');
+                if (__ppl) __ppl.dataset.primed = '';
+                setTimeout(function () { if (typeof mcRenderProjectAssignedPlayers === 'function') mcRenderProjectAssignedPlayers(); }, 0);
+            } catch (e) {}
             var cohortListDiv = document.getElementById('mc-project-cohorts-list');
             if (cohortListDiv) {
                 cohortListDiv.innerHTML = mcCohortGroups.length === 0 ? '<span style="font-size:11px;color:rgba(255,255,255,0.25);">No cohort groups</span>' :
                     mcCohortGroups.map(function(g) {
                         return '<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#e0e6ff;cursor:pointer;padding:4px 8px;background:rgba(255,255,255,0.03);border-radius:6px;">' +
-                            '<input type="checkbox" class="mc-project-cohort-cb" value="' + g.id + '"> ' + escapeHtml(g.name) + '</label>';
+                            '<input type="checkbox" class="mc-project-cohort-cb" value="' + g.id + '" onchange="mcRenderProjectAssignedPlayers()"> ' + escapeHtml(g.name) + '</label>';
                     }).join('');
             }
 
@@ -31882,6 +32001,10 @@
             if (allCohortsCheckbox && !allCohortsCheckbox.checked) {
                 document.querySelectorAll('.mc-project-cohort-cb:checked').forEach(function(cb) { cohortIds.push(cb.value); });
             }
+            // Player scoping — empty = everyone in the selected cohorts.
+            // Child tasks inherit this via pflxEffectiveAssignees.
+            var projAssignedPlayers = [];
+            document.querySelectorAll('.mc-project-player-cb:checked').forEach(function (cb) { projAssignedPlayers.push(cb.value); });
 
             var obj = {
                 id: mcProjectEditIndex >= 0 ? mcProjects[mcProjectEditIndex].id : 'proj-' + Date.now(),
@@ -31897,6 +32020,7 @@
                 // monitoring = task moves through E→D→Enh→F over its duration with
                 // urgency colors from pflxComputeFlpStatus().
                 flpTracking: (document.querySelector('input[name="mc-project-tracking"]:checked') || {}).value || 'monitoring',
+                assignedPlayers: projAssignedPlayers,
                 // Subtasks (host-authored checklist) — same merge pattern as tasks so
                 // player ticks aren't reset when the host edits unrelated items.
                 subtasks: (function () {
