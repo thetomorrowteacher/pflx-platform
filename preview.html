@@ -8412,6 +8412,7 @@
                                             <select id="mc-cp-status" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:10px;border-radius:8px;font-size:13px;box-sizing:border-box;">
                                                 <option value="upcoming">upcoming</option>
                                                 <option value="active">active</option>
+                                                <option value="inactive">inactive (hidden from players)</option>
                                                 <option value="completed">completed</option>
                                             </select>
                                         </div>
@@ -9070,6 +9071,7 @@
                                             <select id="mc-project-status" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
                                                 <option value="planning">planning</option>
                                                 <option value="in_progress">in_progress</option>
+                                                <option value="inactive">inactive (hidden from players)</option>
                                                 <option value="completed">completed</option>
                                             </select>
                                         </div>
@@ -23290,7 +23292,7 @@
                 var __pct = (isFinite(__st0) && isFinite(__end) && __end > __st0)
                     ? Math.min(100, Math.max(0, Math.round((__now - __st0) / (__end - __st0) * 100))) : null;
                 function __cpLive(c) {
-                    if (!c || c.status === 'completed' || c.status === 'archived') return false;
+                    if (!c || c.status === 'completed' || c.status === 'archived' || c.status === 'inactive') return false;
                     if (activeSeason && c.seasonId && c.seasonId !== activeSeason.id) return false;
                     if (c.status === 'active') return true;
                     var st = c.startDate ? Date.parse(c.startDate) : NaN;
@@ -23804,7 +23806,9 @@
                 // Pipe each cp through the tier-variant merge so all Player
                 // Portal renders see the right endDate / xc / xcReward for
                 // the active tier. Base record is untouched.
-                return (raw || []).map(function (cp) { return pflxApplyTierVariant(cp); });
+                // 'inactive' = host draft for future use — players never see it
+                return (raw || []).filter(function (cp) { return cp && cp.status !== 'inactive'; })
+                    .map(function (cp) { return pflxApplyTierVariant(cp); });
             } catch(e) { return []; }
         }
         function ppGetTasks() {
@@ -23826,8 +23830,11 @@
         }
         function ppGetProjects() {
             try {
-                if (typeof mcProjects !== 'undefined' && Array.isArray(mcProjects)) return mcProjects.slice();
-                return JSON.parse(localStorage.getItem('pflx_mc_projects') || localStorage.getItem('pflx_projects') || '[]');
+                var raw;
+                if (typeof mcProjects !== 'undefined' && Array.isArray(mcProjects)) raw = mcProjects.slice();
+                else raw = JSON.parse(localStorage.getItem('pflx_mc_projects') || localStorage.getItem('pflx_projects') || '[]');
+                // 'inactive' = host draft for future use — players never see it
+                return (raw || []).filter(function (p) { return p && p.status !== 'inactive'; });
             } catch(e) { return []; }
         }
         // Helper: does this task/project belong to the given checkpoint?
