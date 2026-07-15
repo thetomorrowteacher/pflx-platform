@@ -28091,7 +28091,12 @@
         }
         // Per-task counts across the assigned cohort(s): how many players hold
         // this task, and how many of them are approved / awaiting review.
+        var _mcTCCCache = { at: 0, map: {} };   // 3s memo — boards render many tasks
         function _mcTaskCohortCounts(task) {
+            var now = Date.now();
+            if (now - _mcTCCCache.at > 3000) _mcTCCCache = { at: now, map: {} };
+            var key = task && task.id;
+            if (key && _mcTCCCache.map[key]) return _mcTCCCache.map[key];
             var out = { assigned: 0, approved: 0, submitted: 0 };
             try {
                 _mcAnalyticsRoster().forEach(function (p) {
@@ -28104,7 +28109,30 @@
                     else if (st === 'submitted') out.submitted++;
                 });
             } catch (e) {}
+            if (key) _mcTCCCache.map[key] = out;
             return out;
+        }
+        // HOST completion rule (July 15, Ennis): a task is only COMPLETE on the
+        // host dashboard when EVERY assigned player is approved — one player's
+        // approval doesn't close a cohort task (unless they're the only assignee).
+        function _mcTaskHostComplete(t) {
+            try {
+                var c = _mcTaskCohortCounts(t);
+                if (c.assigned > 0) return c.approved >= c.assigned;
+            } catch (e) {}
+            return _mcTaskIsApproved(t);   // no resolvable audience → legacy single-track
+        }
+        // Host status descriptor for task cards/boards/tables.
+        function _mcTaskHostState(t) {
+            var c = _mcTaskCohortCounts(t);
+            if (c.assigned > 0) {
+                if (c.approved >= c.assigned) return { label: 'COMPLETED', color: '#22c55e', bg: 'rgba(34,197,94,0.1)', counts: c, complete: true };
+                if (c.submitted > 0) return { label: '⧗ ' + c.submitted + ' IN REVIEW · ✓ ' + c.approved + '/' + c.assigned, color: '#f5a500', bg: 'rgba(245,165,0,0.1)', counts: c, complete: false };
+                if (c.approved > 0) return { label: 'IN PROGRESS · ✓ ' + c.approved + '/' + c.assigned, color: '#4ade80', bg: 'rgba(74,222,128,0.1)', counts: c, complete: false };
+                return { label: 'OPEN · 0/' + c.assigned, color: '#00d4ff', bg: 'rgba(0,212,255,0.1)', counts: c, complete: false };
+            }
+            var done = _mcTaskIsApproved(t);
+            return { label: (t.status || 'open').toUpperCase(), color: done ? '#22c55e' : (t.status === 'submitted' ? '#f5a500' : '#00d4ff'), bg: done ? 'rgba(34,197,94,0.1)' : (t.status === 'submitted' ? 'rgba(245,165,0,0.1)' : 'rgba(0,212,255,0.1)'), counts: c, complete: done };
         }
         function _mcTaskCountsChip(task) {
             var c = _mcTaskCohortCounts(task);
@@ -28126,7 +28154,11 @@
             if (Array.isArray(task.submissions) && task.submissions.length) {
                 var s = task.submissions.find(function (x) { return x && (x.playerId === pid || x.submittedBy === pid || x.submittedById === pid); });
                 if (s) return s.status === 'approved' ? 'approved' : (s.status === 'rejected' ? 'open' : 'submitted');
-                if (_mcTaskIsApproved(task)) return 'approved'; // globally approved shared task
+                // July 15 (Ennis): NO global-approved fallback when per-player
+                // submissions exist. Approving ONE player's work used to make
+                // the task read "approved" for every other assigned player —
+                // inflating checkpoint/project progress (a 1-submission task
+                // showed 50/50) and striking tasks through on the host board.
                 return 'open';
             }
             if (_mcTaskIsApproved(task)) return 'approved';
@@ -28779,7 +28811,7 @@
                         var realIndex = mcTasks.indexOf(t);
                         var urgency = _mcUrgencyForDueDate(t.dueDate);
                         var priorityFlag = _mcPriorityFlag(t.priority || 'normal');
-                        var isApproved = _mcTaskIsApproved(t);
+                        var isApproved = _mcTaskHostComplete(t);
                         html += '<div ' + _mcJumpAttr('task', t.id) + ' data-mc-task-id="' + t.id + '" style="background:rgba(22,22,31,0.7);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:10px 12px;cursor:pointer;transition:transform 0.12s ease;" onmouseover="this.style.transform=\'translateY(-2px)\'" onmouseout="this.style.transform=\'translateY(0)\'">' +
                             '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
                                 priorityFlag +
@@ -28859,7 +28891,7 @@
                         (dayTasks.length > 0 ? '<span style="font-size:9px;color:rgba(255,255,255,0.4);font-family:monospace;">' + dayTasks.length + '</span>' : '') +
                     '</div>';
                 dayTasks.slice(0, 3).forEach(function (t) {
-                    var isApproved = t.status === 'approved' || t.completed;
+                    var isApproved = _mcTaskHostComplete(t);
                     var pRgb = MC_PRIORITY_META[t.priority || 'normal'].rgb;
                     html += '<div ' + _mcJumpAttr('task', t.id) + ' style="padding:3px 6px;background:rgba(' + pRgb + ',0.14);border:1px solid rgba(' + pRgb + ',0.3);border-radius:4px;font-size:10px;color:' + (isApproved ? 'rgba(255,255,255,0.55)' : '#f0f0ff') + ';cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + (isApproved ? 'text-decoration:line-through;' : '') + '" title="' + escapeHtml(t.title || 'Untitled') + '">' + escapeHtml(t.title || 'Untitled') + '</div>';
                 });
@@ -28909,7 +28941,7 @@
                 var realIndex = mcTasks.indexOf(t);
                 var priorityFlag = _mcPriorityFlag(t.priority || 'normal');
                 var urgency = _mcUrgencyForDueDate(t.dueDate);
-                var isApproved = _mcTaskIsApproved(t);
+                var isApproved = _mcTaskHostComplete(t);
                 var statusCol = t.status === 'approved' ? '#22c55e' : t.status === 'submitted' ? '#f5a500' : t.status === 'rejected' ? '#ef4444' : '#00d4ff';
                 html += '<tr onmouseover="this.style.background=\'rgba(0,212,255,0.04)\'" onmouseout="this.style.background=\'transparent\'" style="transition:background 0.1s ease;">' +
                     '<td style="padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.04);">' + priorityFlag + '</td>' +
@@ -28965,7 +28997,8 @@
             //   bypass — flpTracking !== 'monitoring'
             //   completed — status approved (overrides phase so done work stays together)
             function _mcFlpBucketForTask(t) {
-                if (t.status === 'approved' || t.completed) return 'completed';
+                // COMPLETED only when every assigned player is approved (July 15).
+                if (_mcTaskHostComplete(t)) return 'completed';
                 if (t.flpTracking !== 'monitoring') return 'bypass';
                 if (!t.startedAt) return 'not-started';
                 try {
@@ -28991,11 +29024,11 @@
             var __taskCards = filtered.map(function(t, i) {
                 var realIndex = mcTasks.indexOf(t);
 
-                // Status badge colors
-                var statusColors = t.status === 'open' ? { bg:'rgba(0,212,255,0.1)', text:'#00d4ff' }
-                    : t.status === 'submitted' ? { bg:'rgba(245,165,0,0.1)', text:'#f5a500' }
-                    : t.status === 'approved' ? { bg:'rgba(34,197,94,0.1)', text:'#22c55e' }
-                    : { bg:'rgba(239,68,68,0.1)', text:'#ef4444' };
+                // Status badge — HOST view (July 15): derived from the whole
+                // assigned cohort, never one player's submission. Shows x/y
+                // approved + awaiting-review counts until EVERYONE is approved.
+                var hostState = _mcTaskHostState(t);
+                var statusColors = { bg: hostState.bg, text: hostState.color };
 
                 var cp = mcCheckpoints.find(function(c) { return c.id === t.roundId; });
                 // Lineage — Task can inherit from BOTH a Checkpoint AND a
@@ -29020,19 +29053,31 @@
                 else if (t.category === 'presentation') categoryEmoji = '🎤';
                 else if (t.category === 'collaboration') categoryEmoji = '👥';
 
-                // Build submission info panel
+                // Build submission info panel — HOST view (July 15): shows ALL
+                // players' submissions with brand names + per-player status,
+                // never just the single legacy submitter row.
                 var submissionPanel = '';
-                if (t.submission) {
-                    submissionPanel = '<div style="background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.3);border-radius:12px;padding:12px;margin-top:12px;font-size:11px;color:rgba(0,240,255,0.8);">' +
-                        '<div style="margin-bottom:6px;"><strong>📤 Submitted by:</strong> ' + escapeHtml(t.submission.submittedBy) + '</div>';
-                    if (t.submission.peerReviews && t.submission.peerReviews.length > 0) {
-                        var needed = t.peerReviewCount || 0;
-                        submissionPanel += '<div style="margin-bottom:6px;">👥 Peer Reviews: ' + t.submission.peerReviews.length + '/' + needed + '</div>';
-                    }
-                    if (t.submission.selfEvaluation) {
-                        submissionPanel += '<div>✓ Self-evaluation completed</div>';
-                    }
-                    submissionPanel += '</div>';
+                var _subsArr = Array.isArray(t.submissions) && t.submissions.length
+                    ? t.submissions.filter(Boolean)
+                    : (t.submission ? [t.submission] : []);
+                if (_subsArr.length || (hostState.counts && hostState.counts.assigned > 0)) {
+                    var _sc = hostState.counts || { assigned: 0, approved: 0, submitted: 0 };
+                    var _chips = _subsArr.slice(0, 10).map(function (s) {
+                        var who = pflxLookupPlayer(s.playerId || s.submittedById || s.submittedBy);
+                        var nm = who ? (who.brand || who.name) : (s.playerName || s.submittedBy || 'Player');
+                        var st = s.status || 'pending';
+                        var col = st === 'approved' ? '#22c55e' : st === 'rejected' ? '#ef4444' : '#f5a500';
+                        return '<span style="display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:3px 9px;font-size:10px;color:#e0e6ff;font-weight:700;">' +
+                            escapeHtml(String(nm)) + ' <b style="color:' + col + ';text-transform:uppercase;font-size:8px;letter-spacing:0.06em;">' + escapeHtml(st) + '</b></span>';
+                    }).join('');
+                    var _more = _subsArr.length > 10 ? '<span style="font-size:10px;color:rgba(255,255,255,0.4);">+' + (_subsArr.length - 10) + ' more</span>' : '';
+                    submissionPanel = '<div style="background:rgba(0,212,255,0.06);border:1px solid rgba(0,212,255,0.25);border-radius:12px;padding:12px;margin-top:12px;font-size:11px;color:rgba(0,240,255,0.85);">' +
+                        '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:' + (_chips ? '8px' : '0') + ';flex-wrap:wrap;">' +
+                            '<strong>📤 Submissions: ' + _subsArr.length + '</strong>' +
+                            (_sc.assigned > 0 ? '<span style="font-family:monospace;font-size:10px;color:rgba(255,255,255,0.6);">✓ ' + _sc.approved + '/' + _sc.assigned + ' approved' + (_sc.submitted ? ' · ⧗ ' + _sc.submitted + ' awaiting review' : '') + '</span>' : '') +
+                        '</div>' +
+                        (_chips ? '<div style="display:flex;flex-wrap:wrap;gap:5px;">' + _chips + _more + '</div>' : '<div style="font-size:10px;color:rgba(255,255,255,0.35);">No submissions yet.</div>') +
+                    '</div>';
                 }
 
                 // FLP phase status pill — only for monitored tasks that have been started
@@ -29107,7 +29152,7 @@
                 // Middle: title + short description + lineage chips.
                 // Right: urgency chip · XC · badge count · quick actions.
                 // Expanded body (subtasks, submission panel, FLP pill) still shows below when relevant.
-                var isApproved = _mcTaskIsApproved(t);
+                var isApproved = _mcTaskHostComplete(t);
                 var isSubmitted = _mcTaskIsSubmitted(t);
                 var checkboxHtml =
                     '<div onclick="mcApproveTask(' + realIndex + ')" title="' + (isApproved ? 'Approved' : isSubmitted ? 'Click to approve submission' : 'Not yet submitted') + '" style="width:26px;height:26px;border-radius:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:900;cursor:' + (isSubmitted ? 'pointer' : 'default') + ';transition:transform 0.15s ease;' +
@@ -29150,7 +29195,7 @@
                         '<div style="flex:1;min-width:0;">' +
                             '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
                                 '<div style="font-size:14px;font-weight:700;color:' + (isApproved ? 'rgba(255,255,255,0.55)' : '#f0f0ff') + ';' + (isApproved ? 'text-decoration:line-through;' : '') + 'line-height:1.3;">' + escapeHtml(t.title || 'Untitled') + '</div>' +
-                                '<div style="display:inline-block;background:' + statusColors.bg + ';color:' + statusColors.text + ';font-size:9px;font-weight:800;padding:3px 8px;border-radius:5px;text-transform:uppercase;letter-spacing:0.06em;">' + (t.status || 'open') + '</div>' +
+                                '<div style="display:inline-block;background:' + statusColors.bg + ';color:' + statusColors.text + ';font-size:9px;font-weight:800;padding:3px 8px;border-radius:5px;text-transform:uppercase;letter-spacing:0.06em;">' + hostState.label + '</div>' +
                             '</div>' +
                             (t.description ? '<div style="font-size:12px;color:rgba(255,255,255,0.45);line-height:1.4;margin-top:3px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;">' + pflxLinkify(t.description) + '</div>' : '') +
                             (taskLineage ? taskLineage.replace('margin-bottom:10px', 'margin-top:6px;margin-bottom:0') : '') +
@@ -31994,24 +32039,33 @@
                             var ctStatusCol = ct.status === 'approved' ? '#22c55e' : ct.status === 'submitted' ? '#f5a500' : ct.status === 'open' ? '#00d4ff' : 'rgba(255,255,255,0.4)';
                             return '<div ' + _mcJumpAttr('task', ct.id) + ' style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 8px;background:rgba(255,255,255,0.02);border-radius:6px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(122,169,255,0.08)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.02)\'">' +
                                 '<span style="font-size:11px;color:#e0e6ff;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(ct.title || 'Untitled') + '</span>' +
-                                '<span style="font-size:9px;color:' + ctStatusCol + ';font-weight:700;text-transform:uppercase;letter-spacing:0.06em;flex-shrink:0;">' + (ct.status || 'open') + '</span>' +
+                                _mcTaskCountsChip(ct) +
                             '</div>';
                         }).join('') +
                         '</div>' +
                     '</div>';
                 }
 
-                // Compute task completion progress
+                // Compute task completion progress — HOST view (July 15, Ennis):
+                // measured across ALL assigned cohorts/players. The % is
+                // player-task pairs; a task only counts "complete" when EVERY
+                // assigned player is approved (single-assignee tasks behave
+                // exactly as before).
                 var assignedTasks = (p.taskIds || []).map(function(tid) { return mcTasks.find(function(t) { return t.id === tid; }); }).filter(Boolean);
-                var completedTasks = assignedTasks.filter(function(t) { return t.status === 'approved'; }).length;
+                var _pairT = 0, _pairA = 0;
+                assignedTasks.forEach(function (tt) {
+                    var c = _mcTaskCohortCounts(tt);
+                    if (c.assigned > 0) { _pairT += c.assigned; _pairA += c.approved; }
+                    else { _pairT += 1; _pairA += _mcTaskIsApproved(tt) ? 1 : 0; }
+                });
+                var completedTasks = assignedTasks.filter(_mcTaskHostComplete).length;
                 var totalTasks = assignedTasks.length;
-                var pct = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+                var pct = _pairT > 0 ? Math.round((_pairA / _pairT) * 100) : 0;
                 var progressColor = pct >= 100 ? '#22c55e' : pct > 50 ? '#f5c842' : '#00d4ff';
 
-                // XC earned so far — sum XC of approved tasks that carry a value.
-                // Pool + earned include task XC, each task's badge XC, the
-                // project's own XC, and the project's badge XC (July 12).
-                var xcEarnedSoFar = assignedTasks.filter(_mcTaskIsApproved).reduce(function (s, tt) { return s + (tt && tt.xcReward ? tt.xcReward : 0) + pflxItemBadgeXC(tt); }, 0);
+                // XC earned so far — tasks count as earned only when fully
+                // complete across all assigned players (host completion rule).
+                var xcEarnedSoFar = assignedTasks.filter(_mcTaskHostComplete).reduce(function (s, tt) { return s + (tt && tt.xcReward ? tt.xcReward : 0) + pflxItemBadgeXC(tt); }, 0);
                 var xcTotalPool   = assignedTasks.reduce(function (s, tt) { return s + (tt && tt.xcReward ? tt.xcReward : 0) + pflxItemBadgeXC(tt); }, 0) + (p.xcReward || 0) + pflxItemBadgeXC(p);
                 // ── Progress hero panel ── the card's primary signal, rendered
                 // ABOVE the task list (Ennis, 2026-07-02) so the objective leads.
@@ -32040,7 +32094,7 @@
                                 '</div>' +
                                 _mcProgressBarHtml(pct, { height: 14 }) +
                                 '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:9px;flex-wrap:wrap;">' +
-                                    '<span style="font-size:11px;color:rgba(255,255,255,0.78);font-weight:600;">✓ ' + completedTasks + ' <span style="opacity:0.55;">of</span> ' + totalTasks + ' <span style="opacity:0.55;">tasks approved</span></span>' +
+                                    '<span style="font-size:11px;color:rgba(255,255,255,0.78);font-weight:600;">✓ ' + _pairA + ' <span style="opacity:0.55;">of</span> ' + _pairT + ' <span style="opacity:0.55;">player-task completions</span> · ' + completedTasks + '/' + totalTasks + ' <span style="opacity:0.55;">tasks fully complete</span></span>' +
                                     (xcTotalPool > 0 ? '<span style="background:rgba(245,200,66,0.12);border:1px solid rgba(245,200,66,0.35);padding:3px 9px;border-radius:8px;font-size:11px;color:#f5c842;font-weight:800;font-family:monospace;">⚡ ' + xcEarnedSoFar.toLocaleString() + ' / ' + xcTotalPool.toLocaleString() + ' XC</span>' : '') +
                                 '</div>' +
                             '</div>' +
