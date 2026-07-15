@@ -22255,9 +22255,17 @@
                         try { mcSaveData('cohortgroups'); } catch (e) {}
                     }
                 } catch (e) { console.warn('[MC cloud] group heal failed', e); }
+                // Live stream state rides along with the boot pull so fresh
+                // profiles see an ongoing broadcast without waiting for realtime.
+                try {
+                    var sres = await client.from('app_data').select('data').eq('key', 'pflx_live_stream').limit(1);
+                    var srow = sres && sres.data && sres.data[0];
+                    if (srow && srow.data && typeof window.pflxApplyCloudStream === 'function') window.pflxApplyCloudStream(srow.data);
+                } catch (e) {}
                 // Pull completed (even with zero rows on a fresh org) —
                 // pushes are now allowed (STOMP GUARD 1).
                 _mcCloudPulledOnce = true;
+                window._mcPullDone = true;
                 if (changed.length) {
                     console.log('[MC cloud] ✓ pulled', changed.join(', '));
                     _mcAfterCloudChange(changed);
@@ -22279,6 +22287,12 @@
                         try {
                             var row = payload && (payload.new || payload.record);
                             if (!row || !row.key) return;
+                            // Live stream state — theater goes LIVE/offline on
+                            // every device the moment the host flips it.
+                            if (row.key === 'pflx_live_stream') {
+                                if (typeof window.pflxApplyCloudStream === 'function') window.pflxApplyCloudStream(row.data);
+                                return;
+                            }
                             // Organization / cohort-access config
                             if (row.key === 'pflx_organizations') {
                                 if (typeof window.hmcApplyCloudOrgs === 'function' && window.hmcApplyCloudOrgs(row.data)) {
@@ -22349,10 +22363,33 @@
         }
 
         // Kick off boot pull + realtime once Supabase is reachable.
-        setTimeout(function () {
-            try { window.mcCloudPull(); } catch (e) {}
-            try { mcStartCloudRealtime(); } catch (e) {}
-        }, 800);
+        // RETRYING PULL (July 12): the pull used to fire ONCE at 800ms — if it
+        // failed (slow network, race with login on a fresh profile) the console
+        // ran forever on empty/mock data: no season, no checkpoints, theater
+        // OFFLINE. Now it retries with backoff until the first success, then
+        // keeps a 60s health re-pull so even realtime-less sessions stay synced.
+        var _mcPullRetryDelays = [4000, 10000, 20000, 40000];
+        var _mcPullAttempt = 0;
+        var _mcHealthIv = null;
+        function _mcPullWithRetry() {
+            var p = null;
+            try { p = window.mcCloudPull(); } catch (e) {}
+            Promise.resolve(p).then(function () { _mcAfterPullAttempt(); }, function () { _mcAfterPullAttempt(); });
+        }
+        function _mcAfterPullAttempt() {
+            if (window._mcPullDone) {
+                if (!_mcHealthIv) {
+                    _mcHealthIv = setInterval(function () { try { window.mcCloudPull(); } catch (e) {} }, 60000);
+                }
+                return;
+            }
+            var d = _mcPullRetryDelays[Math.min(_mcPullAttempt, _mcPullRetryDelays.length - 1)];
+            _mcPullAttempt++;
+            console.warn('[MC cloud] boot pull incomplete — retrying in ' + d + 'ms (attempt ' + _mcPullAttempt + ')');
+            setTimeout(_mcPullWithRetry, d);
+        }
+        setTimeout(_mcPullWithRetry, 800);
+        setTimeout(function () { try { mcStartCloudRealtime(); } catch (e) {} }, 900);
 
         // Listen for cloud data coming back from X-Coin / other apps
         window.addEventListener('message', function(event) {
@@ -32677,10 +32714,43 @@
             } catch (e) {}
             return { url: '', active: false, title: '' };
         }
+        var _pflxApplyingCloudStream = false;
         function pflxSetLiveStream(state) {
             try { localStorage.setItem('pflx_live_stream', JSON.stringify(state)); } catch (e) {}
             try { pflxRenderLiveStream(); } catch (e) {}
+            // ── CROSS-DEVICE (July 12) ── the stream state used to live ONLY
+            // in localStorage, so a different browser/profile/device never saw
+            // an ongoing broadcast (theater showed OFFLINE everywhere else).
+            // Mirror it to the cloud; every console applies it via boot pull,
+            // realtime, and the 60s health re-pull.
+            if (!_pflxApplyingCloudStream) {
+                try {
+                    var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                    if (client) {
+                        client.from('app_data').upsert(
+                            { key: 'pflx_live_stream', data: { url: state.url || '', active: !!state.active, title: state.title || '', setAt: new Date().toISOString() }, updated_at: new Date().toISOString() },
+                            { onConflict: 'key' }
+                        ).then(function (res) {
+                            if (res && res.error) console.warn('[live-stream] cloud sync error:', res.error.message);
+                        }, function (err) { console.warn('[live-stream] cloud sync threw', err); });
+                    }
+                } catch (e) {}
+            }
         }
+        // Apply a stream state that arrived from the cloud (no re-upsert echo).
+        function pflxApplyCloudStream(data) {
+            try {
+                if (!data || typeof data !== 'object') return;
+                var cur = pflxGetLiveStream();
+                var next = { url: data.url || '', active: !!data.active, title: data.title || '' };
+                if (cur.url === next.url && !!cur.active === !!next.active && (cur.title || '') === (next.title || '')) return;
+                _pflxApplyingCloudStream = true;
+                pflxSetLiveStream(next);
+                _pflxApplyingCloudStream = false;
+                console.log('[live-stream] ← applied cloud state:', next.active ? 'LIVE' : 'offline');
+            } catch (e) { _pflxApplyingCloudStream = false; }
+        }
+        window.pflxApplyCloudStream = pflxApplyCloudStream;
         function pflxToYouTubeEmbed(url) {
             if (!url) return '';
             url = url.trim();
