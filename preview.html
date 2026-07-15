@@ -32728,7 +32728,14 @@
                     var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
                     if (client) {
                         client.from('app_data').upsert(
-                            { key: 'pflx_live_stream', data: { url: state.url || '', active: !!state.active, title: state.title || '', setAt: new Date().toISOString() }, updated_at: new Date().toISOString() },
+                            { key: 'pflx_live_stream', data: {
+                                url: state.url || '', active: !!state.active, title: state.title || '',
+                                mode: state.mode || 'live',
+                                playlist: Array.isArray(state.playlist) ? state.playlist : [],
+                                loop: !!state.loop,
+                                plIndex: state.plIndex || 0,
+                                setAt: new Date().toISOString()
+                            }, updated_at: new Date().toISOString() },
                             { onConflict: 'key' }
                         ).then(function (res) {
                             if (res && res.error) console.warn('[live-stream] cloud sync error:', res.error.message);
@@ -32742,8 +32749,12 @@
             try {
                 if (!data || typeof data !== 'object') return;
                 var cur = pflxGetLiveStream();
-                var next = { url: data.url || '', active: !!data.active, title: data.title || '' };
-                if (cur.url === next.url && !!cur.active === !!next.active && (cur.title || '') === (next.title || '')) return;
+                var next = { url: data.url || '', active: !!data.active, title: data.title || '',
+                             mode: data.mode || 'live',
+                             playlist: Array.isArray(data.playlist) ? data.playlist : [],
+                             loop: !!data.loop, plIndex: data.plIndex || 0 };
+                var sig = function (x) { return JSON.stringify([x.url, !!x.active, x.title || '', x.mode || 'live', x.playlist || [], !!x.loop, x.plIndex || 0]); };
+                if (sig(cur) === sig(next)) return;
                 _pflxApplyingCloudStream = true;
                 pflxSetLiveStream(next);
                 _pflxApplyingCloudStream = false;
@@ -32779,22 +32790,199 @@
             // Otherwise use URL as-is (allows direct iframe-able pages)
             return url;
         }
+        // ═══ THEATER SOURCE — live stream OR curated playlist channel (July 12) ═══
+        // The theater can broadcast a single live URL (mode 'live') or a
+        // host-curated YouTube queue (mode 'playlist') that plays back-to-back
+        // like a live channel, with optional loop. The HOST console is the
+        // conductor: when a video ends it advances plIndex and publishes via
+        // pflxSetLiveStream (cloud-mirrored), so every device follows in sync.
+        // Items can be added while playing — the current video is untouched.
+        function pflxStreamCurrentSource(s) {
+            if (s && s.mode === 'playlist' && Array.isArray(s.playlist) && s.playlist.length) {
+                var i = Math.min(Math.max(0, s.plIndex || 0), s.playlist.length - 1);
+                var it = s.playlist[i] || {};
+                return { url: it.url || '', title: (s.title ? s.title + ' · ' : '') + (it.title || ('Video ' + (i + 1))) + '  (' + (i + 1) + '/' + s.playlist.length + (s.loop ? ' ↻' : '') + ')', idx: i };
+            }
+            return { url: (s && s.url) || '', title: (s && s.title) || '', idx: -1 };
+        }
+        var _pflxLastAdvanceAt = 0;
+        function pflxPlaylistAdvance(reason) {
+            try {
+                // Only the host conducts the channel; players follow via cloud.
+                if (window.pflxRole !== 'host') return;
+                var now = Date.now();
+                if (now - _pflxLastAdvanceAt < 2000) return;   // double-event guard
+                _pflxLastAdvanceAt = now;
+                var s = pflxGetLiveStream();
+                if (!s.active || s.mode !== 'playlist' || !Array.isArray(s.playlist) || !s.playlist.length) return;
+                var n = (s.plIndex || 0) + 1;
+                if (n >= s.playlist.length) {
+                    if (s.loop) { n = 0; }
+                    else { s.active = false; s.plIndex = 0; pflxSetLiveStream(s); pflxToast('📺 Playlist finished — theater off air', 'info'); return; }
+                }
+                s.plIndex = n;
+                pflxSetLiveStream(s);
+                console.log('[theater] ▶ playlist advance (' + (reason || 'auto') + ') → ' + (n + 1) + '/' + s.playlist.length);
+            } catch (e) {}
+        }
+        window.pflxPlaylistAdvance = pflxPlaylistAdvance;
+        // Listen for YouTube player events (ended) from the MAIN theater iframe.
+        // We use YT's raw postMessage protocol (no API script needed): each
+        // iframe is put into "listening" mode on load with a distinct id, and
+        // only the main iframe's ended event advances the queue (the muted
+        // player mirror would otherwise double-advance).
+        (function () {
+            window.addEventListener('message', function (e) {
+                try {
+                    if (typeof e.data !== 'string') return;
+                    if (!e.origin || e.origin.indexOf('youtube.com') < 0) return;
+                    if (e.data.indexOf('onStateChange') < 0) return;
+                    var d = JSON.parse(e.data);
+                    if (d && d.event === 'onStateChange' && d.info === 0 && d.id === 'pflxvt-main') {
+                        pflxPlaylistAdvance('video-ended');
+                    }
+                } catch (err) {}
+            });
+        })();
+        function pflxYTListen(iframe, id) {
+            if (!iframe) return;
+            iframe.onload = function () {
+                try { iframe.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: id }), '*'); } catch (e) {}
+                // mirrors stay muted (single audio source rule)
+                if (id === 'pflxvt-mirror') {
+                    try { iframe.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*'); } catch (e) {}
+                }
+            };
+            // if already loaded (src set before onload assignment), fire once
+            try { iframe.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: id }), '*'); } catch (e) {}
+        }
+        // ── Configure modal (replaces the old prompt()s) ──
         function pflxEditLiveStream() {
             var cur = pflxGetLiveStream();
-            var url = prompt('Enter live stream URL (YouTube, Twitch, or embed URL):', cur.url || '');
-            if (url === null) return;
-            var title = prompt('Stream title (optional):', cur.title || '');
-            cur.url = (url || '').trim();
-            cur.title = (title || '').trim();
-            pflxSetLiveStream(cur);
+            cur.mode = cur.mode || 'live';
+            cur.playlist = Array.isArray(cur.playlist) ? cur.playlist : [];
+            var old = document.getElementById('pflx-vt-config-modal');
+            if (old) old.remove();
+            var ov = document.createElement('div');
+            ov.id = 'pflx-vt-config-modal';
+            ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;z-index:10000;backdrop-filter:blur(6px);padding:20px;';
+            function inputCss() { return 'width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.1);color:#e0e6ff;padding:9px 12px;border-radius:7px;font-size:13px;box-sizing:border-box;'; }
+            ov.innerHTML =
+                '<div style="background:#10101e;border:1px solid rgba(0,240,255,0.3);border-radius:16px;padding:24px;max-width:640px;width:100%;max-height:90vh;overflow-y:auto;">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">' +
+                        '<div style="font-family:Orbitron,sans-serif;font-size:14px;letter-spacing:2px;color:#00f0ff;">🎬 VIRTUAL THEATER SOURCE</div>' +
+                        '<button onclick="document.getElementById(\'pflx-vt-config-modal\').remove()" style="background:none;border:none;color:rgba(255,255,255,0.4);font-size:22px;cursor:pointer;">×</button>' +
+                    '</div>' +
+                    '<div style="display:flex;gap:6px;margin-bottom:16px;">' +
+                        '<button id="vt-mode-live" style="flex:1;padding:9px;border-radius:8px;border:1px solid;cursor:pointer;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:0.08em;">📡 LIVE STREAM</button>' +
+                        '<button id="vt-mode-playlist" style="flex:1;padding:9px;border-radius:8px;border:1px solid;cursor:pointer;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:0.08em;">📺 PLAYLIST CHANNEL</button>' +
+                    '</div>' +
+                    '<div id="vt-pane-live">' +
+                        '<label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px;letter-spacing:0.1em;">STREAM URL (YouTube / Twitch / embed)</label>' +
+                        '<input id="vt-live-url" type="text" style="' + inputCss() + '" value="">' +
+                        '<label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin:12px 0 4px;letter-spacing:0.1em;">TITLE (optional)</label>' +
+                        '<input id="vt-live-title" type="text" style="' + inputCss() + '" value="">' +
+                    '</div>' +
+                    '<div id="vt-pane-playlist" style="display:none;">' +
+                        '<label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px;letter-spacing:0.1em;">CHANNEL TITLE (optional — shows before each video title)</label>' +
+                        '<input id="vt-pl-title" type="text" style="' + inputCss() + '" value="">' +
+                        '<div style="display:flex;gap:8px;margin:12px 0 8px;">' +
+                            '<input id="vt-pl-add" type="text" placeholder="+ Paste a YouTube URL and press ADD…" style="' + inputCss() + 'flex:1;">' +
+                            '<button id="vt-pl-add-btn" style="padding:9px 18px;background:rgba(0,240,255,0.12);border:1px solid rgba(0,240,255,0.4);color:#00f0ff;border-radius:7px;cursor:pointer;font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:0.08em;">ADD</button>' +
+                        '</div>' +
+                        '<div id="vt-pl-list" style="display:flex;flex-direction:column;gap:6px;max-height:260px;overflow-y:auto;margin-bottom:10px;"></div>' +
+                        '<label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#e0e6ff;cursor:pointer;">' +
+                            '<input id="vt-pl-loop" type="checkbox" style="accent-color:#00f0ff;width:16px;height:16px;"> ↻ Loop — restart from the top when the last video ends' +
+                        '</label>' +
+                        '<div style="font-size:10px;color:rgba(255,255,255,0.35);margin-top:8px;line-height:1.5;">Videos play back-to-back like a live channel. You can keep adding while it\'s on air — the queue updates without interrupting the current video. Every device follows this console\'s playback position.</div>' +
+                    '</div>' +
+                    '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px;">' +
+                        '<button id="vt-cfg-cancel" style="padding:10px 18px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);border-radius:8px;cursor:pointer;font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:0.08em;">CANCEL</button>' +
+                        '<button id="vt-cfg-save" style="padding:10px 22px;background:linear-gradient(135deg,#00d4ff,#7c3aed);color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:0.08em;font-weight:800;">SAVE</button>' +
+                    '</div>' +
+                '</div>';
+            document.body.appendChild(ov);
+            // working copy
+            var work = { mode: cur.mode, url: cur.url || '', title: cur.title || '', playlist: cur.playlist.slice(), loop: !!cur.loop };
+            document.getElementById('vt-live-url').value = work.url;
+            document.getElementById('vt-live-title').value = work.mode === 'live' ? (work.title || '') : '';
+            document.getElementById('vt-pl-title').value = work.mode === 'playlist' ? (work.title || '') : (work.title || '');
+            document.getElementById('vt-pl-loop').checked = work.loop;
+            function paintMode() {
+                var lb = document.getElementById('vt-mode-live'), pb = document.getElementById('vt-mode-playlist');
+                var on = 'background:rgba(0,240,255,0.15);border-color:#00f0ff;color:#00f0ff;';
+                var off = 'background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.12);color:rgba(255,255,255,0.45);';
+                lb.style.cssText = 'flex:1;padding:9px;border-radius:8px;border:1px solid;cursor:pointer;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:0.08em;' + (work.mode === 'live' ? on : off);
+                pb.style.cssText = 'flex:1;padding:9px;border-radius:8px;border:1px solid;cursor:pointer;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:0.08em;' + (work.mode === 'playlist' ? on : off);
+                document.getElementById('vt-pane-live').style.display = work.mode === 'live' ? '' : 'none';
+                document.getElementById('vt-pane-playlist').style.display = work.mode === 'playlist' ? '' : 'none';
+            }
+            function paintList() {
+                var box = document.getElementById('vt-pl-list');
+                if (!work.playlist.length) { box.innerHTML = '<div style="font-size:11px;color:rgba(255,255,255,0.3);text-align:center;padding:14px;">Queue is empty — add a YouTube URL above.</div>'; return; }
+                box.innerHTML = work.playlist.map(function (it, i) {
+                    return '<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.12);border-radius:8px;">' +
+                        '<span style="font-family:\'Share Tech Mono\',monospace;font-size:10px;color:rgba(0,240,255,0.6);width:22px;">' + (i + 1) + '.</span>' +
+                        '<span style="flex:1;font-size:12px;color:#e0e6ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(it.url) + '">' + escapeHtml(it.title || it.url) + '</span>' +
+                        '<button data-vt-up="' + i + '" style="background:none;border:1px solid rgba(255,255,255,0.15);color:#8a92b0;border-radius:5px;cursor:pointer;padding:2px 7px;font-size:10px;">▲</button>' +
+                        '<button data-vt-dn="' + i + '" style="background:none;border:1px solid rgba(255,255,255,0.15);color:#8a92b0;border-radius:5px;cursor:pointer;padding:2px 7px;font-size:10px;">▼</button>' +
+                        '<button data-vt-rm="' + i + '" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.35);color:#fca5a5;border-radius:5px;cursor:pointer;padding:2px 8px;font-size:10px;">✕</button>' +
+                    '</div>';
+                }).join('');
+                box.querySelectorAll('button[data-vt-rm]').forEach(function (b) { b.onclick = function () { work.playlist.splice(parseInt(b.getAttribute('data-vt-rm'), 10), 1); paintList(); }; });
+                box.querySelectorAll('button[data-vt-up]').forEach(function (b) { b.onclick = function () { var i = parseInt(b.getAttribute('data-vt-up'), 10); if (i > 0) { var t = work.playlist[i - 1]; work.playlist[i - 1] = work.playlist[i]; work.playlist[i] = t; paintList(); } }; });
+                box.querySelectorAll('button[data-vt-dn]').forEach(function (b) { b.onclick = function () { var i = parseInt(b.getAttribute('data-vt-dn'), 10); if (i < work.playlist.length - 1) { var t = work.playlist[i + 1]; work.playlist[i + 1] = work.playlist[i]; work.playlist[i] = t; paintList(); } }; });
+            }
+            document.getElementById('vt-mode-live').onclick = function () { work.mode = 'live'; paintMode(); };
+            document.getElementById('vt-mode-playlist').onclick = function () { work.mode = 'playlist'; paintMode(); };
+            document.getElementById('vt-pl-add-btn').onclick = function () {
+                var inp = document.getElementById('vt-pl-add');
+                var u = (inp.value || '').trim();
+                if (!u) return;
+                var item = { url: u, title: '' };
+                work.playlist.push(item);
+                inp.value = '';
+                paintList();
+                // Fetch the real video title via YouTube oEmbed (CORS-open)
+                try {
+                    fetch('https://www.youtube.com/oembed?url=' + encodeURIComponent(u) + '&format=json')
+                        .then(function (r) { return r.ok ? r.json() : null; })
+                        .then(function (j) { if (j && j.title) { item.title = j.title; paintList(); } })
+                        .catch(function () {});
+                } catch (e) {}
+            };
+            document.getElementById('vt-pl-add').addEventListener('keydown', function (e) { if (e.key === 'Enter') document.getElementById('vt-pl-add-btn').click(); });
+            document.getElementById('vt-cfg-cancel').onclick = function () { ov.remove(); };
+            document.getElementById('vt-cfg-save').onclick = function () {
+                var s = pflxGetLiveStream();
+                var wasIdx = s.plIndex || 0;
+                s.mode = work.mode;
+                if (work.mode === 'live') {
+                    s.url = (document.getElementById('vt-live-url').value || '').trim();
+                    s.title = (document.getElementById('vt-live-title').value || '').trim();
+                } else {
+                    s.title = (document.getElementById('vt-pl-title').value || '').trim();
+                    s.playlist = work.playlist.slice();
+                    s.loop = !!document.getElementById('vt-pl-loop').checked;
+                    // keep the current position if it still exists (seamless add-while-playing)
+                    s.plIndex = Math.min(wasIdx, Math.max(0, s.playlist.length - 1));
+                }
+                pflxSetLiveStream(s);
+                ov.remove();
+                try { pflxToast('🎬 Theater source saved' + (s.mode === 'playlist' ? ' · ' + s.playlist.length + ' video(s)' + (s.loop ? ' · loop' : '') : ''), 'success'); } catch (e) {}
+            };
+            paintMode();
+            paintList();
         }
         function pflxToggleLiveStream() {
             var cur = pflxGetLiveStream();
-            if (!cur.url && !cur.active) {
-                alert('Configure a stream URL first (⚙ Configure).');
+            var hasSource = cur.url || (cur.mode === 'playlist' && Array.isArray(cur.playlist) && cur.playlist.length);
+            if (!hasSource && !cur.active) {
+                alert('Configure a stream URL or a playlist first (⚙ Configure).');
                 return;
             }
             cur.active = !cur.active;
+            if (cur.active && cur.mode === 'playlist') cur.plIndex = cur.plIndex || 0;
             pflxSetLiveStream(cur);
         }
         function pflxTickerLiveClick() {
@@ -32814,15 +33002,21 @@
             var statusText = document.getElementById('mc-theater-status-text');
             var launchBtn = document.getElementById('mc-theater-launch-btn');
             var vtPill = document.getElementById('vt-status-pill');
+            // Resolve the CURRENT source — the live URL, or the playlist's
+            // current item (mode 'playlist'). Playlist advance re-renders with
+            // the next item's embed; unchanged items never reload (seamless).
+            var srcInfo = (typeof pflxStreamCurrentSource === 'function') ? pflxStreamCurrentSource(s) : { url: s.url, title: s.title };
             if (offline && embedWrap && iframe) {
-                if (s.active && s.url) {
-                    var embedUrl = pflxToYouTubeEmbed(s.url);
+                if (s.active && srcInfo.url) {
+                    var embedUrl = pflxToYouTubeEmbed(srcInfo.url);
                     var becameLive = !iframe.src; // first activation this render cycle
                     if (iframe.src !== embedUrl) iframe.src = embedUrl;
+                    // playlist auto-advance needs YT events from the MAIN iframe
+                    try { if (typeof pflxYTListen === 'function') pflxYTListen(iframe, 'pflxvt-main'); } catch (e) {}
                     offline.style.display = 'none';
                     embedWrap.style.display = 'block';
                     if (dot) { dot.classList.add('live'); }
-                    if (statusText) statusText.textContent = 'ON AIR' + (s.title ? ' — ' + s.title : '');
+                    if (statusText) statusText.textContent = 'ON AIR' + (srcInfo.title ? ' — ' + srcInfo.title : '');
                     if (launchBtn) launchBtn.innerHTML = '&#x1F3AC; Open Theater';
                     if (vtPill) { vtPill.textContent = 'LIVE'; vtPill.classList.add('live'); }
                     // Auto-expand theater for host when going live
@@ -32839,6 +33033,7 @@
                         if (playerIframe.src !== muteUrl) playerIframe.src = muteUrl;
                         // Belt-and-suspenders: also postMessage mute when iframe loads.
                         playerIframe.onload = function() {
+                            try { playerIframe.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 'pflxvt-mirror' }), '*'); } catch(e) {}
                             try { playerIframe.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*'); } catch(e) {}
                         };
                     }
