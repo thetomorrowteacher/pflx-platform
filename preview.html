@@ -14991,6 +14991,74 @@
 
         // ── COHORT HUB UI (Organizations panel) ─────────────────────────
         var _hmcCohortHubItems = [];
+        // ── Bulk rostering engine (July 15) ──
+        window._hmcBulk = window._hmcBulk || { sel: {} };
+        function _hmcBulkPool() {
+            return (Array.isArray(PLAYERS) ? PLAYERS : []).filter(function (p) {
+                return p && !p.godTier && (p.role === 'player' || (window.pflxIsHostRole && window.pflxIsHostRole(p.role)));
+            });
+        }
+        window.hmcBulkRosterRenderList = function () {
+            var list = document.getElementById('hmc-bulk-roster-list');
+            if (!list) return;
+            var q = (document.getElementById('hmc-bulk-search')?.value || '').toLowerCase().trim();
+            var pool = _hmcBulkPool().filter(function (p) {
+                if (!q) return true;
+                return (p.brand || '').toLowerCase().includes(q) || (p.name || '').toLowerCase().includes(q) || (p.cohort || '').toLowerCase().includes(q);
+            });
+            pool.sort(function (a, b) { return String(a.brand || a.name || '').localeCompare(String(b.brand || b.name || '')); });
+            list.innerHTML = pool.map(function (p) {
+                var on = !!window._hmcBulk.sel[p.id];
+                return '<label style="display:flex;align-items:center;gap:10px;padding:5px 10px;border-bottom:1px solid rgba(255,255,255,0.04);cursor:pointer;font-size:11px;' + (on ? 'background:rgba(0,212,255,0.08);' : '') + '">' +
+                    '<input type="checkbox" data-bulk-id="' + escapeHtml(p.id) + '" ' + (on ? 'checked' : '') + ' onchange="hmcBulkToggle(this)">' +
+                    '<span style="color:#e0e6ff;font-weight:700;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(p.brand || '—') + '</span>' +
+                    '<span style="color:rgba(255,255,255,0.5);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(p.name || '') + '</span>' +
+                    '<span style="color:rgba(255,255,255,0.35);font-family:monospace;font-size:10px;flex-shrink:0;">' + escapeHtml(p.cohort || 'no cohort') + '</span>' +
+                '</label>';
+            }).join('') || '<div style="padding:12px;color:rgba(255,255,255,0.3);font-size:11px;">No players match.</div>';
+            var c = document.getElementById('hmc-bulk-count');
+            if (c) c.textContent = Object.keys(window._hmcBulk.sel).length + ' selected';
+        };
+        window.hmcBulkToggle = function (cb) {
+            var id = cb.getAttribute('data-bulk-id');
+            if (cb.checked) window._hmcBulk.sel[id] = 1; else delete window._hmcBulk.sel[id];
+            var c = document.getElementById('hmc-bulk-count');
+            if (c) c.textContent = Object.keys(window._hmcBulk.sel).length + ' selected';
+        };
+        window.hmcBulkSelectVisible = function (on) {
+            var list = document.getElementById('hmc-bulk-roster-list');
+            if (!list) return;
+            list.querySelectorAll('input[data-bulk-id]').forEach(function (cb) {
+                var id = cb.getAttribute('data-bulk-id');
+                if (on) { window._hmcBulk.sel[id] = 1; cb.checked = true; }
+                else { delete window._hmcBulk.sel[id]; cb.checked = false; }
+            });
+            var c = document.getElementById('hmc-bulk-count');
+            if (c) c.textContent = Object.keys(window._hmcBulk.sel).length + ' selected';
+        };
+        window.hmcBulkAssignCohort = function () {
+            var ids = Object.keys(window._hmcBulk.sel);
+            if (!ids.length) { if (typeof pflxToast === 'function') pflxToast('Select at least one player first', 'warn'); return; }
+            var target = document.getElementById('hmc-bulk-target')?.value || '';
+            if (target === '__NEW__') {
+                target = (prompt('Name of the new cohort:') || '').trim();
+            }
+            if (!target) { if (typeof pflxToast === 'function') pflxToast('Choose a destination cohort', 'warn'); return; }
+            var moved = 0;
+            ids.forEach(function (id) {
+                var p = (Array.isArray(PLAYERS) ? PLAYERS : []).find(function (x) { return x && x.id === id; });
+                if (p) { p.cohort = target; p.updatedAt = Date.now(); moved++; try { if (typeof pflxIdentityPersist === 'function') pflxIdentityPersist(p); } catch (e) {} }
+                var m = (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) ? mcPlayers.find(function (x) { return x && x.id === id; }) : null;
+                if (m) { m.cohort = target; m.updatedAt = Date.now(); }
+            });
+            try { pflxCohortHub.register(target, null); } catch (e) {}
+            try { mcSaveData('players'); } catch (e) {}
+            window._hmcBulk.sel = {};
+            try { hmcRenderCohortHub(); } catch (e) {}
+            try { hmcRenderPlayers(); } catch (e) {}
+            try { if (typeof mcRenderPlayers === 'function') mcRenderPlayers(); } catch (e) {}
+            if (typeof pflxToast === 'function') pflxToast('✓ Moved ' + moved + ' player' + (moved === 1 ? '' : 's') + ' to ' + target, 'success');
+        };
         window.hmcRenderCohortHub = function () {
             var box = document.getElementById('hmc-cohort-hub');
             if (!box) return;
@@ -15038,7 +15106,28 @@
                         '<button data-hub-delete="' + idx + '" class="hmc-btn-sm hmc-btn-red" style="padding:3px 10px;font-size:9px;">DELETE</button>' +
                     '</div>' +
                 '</div>';
-            }).join('');
+            }).join('') +
+            // ── BULK ROSTERING (July 15, Ennis) ── select/deselect players and
+            // move them into a cohort in one action — no more per-player edits.
+            '<div id="hmc-bulk-roster" style="margin-top:18px;padding:14px 16px;background:rgba(0,212,255,0.04);border:1px solid rgba(0,212,255,0.2);border-radius:12px;">' +
+                '<div style="font-family:Orbitron,sans-serif;font-size:11px;font-weight:800;color:var(--cyan);letter-spacing:0.1em;margin-bottom:10px;">⇄ BULK COHORT ROSTERING</div>' +
+                '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">' +
+                    '<input type="text" id="hmc-bulk-search" placeholder="Search players…" oninput="hmcBulkRosterRenderList()" style="flex:1;min-width:160px;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.1);color:#e0e6ff;padding:7px 10px;border-radius:6px;font-size:12px;font-family:Rajdhani,sans-serif;">' +
+                    '<select id="hmc-bulk-target" style="background:rgba(10,18,40,0.7);border:1px solid rgba(0,212,255,0.25);color:#e0e6ff;padding:7px 10px;border-radius:6px;font-size:12px;font-family:Rajdhani,sans-serif;max-width:220px;">' +
+                        '<option value="">→ Move selected to…</option>' +
+                        items.map(function (it) { return '<option value="' + escapeHtml(it.name) + '">' + escapeHtml(it.name) + '</option>'; }).join('') +
+                        '<option value="__NEW__">+ New cohort…</option>' +
+                    '</select>' +
+                    '<button class="hmc-btn-sm hmc-btn-cyan" onclick="hmcBulkAssignCohort()" style="padding:7px 14px;font-size:11px;">ASSIGN SELECTED</button>' +
+                '</div>' +
+                '<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;font-size:10px;">' +
+                    '<button class="hmc-btn-sm" onclick="hmcBulkSelectVisible(true)" style="padding:2px 10px;font-size:9px;">SELECT ALL SHOWN</button>' +
+                    '<button class="hmc-btn-sm" onclick="hmcBulkSelectVisible(false)" style="padding:2px 10px;font-size:9px;">CLEAR</button>' +
+                    '<span id="hmc-bulk-count" style="color:rgba(255,255,255,0.5);font-family:monospace;">0 selected</span>' +
+                '</div>' +
+                '<div id="hmc-bulk-roster-list" style="max-height:260px;overflow-y:auto;border:1px solid rgba(255,255,255,0.06);border-radius:8px;"></div>' +
+            '</div>';
+            try { hmcBulkRosterRenderList(); } catch (e) {}
             // wire actions
             box.querySelectorAll('select[data-hub-org]').forEach(function (sel) {
                 sel.onchange = function () {
@@ -16270,12 +16359,14 @@
         // ── Player Management ──
         function hmcRenderPlayers() {
             const tbody = document.getElementById('hmc-player-tbody');
-            const search = (document.getElementById('hmc-player-search')?.value || '').toLowerCase();
-            const cohortFilter = document.getElementById('hmc-cohort-filter')?.value || 'all';
-
-            // Populate cohort filter dropdown
+            // STICKY FILTERS (July 15, Ennis): entering/leaving a player's Edit
+            // view rebuilds this panel's DOM, which used to wipe the cohort
+            // filter back to All. The chosen filter now lives in JS state and
+            // is re-applied to the rebuilt controls on every render. It only
+            // changes when the user changes it (or on a page refresh).
+            window._hmcPMFilter = window._hmcPMFilter || { cohort: 'all', search: '' };
             const cohortSelect = document.getElementById('hmc-cohort-filter');
-            const currentVal = cohortSelect?.value;
+            const searchEl = document.getElementById('hmc-player-search');
             const cohorts = [...new Set(PLAYERS.filter(p => p.role === 'player').map(p => p.cohort).filter(Boolean))].sort().filter(_pflxCohortVisible);
             if (cohortSelect && cohortSelect.options.length <= 1) {
                 cohorts.forEach(c => {
@@ -16283,8 +16374,17 @@
                     opt.value = c; opt.textContent = c;
                     cohortSelect.appendChild(opt);
                 });
-                if (currentVal) cohortSelect.value = currentVal;
             }
+            // Restore the sticky choices onto (possibly rebuilt) controls.
+            if (cohortSelect && window._hmcPMFilter.cohort &&
+                Array.from(cohortSelect.options).some(o => o.value === window._hmcPMFilter.cohort)) {
+                cohortSelect.value = window._hmcPMFilter.cohort;
+            }
+            if (searchEl && !searchEl.value && window._hmcPMFilter.search && document.activeElement !== searchEl) {
+                searchEl.value = window._hmcPMFilter.search;
+            }
+            const search = (searchEl?.value || '').toLowerCase();
+            const cohortFilter = cohortSelect?.value || 'all';
 
             // List players AND host-tier accounts (Guest/Instructor/Admin/Master
             // Host) so an elevated user can always be found and demoted here.
@@ -16320,7 +16420,14 @@
             if (countEl) countEl.textContent = `${players.length} players`;
         }
 
-        function hmcFilterPlayers() { hmcRenderPlayers(); }
+        function hmcFilterPlayers() {
+            // Capture the user's choice into sticky state BEFORE rendering.
+            window._hmcPMFilter = {
+                cohort: document.getElementById('hmc-cohort-filter')?.value || 'all',
+                search: document.getElementById('hmc-player-search')?.value || ''
+            };
+            hmcRenderPlayers();
+        }
 
         function hmcShowPlayerDetail(id) {
             const player = PLAYERS.find(p => p.id === id);
@@ -27661,6 +27768,19 @@
                     (pj.taskIds || []).forEach(function (id) { _nestedTaskIds[id] = 1; });
                 });
                 cpDirectTasks = cpDirectTasks.filter(function (t) { return !_nestedTaskIds[t.id]; });
+                // ── XC IN CIRCULATION (July 15, Ennis) ── the checkpoint's XC
+                // total pulls from the Checkpoint itself, every assigned Project,
+                // and every assigned Task — XC rewards AND badge XC included.
+                try {
+                    var _bx = function (it) { return (typeof pflxItemBadgeXC === 'function') ? pflxItemBadgeXC(it) : 0; };
+                    var circXC = (cp.xcReward || 0) + badgeXC;
+                    cpChildProjects.forEach(function (pj) {
+                        circXC += (pj.xcReward || 0) + _bx(pj);
+                        mcChildTasksForProject(pj).forEach(function (t) { circXC += (t.xcReward || 0) + _bx(t); });
+                    });
+                    cpDirectTasks.forEach(function (t) { circXC += (t.xcReward || 0) + _bx(t); });
+                    totalXC = circXC;
+                } catch (e) {}
                 var contentsPanel = '';
                 if (cpChildProjects.length > 0 || cpDirectTasks.length > 0) {
                     var totalTasksHere = cpDirectTasks.length + cpChildProjects.reduce(function (a, pj) { return a + (pj.taskIds || []).length; }, 0);
@@ -27673,8 +27793,9 @@
                         cpChildProjects.map(function (pj) {
                             var nestedTasks = mcChildTasksForProject(pj);
                             var taskLines = nestedTasks.map(function (nt) {
-                                var col = nt.status === 'approved' ? '#22c55e' : nt.status === 'submitted' ? '#f5a500' : 'rgba(255,255,255,0.6)';
-                                return '<div ' + _mcJumpAttr('task', nt.id) + ' style="display:flex;justify-content:space-between;align-items:center;padding:3px 8px 3px 22px;font-size:11px;color:#d0d6ea;cursor:pointer;border-radius:5px;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(255,255,255,0.05)\'" onmouseout="this.style.background=\'transparent\'"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📋 ' + escapeHtml(nt.title || 'Untitled') + '</span><span style="font-size:9px;color:' + col + ';font-weight:700;text-transform:uppercase;letter-spacing:0.05em;flex-shrink:0;">' + (nt.status || 'open') + '</span></div>';
+                                // Host view: per-task cohort counts (approved/assigned + awaiting),
+                                // not the single-track status that reads like one player.
+                                return '<div ' + _mcJumpAttr('task', nt.id) + ' style="display:flex;justify-content:space-between;align-items:center;padding:3px 8px 3px 22px;font-size:11px;color:#d0d6ea;cursor:pointer;border-radius:5px;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(255,255,255,0.05)\'" onmouseout="this.style.background=\'transparent\'"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📋 ' + escapeHtml(nt.title || 'Untitled') + '</span>' + _mcTaskCountsChip(nt) + '</div>';
                             }).join('');
                             return '<div style="margin-bottom:8px;">' +
                                 '<div ' + _mcJumpAttr('project', pj.id) + ' style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.22);border-radius:6px;cursor:pointer;transition:background 0.15s;font-weight:700;" onmouseover="this.style.background=\'rgba(139,92,246,0.16)\'" onmouseout="this.style.background=\'rgba(139,92,246,0.08)\'">' +
@@ -27689,10 +27810,9 @@
                             ? '<div style="margin-top:' + (cpChildProjects.length > 0 ? '10' : '0') + 'px;">' +
                                 (cpChildProjects.length > 0 ? '<div style="font-size:9px;color:rgba(255,255,255,0.35);letter-spacing:0.1em;margin-bottom:4px;">STANDALONE TASKS</div>' : '') +
                                 cpDirectTasks.map(function (dt) {
-                                    var col = dt.status === 'approved' ? '#22c55e' : dt.status === 'submitted' ? '#f5a500' : 'rgba(255,255,255,0.6)';
                                     return '<div ' + _mcJumpAttr('task', dt.id) + ' style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:rgba(79,142,247,0.05);border:1px solid rgba(79,142,247,0.18);border-radius:6px;margin-bottom:4px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(79,142,247,0.12)\'" onmouseout="this.style.background=\'rgba(79,142,247,0.05)\'">' +
                                         '<span style="font-size:11px;color:#c9d6ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📋 ' + escapeHtml(dt.title || 'Untitled') + '</span>' +
-                                        '<span style="font-size:9px;color:' + col + ';font-weight:700;text-transform:uppercase;letter-spacing:0.05em;flex-shrink:0;">' + (dt.status || 'open') + '</span>' +
+                                        _mcTaskCountsChip(dt) +
                                     '</div>';
                                 }).join('') +
                               '</div>'
@@ -27702,19 +27822,42 @@
                 // Aggregate progress across all descendant tasks (via child
                 // projects + direct tasks). Shown as a big hero bar so the
                 // Checkpoint's overall completion state is instantly clear.
-                var cpProg = _mcCheckpointProgress(cp);
+                // COHORT-WIDE progress (July 15, Ennis): hosts see completion
+                // across every player in the assigned cohorts — player-task
+                // completions, not one player's view.
+                var cpProg = _mcCheckpointCohortProgress(cp);
                 var cpUrgency = _mcUrgencyForDueDate(cp.endDate || cp.dueDate);
+                // Data pull: who has NOT completed their tasks yet.
+                var _lagging = (cpProg.players || []).filter(function (r) { return r.approved < r.total; });
+                var laggingPanel = '';
+                if (_lagging.length) {
+                    laggingPanel = '<details style="margin-top:12px;">' +
+                        '<summary style="cursor:pointer;font-size:11px;color:#f5a500;font-weight:700;letter-spacing:0.06em;font-family:Rajdhani,sans-serif;">⚠ ' + _lagging.length + ' of ' + cpProg.playerCount + ' players not yet complete — view list</summary>' +
+                        '<div style="max-height:200px;overflow-y:auto;margin-top:8px;border:1px solid rgba(255,255,255,0.08);border-radius:8px;">' +
+                        _lagging.map(function (r) {
+                            return '<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 10px;border-bottom:1px solid rgba(255,255,255,0.04);font-size:11px;">' +
+                                '<span style="color:#e0e6ff;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(r.brand) + '</span>' +
+                                '<span style="color:rgba(255,255,255,0.4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(r.cohort) + '</span>' +
+                                '<span style="font-family:monospace;color:' + (r.submitted > 0 ? '#f5a500' : 'rgba(255,255,255,0.55)') + ';flex-shrink:0;">' + r.approved + '/' + r.total + (r.submitted ? ' · ⧗' + r.submitted : '') + '</span>' +
+                            '</div>';
+                        }).join('') +
+                        '</div></details>';
+                } else if (cpProg.playerCount > 0) {
+                    laggingPanel = '<div style="margin-top:10px;font-size:11px;color:#22c55e;font-weight:700;">✓ All ' + cpProg.playerCount + ' assigned players complete</div>';
+                }
                 var cpProgressPanel = (cpProg.total > 0 || totalXC > 0)
                     ? '<div style="margin-bottom:14px;padding:16px 18px;background:rgba(' + accentRgb + ',0.06);border:1px solid rgba(' + accentRgb + ',0.30);border-radius:14px;">' +
                         '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:10px;">' +
-                            '<span style="font-family:Orbitron,sans-serif;font-size:12px;color:rgba(' + accentRgb + ',1);font-weight:800;letter-spacing:0.12em;">◆ CHECKPOINT PROGRESS</span>' +
+                            '<span style="font-family:Orbitron,sans-serif;font-size:12px;color:rgba(' + accentRgb + ',1);font-weight:800;letter-spacing:0.12em;">◆ CHECKPOINT PROGRESS <span style="font-size:9px;color:rgba(255,255,255,0.4);letter-spacing:0.06em;">ALL COHORTS</span></span>' +
                             '<span style="font-size:18px;color:' + (cpProg.pct === 100 ? '#22c55e' : '#ffffff') + ';font-weight:900;font-family:monospace;">' + cpProg.pct + '%</span>' +
                         '</div>' +
                         _mcProgressBarHtml(cpProg.pct, { height: 14 }) +
-                        '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12px;color:rgba(255,255,255,0.7);">' +
-                            '<span>✓ ' + cpProg.approved + ' of ' + cpProg.total + ' tasks approved</span>' +
+                        '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12px;color:rgba(255,255,255,0.7);flex-wrap:wrap;gap:6px;">' +
+                            '<span>✓ ' + cpProg.approved + ' of ' + cpProg.total + ' player-task completions · 👥 ' + cpProg.playerCount + ' players' + (cpProg.submitted ? ' · ⧗ ' + cpProg.submitted + ' awaiting review' : '') + '</span>' +
                             (cp.endDate || cp.dueDate ? '<span style="color:rgba(' + cpUrgency.rgb + ',1);font-weight:700;">📅 ' + cpUrgency.label + '</span>' : '') +
                         '</div>' +
+                        '<div style="margin-top:10px;font-size:11px;color:var(--gold);font-family:monospace;" title="Checkpoint XC + all assigned Project XC + all assigned Task XC, badge XC included">⚡ ' + totalXC.toLocaleString() + ' XC in circulation</div>' +
+                        laggingPanel +
                     '</div>'
                     : '';
                 return '<div data-mc-checkpoint-id="' + cp.id + '" style="background:linear-gradient(180deg, rgba(22,22,31,0.85), rgba(22,22,31,0.65));border:1.5px solid rgba(' + accentRgb + ',0.5);border-radius:22px;position:relative;overflow:hidden;box-shadow:0 0 0 1px rgba(' + accentRgb + ',0.16), 0 0 26px rgba(' + accentRgb + ',0.20), 0 0 50px rgba(' + accentRgb + ',0.08), 0 16px 34px rgba(0,0,0,0.60);transition:transform 0.2s ease, box-shadow 0.2s ease;" onmouseover="this.style.transform=\'translateY(-4px)\';this.style.boxShadow=\'0 0 0 1px rgba(' + accentRgb + ',0.28), 0 0 38px rgba(' + accentRgb + ',0.32), 0 0 78px rgba(' + accentRgb + ',0.14), 0 22px 44px rgba(0,0,0,0.70)\';" onmouseout="this.style.transform=\'translateY(0)\';this.style.boxShadow=\'0 0 0 1px rgba(' + accentRgb + ',0.16), 0 0 26px rgba(' + accentRgb + ',0.20), 0 0 50px rgba(' + accentRgb + ',0.08), 0 16px 34px rgba(0,0,0,0.60)\';">' +
@@ -27895,6 +28038,58 @@
             var all = Object.keys(seen).map(function (k) { return seen[k]; });
             var done = all.filter(_mcTaskIsApproved).length;
             return { approved: done, total: all.length, pct: all.length ? Math.round(done*100/all.length) : 0 };
+        }
+        // ── HOST cohort-wide checkpoint analytics (July 15, Ennis) ──
+        // The host card must show progress across ALL players in the cohorts
+        // assigned to the checkpoint/projects — not the single-track task
+        // status (which reads like one player's progress). Unit of measure:
+        // player-task completions (each assigned player × each of their tasks).
+        function _mcAnalyticsRoster() {
+            var pool = (typeof _mcRoster === 'function') ? _mcRoster()
+                : (Array.isArray(PLAYERS) ? PLAYERS : []);
+            return (pool || []).filter(function (p) {
+                return p && !p.godTier && !p.isHost &&
+                    !(typeof pflxIsHostRole === 'function' && pflxIsHostRole(p.role));
+            });
+        }
+        function _mcCheckpointCohortProgress(cp) {
+            var out = { total: 0, approved: 0, submitted: 0, pct: 0, playerCount: 0, players: [] };
+            try {
+                _mcAnalyticsRoster().forEach(function (p) {
+                    var pr = pflxPlayerCheckpointProgress(cp, p);
+                    if (!pr || !pr.total) return;   // checkpoint has nothing for this player
+                    out.total += pr.total;
+                    out.approved += pr.approved;
+                    out.submitted += pr.submitted;
+                    out.playerCount++;
+                    out.players.push({ id: p.id, brand: p.brand || p.brandName || p.name || 'Player', cohort: p.cohort || '', approved: pr.approved, submitted: pr.submitted, total: pr.total });
+                });
+                out.pct = out.total ? Math.round(out.approved * 100 / out.total) : 0;
+            } catch (e) {}
+            return out;
+        }
+        // Per-task counts across the assigned cohort(s): how many players hold
+        // this task, and how many of them are approved / awaiting review.
+        function _mcTaskCohortCounts(task) {
+            var out = { assigned: 0, approved: 0, submitted: 0 };
+            try {
+                _mcAnalyticsRoster().forEach(function (p) {
+                    var see = false;
+                    try { see = pflxPlayerCanSeeItem(task, p.id, pflxPlayerCohorts(p)); } catch (e) {}
+                    if (!see) return;
+                    out.assigned++;
+                    var st = pflxTaskStateForPlayer(task, p.id);
+                    if (st === 'approved') out.approved++;
+                    else if (st === 'submitted') out.submitted++;
+                });
+            } catch (e) {}
+            return out;
+        }
+        function _mcTaskCountsChip(task) {
+            var c = _mcTaskCohortCounts(task);
+            if (!c.assigned) return '<span style="font-size:9px;color:rgba(255,255,255,0.35);font-family:monospace;flex-shrink:0;">no players</span>';
+            var col = c.approved === c.assigned ? '#22c55e' : (c.submitted > 0 ? '#f5a500' : 'rgba(255,255,255,0.6)');
+            return '<span style="font-size:9px;color:' + col + ';font-weight:700;font-family:monospace;letter-spacing:0.03em;flex-shrink:0;" title="' + c.approved + ' approved · ' + c.submitted + ' awaiting review · ' + c.assigned + ' players assigned">✓ ' + c.approved + '/' + c.assigned + (c.submitted ? ' · ⧗ ' + c.submitted : '') + '</span>';
         }
         // ── PER-PLAYER progress (Host Progress dashboard) ──
         function pflxPlayerCohorts(player) {
