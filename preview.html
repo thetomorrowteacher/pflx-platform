@@ -22412,6 +22412,60 @@
         // was memory-only, the next boot pull happily overwrote the newer local
         // work with the stale cloud rows. Persisting the stamps lets Guard 3 do
         // its job across sessions: stale cloud never beats newer offline edits.
+        // ── PLAYER TOMBSTONES (July 15, Ennis) ── deleted players kept coming
+        // back: the console holds TWO rosters (PLAYERS + mcPlayers), X-Coin
+        // pushes its users list back over the bridge, and cloud pulls re-adopt
+        // whatever any stale device still holds. A delete now writes a
+        // tombstone (by id AND brand), mirrored to the cloud — every ingest
+        // path refuses tombstoned records, on every device.
+        var _PFLX_TOMB_LS = 'pflx_player_tombstones_v1';
+        window.pflxTombstones = (function () { try { return JSON.parse(localStorage.getItem(_PFLX_TOMB_LS) || '{}') || {}; } catch (e) { return {}; } })();
+        function _pflxTombSaveLocal() { try { localStorage.setItem(_PFLX_TOMB_LS, JSON.stringify(window.pflxTombstones)); } catch (e) {} }
+        window.pflxIsTombstoned = function (p) {
+            if (!p) return false;
+            var t = window.pflxTombstones || {};
+            if (p.id && t[p.id]) return true;
+            var b = String(p.brand || p.brandName || '').trim().toUpperCase();
+            return !!(b && t['b:' + b]);
+        };
+        window.pflxTombstoneAdd = function (p) {
+            if (!p) return;
+            var t = window.pflxTombstones;
+            if (p.id) t[p.id] = Date.now();
+            var b = String(p.brand || p.brandName || '').trim().toUpperCase();
+            if (b) t['b:' + b] = Date.now();
+            _pflxTombSaveLocal();
+            try {
+                var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (client) client.from('app_data').upsert({ key: 'pflx_player_tombstones', data: t, updated_at: new Date().toISOString() }, { onConflict: 'key' }).then(function () {}, function () {});
+            } catch (e) {}
+        };
+        window.pflxTombstoneMergeCloud = function (cloud) {
+            if (!cloud || typeof cloud !== 'object') return 0;
+            var t = window.pflxTombstones, changed = 0;
+            Object.keys(cloud).forEach(function (k) { if (!t[k]) { t[k] = cloud[k]; changed++; } });
+            if (changed) _pflxTombSaveLocal();
+            return changed;
+        };
+        window.pflxPurgeTombstoned = function () {
+            var n = 0;
+            try {
+                if (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) {
+                    var b = mcPlayers.length;
+                    mcPlayers = mcPlayers.filter(function (p) { return !window.pflxIsTombstoned(p); });
+                    n += b - mcPlayers.length;
+                }
+            } catch (e) {}
+            try {
+                if (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) {
+                    for (var i = PLAYERS.length - 1; i >= 0; i--) {
+                        if (window.pflxIsTombstoned(PLAYERS[i])) { PLAYERS.splice(i, 1); n++; }
+                    }
+                }
+            } catch (e) {}
+            if (n) { try { mcSaveData('players'); } catch (e) {} }
+            return n;
+        };
         var _MC_LASTWRITE_LS = 'pflx_mc_lastwrite_v1';
         var _mcLocalLastWrite = {};   // type → epoch ms of last local mcSaveData
         try { _mcLocalLastWrite = JSON.parse(localStorage.getItem(_MC_LASTWRITE_LS) || '{}') || {}; } catch (e) { _mcLocalLastWrite = {}; }
@@ -22451,6 +22505,10 @@
                 }
             }
 
+            // Tombstone filter (July 15) — deleted players never re-enter via cloud.
+            if (type === 'players' && Array.isArray(items) && window.pflxIsTombstoned) {
+                items = items.filter(function (p) { return !window.pflxIsTombstoned(p); });
+            }
             _mcApplyingCloud = true;
             var ok = false;
             try {
@@ -22592,6 +22650,15 @@
                     var sres = await client.from('app_data').select('data').eq('key', 'pflx_live_stream').limit(1);
                     var srow = sres && sres.data && sres.data[0];
                     if (srow && srow.data && typeof window.pflxApplyCloudStream === 'function') window.pflxApplyCloudStream(srow.data);
+                } catch (e) {}
+                // Tombstones ride along too (July 15) — merge cloud deletions,
+                // then purge any zombie records this device still holds.
+                try {
+                    var tres = await client.from('app_data').select('data').eq('key', 'pflx_player_tombstones').limit(1);
+                    var trow = tres && tres.data && tres.data[0];
+                    if (trow && trow.data) window.pflxTombstoneMergeCloud(trow.data);
+                    var purged = window.pflxPurgeTombstoned();
+                    if (purged) console.log('[MC cloud] 🪦 purged ' + purged + ' tombstoned player record(s)');
                 } catch (e) {}
                 // Pull completed (even with zero rows on a fresh org) —
                 // pushes are now allowed (STOMP GUARD 1).
@@ -22780,6 +22847,9 @@
                         // X-Coin uses brandName; Console uses brand. Normalize so the brand
                         // column in Player Management isn't blanked out on every sync.
                         msg.data.forEach(pflxNormalizePlayerRecord);
+                        // Tombstone filter (July 15) — deleted players never come
+                        // back through the X-Coin users bridge.
+                        if (window.pflxIsTombstoned) msg.data = msg.data.filter(function (np) { return !window.pflxIsTombstoned(np); });
                         // Also preserve any locally-stored badges that X-Coin's user payload
                         // doesn't carry (X-Coin sends digitalBadges count, not the array).
                         var existingById = {};
@@ -26812,7 +26882,10 @@
         function mcBulkDeletePlayers() {
             if (mcSelectedPlayerIds.size === 0) return;
             if (!confirm('Delete ' + mcSelectedPlayerIds.size + ' player(s)? This cannot be undone.')) return;
+            // TOMBSTONES (July 15) — deletions stick across all roster sources.
+            try { mcPlayers.forEach(function (p) { if (p && mcSelectedPlayerIds.has(p.id) && window.pflxTombstoneAdd) window.pflxTombstoneAdd(p); }); } catch (e) {}
             mcPlayers = mcPlayers.filter(function(p) { return !mcSelectedPlayerIds.has(p.id); });
+            try { if (window.pflxPurgeTombstoned) window.pflxPurgeTombstoned(); } catch (e) {}
             mcSaveData('players');
             mcClearSelection();
             mcRenderPlayers();
@@ -27502,7 +27575,13 @@
         }
         function mcConfirmDeletePlayer() {
             if (!mcPendingDeleteId) return;
+            // TOMBSTONE (July 15) — deletion is permanent across all roster sources.
+            try {
+                var __dp = mcPlayers.find(function (p) { return p && p.id === mcPendingDeleteId; });
+                if (__dp && window.pflxTombstoneAdd) window.pflxTombstoneAdd(__dp);
+            } catch (e) {}
             mcPlayers = mcPlayers.filter(function(p) { return p.id !== mcPendingDeleteId; });
+            try { if (window.pflxPurgeTombstoned) window.pflxPurgeTombstoned(); } catch (e) {}
             mcSaveData('players');
             mcCloseDeleteModal();
             mcRenderPlayers();
@@ -27874,7 +27953,7 @@
                         '</div>' +
                         _mcProgressBarHtml(cpProg.pct, { height: 14 }) +
                         '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12px;color:rgba(255,255,255,0.7);flex-wrap:wrap;gap:6px;">' +
-                            '<span>✓ ' + cpProg.approved + ' of ' + cpProg.total + ' player-task completions · 👥 ' + cpProg.playerCount + ' players' + (cpProg.submitted ? ' · ⧗ ' + cpProg.submitted + ' awaiting review' : '') + '</span>' +
+                            '<span>👥 ' + cpProg.playerCount + ' players in scope · ✓ ' + cpProg.approved + ' / ' + cpProg.total + ' completions <span style="opacity:0.5;">(each player × their tasks)</span>' + (cpProg.submitted ? ' · ⧗ ' + cpProg.submitted + ' awaiting review' : '') + '</span>' +
                             (cp.endDate || cp.dueDate ? '<span style="color:rgba(' + cpUrgency.rgb + ',1);font-weight:700;">📅 ' + cpUrgency.label + '</span>' : '') +
                         '</div>' +
                         '<div style="margin-top:10px;font-size:11px;color:var(--gold);font-family:monospace;" title="Checkpoint XC + all assigned Project XC + all assigned Task XC, badge XC included">⚡ ' + totalXC.toLocaleString() + ' XC in circulation</div>' +
@@ -28942,13 +29021,35 @@
                 var priorityFlag = _mcPriorityFlag(t.priority || 'normal');
                 var urgency = _mcUrgencyForDueDate(t.dueDate);
                 var isApproved = _mcTaskHostComplete(t);
-                var statusCol = t.status === 'approved' ? '#22c55e' : t.status === 'submitted' ? '#f5a500' : t.status === 'rejected' ? '#ef4444' : '#00d4ff';
+                // HOST status cell (July 15, Ennis): never the single-track
+                // status — show cohort-wide counts plus a mini bar toward FULL
+                // submission (green = approved, amber = awaiting review).
+                var hs = _mcTaskHostState(t);
+                var hc = hs.counts || { assigned: 0, approved: 0, submitted: 0 };
+                var statusCell;
+                if (hc.assigned > 0) {
+                    var pA = Math.round(hc.approved * 100 / hc.assigned);
+                    var pS = Math.round(hc.submitted * 100 / hc.assigned);
+                    statusCell = '<div style="color:' + hs.color + ';font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;white-space:nowrap;">' + hs.label + '</div>' +
+                        '<div style="margin-top:5px;height:5px;width:110px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;display:flex;" title="' + hc.approved + ' approved · ' + hc.submitted + ' awaiting review · ' + hc.assigned + ' assigned">' +
+                            '<div style="height:100%;width:' + pA + '%;background:#22c55e;"></div>' +
+                            '<div style="height:100%;width:' + pS + '%;background:#f5a500;"></div>' +
+                        '</div>';
+                } else {
+                    statusCell = '<span style="color:' + hs.color + ';font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;">' + hs.label + '</span>';
+                }
+                // XC cell: rewards gold, penalties unmistakably red.
+                var xcCell = [];
+                if ((t.xcReward || 0) > 0) xcCell.push('<span style="color:#f5c842;">⚡ ' + t.xcReward + '</span>');
+                if ((t.xcReward || 0) < 0) xcCell.push('<span style="color:#ef4444;font-weight:800;" title="XC penalty">▼ ' + t.xcReward + ' XC</span>');
+                var _dp = t.deadlinePenalty;
+                if (_dp && _dp.enabled && (_dp.amount || 0) > 0) xcCell.push('<span style="color:#ef4444;font-weight:800;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.4);border-radius:6px;padding:1px 7px;font-size:10px;" title="Late penalty (' + escapeHtml(_dp.type || 'fine') + (_dp.graceDays ? ', ' + _dp.graceDays + 'd grace' : '') + ')">⏰ −' + _dp.amount + ' LATE</span>');
                 html += '<tr onmouseover="this.style.background=\'rgba(0,212,255,0.04)\'" onmouseout="this.style.background=\'transparent\'" style="transition:background 0.1s ease;">' +
                     '<td style="padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.04);">' + priorityFlag + '</td>' +
                     '<td ' + _mcJumpAttr('task', t.id) + ' style="padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.04);color:' + (isApproved ? 'rgba(255,255,255,0.55)' : '#f0f0ff') + ';font-weight:700;cursor:pointer;' + (isApproved ? 'text-decoration:line-through;' : '') + '">' + escapeHtml(t.title || 'Untitled') + '</td>' +
-                    '<td style="padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.04);color:' + statusCol + ';font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;">' + (t.status || 'open') + '</td>' +
+                    '<td style="padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.04);">' + statusCell + '</td>' +
                     '<td style="padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.04);font-size:12px;' + (t.dueDate ? 'color:rgba(' + urgency.rgb + ',1);font-weight:700;' : 'color:rgba(255,255,255,0.3);') + '">' + (t.dueDate ? urgency.label : '—') + '</td>' +
-                    '<td style="padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.04);color:#f5c842;font-weight:700;font-family:monospace;">' + (t.xcReward ? '⚡ ' + t.xcReward : '—') + '</td>' +
+                    '<td style="padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.04);font-weight:700;font-family:monospace;white-space:nowrap;">' + (xcCell.length ? xcCell.join(' ') : '—') + '</td>' +
                     '<td style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);white-space:nowrap;">' +
                         '<button onclick="mcEditTask(' + realIndex + ')" style="padding:5px 10px;font-size:10px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:6px;cursor:pointer;font-weight:700;">Edit</button>' +
                     '</td>' +
@@ -29168,9 +29269,18 @@
                 var dueChip = t.dueDate
                     ? '<span style="background:rgba(' + urgency.rgb + ',0.14);color:rgba(' + urgency.rgb + ',1);padding:5px 10px;border-radius:12px;font-size:11px;font-weight:700;border:1px solid rgba(' + urgency.rgb + ',0.35);white-space:nowrap;">📅 ' + urgency.label + '</span>'
                     : '';
-                var xcChip = t.xcReward
-                    ? '<span style="background:rgba(245,200,66,0.16);color:#f5c842;padding:5px 10px;border-radius:12px;font-size:11px;font-weight:800;border:1px solid rgba(245,200,66,0.4);white-space:nowrap;box-shadow:0 0 8px rgba(245,200,66,0.14);">⚡ ' + t.xcReward + ' XC</span>'
-                    : '';
+                // XC chips (July 15, Ennis): rewards stay gold; penalties are
+                // unmistakably RED — a −50 late fine must never read as a reward.
+                var xcChip = '';
+                if ((t.xcReward || 0) > 0) {
+                    xcChip = '<span style="background:rgba(245,200,66,0.16);color:#f5c842;padding:5px 10px;border-radius:12px;font-size:11px;font-weight:800;border:1px solid rgba(245,200,66,0.4);white-space:nowrap;box-shadow:0 0 8px rgba(245,200,66,0.14);">⚡ ' + t.xcReward + ' XC</span>';
+                } else if ((t.xcReward || 0) < 0) {
+                    xcChip = '<span style="background:rgba(239,68,68,0.14);color:#ef4444;padding:5px 10px;border-radius:12px;font-size:11px;font-weight:800;border:1px solid rgba(239,68,68,0.45);white-space:nowrap;" title="XC penalty">▼ ' + t.xcReward + ' XC PENALTY</span>';
+                }
+                var _dpc = t.deadlinePenalty;
+                if (_dpc && _dpc.enabled && (_dpc.amount || 0) > 0) {
+                    xcChip += (xcChip ? ' ' : '') + '<span style="background:rgba(239,68,68,0.12);color:#ef4444;padding:5px 10px;border-radius:12px;font-size:11px;font-weight:800;border:1px solid rgba(239,68,68,0.45);white-space:nowrap;" title="Late penalty (' + escapeHtml(_dpc.type || 'fine') + (_dpc.graceDays ? ', ' + _dpc.graceDays + ' day grace' : '') + ')">⏰ −' + _dpc.amount + ' XC LATE FINE</span>';
+                }
                 var rewardBadgeCount = (Array.isArray(t.rewardBadges) ? t.rewardBadges.length : 0);
                 var badgeChip = rewardBadgeCount > 0
                     ? '<span style="background:rgba(139,92,246,0.14);color:#c4b5fd;padding:5px 10px;border-radius:12px;font-size:11px;font-weight:700;border:1px solid rgba(139,92,246,0.35);white-space:nowrap;">🏆 ' + rewardBadgeCount + '</span>'
@@ -58166,11 +58276,7 @@ RESPONSE RULES:
                         BRANDS[brand] = pin;
                         broadcastPlayerChange(newP);
                         if (typeof window.pflxIdentityPersistNewPlayer === 'function') window.pflxIdentityPersistNewPlayer(newP);
-                        // Clear any active filter/search so the new/edited row is immediately visible
-                        try {
-                            var s = document.getElementById('hmc-player-search');  if (s) s.value = '';
-                            var c = document.getElementById('hmc-cohort-filter');   if (c) c.value = 'all';
-                        } catch (e) {}
+                        // July 15 (Ennis): filters/search persist through add/edit/delete.
                         if (typeof hmcRenderPlayers === 'function') hmcRenderPlayers();
                         if (typeof populateBrandSelect === 'function') populateBrandSelect();
                         try { if (typeof window.pflxShowSaveToast === 'function') window.pflxShowSaveToast('Player created · ' + brand); } catch (e) {}
@@ -58224,11 +58330,7 @@ RESPONSE RULES:
                             added++;
                         });
                         persistPlayers();
-                        // Clear any active filter/search so the new/edited row is immediately visible
-                        try {
-                            var s = document.getElementById('hmc-player-search');  if (s) s.value = '';
-                            var c = document.getElementById('hmc-cohort-filter');   if (c) c.value = 'all';
-                        } catch (e) {}
+                        // July 15 (Ennis): filters/search persist through add/edit/delete.
                         if (typeof hmcRenderPlayers === 'function') hmcRenderPlayers();
                         if (typeof populateBrandSelect === 'function') populateBrandSelect();
                         status.innerHTML = '<span style="color:#22c55e;">✓ ' + added + ' imported</span>' + (skipped ? ' · <span style="color:#f59e0b;">' + skipped + ' skipped (duplicate or invalid)</span>' : '');
@@ -58428,6 +58530,10 @@ RESPONSE RULES:
                     card.__getWorkingBadges = function () { return workingBadges; };
                     card.querySelector('#pm-ed-delete').onclick = function () {
                         if (!confirm('Permanently delete ' + (p.brand || p.name) + '? This cannot be undone.')) return;
+                        // TOMBSTONE (July 15) — record the deletion by id + brand
+                        // and mirror it to the cloud so no roster source (X-Coin
+                        // bridge, cloud pull, stale device) can resurrect them.
+                        try { if (window.pflxTombstoneAdd) window.pflxTombstoneAdd(p); } catch (e) {}
                         var i = PLAYERS.indexOf(p);
                         if (i >= 0) PLAYERS.splice(i, 1);
                         if (p.brand) delete BRANDS[p.brand];
@@ -58437,11 +58543,9 @@ RESPONSE RULES:
                         // and Mission Control kept showing the deleted player
                         // because mcPlayers / users cloud row still had them.
                         try { pflxDeletePlayerFully(p.id, p.brand); } catch (e) { console.warn('[delete] mirror failed', e); }
-                        // Clear any active filter/search so the new/edited row is immediately visible
-                        try {
-                            var s = document.getElementById('hmc-player-search');  if (s) s.value = '';
-                            var c = document.getElementById('hmc-cohort-filter');   if (c) c.value = 'all';
-                        } catch (e) {}
+                        // July 15 (Ennis): the filter/search must SURVIVE deletes —
+                        // the old "clear filters so the row is visible" reset here
+                        // was exactly the bug being reported. Filters stay put.
                         if (typeof hmcRenderPlayers === 'function') hmcRenderPlayers();
                         try { if (typeof window.pflxShowSaveToast === 'function') window.pflxShowSaveToast('Player deleted'); } catch (e) {}
                         close();
@@ -58501,11 +58605,7 @@ RESPONSE RULES:
                         if (oldBrand && oldBrand !== newBrand) delete BRANDS[oldBrand];
                         if (newBrand && newPin) BRANDS[newBrand] = newPin;
                         broadcastPlayerChange(p);
-                        // Clear any active filter/search so the new/edited row is immediately visible
-                        try {
-                            var s = document.getElementById('hmc-player-search');  if (s) s.value = '';
-                            var c = document.getElementById('hmc-cohort-filter');   if (c) c.value = 'all';
-                        } catch (e) {}
+                        // July 15 (Ennis): filters/search persist through add/edit/delete.
                         if (typeof hmcRenderPlayers === 'function') hmcRenderPlayers();
                         if (typeof populateBrandSelect === 'function') populateBrandSelect();
                         try { if (typeof window.pflxShowSaveToast === 'function') window.pflxShowSaveToast('Saved · ' + p.brand); } catch (e) {}
