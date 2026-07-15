@@ -30287,7 +30287,11 @@
             if (!allCoh || !allCoh.checked) {
                 document.querySelectorAll('.mc-project-cohort-cb:checked').forEach(function (cb) { checked.push(cb.value); });
             }
-            var norm = function (x) { return String(x == null ? '' : x).toLowerCase().trim(); };
+            // Whitespace-collapsing norm — cohort strings drift ("Global  Digital
+            // Intern"), and the AUTHORITATIVE roster is PLAYERS (live, incl.
+            // freshly claimed accounts) with mcPlayers as fallback — reading
+            // only mcPlayers showed a fraction of the cohort's members.
+            var norm = function (x) { return String(x == null ? '' : x).toLowerCase().trim().replace(/\s+/g, ' '); };
             var acceptable = new Set();
             (typeof mcCohortGroups !== 'undefined' ? mcCohortGroups : []).forEach(function (g) {
                 if (g && (checked.indexOf(g.id) !== -1 || checked.indexOf(g.name) !== -1)) {
@@ -30302,10 +30306,18 @@
                 if (Array.isArray(p.cohorts)) out = out.concat(p.cohorts);
                 return out;
             }
-            var pool = (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) ? mcPlayers : [];
+            var pool = (typeof _mcRoster === 'function') ? _mcRoster()
+                : ((typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) ? mcPlayers : []);
+            // "player" = anyone who isn't a host tier / system account —
+            // requiring role === 'player' exactly dropped legacy role spellings.
+            function isPlayerish(p) {
+                if (!p || p.godTier) return false;
+                if (typeof window.pflxIsHostRole === 'function' && window.pflxIsHostRole(p.role)) return false;
+                return true;
+            }
             var scoped = acceptable.size
-                ? pool.filter(function (p) { return p && (p.role || 'player') === 'player' && tags(p).some(function (c) { return acceptable.has(norm(c)); }); })
-                : pool.filter(function (p) { return p && (p.role || 'player') === 'player'; });
+                ? pool.filter(function (p) { return isPlayerish(p) && tags(p).some(function (c) { return acceptable.has(norm(c)); }); })
+                : pool.filter(isPlayerish);
             var q = (document.getElementById('mc-project-players-search')?.value || '').toLowerCase().trim();
             if (q) scoped = scoped.filter(function (p) { return String(p.brand || p.brandName || p.name || '').toLowerCase().indexOf(q) !== -1; });
             var prior = new Set();
