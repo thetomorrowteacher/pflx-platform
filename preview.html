@@ -27938,6 +27938,79 @@
             var submitted = tasks.filter(function (x) { return x.state === 'submitted'; }).length;
             return { total: tasks.length, approved: approved, submitted: submitted, pct: tasks.length ? Math.round(approved * 100 / tasks.length) : 0, tasks: tasks };
         }
+        // ── CHECKPOINT PROGRESSION GATE (July 15, Ennis) ──
+        // Players may only complete tasks whose checkpoint is ACTIVE (or already
+        // completed), OR — early-advance — when every earlier checkpoint is fully
+        // approved for them. Tasks under INACTIVE drafts are never completable.
+        function pflxCheckpointTimeline() {
+            var cps = (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints))
+                ? mcCheckpoints.filter(function (c) { return c && c.status !== 'inactive'; }) : [];
+            var withIdx = cps.map(function (c, i) { return { c: c, i: i }; });
+            withIdx.sort(function (a, b) {
+                var da = Date.parse(a.c.startDate || a.c.dueDate || '') || 0;
+                var db = Date.parse(b.c.startDate || b.c.dueDate || '') || 0;
+                if (da !== db) return da - db;
+                return a.i - b.i;   // stable: creation order breaks date ties
+            });
+            return withIdx.map(function (x) { return x.c; });
+        }
+        function pflxPlayerClearedCheckpoint(cp, player) {
+            try {
+                var pr = pflxPlayerCheckpointProgress(cp, player);
+                // No tasks for this player in that checkpoint → nothing blocks them.
+                return pr.total === 0 || pr.approved === pr.total;
+            } catch (e) { return false; }
+        }
+        function pflxTaskCheckpointLock(task, player) {
+            // → null when the task is completable; otherwise { reason, cpName, blockedBy }
+            try {
+                if (!task || !player) return null;
+                // Hosts / elevated tiers always pass (testing + management).
+                if ((typeof pflxIsHostRole === 'function' && pflxIsHostRole(player.role))
+                    || (typeof window.pflxHostTier === 'function' && !!window.pflxHostTier(player))) return null;
+                var cps = (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) ? mcCheckpoints : [];
+                var cp = cps.find(function (c) { return c && ppItemInCheckpoint(task, c.id); });
+                if (!cp) {
+                    // Task attached through a project — walk the project's checkpoint.
+                    var proj = (typeof mcProjects !== 'undefined' && Array.isArray(mcProjects) ? mcProjects : []).find(function (p) {
+                        if (!p) return false;
+                        if (task.projectId && p.id === task.projectId) return true;
+                        return Array.isArray(p.taskIds) && p.taskIds.indexOf(task.id) !== -1;
+                    });
+                    if (proj) cp = cps.find(function (c) { return c && ppItemInCheckpoint(proj, c.id); });
+                }
+                if (!cp) return null;   // free-floating task — not gated
+                var st = String(cp.status || 'upcoming').toLowerCase();
+                if (st === 'active' || st === 'completed' || st === 'archived') return null;
+                var cpName = cp.name || cp.title || 'Checkpoint';
+                if (st === 'inactive') return { reason: 'inactive', cpName: cpName };
+                // upcoming → early access only when every earlier checkpoint is cleared
+                var timeline = pflxCheckpointTimeline();
+                var idx = timeline.findIndex(function (c) { return c.id === cp.id; });
+                for (var i = 0; i < idx; i++) {
+                    if (!pflxPlayerClearedCheckpoint(timeline[i], player)) {
+                        return {
+                            reason: 'progression',
+                            cpName: cpName,
+                            blockedBy: timeline[i].name || timeline[i].title || 'the previous checkpoint'
+                        };
+                    }
+                }
+                return null;   // earned early advance
+            } catch (e) { return null; }
+        }
+        window.pflxTaskCheckpointLock = pflxTaskCheckpointLock;
+        function pflxCheckpointLockMsg(lk) {
+            if (!lk) return '';
+            return lk.reason === 'progression'
+                ? '🔒 ' + lk.cpName + ' hasn\'t started yet — finish and get approval on ' + lk.blockedBy + ' to unlock it early.'
+                : '🔒 This task isn\'t open yet.';
+        }
+        window.pflxCheckpointLockMsg = pflxCheckpointLockMsg;
+        // (function scope continues — original close brace below belongs to
+        // pflxPlayerCheckpointProgress's neighbor and is preserved)
+        function _pflxCpGateNoop() {
+        }
         window.pflxPlayerCheckpointProgress = pflxPlayerCheckpointProgress;
         window.pflxTaskStateForPlayer = pflxTaskStateForPlayer;
 
@@ -29016,6 +29089,9 @@
             mcSubmitTaskIndex = taskIndex;
             var t = mcTasks[taskIndex];
             if (!t) return;
+            // CHECKPOINT PROGRESSION GATE (July 15)
+            var _lk = (typeof window.pflxTaskCheckpointLock === 'function') ? window.pflxTaskCheckpointLock(t, window.activeSession || {}) : null;
+            if (_lk) { pflxPlaySfx('error'); if (typeof pflxToast === 'function') pflxToast(pflxCheckpointLockMsg(_lk), 'warn', 5500); mcSubmitTaskIndex = -1; return; }
             pflxPlaySfx('open');
             var modal = document.getElementById('mc-player-submit-modal');
             if (modal) modal.style.display = 'flex';
@@ -29117,6 +29193,9 @@
         function mcPlayerSubmitTask() {
             if (mcSubmitTaskIndex < 0 || !mcTasks[mcSubmitTaskIndex]) return;
             var t = mcTasks[mcSubmitTaskIndex];
+            // CHECKPOINT PROGRESSION GATE (July 15) — hard stop even if the modal was reached
+            var _lk = (typeof window.pflxTaskCheckpointLock === 'function') ? window.pflxTaskCheckpointLock(t, window.activeSession || {}) : null;
+            if (_lk) { if (typeof pflxToast === 'function') pflxToast(pflxCheckpointLockMsg(_lk), 'warn', 5500); mcCloseSubmitModal(); return; }
 
             // Title is now required so submissions are meaningfully labeled
             // in the host approval queue.
@@ -29199,8 +29278,11 @@
             list.innerHTML = playerTasks.map(function(t, i) {
                 var realIdx = mcTasks.indexOf(t);
                 var hasSubmitted = t.submissions && t.submissions.some(function(s) { return s.playerId === playerId; });
-                var statusColor = hasSubmitted ? '#f5c842' : '#4ade80';
-                var statusText = hasSubmitted ? 'SUBMITTED' : 'OPEN';
+                // CHECKPOINT PROGRESSION GATE (July 15) — locked tasks show a 🔒
+                // chip instead of the Submit button.
+                var cpLock = (typeof window.pflxTaskCheckpointLock === 'function') ? window.pflxTaskCheckpointLock(t, (typeof activeSession !== 'undefined' && activeSession) || {}) : null;
+                var statusColor = hasSubmitted ? '#f5c842' : (cpLock ? '#8a92b0' : '#4ade80');
+                var statusText = hasSubmitted ? 'SUBMITTED' : (cpLock ? 'LOCKED' : 'OPEN');
                 var duePill = t.dueDate ? '<span style="font-size:10px;padding:2px 8px;border-radius:6px;background:rgba(239,68,68,0.1);color:#f87171;">Due: ' + t.dueDate + '</span>' : '';
                 var xcPill = '<span style="font-size:10px;padding:2px 8px;border-radius:6px;background:rgba(245,200,66,0.1);color:#fbbf24;">' + (t.xcReward || 0) + ' XC</span>';
 
@@ -29211,6 +29293,7 @@
                     (t.description ? '<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;">' + pflxLinkify(t.description) + '</div>' : '') +
                     '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">' + xcPill + duePill + '</div>' +
                     (hasSubmitted ? '<span style="font-size:11px;color:#f5c842;">Awaiting review...</span>' :
+                    cpLock ? '<span style="font-size:11px;color:#8a92b0;">' + escapeHtml(pflxCheckpointLockMsg(cpLock)) + '</span>' :
                     '<button class="mc-btn mc-btn-green" onclick="mcOpenSubmitModal(' + realIdx + ')" style="font-size:11px;padding:6px 14px;">Submit Task</button>') +
                     '</div>';
             }).join('');
@@ -52611,6 +52694,10 @@ RESPONSE RULES:
             mcSubmitTaskIndex = taskIndex;
             mcSubmitFileData = '';
             var t = mcTasks[taskIndex];
+            if (!t) return;
+            // CHECKPOINT PROGRESSION GATE (July 15)
+            var _lk = (typeof window.pflxTaskCheckpointLock === 'function') ? window.pflxTaskCheckpointLock(t, window.activeSession || {}) : null;
+            if (_lk) { if (typeof pflxToast === 'function') pflxToast(pflxCheckpointLockMsg(_lk), 'warn', 5500); mcSubmitTaskIndex = -1; return; }
 
             // Populate modal header
             var header = document.getElementById('mc-submit-task-title');
@@ -52683,6 +52770,10 @@ RESPONSE RULES:
         function mcSubmitToHost() {
             if (mcSubmitTaskIndex < 0) return;
             var t = mcTasks[mcSubmitTaskIndex];
+            if (!t) return;
+            // CHECKPOINT PROGRESSION GATE (July 15) — hard stop even if the modal was reached
+            var _lk = (typeof window.pflxTaskCheckpointLock === 'function') ? window.pflxTaskCheckpointLock(t, window.activeSession || {}) : null;
+            if (_lk) { if (typeof pflxToast === 'function') pflxToast(pflxCheckpointLockMsg(_lk), 'warn', 5500); mcCloseSubmitModal(); return; }
             var link = (document.getElementById('mc-submit-link')?.value || '').trim();
             var description = (document.getElementById('mc-submit-description')?.value || '').trim();
 
