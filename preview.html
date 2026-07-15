@@ -14000,11 +14000,54 @@
         const BRANDS = {};
         PLAYERS.filter(p => p.brand && p.pin).forEach(p => { BRANDS[p.brand] = p.pin; });
 
+        // July 15 identity rework — pre-entered players must NEVER end up with a
+        // second account. Lookups now (a) are null-safe (a single record without
+        // an email used to throw and silently kill the whole claim handler),
+        // (b) search the MC roster mirror too (adopting hits into PLAYERS so the
+        // normal claim/persist paths work), and (c) can match by full name for
+        // students who type a personal email different from the host-entered one.
+        function _pflxRosterFind(pred) {
+            var hit = (Array.isArray(PLAYERS) ? PLAYERS : []).find(function (p) { return p && pred(p); });
+            if (hit) return hit;
+            if (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) {
+                hit = mcPlayers.find(function (p) { return p && pred(p); });
+                if (hit) {
+                    try { if (!PLAYERS.some(function (p) { return p && p.id === hit.id; })) PLAYERS.push(hit); } catch (e) {}
+                    return hit;
+                }
+            }
+            return null;
+        }
+        function _pflxNameKey(s) {
+            return String(s || '').toLowerCase().trim().replace(/\s+/g, ' ');
+        }
         function findPlayerByEmail(email) {
-            return PLAYERS.find(p => p.email.toLowerCase() === email.toLowerCase());
+            var k = String(email || '').toLowerCase().trim();
+            if (!k) return null;
+            return _pflxRosterFind(function (p) { return String(p.email || '').toLowerCase().trim() === k; });
+        }
+        function findPlayerByName(name) {
+            var k = _pflxNameKey(name);
+            if (!k) return null;
+            return _pflxRosterFind(function (p) { return _pflxNameKey(p.name) === k; });
         }
         function findPlayerByBrand(brand) {
-            return PLAYERS.find(p => p.brand && p.brand.toUpperCase() === brand.toUpperCase());
+            var k = String(brand || '').toUpperCase().trim();
+            if (!k) return null;
+            return _pflxRosterFind(function (p) { return String(p.brand || '').toUpperCase().trim() === k; });
+        }
+        // Never decide "this player doesn't exist" against a roster that hasn't
+        // loaded yet — a fresh browser deciding before the boot pull landed was
+        // one of the ways pre-entered students got duplicate accounts.
+        async function pflxEnsureRosterLoaded(timeoutMs) {
+            if (window._mcPullDone) return true;
+            try {
+                await Promise.race([
+                    (typeof window.mcCloudPull === 'function') ? window.mcCloudPull() : Promise.resolve(),
+                    new Promise(function (res) { setTimeout(res, timeoutMs || 6000); })
+                ]);
+            } catch (e) {}
+            return !!window._mcPullDone;
         }
         function populateBrandSelect() {
             // The brand input is now a <input type="text" list="brand-datalist">
@@ -17523,23 +17566,28 @@
             document.getElementById('goto-email-signup-btn').addEventListener('click', () => showStep('step-email-signup'));
             document.getElementById('back-to-login-from-signup').addEventListener('click', () => showStep('step-login'));
             document.getElementById('goto-claim-from-signup').addEventListener('click', () => showStep('step-claim-email'));
-            document.getElementById('signup-direct-btn').addEventListener('click', () => {
+            document.getElementById('signup-direct-btn').addEventListener('click', async () => {
                 const name = document.getElementById('signup-direct-fullname').value.trim();
                 const email = document.getElementById('signup-direct-email').value.trim();
                 if (!name) { shakeEl(document.getElementById('signup-direct-fullname')); return; }
                 if (!email || !email.includes('@')) { shakeEl(document.getElementById('signup-direct-email')); return; }
-                // Check if email already exists
-                const existing = findPlayerByEmail(email);
+                // Make sure the cloud roster is loaded before deciding this is a
+                // new player, then match by email OR full name — students often
+                // type a personal email different from the host-entered one.
+                const _btn = document.getElementById('signup-direct-btn');
+                _btn.disabled = true;
+                await pflxEnsureRosterLoaded(6000);
+                _btn.disabled = false;
+                const existing = findPlayerByEmail(email) || findPlayerByName(name);
                 if (existing && existing.claimed) {
-                    alert('This email is already registered under brand "' + existing.brand + '". Use the login screen.');
+                    alert('You already have an account under brand "' + existing.brand + '". Use the login screen — all your progress is there.');
                     showStep('step-login');
                     return;
                 }
                 if (existing && !existing.claimed) {
-                    // Found an imported account — redirect to claim flow
-                    alert('An imported account was found for this email! Redirecting to claim flow.');
-                    document.getElementById('claim-email').value = email;
-                    document.getElementById('claim-email-btn').click();
+                    // Found a pre-entered account — claim it, never create a second one.
+                    newPlayerData.email = email;
+                    pflxEnterClaimFlow(existing);
                     return;
                 }
                 // Brand new standalone player
@@ -17555,43 +17603,51 @@
                 showStep('step-temp-pin');
             });
 
+            // Shared claim-flow entry (July 15): every path that discovers a
+            // pre-entered account funnels here — one way in, zero duplicates.
+            function pflxEnterClaimFlow(found) {
+                newPlayerData.isImported = true;
+                newPlayerData.importedPlayer = found;
+                newPlayerData.fullName = found.name;
+                newPlayerData.cohort = found.cohort;
+                if (!newPlayerData.email) newPlayerData.email = found.email || '';
+                newPlayerData.tempPin = generateTempPin();
+                document.getElementById('imported-temp-pin').textContent = newPlayerData.tempPin;
+                document.getElementById('imported-name').textContent = found.name;
+                document.getElementById('imported-cohort').textContent = found.cohort || 'PlayerPool';
+                // Populate imported brand select — show player's own brand first, then create-new option
+                const sel = document.getElementById('imported-brand-select');
+                sel.innerHTML = '<option value="">Choose a brand name...</option>';
+                if (found.brand) {
+                    const ownOpt = document.createElement('option');
+                    ownOpt.value = found.brand;
+                    ownOpt.textContent = found.brand + ' (your assigned brand)';
+                    sel.appendChild(ownOpt);
+                    sel.value = found.brand;
+                }
+                const newOpt = document.createElement('option'); newOpt.value = '__NEW__'; newOpt.textContent = '+ Create New Brand Name'; sel.appendChild(newOpt);
+                showStep('step-imported-found');
+            }
+
             // === STEP 2: Email lookup ===
-            document.getElementById('claim-email-btn').addEventListener('click', () => {
+            document.getElementById('claim-email-btn').addEventListener('click', async () => {
                 const email = document.getElementById('claim-email').value.trim();
                 if (!email || !email.includes('@')) { shakeEl(document.getElementById('claim-email')); return; }
                 newPlayerData.email = email;
+                const _btn = document.getElementById('claim-email-btn');
+                _btn.disabled = true;
+                await pflxEnsureRosterLoaded(6000);
+                _btn.disabled = false;
                 const found = findPlayerByEmail(email);
                 if (found && !found.claimed) {
-                    // IMPORTED player found
-                    newPlayerData.isImported = true;
-                    newPlayerData.importedPlayer = found;
-                    newPlayerData.fullName = found.name;
-                    newPlayerData.cohort = found.cohort;
-                    newPlayerData.tempPin = generateTempPin();
-                    document.getElementById('imported-temp-pin').textContent = newPlayerData.tempPin;
-                    document.getElementById('imported-name').textContent = found.name;
-                    document.getElementById('imported-cohort').textContent = found.cohort;
-                    // Populate imported brand select — show player's own brand first, then create-new option
-                    const sel = document.getElementById('imported-brand-select');
-                    sel.innerHTML = '<option value="">Choose a brand name...</option>';
-                    // Show the player's own assigned brand as the primary option
-                    if (found.brand) {
-                        const ownOpt = document.createElement('option');
-                        ownOpt.value = found.brand;
-                        ownOpt.textContent = found.brand + ' (your assigned brand)';
-                        sel.appendChild(ownOpt);
-                        // Auto-select the player's own brand
-                        sel.value = found.brand;
-                    }
-                    // Also add a "create new" option if they want a different name
-                    const newOpt = document.createElement('option'); newOpt.value = '__NEW__'; newOpt.textContent = '+ Create New Brand Name'; sel.appendChild(newOpt);
-                    showStep('step-imported-found');
+                    pflxEnterClaimFlow(found);
                 } else if (found && found.claimed) {
                     // Already claimed — tell them to log in
                     alert('This email is already registered under brand "' + found.brand + '". Use the login screen.');
                     showStep('step-login');
                 } else {
-                    // NEW standalone player
+                    // No email match — collect their name next; the name step
+                    // gets another chance to find their pre-entered account.
                     newPlayerData.isImported = false;
                     newPlayerData.cohort = 'PlayerPool';
                     document.getElementById('signup-email-readonly').value = email;
@@ -17616,6 +17672,19 @@
             document.getElementById('new-player-submit-btn').addEventListener('click', () => {
                 const name = document.getElementById('signup-fullname').value.trim();
                 if (!name) { shakeEl(document.getElementById('signup-fullname')); return; }
+                // Last chance to catch a pre-entered account: the email didn't
+                // match (personal address), but the host-entered NAME might.
+                const byName = findPlayerByName(name);
+                if (byName && !byName.claimed) {
+                    alert('Found your pre-entered account' + (byName.cohort ? ' (' + byName.cohort + ')' : '') + ' — claiming it so all your work lands in one place.');
+                    pflxEnterClaimFlow(byName);
+                    return;
+                }
+                if (byName && byName.claimed) {
+                    alert('An account under this name already exists (brand "' + byName.brand + '"). If that\'s you, use the login screen.');
+                    showStep('step-login');
+                    return;
+                }
                 newPlayerData.fullName = name;
                 newPlayerData.tempPin = generateTempPin();
                 document.getElementById('temp-pin-value').textContent = newPlayerData.tempPin;
@@ -18512,6 +18581,18 @@
                 // full stop. Elevated access comes only from a host via Player
                 // Manager → Access Level, never from anything in this flow.
                 const _safeDisplayRole = 'Player';
+                // FINAL SAFETY NET (July 15): if an unclaimed pre-entered record
+                // matches this signup by email or name, merge onto it — a second
+                // account for an existing player must be impossible past this line.
+                if (!newPlayerData.isImported) {
+                    try {
+                        const __match = findPlayerByEmail(newPlayerData.email) || findPlayerByName(newPlayerData.fullName);
+                        if (__match && !__match.claimed) {
+                            newPlayerData.isImported = true;
+                            newPlayerData.importedPlayer = __match;
+                        }
+                    } catch (e) {}
+                }
                 // Studio placement safety net: runStudioPlacement writes studioId onto
                 // newPlayerData during the diagnostic, but if the player somehow reached
                 // the final PIN without one (skipped/legacy path), compute it now from
