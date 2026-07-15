@@ -24325,14 +24325,33 @@
                 })()
             };
             //  5a. Task with projectId → project's cohort (which may itself
-            //      inherit from checkpoint / season)
-            if (item.projectId && !visit['proj:' + item.projectId]) {
-                visit['proj:' + item.projectId] = true;
-                var proj = pflxFindProject(ctx.projects, item.projectId);
+            //      inherit from checkpoint / season).
+            //      July 15 (Ennis): ALSO resolve the parent through REVERSE
+            //      pointers (project.taskIds). Tasks wired via the checkpoint/
+            //      project form carry no forward id — they used to fall through
+            //      to the "everyone sees it" convention at 5d, leaking a
+            //      cohort-fenced checkpoint's task to the ENTIRE roster
+            //      (symptom: a 1-cohort checkpoint showing 138 players).
+            var __projId = item.projectId || null;
+            if (!__projId && item.id) {
+                var __rp = (ctx.projects || []).find(function (p) { return p && Array.isArray(p.taskIds) && p.taskIds.indexOf(item.id) >= 0; });
+                if (__rp) __projId = __rp.id;
+            }
+            if (__projId && !visit['proj:' + __projId]) {
+                visit['proj:' + __projId] = true;
+                var proj = pflxFindProject(ctx.projects, __projId);
                 if (proj && pflxPlayerCanSeeItem(proj, pid, cohorts, ctx, visit)) return true;
             }
-            //  5b. Item with roundId / checkpointId → checkpoint's cohort
+            //  5b. Item with roundId / checkpointId → checkpoint's cohort —
+            //      reverse pointers (cp.taskIds / cp.projectIds) honored too.
             var cpId = item.roundId || item.checkpointId || null;
+            if (!cpId && item.id) {
+                var __rc = (ctx.checkpoints || []).find(function (c) {
+                    return c && ((Array.isArray(c.taskIds) && c.taskIds.indexOf(item.id) >= 0) ||
+                                 (Array.isArray(c.projectIds) && c.projectIds.indexOf(item.id) >= 0));
+                });
+                if (__rc) cpId = __rc.id;
+            }
             if (cpId && !visit['cp:' + cpId]) {
                 visit['cp:' + cpId] = true;
                 var cp = pflxFindCheckpoint(ctx.checkpoints, cpId);
@@ -24346,7 +24365,9 @@
             }
             //  5d. Reached the top of the chain with no own cohort and no
             //      matching ancestor — convention is "everyone sees it".
-            if (!item.projectId && !cpId && !item.seasonId) return true;
+            //      Reverse-resolved parents count as parents: a task inside a
+            //      fenced checkpoint is NEVER "free for everyone".
+            if (!__projId && !cpId && !item.seasonId) return true;
             return false;
         }
         // Thin wrapper used by Console Player Portal (binds to activeSession).
@@ -28446,8 +28467,15 @@
                 (mcCPAllCohorts ? 'background:rgba(34,197,94,0.2);border:1px solid rgba(34,197,94,0.5);color:#22c55e;' : offCss) + '">ALL</div>';
             // Group chips — only groups that actually HAVE member cohorts
             // (empty seeded groups used to render identical dead chips here).
+            // July 15 de-dup (Ennis): the cohort-group heal wrapped every cohort
+            // in a 1:1 group with the same name, which made this row render every
+            // cohort TWICE (📁 group chip + plain cohort chip). A group chip only
+            // earns its place when it bundles MULTIPLE cohorts or its name differs
+            // from its single member — 1:1 same-name wrappers are skipped.
+            var _nrmChip = function (s) { return String(s || '').trim().toLowerCase().replace(/\s+/g, ' '); };
             (typeof mcCohortGroups !== 'undefined' ? mcCohortGroups : []).forEach(function (g) {
                 if (!g || !Array.isArray(g.cohorts) || !g.cohorts.length) return;
+                if (g.cohorts.length === 1 && _nrmChip(g.cohorts[0]) === _nrmChip(g.name)) return;
                 var allInGroup = g.cohorts.every(function (c) { return mcCPAssignedCohorts.includes(c); });
                 html += '<div onclick="mcToggleCPCohortGroup(\'' + escapeHtml(g.name).replace(/'/g, "\\'") + '\')" style="cursor:pointer;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:0.05em;' +
                     (allInGroup ? 'background:rgba(139,92,246,0.2);border:1px solid rgba(139,92,246,0.5);color:#8b5cf6;' : offCss) + '">&#128193; ' + escapeHtml(g.name) + '</div>';
