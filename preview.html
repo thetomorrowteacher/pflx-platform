@@ -33089,6 +33089,14 @@
             // the next item's embed; unchanged items never reload (seamless).
             var srcInfo = (typeof pflxStreamCurrentSource === 'function') ? pflxStreamCurrentSource(s) : { url: s.url, title: s.title };
             if (offline && embedWrap && iframe) {
+                // STARTUP GATE (July 12): never start stream players while the
+                // page is still booting — the intro/loading sequence plays
+                // first, the page settles, THEN an ongoing broadcast begins
+                // (also kills the double-audio during startup).
+                if (s.active && srcInfo.url && !window._pflxStreamGateOpen) {
+                    if (statusText) statusText.textContent = 'ON AIR — starting after load…';
+                    if (dot) dot.classList.add('live');
+                } else
                 if (s.active && srcInfo.url) {
                     var embedUrl = pflxToYouTubeEmbed(srcInfo.url);
                     var becameLive = !iframe.src; // first activation this render cycle
@@ -33169,6 +33177,21 @@
             var banner = document.getElementById('pflx-platform-live-banner');
             if (banner) banner.style.display = s.active ? 'flex' : 'none';
         }
+
+        // ── Stream startup gate: opens 2.5s AFTER full page load (intro/
+        //    loading video finishes, UI settles), then renders any ongoing
+        //    broadcast. Hard fallback at 12s so it can never stay shut.
+        window._pflxStreamGateOpen = false;
+        (function () {
+            function openGate() {
+                if (window._pflxStreamGateOpen) return;
+                window._pflxStreamGateOpen = true;
+                try { pflxRenderLiveStream(); } catch (e) {}
+            }
+            if (document.readyState === 'complete') setTimeout(openGate, 2500);
+            else window.addEventListener('load', function () { setTimeout(openGate, 2500); });
+            setTimeout(openGate, 12000);
+        })();
 
         /* ── Virtual Theater Launch / Collapse ── */
         function vtLaunchTheater() {
@@ -50831,6 +50854,22 @@ RESPONSE RULES:
             } catch (e) {}
             const studioChip = (__homeSid && typeof window.pflxStudioChipHtml === 'function')
                 ? window.pflxStudioChipHtml(__homeSid, { size: 34 }) : '';
+            // Legacy locals — the Startup Studio card further down this
+            // renderer still reads studioName/studioData (removing them
+            // crashed Home Base on startup: "studioName is not defined").
+            let studioName = '';
+            let studioData = null;
+            try {
+                if (__homeSid) {
+                    const meta = (typeof window.pflxStudioMeta === 'function') ? window.pflxStudioMeta(__homeSid) : null;
+                    if (meta) { studioName = meta.name || __homeSid; studioData = meta; }
+                    if (!studioData) {
+                        const studios = JSON.parse(localStorage.getItem('pflx_studios') || '[]');
+                        studioData = studios.find(function (st) { return st && st.id === __homeSid; }) || null;
+                        studioName = (studioData && studioData.name) || __homeSid;
+                    }
+                }
+            } catch (e) {}
             // Resolve the hero avatar — prefer the player's own uploaded image,
             // fall back to the PFLX core logo only when nothing is uploaded.
             const heroAvatarSrc = (s.image && String(s.image).length > 0)
@@ -53760,7 +53799,17 @@ RESPONSE RULES:
 
         // ── Show / Hide ─────────────────────────────────────────
 
+        function _pflxMainTheaterAudio(mute) {
+            try {
+                var mi = document.getElementById('mc-live-stream-iframe');
+                if (mi && mi.contentWindow) mi.contentWindow.postMessage('{"event":"command","func":"' + (mute ? 'mute' : 'unMute') + '","args":""}', '*');
+            } catch (e) {}
+        }
         function pipShow(youtubeUrl) {
+            // Single audio source rule: while the PiP popup plays, the main
+            // theater iframe (still alive in the hidden MC view) is muted —
+            // this was the "double sound" on startup/navigation.
+            _pflxMainTheaterAudio(true);
             if (!pip.el) return;
             if (!youtubeUrl) {
                 // Try to get the current live stream URL
@@ -53800,6 +53849,8 @@ RESPONSE RULES:
         }
 
         function pipHide() {
+            // PiP closing — give audio back to the main theater iframe.
+            try { _pflxMainTheaterAudio(false); } catch (e) {}
             if (!pip.el) return;
             pip.el.style.display = 'none';
             pip.iframe.src = '';
