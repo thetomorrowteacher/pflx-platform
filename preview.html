@@ -17964,8 +17964,31 @@
                     if ((result.scores.visionary||0) > (result.scores.maker||0) || result.brandType === 'digital-innovator') s['studio-innov8'] += 3;
                     else s['studio-gentech'] += 3;
                 }
+                // ── Vision-statement confirmation (July 15) ──
+                // The player's full vision statement (create / impact / perspective /
+                // future) is matched against each studio's vision + themes. A clear
+                // thematic match confirms — and can decide — the house, exactly as
+                // the Studios Guide intends: your vision places you.
+                const vs = result.visionStatement || {};
+                const visionText = [vs.create, vs.impact, vs.perspective, vs.future]
+                    .filter(Boolean).join(' ').toLowerCase();
+                if (visionText) {
+                    const VISION_BANK = {
+                        'studio-mindforge':   /divers|inclus|identit|heritage|cultur|empower|equit|justic|communit|voice|represent|advoc|activis|social|truth|belong/g,
+                        'studio-emagination': /story|stories|storytell|animat|fiction|fantasy|character|world.?build|comic|imagin|narrat|film|cinema|magic|play/g,
+                        'studio-gentech':     /\bcode\b|coding|program|engineer|robot|solve|solving|research|software|system|invent|maker|build tool|prototype|logic/g,
+                        'studio-innov8':      /\ba\.?i\.?\b|artificial intelligence|futur|\bvr\b|\bar\b|\bxr\b|immersiv|simulat|virtual|experiment|innovat|next generation|tomorrow|metaverse|digital human/g
+                    };
+                    Object.entries(VISION_BANK).forEach(([sid, re]) => {
+                        const hits = (visionText.match(re) || []).length;
+                        s[sid] += Math.min(hits, 4) * 2;   // up to +8 — a strong vision match steers placement
+                    });
+                }
                 return Object.entries(s).sort((a,b)=>b[1]-a[1])[0][0];
             }
+            // Exposed so the roster backfill (and any host tooling) can place a
+            // player from their saved vision statement + diagnostic data.
+            window.cadAssignStudio = cadAssignStudio;
 
             // ─── Diagnostic runtime state ──────────────────────────────────────
             const cadState = { step:'intro', answers:{}, results:null, vision:{ create:'', createCustom:'', impact:'', impactCustom:'', perspective:'', perspectiveCustom:'', future:'', futureCustom:'' } };
@@ -18513,6 +18536,22 @@
                 const _rawSignupRole = newPlayerData.role || 'Student';
                 const _ALLOWED_DISPLAY_ROLES = ['Student','Creator','Educator','Explorer'];
                 const _safeDisplayRole = _ALLOWED_DISPLAY_ROLES.indexOf(_rawSignupRole) >= 0 ? _rawSignupRole : 'Student';
+                // Studio placement safety net: runStudioPlacement writes studioId onto
+                // newPlayerData during the diagnostic, but if the player somehow reached
+                // the final PIN without one (skipped/legacy path), compute it now from
+                // whatever diagnostic + vision data exists so nobody signs up studio-less.
+                if (!newPlayerData.studioId && typeof cadAssignStudio === 'function') {
+                    try {
+                        newPlayerData.studioId = cadAssignStudio({
+                            brandType: newPlayerData.brandType || 'experience-designer',
+                            scores: newPlayerData.diagnosticScores || { maker:3, visionary:3, storyteller:3, technologist:3 },
+                            topPathways: newPlayerData.diagnosticTopPathways || ['content-creator','digital-artist','game-designer'],
+                            visionStatement: newPlayerData.visionStatement || { create:'', impact:'', perspective:'', future:'' }
+                        });
+                        const _sMeta = (typeof PFLX_STUDIOS !== 'undefined') ? PFLX_STUDIOS.find(s => s.id === newPlayerData.studioId) : null;
+                        if (_sMeta) newPlayerData.studioName = _sMeta.name;
+                    } catch (e) {}
+                }
                 const newPlayer = {
                     id: (newPlayerData.isImported && newPlayerData.importedPlayer && newPlayerData.importedPlayer.id)
                         ? newPlayerData.importedPlayer.id
@@ -18535,6 +18574,16 @@
                     rankOverride: null,
                     godTier: false,
                     evoRank: 1,
+                    // ── Diagnostic outputs (July 15 fix) ──
+                    // runStudioPlacement stored these on newPlayerData but they were
+                    // never copied onto the created player, so diagnostic placements
+                    // were shown to the player and then silently lost. Persist the
+                    // studio + vision statement so X-Coin, Home Base and the market
+                    // engine all see the assignment immediately.
+                    studioId: newPlayerData.studioId || '',
+                    studioName: newPlayerData.studioName || '',
+                    visionStatement: newPlayerData.visionStatement || null,
+                    brandType: newPlayerData.brandType || '',
                     updatedAt: Date.now()
                 };
                 // If imported, update existing record
@@ -22414,7 +22463,10 @@
         function _mcAfterPullAttempt() {
             if (window._mcPullDone) {
                 if (!_mcHealthIv) {
-                    _mcHealthIv = setInterval(function () { try { window.mcCloudPull(); } catch (e) {} }, 60000);
+                    // 3 min (was 60s): every open console re-pulling all keys each
+                    // minute was real load on an I/O-starved database. Realtime
+                    // still delivers changes instantly; this is only the fallback.
+                    _mcHealthIv = setInterval(function () { try { window.mcCloudPull(); } catch (e) {} }, 180000);
                 }
                 return;
             }
@@ -25940,6 +25992,23 @@
                 let changed = 0;
                 mcPlayers.forEach(function (p) {
                     if (!p || p.studioId || p.role === 'admin' || p.isHost) return;
+                    // Vision-first placement: if the player saved a vision statement
+                    // during the diagnostic, let it confirm the studio (same engine
+                    // as onboarding — themes + vision keywords decide the house).
+                    if (p.visionStatement && typeof window.cadAssignStudio === 'function') {
+                        try {
+                            const sid = window.cadAssignStudio({
+                                brandType: p.brandType || '',
+                                scores: p.diagnosticScores || {},
+                                topPathways: p.diagnosticTopPathways || (p.pathway ? [String(p.pathway).toLowerCase()] : []),
+                                visionStatement: p.visionStatement
+                            });
+                            if (sid && counts[sid] !== undefined) {
+                                p.studioId = sid; counts[sid]++; changed++;
+                                return;
+                            }
+                        } catch (e) {}
+                    }
                     const pw = (p.pathway || '').toLowerCase();
                     let best = null, bestScore = -1;
                     PFLX_STUDIOS.forEach(function (s) {
@@ -59350,10 +59419,30 @@ RESPONSE RULES:
             } catch (e) {}
             return base;
         }
+        var _prBootedId = null;   // session id the live channel was keyed with
+        var _prRebooting = false;
+        function _prReboot() {
+            // Tear the channel down and rebuild it. Covers realtime drops
+            // (CHANNEL_ERROR / TIMED_OUT / CLOSED) and login changes — without
+            // this, a flaky connection or a login-after-boot silently killed
+            // the Live Roster for the rest of the session.
+            if (_prRebooting) return;
+            _prRebooting = true;
+            try { if (_prChannel && _prChannel.unsubscribe) _prChannel.unsubscribe(); } catch (e) {}
+            _prChannel = null;
+            _prBootedId = null;
+            if (_prRepeat) { clearInterval(_prRepeat); _prRepeat = null; }
+            setTimeout(function () { _prRebooting = false; _prBoot(); }, 5000);
+        }
         function _prTrack() {
-            if (!_prChannel) return;
             var me = _prMe();
+            if (!_prChannel) {
+                // Channel never came up but someone is logged in — try again.
+                if (me.id && !_prRebooting) _prReboot();
+                return;
+            }
             if (!me.id) return;
+            if (_prBootedId && me.id !== _prBootedId) { _prReboot(); return; } // login changed → re-key
             var act = _prCurrentActivity();
             try {
                 _prChannel.track({
@@ -59467,8 +59556,13 @@ RESPONSE RULES:
                 ch.on('presence', { event: 'sync' }, function () { _prSetState(_prReadPresence()); })
                   .on('presence', { event: 'join' }, function () { _prSetState(_prReadPresence()); })
                   .on('presence', { event: 'leave' }, function () { _prSetState(_prReadPresence()); })
-                  .subscribe(function (status) { if (status === 'SUBSCRIBED') _prTrack(); });
+                  .subscribe(function (status) {
+                      if (status === 'SUBSCRIBED') { _prTrack(); return; }
+                      // Realtime hiccup — rebuild the channel instead of going dark.
+                      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') _prReboot();
+                  });
                 _prChannel = ch;
+                _prBootedId = me.id;
                 // Re-track periodically so activity stays fresh.
                 _prRepeat = setInterval(_prTrack, 8000);
                 // Also re-track on visibility change so idle vs. active shows up.
