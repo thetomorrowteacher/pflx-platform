@@ -28576,6 +28576,7 @@
                         '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">' +
                             dueChip + xcChip + badgeChip +
                             '<button class="mc-btn" style="padding:5px 10px;font-size:11px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:7px;cursor:pointer;font-weight:700;" onclick="mcEditTask(' + realIndex + ')">Edit</button>' +
+                            '<button class="mc-btn" style="padding:5px 10px;font-size:11px;background:rgba(167,139,250,0.1);color:#a78bfa;border:1px solid rgba(167,139,250,0.3);border-radius:7px;cursor:pointer;font-weight:700;" title="Duplicate" onclick="mcDuplicateItem(&quot;task&quot;,' + realIndex + ')">⧉</button>' +
                             '<button class="mc-btn mc-btn-red" style="padding:5px 10px;font-size:11px;background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:7px;cursor:pointer;font-weight:700;" onclick="mcDeleteTask(' + realIndex + ')">Delete</button>' +
                         '</div>' +
                     '</div>' +
@@ -31500,6 +31501,7 @@
                         ? '<div style="padding:6px 12px;font-size:11px;background:rgba(34,197,94,0.05);color:#22c55e;border:1px dashed rgba(34,197,94,0.35);border-radius:8px;flex:1;min-width:90px;text-align:center;letter-spacing:0.04em;font-weight:700;">✓ COMPLETED</div>'
                         : '') +
                     '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:60px;" onclick="mcEditProject(' + i + ')">Edit</button>' +
+                    '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(167,139,250,0.1);color:#a78bfa;border:1px solid rgba(167,139,250,0.3);border-radius:7px;cursor:pointer;font-weight:700;" title="Duplicate" onclick="mcDuplicateItem(&quot;project&quot;,' + i + ')">⧉</button>' +
                     '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(245,200,66,0.08);color:#f5c842;border:1px solid rgba(245,200,66,0.3);border-radius:8px;cursor:pointer;min-width:36px;" title="Save as Template" onclick="mcSaveAsTemplate(&quot;project&quot;,' + i + ')">📄</button>' +
                     '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:60px;" onclick="mcDeleteProject(' + i + ')">Delete</button>' +
                     '</div>' +
@@ -32017,6 +32019,49 @@
             mcShowProjectForm(index);
         }
 
+        // ── DUPLICATE (July 12) — clone a Project / Task / Job / Season.
+        // Deep copy with a fresh id + "(Copy)" name; per-instance state
+        // (submissions, completion, applicants) is reset so the copy starts
+        // clean. Inserted right below the original, saved + re-rendered.
+        window.mcDuplicateItem = function (type, index) {
+            try {
+                var map = {
+                    project: { arr: (typeof mcProjects !== 'undefined') ? mcProjects : null, save: 'projects', prefix: 'proj',
+                               render: function () { if (typeof mcRenderProjects === 'function') mcRenderProjects(); } },
+                    task:    { arr: (typeof mcTasks !== 'undefined') ? mcTasks : null, save: 'tasks', prefix: 'task',
+                               render: function () { if (typeof mcRenderTasks === 'function') mcRenderTasks(); } },
+                    job:     { arr: (typeof mcJobs !== 'undefined') ? mcJobs : null, save: 'jobs', prefix: 'job',
+                               render: function () { if (typeof mcRenderJobs === 'function') mcRenderJobs(); } },
+                    season:  { arr: (typeof mcSeasons !== 'undefined') ? mcSeasons : null, save: 'seasons', prefix: 'season',
+                               render: function () {
+                                   if (typeof mcRenderSeasons === 'function') mcRenderSeasons();
+                                   if (typeof mcRenderSettingsSeasons === 'function') mcRenderSettingsSeasons();
+                               } }
+                };
+                var cfg = map[type];
+                if (!cfg || !Array.isArray(cfg.arr) || !cfg.arr[index]) return;
+                var copy = JSON.parse(JSON.stringify(cfg.arr[index]));
+                copy.id = cfg.prefix + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+                var nameKey = (copy.name !== undefined) ? 'name' : ((copy.title !== undefined) ? 'title' : null);
+                if (nameKey) copy[nameKey] = (copy[nameKey] || 'Untitled') + ' (Copy)';
+                // reset per-instance state
+                delete copy.submissions; delete copy.completedBy; delete copy.claimedBy;
+                delete copy.applicants; delete copy.approvedAt; delete copy.filledBy;
+                if (type === 'task') { copy.status = 'open'; delete copy.submission; delete copy.submittedAt; delete copy.approvedBy; delete copy.startedAt; }
+                if (type === 'project') {
+                    copy.status = 'planning'; delete copy.startedAt;
+                    if (Array.isArray(copy.subtasks)) copy.subtasks.forEach(function (st) { if (st) { st.done = false; delete st.doneBy; } });
+                }
+                if (type === 'job') copy.status = 'open';
+                if (type === 'season') copy.status = 'upcoming';
+                copy.createdAt = Date.now();
+                cfg.arr.splice(index + 1, 0, copy);
+                if (typeof mcSaveData === 'function') mcSaveData(cfg.save);
+                try { cfg.render(); } catch (e) {}
+                try { pflxToast('⧉ Duplicated · ' + (nameKey ? copy[nameKey] : type), 'success'); } catch (e) {}
+            } catch (e) { console.warn('[duplicate] failed', e); }
+        };
+
         function mcDeleteProject(index) {
             if (!confirm('Delete project "' + (mcProjects[index].name || '') + '"?')) return;
             pflxPlaySfx('delete');
@@ -32055,6 +32100,7 @@
                     '</div>' +
                     '<div style="display:flex;gap:8px;">' +
                     '<button class="mc-btn" style="padding:4px 12px;font-size:10px;" onclick="mcShowSeasonForm(' + i + ')">Edit</button>' +
+                    '<button class="mc-btn" style="padding:4px 10px;font-size:11px;background:rgba(167,139,250,0.1);color:#a78bfa;border:1px solid rgba(167,139,250,0.3);border-radius:7px;cursor:pointer;font-weight:700;" title="Duplicate" onclick="mcDuplicateItem(&quot;season&quot;,' + i + ')">⧉</button>' +
                     '<button class="mc-btn mc-btn-red" style="padding:4px 12px;font-size:10px;" onclick="mcDeleteSeason(' + i + ')">Delete</button>' +
                     '</div></div>';
             }).join('');
@@ -35535,6 +35581,7 @@
                     // Action buttons
                     '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:auto;padding-top:12px;border-top:1px solid rgba(255,255,255,0.04);">' +
                     '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:70px;" onclick="mcShowJobForm(' + ri + ')">Edit</button>' +
+                    '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(167,139,250,0.1);color:#a78bfa;border:1px solid rgba(167,139,250,0.3);border-radius:7px;cursor:pointer;font-weight:700;" title="Duplicate" onclick="mcDuplicateItem(&quot;job&quot;,' + ri + ')">⧉</button>' +
                     (hired.length > 0 && j.status !== 'completed' ? '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(139,92,246,0.1);color:#a78bfa;border:1px solid rgba(139,92,246,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:100px;" onclick="mcConvertJobToProject(' + ri + ')">📦 Convert</button>' : '') +
                     '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:70px;" onclick="mcDeleteJob(' + ri + ')">Delete</button>' +
                     '</div>' +
