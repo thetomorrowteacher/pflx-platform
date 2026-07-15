@@ -23992,9 +23992,22 @@
             // project/checkpoint) names specific players, availability is HARD
             // gated to them: a task inside a player-scoped project is only
             // available to those players, across the board.
+            // EXCEPTION (Ennis): host tiers (Guest/Instructor/Admin/Master
+            // Host) and high Evo ranks (Executive tier, level 9+) bypass the
+            // player fence — they see everything WITHIN their cohort scope
+            // (the cohort fence below still applies to them).
             try {
                 var __effA = pflxEffectiveAssignees(item);
-                if (__effA.length && (!pid || __effA.indexOf(pid) === -1)) return false;
+                if (__effA.length && (!pid || __effA.indexOf(pid) === -1)) {
+                    var __vs = window.activeSession || {};
+                    var __viewingSelf = pid && __vs.id === pid;
+                    var __isHostTier = __viewingSelf && (
+                        (typeof window.pflxIsHostRole === 'function' && window.pflxIsHostRole(__vs.role)) ||
+                        (typeof window.pflxHostTier === 'function' && !!window.pflxHostTier(__vs))
+                    );
+                    var __rankLvl = __viewingSelf ? (__vs.rankLevel || __vs.level || 0) : 0;
+                    if (!__isHostTier && __rankLvl < 9) return false;
+                }
             } catch (e) {}
             // 3. Own cohort matches
             if (pflxItemCohortsMatch(item, cohorts)) return true;
