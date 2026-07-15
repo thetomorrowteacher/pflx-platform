@@ -31814,6 +31814,9 @@
 
         function mcRemoveProjectBanner() {
             mcResetProjectBannerPreview();
+            // Sentinel — distinguishes "host removed the banner" from "form
+            // opened before the banner loaded" (see save fallback below).
+            mcProjectBannerData = '__REMOVED__';
         }
 
         function mcShowProjectForm(index) {
@@ -32074,7 +32077,13 @@
                 skillLevel: document.getElementById('mc-project-skill-level')?.value || 'beginner',
                 learningObjectives: document.getElementById('mc-project-objectives')?.value || '',
                 deliverables: document.getElementById('mc-project-deliverables')?.value || '',
-                bannerImage: mcProjectBannerData || '',
+                // BANNER PRESERVE (July 12): '' here used to mean "form opened
+                // before the banner data loaded" AND "host removed it" — saving
+                // in the first case stamped a blank over the cloud URL (the
+                // "images are messing up" wipe). Empty now PRESERVES the
+                // existing banner; only the ✕ Remove sentinel clears it.
+                bannerImage: (mcProjectBannerData === '__REMOVED__') ? ''
+                    : (mcProjectBannerData || (mcProjectEditIndex >= 0 ? (mcProjects[mcProjectEditIndex]?.bannerImage || '') : '')),
                 createdAt: mcProjectEditIndex >= 0 ? (mcProjects[mcProjectEditIndex].createdAt || new Date().toISOString().split('T')[0]) : new Date().toISOString().split('T')[0],
                 nodeType: document.getElementById('mc-project-node-type')?.value || 'course',
                 coopMode: document.getElementById('mc-project-coop-mode')?.value || 'solo',
