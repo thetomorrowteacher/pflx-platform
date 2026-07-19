@@ -25616,8 +25616,10 @@
                 });
                 html += '<div style="font-family:Orbitron,sans-serif;font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:0.12em;margin-bottom:10px;">📋 TASKS IN THIS PROJECT · ' + tasks.length + '</div>';
                 tasks.forEach(function (t) {
-                    var isApproved = (t.status === 'approved' || t.completed);
-                    var isSubmitted = (t.status === 'submitted');
+                    // Per-player state (July 15): my checkmark, not the cohort's.
+                    var __rowState = (typeof pflxTaskStateForPlayer === 'function') ? pflxTaskStateForPlayer(t, (window.activeSession || {}).id) : (t.status || 'open');
+                    var isApproved = (__rowState === 'approved');
+                    var isSubmitted = (__rowState === 'submitted');
                     var checkboxHtml = '<div style="width:22px;height:22px;border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;' +
                         (isApproved ? 'background:#22c55e;border:2px solid #22c55e;color:#0b1d10;box-shadow:0 0 10px rgba(34,197,94,0.5);'
                         : isSubmitted ? 'background:rgba(245,165,0,0.18);border:2px solid #f5a500;color:#f5a500;'
@@ -25722,6 +25724,20 @@
             var parentCp = pflxFindCheckpoint(cps, task.roundId || task.checkpointId);
             var parentProj = pflxFindProject(projs, task.projectId);
 
+            // ── PER-PLAYER VIEW (July 15, Ennis) ── another player's submission
+            // or approval must never pre-fill or complete this task for me.
+            // Everything below renders MY state and MY submission. Shared tasks
+            // stay open for everyone until each player submits their own work.
+            var __pid = (window.activeSession || {}).id || null;
+            var __mySub = null;
+            if (Array.isArray(task.submissions) && task.submissions.length) {
+                __mySub = task.submissions.find(function (s) { return s && (s.playerId === __pid || s.submittedBy === __pid || s.submittedById === __pid); }) || null;
+            }
+            if (!__mySub && task.submission && (task.submission.submittedBy === __pid || task.submission.submittedById === __pid)) __mySub = task.submission;
+            var __myStatus = __mySub
+                ? (__mySub.status === 'approved' ? 'approved' : (__mySub.status === 'rejected' ? 'rejected' : 'submitted'))
+                : ((typeof pflxTaskStateForPlayer === 'function') ? pflxTaskStateForPlayer(task, __pid) : (task.status || 'open'));
+
             // Breadcrumb chain — Home > Checkpoint > Project > Task. Each parent
             // carries its own data so clicking back navigates to that specific record.
             var crumb = [{ label: 'Home', view: 'home' }];
@@ -25730,7 +25746,7 @@
             crumb.push({ label: task.title || task.name || 'Task', view: 'task-detail' });
 
             var statusBadge = (function () {
-                switch (task.status) {
+                switch (__myStatus) {
                     case 'approved': return '<span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:4px 12px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:0.1em;">✓ APPROVED</span>';
                     case 'submitted': return '<span style="background:rgba(245,200,66,0.15);color:#f5c842;padding:4px 12px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:0.1em;">⏳ AWAITING HOST</span>';
                     case 'rejected': return '<span style="background:rgba(239,68,68,0.15);color:#ef4444;padding:4px 12px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:0.1em;">✗ REJECTED</span>';
@@ -25762,10 +25778,10 @@
 
             // Progress bar (checklist-based if checklist exists, else by status)
             var checklist = Array.isArray(task.checklist) ? task.checklist : [];
-            var savedChecks = (task.submission && Array.isArray(task.submission.checklist)) ? task.submission.checklist : [];
+            var savedChecks = (__mySub && Array.isArray(__mySub.checklist)) ? __mySub.checklist : [];
             var checked = savedChecks.filter(Boolean).length;
             var pct = checklist.length ? Math.round((checked / checklist.length) * 100) :
-                      (task.status === 'approved' ? 100 : task.status === 'submitted' ? 60 : 0);
+                      (__myStatus === 'approved' ? 100 : __myStatus === 'submitted' ? 60 : 0);
 
             // Header card — banner-aware. Tasks themselves don't carry a
             // bannerImage, so we surface the closest parent's banner for
@@ -25838,13 +25854,19 @@
                 html += '</div>';
             }
 
-            // Submission section
-            var canSubmit = task.status !== 'approved' && task.status !== 'submitted';
-            var existing = task.submission || {};
-            html += '<div class="mc-card" style="padding:22px 24px;">' +
-                '<div style="font-family:\'Orbitron\',sans-serif;font-size:12px;color:#00d4ff;letter-spacing:1.5px;margin-bottom:14px;">📤 ' + (canSubmit ? 'YOUR SUBMISSION' : 'SUBMITTED') + '</div>';
+            // Submission section — MY state only, with the checkpoint
+            // progression lock enforced at render time (July 15).
+            var __cpLock = (typeof window.pflxTaskCheckpointLock === 'function') ? window.pflxTaskCheckpointLock(task, window.activeSession || {}) : null;
+            var canSubmit = !__cpLock && __myStatus !== 'approved' && __myStatus !== 'submitted';
+            var existing = __mySub || {};
+            html += '<div class="mc-card" style="padding:22px 24px;' + (__cpLock ? 'border:1px solid rgba(245,165,0,0.35);' : '') + '">' +
+                '<div style="font-family:\'Orbitron\',sans-serif;font-size:12px;color:' + (__cpLock ? '#f5a500' : '#00d4ff') + ';letter-spacing:1.5px;margin-bottom:14px;">' + (__cpLock ? '🔒 LOCKED' : '📤 ' + (canSubmit ? 'YOUR SUBMISSION' : 'SUBMITTED')) + '</div>';
 
-            if (!canSubmit) {
+            if (__cpLock) {
+                html += '<div style="font-size:13px;color:rgba(255,255,255,0.75);line-height:1.6;">' +
+                    escapeHtml((typeof pflxCheckpointLockMsg === 'function') ? pflxCheckpointLockMsg(__cpLock) : 'This task is not open yet.') +
+                '</div>';
+            } else if (!canSubmit) {
                 // Read-only — show what they submitted
                 if (existing.description) {
                     html += '<div style="font-size:11px;letter-spacing:0.1em;color:rgba(255,255,255,0.4);margin-bottom:4px;">DESCRIPTION</div>' +
@@ -25867,9 +25889,9 @@
                     });
                 }
                 html += '<div style="margin-top:14px;padding:10px 12px;background:rgba(245,200,66,0.06);border:1px solid rgba(245,200,66,0.2);border-radius:8px;font-size:12px;color:#f5c842;">' +
-                    (task.status === 'approved' ? '✓ Your host approved this. Rewards delivered through X-Coin.' : task.status === 'rejected' ? 'Your host asked for revisions. ' + (existing.hostNote || '') : '⏳ Submission received. Your host will review and approve to release rewards.') +
+                    (__myStatus === 'approved' ? '✓ Your host approved this. Rewards delivered through X-Coin.' : __myStatus === 'rejected' ? 'Your host asked for revisions. ' + (existing.hostNote || '') : '⏳ Submission received. Your host will review and approve to release rewards.') +
                     '</div>';
-                if (task.status === 'rejected') {
+                if (__myStatus === 'rejected') {
                     html += '<button onclick="ppResubmitTask(\'' + escapeHtml(task.id) + '\')" style="margin-top:10px;padding:10px 18px;background:linear-gradient(135deg,#00d4ff,#7c3aed);color:#fff;border:none;border-radius:8px;font-family:\'Share Tech Mono\',monospace;font-size:12px;font-weight:800;letter-spacing:0.08em;cursor:pointer;">REOPEN AND RESUBMIT</button>';
                 }
             } else {
@@ -25967,6 +25989,17 @@
                 function setErr(s) { if (msgEl) { msgEl.style.color = '#ef4444'; msgEl.textContent = s; } }
                 function setOk(s)  { if (msgEl) { msgEl.style.color = '#22c55e'; msgEl.textContent = s; } }
 
+                // CHECKPOINT PROGRESSION GATE (July 15) — the portal's own submit
+                // path was unguarded, which is how upcoming-checkpoint tasks were
+                // getting submitted early.
+                var _lk = (typeof window.pflxTaskCheckpointLock === 'function') ? window.pflxTaskCheckpointLock(t, window.activeSession || {}) : null;
+                if (_lk) {
+                    var _lm = (typeof pflxCheckpointLockMsg === 'function') ? pflxCheckpointLockMsg(_lk) : 'This task is not open yet.';
+                    setErr(_lm);
+                    if (typeof pflxToast === 'function') pflxToast(_lm, 'warn', 5500);
+                    return;
+                }
+
                 var desc = (document.getElementById(sid + '-desc') || {}).value || '';
                 var link = (document.getElementById(sid + '-link') || {}).value || '';
                 var fileData = (document.getElementById(sid + '-filedata') || {}).value || '';
@@ -25986,13 +26019,38 @@
                     setErr('Add a link or upload a file as evidence.'); return;
                 }
 
+                // PER-PLAYER SUBMISSION (July 15, Ennis): each player's work is
+                // their own entry in task.submissions[]. The legacy single-track
+                // t.submission/t.status stays as a compatibility signal only —
+                // one player submitting no longer marks the task for everyone.
+                var __spid = (window.activeSession && window.activeSession.id) || null;
+                var __sname = (window.activeSession && (window.activeSession.brand || window.activeSession.name)) || 'Player';
+                var subEntry = {
+                    id: 'sub-' + Date.now(),
+                    playerId: __spid,
+                    playerName: __sname,
+                    date: new Date().toISOString(),
+                    title: t.title || 'Task Submission',
+                    description: desc.trim(),
+                    link: link.trim() || null,
+                    fileName: fileName || null,
+                    fileData: fileData || null,
+                    checklist: checks,
+                    status: 'pending'
+                };
+                if (!Array.isArray(t.submissions)) t.submissions = [];
+                // Replace my earlier non-approved entry rather than stacking.
+                t.submissions = t.submissions.filter(function (s) {
+                    return !(s && (s.playerId === __spid || s.submittedBy === __spid) && s.status !== 'approved');
+                });
+                t.submissions.push(subEntry);
                 t.submission = {
                     description: desc.trim(),
                     link: link.trim() || null,
                     fileName: fileName || null,
                     fileData: fileData || null, // base64 — large but local-only for now
                     checklist: checks,
-                    submittedBy: (window.activeSession && window.activeSession.id) || null,
+                    submittedBy: __spid,
                     submittedAt: new Date().toISOString()
                 };
                 t.status = 'submitted';
@@ -26014,7 +26072,22 @@
             try {
                 var i = mcTasks.findIndex(function (t) { return t && t.id === taskId; });
                 if (i < 0) return;
-                mcTasks[i].status = 'open';
+                var t = mcTasks[i];
+                // Gate still applies on reopen (July 15).
+                var _lk = (typeof window.pflxTaskCheckpointLock === 'function') ? window.pflxTaskCheckpointLock(t, window.activeSession || {}) : null;
+                if (_lk) { if (typeof pflxToast === 'function') pflxToast((typeof pflxCheckpointLockMsg === 'function') ? pflxCheckpointLockMsg(_lk) : 'This task is not open yet.', 'warn', 5500); return; }
+                // PER-PLAYER reopen: clear only MY rejected entry; other players'
+                // submissions are untouched.
+                var pid = (window.activeSession || {}).id || null;
+                if (Array.isArray(t.submissions)) {
+                    t.submissions = t.submissions.filter(function (s) {
+                        return !(s && (s.playerId === pid || s.submittedBy === pid) && s.status === 'rejected');
+                    });
+                }
+                if (t.submission && (t.submission.submittedBy === pid || t.submission.submittedById === pid)) t.submission = null;
+                // Legacy status: only fully reopen when nobody else has work in review.
+                var othersPending = Array.isArray(t.submissions) && t.submissions.some(function (s) { return s && s.status !== 'approved'; });
+                if (!othersPending) t.status = 'open';
                 mcSaveData('tasks');
                 mcRenderPlayerDashPreview();
             } catch (e) {}
@@ -26027,8 +26100,12 @@
             var tasks = ppGetTasks().filter(ppItemAssignedToActivePlayer);
             var html = ppBreadcrumb([{ label: 'Home', view: 'home' }, { label: 'My Tasks', view: 'tasks' }]);
 
-            var pending = tasks.filter(function(t) { return !(t.completed || t.status === 'approved'); });
-            var done = tasks.filter(function(t) { return t.completed || t.status === 'approved'; });
+            // Per-player split (July 15): "done" means MY submission is approved,
+            // never that some other player finished the shared task.
+            var __mtPid = (window.activeSession || {}).id || null;
+            function __mtDone(t) { return (typeof pflxTaskStateForPlayer === 'function') ? (pflxTaskStateForPlayer(t, __mtPid) === 'approved') : (t.completed || t.status === 'approved'); }
+            var pending = tasks.filter(function(t) { return !__mtDone(t); });
+            var done = tasks.filter(__mtDone);
 
             if (!tasks.length) {
                 html += '<div class="mc-card" style="text-align:center;padding:40px;">' +
@@ -28721,6 +28798,10 @@
 
             var obj = {
                 id: mcCPEditIndex >= 0 ? mcCheckpoints[mcCPEditIndex].id : 'cp-' + Date.now(),
+                // ATTACHMENT PRESERVE (July 15, Ennis): the form rebuilds this
+                // record from fields, which silently dropped Google attachments
+                // on every save. Carry them from the existing record.
+                attachments: mcCPEditIndex >= 0 ? (mcCheckpoints[mcCPEditIndex].attachments || []) : [],
                 name: name,
                 description: document.getElementById('mc-cp-desc')?.value || '',
                 startDate: document.getElementById('mc-cp-start')?.value || '',
@@ -31111,6 +31192,8 @@
                 rewardBadges: rewardBadges,
                 createdBy: mcTaskEditIndex >= 0 ? (mcTasks[mcTaskEditIndex].createdBy || 'host') : (activeSession ? activeSession.brand : 'host'),
                 createdAt: mcTaskEditIndex >= 0 ? (mcTasks[mcTaskEditIndex].createdAt || new Date().toISOString().split('T')[0]) : new Date().toISOString().split('T')[0],
+                // ATTACHMENT PRESERVE (July 15) — see checkpoint save.
+                attachments: mcTaskEditIndex >= 0 ? (mcTasks[mcTaskEditIndex].attachments || []) : [],
                 checklist: mcTaskChecklist || [],
                 links: mcTaskLinks || [],
                 allowFileUpload: document.getElementById('mc-task-allow-file-upload')?.checked !== false,
@@ -32784,6 +32867,8 @@
                 // existing banner; only the ✕ Remove sentinel clears it.
                 bannerImage: (mcProjectBannerData === '__REMOVED__') ? ''
                     : (mcProjectBannerData || (mcProjectEditIndex >= 0 ? (mcProjects[mcProjectEditIndex]?.bannerImage || '') : '')),
+                // ATTACHMENT PRESERVE (July 15) — see checkpoint save.
+                attachments: mcProjectEditIndex >= 0 ? (mcProjects[mcProjectEditIndex]?.attachments || []) : [],
                 createdAt: mcProjectEditIndex >= 0 ? (mcProjects[mcProjectEditIndex].createdAt || new Date().toISOString().split('T')[0]) : new Date().toISOString().split('T')[0],
                 nodeType: document.getElementById('mc-project-node-type')?.value || 'course',
                 coopMode: document.getElementById('mc-project-coop-mode')?.value || 'solo',
