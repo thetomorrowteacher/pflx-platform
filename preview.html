@@ -24431,7 +24431,17 @@
             // matched and the whole checkpoint went dark for that player.
             // Normalize (trim + case-fold) on both sides.
             function __normTag(t) { return String(t == null ? '' : t).trim().toLowerCase(); }
-            var acceptable = new Set(cohorts.map(__normTag).filter(Boolean));
+            // Comma/semicolon-joined cohort strings ("Falcon Studios, Global
+            // Digital Intern") count as EACH member cohort — imported rosters
+            // store multi-cohort membership as one joined string (July 19,
+            // Aadhya's record).
+            var acceptable = new Set();
+            cohorts.forEach(function (c) {
+                String(c == null ? '' : c).split(/[,;]/).forEach(function (part) {
+                    var k = __normTag(part);
+                    if (k) acceptable.add(k);
+                });
+            });
             if (typeof mcCohortGroups !== 'undefined' && Array.isArray(mcCohortGroups)) {
                 mcCohortGroups.forEach(function (g) {
                     if (g && g.id && g.name && acceptable.has(__normTag(g.name))) acceptable.add(__normTag(g.id));
