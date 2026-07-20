@@ -17664,6 +17664,28 @@
                 }
             } catch (e) {}
 
+            // ── RESUME UNFINISHED SIGNUP (July 19) — if a signup draft exists
+            // (reload/crash mid-diagnostic), surface a resume button on the
+            // login step so the player continues where they left off instead
+            // of hitting "code is wrong" with a dead temp PIN.
+            try {
+                var __draft = JSON.parse(localStorage.getItem('pflx_signup_draft_v1') || 'null');
+                if (__draft && __draft.ts && (Date.now() - __draft.ts) < 86400000 && __draft.npd && (__draft.npd.email || __draft.npd.fullName)) {
+                    var __loginStepEl = document.getElementById('step-login');
+                    if (__loginStepEl && !document.getElementById('pflx-resume-signup-btn')) {
+                        var __rb = document.createElement('button');
+                        __rb.id = 'pflx-resume-signup-btn';
+                        __rb.className = 'login-btn-outline';
+                        __rb.style.cssText = 'width:100%;margin-top:10px;border-color:rgba(245,200,66,0.5);color:#f5c842;';
+                        __rb.textContent = '⟳ RESUME UNFINISHED SIGNUP (' + (__draft.npd.fullName || __draft.npd.email) + ')';
+                        __rb.onclick = function () { if (window.pflxResumeSignupDraft) window.pflxResumeSignupDraft(); };
+                        __loginStepEl.appendChild(__rb);
+                    }
+                } else if (__draft) {
+                    localStorage.removeItem('pflx_signup_draft_v1');
+                }
+            } catch (e) {}
+
             // Go to claim
             document.getElementById('goto-claim-btn').addEventListener('click', () => showStep('step-claim-email'));
             document.getElementById('back-to-login-btn').addEventListener('click', () => showStep('step-login'));
@@ -17749,9 +17771,25 @@
                 if (found && !found.claimed) {
                     pflxEnterClaimFlow(found);
                 } else if (found && found.claimed) {
-                    // Already claimed — tell them to log in
-                    alert('This email is already registered under brand "' + found.brand + '". Use the login screen.');
-                    showStep('step-login');
+                    // Already claimed — offer a PIN RESET instead of a dead end.
+                    // (July 19, beta feedback: Callia + Kayce were locked out —
+                    // "account already exists" but no way to get a working PIN.)
+                    var __wantsReset = confirm(
+                        'This email is already registered under brand "' + found.brand + '".\n\n' +
+                        'If that\'s you and you can\'t log in, press OK to RESET YOUR PIN now.\n' +
+                        'Press Cancel to go back to the login screen instead.');
+                    if (!__wantsReset) { showStep('step-login'); return; }
+                    newPlayerData.resetPlayer = found;
+                    newPlayerData.isImported = false;
+                    newPlayerData.importedPlayer = null;
+                    newPlayerData.fullName = found.name || '';
+                    newPlayerData.tempPin = generateTempPin();
+                    document.getElementById('temp-pin-value').textContent = newPlayerData.tempPin;
+                    document.getElementById('verify-email').value = '';
+                    document.getElementById('verify-pin').value = '';
+                    var __ro = document.getElementById('signup-email-readonly');
+                    if (__ro) __ro.value = email;
+                    showStep('step-temp-pin');
                 } else {
                     // No email match — collect their name next; the name step
                     // gets another chance to find their pre-entered account.
@@ -17816,6 +17854,29 @@
                 if (p1.length !== 4) { shakeEl(document.getElementById('new-pin-1')); return; }
                 if (p1 !== p2) { shakeEl(document.getElementById('new-pin-2')); document.getElementById('new-pin-2').value = ''; return; }
                 newPlayerData.pin = p1;
+                // ── PIN RESET path (July 19) — an already-claimed account is
+                // recovering access. Update the existing record's PIN in place
+                // (PLAYERS + mcPlayers + BRANDS + cloud) and log straight in.
+                // No diagnostic, no onboarding, no new record, XC untouched.
+                if (newPlayerData.resetPlayer) {
+                    var __rp = newPlayerData.resetPlayer;
+                    __rp.pin = p1; __rp.claimed = true; __rp.updatedAt = Date.now();
+                    try { if (typeof BRANDS !== 'undefined' && __rp.brand) BRANDS[__rp.brand] = p1; } catch (e) {}
+                    try {
+                        if (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) {
+                            var __mp = mcPlayers.find(function (x) { return x && (x.id === __rp.id || (__rp.brand && x.brand === __rp.brand)); });
+                            if (__mp) { __mp.pin = p1; __mp.claimed = true; __mp.updatedAt = Date.now(); }
+                            if (typeof mcSaveData === 'function') mcSaveData('players');
+                        }
+                    } catch (e) {}
+                    try { if (typeof pflxIdentityPersistNewPlayer === 'function') pflxIdentityPersistNewPlayer(__rp); } catch (e) {}
+                    try { if (typeof pflxIdentityPersist === 'function') pflxIdentityPersist(__rp); } catch (e) {}
+                    newPlayerData.resetPlayer = null;
+                    try { populateBrandSelect(); } catch (e) {}
+                    try { if (typeof pflxToast === 'function') pflxToast('✓ PIN reset — welcome back, ' + (__rp.brand || __rp.name), 'success'); } catch (e) {}
+                    loginUser(__rp.brand);
+                    return;
+                }
                 // Launch X-Coin diagnostic (embedded) before the onboarding wizard
                 launchDiagnosticStep();
             });
@@ -18148,6 +18209,54 @@
             // ─── Diagnostic runtime state ──────────────────────────────────────
             const cadState = { step:'intro', answers:{}, results:null, vision:{ create:'', createCustom:'', impact:'', impactCustom:'', perspective:'', perspectiveCustom:'', future:'', futureCustom:'' } };
 
+            // ── SIGNUP DRAFT (July 19, beta feedback — Kayce) ──
+            // A reload mid-diagnostic used to lose EVERYTHING (newPlayerData +
+            // answers live in memory only) and the shown temp PIN stopped
+            // working — a full lockout loop. Now every diagnostic interaction
+            // persists a draft; the login screen offers one-tap RESUME for
+            // drafts younger than 24h. Cleared on any successful login.
+            var SIGNUP_DRAFT_KEY = 'pflx_signup_draft_v1';
+            function pflxSignupDraftSave() {
+                try {
+                    if (!newPlayerData || (!newPlayerData.email && !newPlayerData.fullName)) return;
+                    localStorage.setItem(SIGNUP_DRAFT_KEY, JSON.stringify({
+                        ts: Date.now(),
+                        npd: {
+                            fullName: newPlayerData.fullName, email: newPlayerData.email,
+                            pin: newPlayerData.pin || '', tempPin: newPlayerData.tempPin || '',
+                            brandName: newPlayerData.brandName || '', cohort: newPlayerData.cohort || 'PlayerPool',
+                            isImported: !!newPlayerData.isImported,
+                            importedPlayerId: (newPlayerData.importedPlayer && newPlayerData.importedPlayer.id) || null,
+                            slogan: newPlayerData.slogan || '', interests: newPlayerData.interests || []
+                        },
+                        cad: { step: cadState.step, answers: cadState.answers, results: cadState.results, vision: cadState.vision }
+                    }));
+                } catch (e) {}
+            }
+            window.pflxSignupDraftClear = function () { try { localStorage.removeItem(SIGNUP_DRAFT_KEY); } catch (e) {} };
+            window.pflxResumeSignupDraft = function () {
+                try {
+                    var d = JSON.parse(localStorage.getItem(SIGNUP_DRAFT_KEY) || 'null');
+                    if (!d || !d.npd) return false;
+                    Object.assign(newPlayerData, d.npd);
+                    if (d.npd.importedPlayerId && typeof _pflxRosterFind === 'function') {
+                        var imp = _pflxRosterFind(function (p) { return p.id === d.npd.importedPlayerId; });
+                        if (imp) { newPlayerData.isImported = true; newPlayerData.importedPlayer = imp; }
+                    }
+                    if (d.cad) {
+                        cadState.step = d.cad.step || 'intro';
+                        cadState.answers = d.cad.answers || {};
+                        cadState.results = d.cad.results || null;
+                        cadState.vision = d.cad.vision || cadState.vision;
+                    }
+                    if (!newPlayerData.pin) { showStep('step-change-pin'); return true; }
+                    if (cadState.step === 'complete' && cadState.results) { cadFinishToOnboarding(); return true; }
+                    showStep('step-diagnostic');
+                    cadRender();
+                    return true;
+                } catch (e) { console.warn('[signup-draft] resume failed', e); return false; }
+            };
+
             function cadEsc(str) {
                 return String(str == null ? '' : str).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
             }
@@ -18199,6 +18308,9 @@
                     box.scrollTop = 0;
                 }
                 _cadPrevStep = cadState.step;
+                // Persist the signup draft after every diagnostic interaction
+                // (every answer re-renders, so this captures all progress).
+                pflxSignupDraftSave();
             }
 
             function cadRenderIntro() {
@@ -18828,6 +18940,8 @@
 
         function loginUser(brandName) {
             pflxPlaySfx('login');
+            // Any successful login invalidates a pending signup draft.
+            try { if (window.pflxSignupDraftClear) window.pflxSignupDraftClear(); } catch (e) {}
             const loginView = document.querySelector('.login-view');
             loginView.style.transition = 'opacity 0.6s ease, filter 0.6s ease';
             loginView.style.opacity = '0';
@@ -22864,6 +22978,30 @@
                                 if (prev.favorite && !np.favorite) np.favorite = prev.favorite;
                                 if (prev.studioId && !np.studioId) np.studioId = prev.studioId;
                                 if (prev.image && !np.image) np.image = prev.image;
+                                // ── STALE-FIELD GUARD (July 19, beta feedback) ──
+                                // The bridge payload wholesale-replaced the roster,
+                                // so a STALE X-Coin snapshot kept stomping fresher
+                                // MC state: XC balances reset toward 0 on every
+                                // sync (Mariya: 50 → 0, "I lose XCs every day I
+                                // join") and brand renames reverted (Sarah). When
+                                // OUR record is newer than the incoming one, keep
+                                // our XC/brand/PIN instead of adopting older data.
+                                var __prevT = prev.updatedAt || 0, __npT = np.updatedAt || 0;
+                                if (__prevT > __npT) {
+                                    var __pXc = (typeof prev.xc === 'number') ? prev.xc : 0;
+                                    var __nXc = (typeof np.xc === 'number') ? np.xc : 0;
+                                    if (__nXc < __pXc) {
+                                        np.xc = prev.xc;
+                                        if (typeof prev.totalXcoin === 'number') np.totalXcoin = prev.totalXcoin;
+                                    }
+                                    if (prev.brand && np.brand !== prev.brand) {
+                                        np.brand = prev.brand;
+                                        if (np.brandName) np.brandName = prev.brand;
+                                    }
+                                    if (prev.pin && np.pin !== prev.pin) np.pin = prev.pin;
+                                    if (prev.claimed && !np.claimed) np.claimed = true;
+                                    np.updatedAt = prev.updatedAt;
+                                }
                             }
                         });
                         mcPlayers = msg.data;
@@ -23843,20 +23981,34 @@
                     var p = (typeof PLAYERS !== 'undefined' ? PLAYERS : []).find(function (x) { return x && x.id === s.id; });
                     if (p) {
                         p.brand = nb;
+                        p.updatedAt = Date.now();   // July 19: newer-wins vs stale bridge payloads
                         try { if (typeof BRANDS !== 'undefined' && oldB && BRANDS[oldB] !== undefined) { BRANDS[nb] = BRANDS[oldB]; delete BRANDS[oldB]; } } catch (e) {}
                         try { if (typeof window.pflxPersistPlayers === 'function') window.pflxPersistPlayers(); } catch (e) {}
+                        try { if (typeof window.pflxIdentityPersistNewPlayer === 'function') window.pflxIdentityPersistNewPlayer(p); } catch (e) {}
                     }
                 } catch (e) {}
                 // mcPlayers mirror → cloud users row
                 try {
                     if (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) {
                         var mp = mcPlayers.find(function (x) { return x && (x.id === s.id || (oldB && x.brand === oldB)); });
-                        if (mp) { mp.brand = nb; if (mp.brandName) mp.brandName = nb; }
+                        if (mp) { mp.brand = nb; if (mp.brandName) mp.brandName = nb; mp.updatedAt = Date.now(); }
                         if (typeof mcSaveData === 'function') mcSaveData('players');
                     }
                 } catch (e) {}
+                // Remembered login + active-brand caches follow the rename —
+                // July 19 (Sarah): these kept the OLD brand, so the login screen
+                // and several session-seeded surfaces still showed it.
+                try {
+                    var rem = JSON.parse(localStorage.getItem('pflx_remember_v1') || 'null');
+                    if (rem && rem.brand && String(rem.brand).toUpperCase() === String(oldB).toUpperCase()) {
+                        rem.brand = nb;
+                        localStorage.setItem('pflx_remember_v1', JSON.stringify(rem));
+                    }
+                } catch (e) {}
+                try { localStorage.setItem('pflx_active_brand', nb); } catch (e) {}
                 // session + visible UI
                 s.brand = nb; s.brandName = nb;
+                if (s.username && String(s.username).toUpperCase() === String(oldB).toUpperCase()) s.username = nb;
                 try { if (typeof window.pflxIdentityPersist === 'function') window.pflxIdentityPersist(s); } catch (e) {}
                 try { var el = document.getElementById('portfolio-brand'); if (el) el.textContent = nb; } catch (e) {}
                 try { if (typeof updateToolbarStatus === 'function') updateToolbarStatus(); } catch (e) {}
@@ -24274,13 +24426,18 @@
             // Build a Set of every tag that should be treated as "mine":
             //   * every cohort name I belong to
             //   * every cohort-group ID whose `name` is one of my cohorts
-            var acceptable = new Set(cohorts);
+            // July 19 (beta feedback — Aadhya: tasks invisible): matching was
+            // exact-string, so "Falcon Studios " vs "falcon studios" never
+            // matched and the whole checkpoint went dark for that player.
+            // Normalize (trim + case-fold) on both sides.
+            function __normTag(t) { return String(t == null ? '' : t).trim().toLowerCase(); }
+            var acceptable = new Set(cohorts.map(__normTag).filter(Boolean));
             if (typeof mcCohortGroups !== 'undefined' && Array.isArray(mcCohortGroups)) {
                 mcCohortGroups.forEach(function (g) {
-                    if (g && g.id && g.name && cohorts.indexOf(g.name) !== -1) acceptable.add(g.id);
+                    if (g && g.id && g.name && acceptable.has(__normTag(g.name))) acceptable.add(__normTag(g.id));
                 });
             }
-            function tagMatches(tag) { return !!tag && acceptable.has(tag); }
+            function tagMatches(tag) { var k = __normTag(tag); return !!k && acceptable.has(k); }
             if (item.cohort && tagMatches(item.cohort)) return true;
             if (Array.isArray(item.cohorts) && item.cohorts.some(tagMatches)) return true;
             if (Array.isArray(item.cohortIds) && item.cohortIds.some(tagMatches)) return true;
@@ -24596,12 +24753,14 @@
                 } else {
                     // Per-assignee: each expected player is a "unit of work".
                     // A player is done if their submission on this task is approved.
-                    // Fallback: if the task itself is approved (aggregate), count everyone.
+                    // Legacy fallback: aggregate task approval counts everyone ONLY
+                    // when no per-player submissions exist (July 19 — with
+                    // submissions present, one approval must not close all units).
                     var subs = (t.submissions || []);
                     expected.forEach(function (pid) {
                         out.total += 1;
-                        var doneAll = t.status === 'approved' || t.completed;
-                        var mine = subs.find(function (s) { return s && s.submittedBy === pid; });
+                        var doneAll = !subs.length && (t.status === 'approved' || t.completed);
+                        var mine = subs.find(function (s) { return s && (s.playerId === pid || s.submittedBy === pid || s.submittedById === pid); });
                         var doneMine = doneAll || (mine && (mine.status === 'approved' || mine.approved));
                         if (doneMine) out.done += 1;
                         out.tasks.push({ id: t.id, title: t.title, playerId: pid, done: !!doneMine });
@@ -25280,18 +25439,27 @@
             });
             var standaloneTasks = allTasks.filter(function(t) { return !t.projectId; });
 
-            // Helper — status colors / icons used by task cards
+            // Helper — status colors / icons used by task cards.
+            // July 19 (beta feedback — Feba, Hannah): these read the GLOBAL
+            // t.status, so ONE player's submission showed every task as
+            // "submitted"/struck-through for the whole cohort. Now the rows
+            // render MY state via pflxTaskStateForPlayer (same source as the
+            // task-detail view), so list and detail can never disagree.
+            var __cpdPid = (window.activeSession || {}).id || null;
+            function _rowState(t) {
+                try { return pflxTaskStateForPlayer(t, __cpdPid); } catch (e) { return 'open'; }
+            }
             function _statusIcon(t) {
-                if (t.status === 'approved' || t.completed) return '✅';
-                if (t.status === 'submitted')                return '⏳';
-                if (t.status === 'rejected')                 return '✗';
+                var st = _rowState(t);
+                if (st === 'approved')  return '✅';
+                if (st === 'submitted') return '⏳';
                 if (t.requirement === 'required' || t.required) return '🔴';
                 return '⬜';
             }
             function _statusColor(t) {
-                if (t.status === 'approved' || t.completed) return 'rgba(255,255,255,0.4)';
-                if (t.status === 'submitted')                return '#f5c842';
-                if (t.status === 'rejected')                 return '#ef4444';
+                var st = _rowState(t);
+                if (st === 'approved')  return 'rgba(255,255,255,0.4)';
+                if (st === 'submitted') return '#f5c842';
                 return '#e0e6ff';
             }
 
@@ -25300,7 +25468,7 @@
                 html += '<div style="font-family:\'Orbitron\',sans-serif;font-size:11px;color:rgba(255,255,255,0.4);letter-spacing:1.5px;margin-bottom:10px;">📁 PROJECTS</div>';
                 projects.forEach(function(proj) {
                     var projTasks = allTasks.filter(function(t) { return t.projectId === proj.id; });
-                    var projDone = projTasks.filter(function(t) { return t.completed || t.status === 'approved'; }).length;
+                    var projDone = projTasks.filter(function(t) { return _rowState(t) === 'approved'; }).length;
                     var projPct = projTasks.length ? Math.round((projDone / projTasks.length) * 100) : 0;
                     html += '<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(139,92,246,0.15);border-left:3px solid #a78bfa;border-radius:12px;padding:16px;margin-bottom:10px;cursor:pointer;" onclick="ppNav(\'project-detail\',{id:\'' + (proj.id || '') + '\'})">' +
                         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
@@ -25314,7 +25482,7 @@
                         projTasks.forEach(function(t) {
                             var icon = _statusIcon(t);
                             var col = _statusColor(t);
-                            var done = (t.completed || t.status === 'approved');
+                            var done = (_rowState(t) === 'approved');
                             var reqLabel = (t.requirement === 'required' || t.required) ? '<span style="font-size:9px;color:#ef4444;margin-left:6px;">REQUIRED</span>' : '<span style="font-size:9px;color:rgba(255,255,255,0.25);margin-left:6px;">OPTIONAL</span>';
                             var chip = pflxAssigneeChipHtml(t);
                             html += '<div onclick="event.stopPropagation();ppNav(\'task-detail\',{id:\'' + (t.id || '') + '\'})" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(255,255,255,0.015);border-radius:6px;cursor:pointer;">' +
@@ -25335,7 +25503,7 @@
                 standaloneTasks.forEach(function(t) {
                     var icon = _statusIcon(t);
                     var col = _statusColor(t);
-                    var done = (t.completed || t.status === 'approved');
+                    var done = (_rowState(t) === 'approved');
                     var reqLabel = (t.requirement === 'required' || t.required) ? '<span style="font-size:9px;color:#ef4444;margin-left:6px;">REQUIRED</span>' : '<span style="font-size:9px;color:rgba(255,255,255,0.25);margin-left:6px;">OPTIONAL</span>';
                     html += '<div onclick="ppNav(\'task-detail\',{id:\'' + (t.id || '') + '\'})" style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:10px;margin-bottom:6px;cursor:pointer;transition:border-color 0.15s;" onmouseenter="this.style.borderColor=\'rgba(0,212,255,0.3)\'" onmouseleave="this.style.borderColor=\'rgba(255,255,255,0.06)\'">' +
                         '<span style="font-size:16px;">' + icon + '</span>' +
@@ -25729,11 +25897,20 @@
             // Everything below renders MY state and MY submission. Shared tasks
             // stay open for everyone until each player submits their own work.
             var __pid = (window.activeSession || {}).id || null;
+            // July 19: match legacy submissions stored under brand/name too —
+            // older builds wrote submittedBy as the brand string, which made a
+            // player's own earlier work invisible in this per-player view.
+            var __sess = window.activeSession || {};
+            var __myKeys = {};
+            if (__pid) __myKeys[__pid] = 1;
+            if (__sess.brand) __myKeys[__sess.brand] = 1;
+            if (__sess.name) __myKeys[__sess.name] = 1;
+            function __subIsMine(s) { return !!(s && (__myKeys[s.playerId] || __myKeys[s.submittedBy] || __myKeys[s.submittedById])); }
             var __mySub = null;
             if (Array.isArray(task.submissions) && task.submissions.length) {
-                __mySub = task.submissions.find(function (s) { return s && (s.playerId === __pid || s.submittedBy === __pid || s.submittedById === __pid); }) || null;
+                __mySub = task.submissions.find(__subIsMine) || null;
             }
-            if (!__mySub && task.submission && (task.submission.submittedBy === __pid || task.submission.submittedById === __pid)) __mySub = task.submission;
+            if (!__mySub && __subIsMine(task.submission)) __mySub = task.submission;
             var __myStatus = __mySub
                 ? (__mySub.status === 'approved' ? 'approved' : (__mySub.status === 'rejected' ? 'rejected' : 'submitted'))
                 : ((typeof pflxTaskStateForPlayer === 'function') ? pflxTaskStateForPlayer(task, __pid) : (task.status || 'open'));
@@ -28307,8 +28484,21 @@
         // falls back to the shared single-status model (task.status/submission).
         function pflxTaskStateForPlayer(task, pid) {
             if (!task) return 'open';
+            // July 19: legacy submissions recorded submittedBy as the player's
+            // BRAND or NAME (not id) — those never matched, so a player's own
+            // earlier work rendered as "not done" (Feba's Monday submissions).
+            // Match against id, brand, and name.
+            var __keys = {};
+            if (pid) {
+                __keys[pid] = 1;
+                var __pl = (typeof pflxLookupPlayer === 'function') ? pflxLookupPlayer(pid) : null;
+                if (__pl) { if (__pl.brand) __keys[__pl.brand] = 1; if (__pl.name) __keys[__pl.name] = 1; }
+            }
+            function __isMine(x) {
+                return !!(x && (__keys[x.playerId] || __keys[x.submittedBy] || __keys[x.submittedById]));
+            }
             if (Array.isArray(task.submissions) && task.submissions.length) {
-                var s = task.submissions.find(function (x) { return x && (x.playerId === pid || x.submittedBy === pid || x.submittedById === pid); });
+                var s = task.submissions.find(__isMine);
                 if (s) return s.status === 'approved' ? 'approved' : (s.status === 'rejected' ? 'open' : 'submitted');
                 // July 15 (Ennis): NO global-approved fallback when per-player
                 // submissions exist. Approving ONE player's work used to make
@@ -28318,7 +28508,7 @@
                 return 'open';
             }
             if (_mcTaskIsApproved(task)) return 'approved';
-            if (_mcTaskIsSubmitted(task) && task.submission && (task.submission.submittedById === pid || task.submission.submittedBy === pid)) return 'submitted';
+            if (_mcTaskIsSubmitted(task) && __isMine(task.submission)) return 'submitted';
             return 'open';
         }
         // A player's progress within a Checkpoint: only tasks assigned/visible to
