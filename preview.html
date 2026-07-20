@@ -32319,6 +32319,26 @@
         function mcApproveTask(index) {
             var task = mcTasks[index];
             if (!task) return;
+            // ── July 20 (Ennis: "approved players not showing in data") ──
+            // With per-player submissions present, the legacy whole-task
+            // approve set t.status='approved' + paid only the LAST submitter,
+            // leaving every submissions[] entry pending. Now it means:
+            // approve EVERY pending submission — each player reviewed and
+            // paid individually through mcApprovePlayerSubmission.
+            if (Array.isArray(task.submissions) && task.submissions.length) {
+                var __pend = task.submissions.filter(function (s) { return s && (s.status || 'pending') === 'pending'; });
+                if (__pend.length) {
+                    __pend.forEach(function (s) {
+                        try { mcApprovePlayerSubmission(task.id, s.playerId || s.submittedById || s.submittedBy); } catch (e) {}
+                    });
+                } else if (typeof _mcTaskHostComplete === 'function' && _mcTaskHostComplete(task)) {
+                    task.status = 'approved';
+                    task.approvedAt = new Date().toISOString().split('T')[0];
+                    mcSaveData('tasks');
+                    try { mcRenderTasks(); } catch (e) {}
+                }
+                return;
+            }
             // ── Dependency guard-rail ──
             // Block approval until every task in dependsOn is approved.
             // Ships an actionable alert listing the blockers so the host
