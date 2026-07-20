@@ -19875,6 +19875,10 @@
                     var sub = t && t.submission && t.submission.submittedBy;
                     return _scopedApprovalCan('approve.task', sub ? { cohort: _pflxPlayerCohortById(sub) } : null);
                 }
+                if (kind === 'tasksub') {
+                    var __pid = String(id || '').split('::')[1];
+                    return _scopedApprovalCan('approve.task', __pid ? { cohort: _pflxPlayerCohortById(__pid) } : null);
+                }
                 if (kind === 'coinsub') {
                     var s = (_pflxCloudSubs || []).find(function (x) { return x && x.id === id; });
                     return (s && s.nodeId) ? _scopedApprovalCan('approve.node', { nodeId: s.nodeId }) : _scopedApprovalCan('approve.reward');
@@ -19909,11 +19913,37 @@
                 });
             });
 
-            // 2. MC task submissions (status === 'submitted')
+            // 2. MC task submissions — July 20 (beta feedback): the card only
+            // read the LEGACY single-track t.submission, so per-player entries
+            // in t.submissions[] never appeared (tasks showed "4 pending"
+            // chips while Approvals said empty). Now every PENDING per-player
+            // entry becomes its own approval item (kind 'tasksub'); the legacy
+            // single-track shape is kept only for tasks with no submissions[].
             try {
                 if (typeof mcTasks !== 'undefined' && Array.isArray(mcTasks)) {
                     mcTasks.forEach(function (t) {
-                        if (!t || t.status !== 'submitted') return;
+                        if (!t) return;
+                        if (Array.isArray(t.submissions) && t.submissions.length) {
+                            t.submissions.forEach(function (s) {
+                                if (!s || (s.status || 'pending') !== 'pending') return;
+                                var pid = s.playerId || s.submittedById || s.submittedBy;
+                                items.push({
+                                    kind: 'tasksub',
+                                    id: t.id + '::' + pid,
+                                    cohort: _pflxPlayerCohortById(pid) || t.cohort,
+                                    submittedAt: s.date || s.submittedAt,
+                                    brand: _pflxPlayerBrandById(pid) || s.playerName || 'Player',
+                                    title: '📋 Task: ' + (t.title || t.name || 'Untitled'),
+                                    sub: s.description || s.notes || '',
+                                    link: s.link || '',
+                                    file: s.fileName || '',
+                                    xc: t.xcReward || 0,
+                                    badges: t.rewardBadges || []
+                                });
+                            });
+                            return;
+                        }
+                        if (t.status !== 'submitted') return;
                         var subBy = t.submission && t.submission.submittedBy;
                         items.push({
                             kind: 'task',
@@ -20065,6 +20095,10 @@
                         try { f.contentWindow.postMessage(JSON.stringify({ type: 'pflx_reward_request_resolved', request: r }), '*'); } catch (e) {}
                     });
                     if (typeof pflxToast === 'function') pflxToast('✓ Reward approved for @' + (r.brand || 'player'), 'success');
+                } else if (kind === 'tasksub') {
+                    // Per-player submission (July 20): id is '<taskId>::<playerId>'.
+                    var __parts = String(id || '').split('::');
+                    if (typeof mcApprovePlayerSubmission === 'function') mcApprovePlayerSubmission(__parts[0], __parts[1]);
                 } else if (kind === 'task') {
                     // Reuse the existing MC task approval pipeline — it already
                     // routes XC + badges through PflxDataBus.award.
@@ -20157,6 +20191,10 @@
                         try { f.contentWindow.postMessage(JSON.stringify({ type: 'pflx_reward_request_resolved', request: queue[i] }), '*'); } catch (e) {}
                     });
                     if (typeof pflxToast === 'function') pflxToast('Reward request denied', 'info');
+                } else if (kind === 'tasksub') {
+                    // Per-player submission (July 20): reject ONLY this player's entry.
+                    var __parts = String(id || '').split('::');
+                    if (typeof mcRejectPlayerSubmission === 'function') mcRejectPlayerSubmission(__parts[0], __parts[1], note);
                 } else if (kind === 'task') {
                     if (typeof mcTasks !== 'undefined' && Array.isArray(mcTasks)) {
                         var idx = mcTasks.findIndex(function (t) { return t && t.id === id; });
@@ -29444,13 +29482,24 @@
                     : (t.submission ? [t.submission] : []);
                 if (_subsArr.length || (hostState.counts && hostState.counts.assigned > 0)) {
                     var _sc = hostState.counts || { assigned: 0, approved: 0, submitted: 0 };
+                    var _isHostView = (typeof window.pflxRole !== 'undefined' && window.pflxRole === 'host');
                     var _chips = _subsArr.slice(0, 10).map(function (s) {
-                        var who = pflxLookupPlayer(s.playerId || s.submittedById || s.submittedBy);
+                        var _cpid = s.playerId || s.submittedById || s.submittedBy;
+                        var who = pflxLookupPlayer(_cpid);
                         var nm = who ? (who.brand || who.name) : (s.playerName || s.submittedBy || 'Player');
                         var st = s.status || 'pending';
                         var col = st === 'approved' ? '#22c55e' : st === 'rejected' ? '#ef4444' : '#f5a500';
+                        // July 20: pending chips are actionable for hosts — ✓/✗
+                        // review THIS player's submission right from the card.
+                        var _act = '';
+                        if (_isHostView && st === 'pending' && _cpid) {
+                            var _tid = String(t.id || '').replace(/'/g, '');
+                            var _pidEsc = String(_cpid).replace(/'/g, '');
+                            _act = ' <b onclick="event.stopPropagation();mcApprovePlayerSubmission(\'' + _tid + '\',\'' + _pidEsc + '\')" title="Approve ' + escapeHtml(String(nm)) + '" style="cursor:pointer;color:#22c55e;font-size:11px;">✓</b>' +
+                                   '<b onclick="event.stopPropagation();mcRejectPlayerSubmission(\'' + _tid + '\',\'' + _pidEsc + '\')" title="Reject ' + escapeHtml(String(nm)) + '" style="cursor:pointer;color:#ef4444;font-size:11px;">✗</b>';
+                        }
                         return '<span style="display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:3px 9px;font-size:10px;color:#e0e6ff;font-weight:700;">' +
-                            escapeHtml(String(nm)) + ' <b style="color:' + col + ';text-transform:uppercase;font-size:8px;letter-spacing:0.06em;">' + escapeHtml(st) + '</b></span>';
+                            escapeHtml(String(nm)) + ' <b style="color:' + col + ';text-transform:uppercase;font-size:8px;letter-spacing:0.06em;">' + escapeHtml(st) + '</b>' + _act + '</span>';
                     }).join('');
                     var _more = _subsArr.length > 10 ? '<span style="font-size:10px;color:rgba(255,255,255,0.4);">+' + (_subsArr.length - 10) + ' more</span>' : '';
                     submissionPanel = '<div style="background:rgba(0,212,255,0.06);border:1px solid rgba(0,212,255,0.25);border-radius:12px;padding:12px;margin-top:12px;font-size:11px;color:rgba(0,240,255,0.85);">' +
@@ -29627,7 +29676,7 @@
                     (t.status === 'submitted'
                         ? '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(34,197,94,0.1);color:#22c55e;border:1px solid rgba(34,197,94,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:70px;" onclick="mcApproveTask(' + realIndex + ')">✓ Approve</button>'
                         : '') +
-                    (t.status === 'approved'
+                    (_mcTaskHostComplete(t)
                         ? '<div style="padding:6px 12px;font-size:11px;background:rgba(34,197,94,0.05);color:#22c55e;border:1px dashed rgba(34,197,94,0.35);border-radius:8px;flex:1;min-width:90px;text-align:center;letter-spacing:0.04em;font-weight:700;">✓ COMPLETED</div>'
                         : '') +
                     // Convert-to-Job — only shown if the current viewer is
@@ -32174,6 +32223,98 @@
             } catch (e) {}
         }
         window.mcRejectTask = mcRejectTask;
+
+        // ── PER-PLAYER SUBMISSION REVIEW (July 20, beta feedback — Ennis:
+        // "not seeing all submissions in my approval listing") ──
+        // The approval pipeline was still single-track: mcApproveTask approved
+        // the WHOLE task and paid only the last submitter. These functions
+        // review ONE player's entry in task.submissions[]: approve pays that
+        // player (XC + badges + streak + automations), reject reopens only
+        // their entry. The task itself flips to approved only when EVERY
+        // assigned player is approved (_mcTaskHostComplete).
+        function _mcFindPlayerSub(task, playerId) {
+            if (!task || !playerId || !Array.isArray(task.submissions)) return null;
+            var keys = {}; keys[playerId] = 1;
+            var pl = (typeof pflxLookupPlayer === 'function') ? pflxLookupPlayer(playerId) : null;
+            if (pl) { if (pl.brand) keys[pl.brand] = 1; if (pl.name) keys[pl.name] = 1; }
+            return task.submissions.find(function (s) { return s && (keys[s.playerId] || keys[s.submittedBy] || keys[s.submittedById]); }) || null;
+        }
+        function mcApprovePlayerSubmission(taskId, playerId) {
+            var task = (mcTasks || []).find(function (t) { return t && t.id === taskId; });
+            if (!task) return;
+            var unmet = _mcTaskUnmetDependencies(task);
+            if (unmet.length > 0) {
+                try { pflxPlaySfx('error'); } catch (e) {}
+                alert('Cannot approve — dependencies not yet approved:\n\n' + unmet.slice(0, 5).map(function (t) { return '• ' + (t.title || 'Untitled'); }).join('\n'));
+                return;
+            }
+            var sub = _mcFindPlayerSub(task, playerId);
+            if (!sub) { if (typeof pflxToast === 'function') pflxToast('Submission not found for that player.', 'error'); return; }
+            if (sub.status === 'approved') return;
+            pflxPlaySfx('success');
+            sub.status = 'approved';
+            sub.reviewedAt = new Date().toISOString();
+            var pid = sub.playerId || playerId;
+            try {
+                if (task.xcReward && window.PflxDataBus) {
+                    window.PflxDataBus.award(pid, { xc: task.xcReward, source: 'mc', reason: 'task:' + task.id });
+                }
+                if (task.rewardBadges && task.rewardBadges.length > 0 && window.PflxDataBus) {
+                    task.rewardBadges.forEach(function (badgeRef) {
+                        window.PflxDataBus.award(pid, { badge: _pflxResolveAwardBadge(badgeRef), source: 'mc', reason: 'task:' + task.id });
+                    });
+                }
+                var canon = window.PflxDataBus ? window.PflxDataBus.get(pid) : null;
+                if (canon) {
+                    var mi = mcPlayers.findIndex(function (p) { return p && p.id === pid; });
+                    if (mi >= 0) mcPlayers[mi] = Object.assign({}, mcPlayers[mi], {
+                        xc: canon.xc, totalXcoin: canon.totalXcoin, digitalBadges: canon.digitalBadges,
+                        badgeCounts: canon.badgeCounts, badges: canon.badges, level: canon.level, rank: canon.rank
+                    });
+                }
+            } catch (eAward) { console.warn('[MC] per-player award failed', eAward); }
+            try { _mcApplyStreakBonus(pid, task); } catch (e) {}
+            try {
+                mcAutomationsFire('task.approved', {
+                    taskId: task.id, playerId: pid, submitterId: pid, projectId: task.projectId,
+                    checkpointId: task.checkpointId || task.roundId, priority: task.priority || 'normal', xcReward: task.xcReward || 0
+                });
+            } catch (e) {}
+            try { if (window.pflxModifiers) window.pflxModifiers.fireEvent('task_approved', { playerId: pid, targetType: 'task', targetId: task.id, cohort: task.cohort }); } catch (e) {}
+            // Whole-task completion: only when every assigned player is approved.
+            try {
+                if (typeof _mcTaskHostComplete === 'function' && _mcTaskHostComplete(task)) {
+                    task.status = 'approved';
+                    task.approvedAt = new Date().toISOString().split('T')[0];
+                    try { _mcSpawnRecurringNext(task); } catch (e) {}
+                }
+            } catch (e) {}
+            mcSaveData('tasks'); mcSaveData('players');
+            try { mcRenderTasks(); } catch (e) {}
+            try { if (typeof renderApprovalsCard === 'function') renderApprovalsCard(); } catch (e) {}
+            try { if (typeof mcBroadcastToApps === 'function') mcBroadcastToApps('pflx_task_approved', { taskId: task.id, playerId: pid }); } catch (e) {}
+            try { if (typeof pflxToast === 'function') pflxToast('✓ Approved for @' + (_pflxPlayerBrandById(pid) || 'player') + (task.xcReward ? ' · +' + task.xcReward + ' XC' : ''), 'success'); } catch (e) {}
+        }
+        function mcRejectPlayerSubmission(taskId, playerId, note) {
+            var task = (mcTasks || []).find(function (t) { return t && t.id === taskId; });
+            if (!task) return;
+            var sub = _mcFindPlayerSub(task, playerId);
+            if (!sub) { if (typeof pflxToast === 'function') pflxToast('Submission not found for that player.', 'error'); return; }
+            var reason = (typeof note === 'string') ? note : (prompt('Reason for rejecting this submission (optional, shared with the player):') || '');
+            sub.status = 'rejected';
+            sub.reviewedAt = new Date().toISOString();
+            if (reason) sub.hostNote = reason;
+            var pid = sub.playerId || playerId;
+            try { _mcResetStreak(pid); } catch (e) {}
+            // Task-level status untouched — other players' work stays in review.
+            mcSaveData('tasks');
+            try { mcRenderTasks(); } catch (e) {}
+            try { if (typeof renderApprovalsCard === 'function') renderApprovalsCard(); } catch (e) {}
+            try { if (typeof mcBroadcastToApps === 'function') mcBroadcastToApps('pflx_task_rejected', { taskId: task.id, playerId: pid, reason: reason }); } catch (e) {}
+            try { if (typeof pflxToast === 'function') pflxToast('Submission rejected for @' + (_pflxPlayerBrandById(pid) || 'player'), 'warning'); } catch (e) {}
+        }
+        window.mcApprovePlayerSubmission = mcApprovePlayerSubmission;
+        window.mcRejectPlayerSubmission = mcRejectPlayerSubmission;
 
         function mcApproveTask(index) {
             var task = mcTasks[index];
@@ -45624,15 +45765,28 @@
 
         function mcRenderApprovals() {
             mcLoadData();
-            // Auto-collect pending submissions from tasks
-            var pendingTasks = mcTasks.filter(function(t) { return t.status === 'submitted'; });
+            // Auto-collect pending submissions from tasks.
+            // July 20 (beta feedback): per-player entries in t.submissions[]
+            // are the primary shape now — each PENDING entry is its own
+            // reviewable item. Legacy single-track (t.status==='submitted'
+            // with no submissions[]) kept as fallback.
+            var pendingSubs = [];
+            mcTasks.forEach(function (t) {
+                if (!t) return;
+                if (Array.isArray(t.submissions) && t.submissions.length) {
+                    t.submissions.forEach(function (s) {
+                        if (s && (s.status || 'pending') === 'pending') pendingSubs.push({ task: t, sub: s });
+                    });
+                }
+            });
+            var pendingTasks = mcTasks.filter(function(t) { return t.status === 'submitted' && !(Array.isArray(t.submissions) && t.submissions.length); });
             var pendingPitches = mcPitches.filter(function(p) { return p.status === 'pending'; });
 
             var stats = document.getElementById('mc-approval-stats');
             if (stats) {
                 stats.innerHTML = [
-                    { label: 'PENDING', value: pendingTasks.length + pendingPitches.length, color: '#f5c842', icon: '&#x23F3;' },
-                    { label: 'TASKS SUBMITTED', value: pendingTasks.length, color: 'var(--cyan)', icon: '&#x2705;' },
+                    { label: 'PENDING', value: pendingSubs.length + pendingTasks.length + pendingPitches.length, color: '#f5c842', icon: '&#x23F3;' },
+                    { label: 'TASKS SUBMITTED', value: pendingSubs.length + pendingTasks.length, color: 'var(--cyan)', icon: '&#x2705;' },
                     { label: 'PITCHES PENDING', value: pendingPitches.length, color: '#a78bfa', icon: '&#x1F4A1;' },
                     { label: 'TOTAL APPROVED', value: mcApprovals.filter(function(a) { return a.action === 'approved'; }).length, color: '#22c55e', icon: '&#x2714;' }
                 ].map(function(s) {
@@ -45645,6 +45799,19 @@
 
             // Build unified approval items
             var items = [];
+            pendingSubs.forEach(function (ps) {
+                var pid = ps.sub.playerId || ps.sub.submittedById || ps.sub.submittedBy;
+                var who = (typeof pflxLookupPlayer === 'function') ? pflxLookupPlayer(pid) : null;
+                items.push({
+                    type: 'tasksub',
+                    id: ps.task.id + '::' + pid,
+                    title: ps.task.title,
+                    submittedBy: (who && (who.brand || who.name)) || ps.sub.playerName || 'Player',
+                    date: ps.sub.date || ps.sub.submittedAt || '',
+                    status: 'pending',
+                    ref: ps.task
+                });
+            });
             pendingTasks.forEach(function(t) {
                 items.push({ type: 'task', id: t.id, title: t.title, submittedBy: t.assignedTo || 'Unknown', date: t.submittedDate || '', status: 'pending', ref: t });
             });
@@ -45682,9 +45849,9 @@
 
             list.innerHTML = items.length === 0 ? '<div style="color:rgba(255,255,255,0.25);font-size:13px;">No items to show.</div>' :
                 items.map(function(it) {
-                    var typeIcon = it.type === 'task' ? '&#x2705;' : it.type === 'arena_external' ? '&#x1F3AE;' : it.type === 'module_completion' ? '&#x1F393;' : '&#x1F4A1;';
+                    var typeIcon = (it.type === 'task' || it.type === 'tasksub') ? '&#x2705;' : it.type === 'arena_external' ? '&#x1F3AE;' : it.type === 'module_completion' ? '&#x1F393;' : '&#x1F4A1;';
                     var sc = it.status === 'pending' ? '#f5c842' : it.status === 'approved' ? '#22c55e' : '#ef4444';
-                    var typeLabel = it.type === 'module_completion' ? 'module completion' : it.type;
+                    var typeLabel = it.type === 'module_completion' ? 'module completion' : (it.type === 'tasksub' ? 'task submission' : it.type);
                     var detail = '';
                     if (it.type === 'module_completion' && it.ref && it.ref.submission) {
                         var sub = it.ref.submission, rw = it.ref.reward, bits = [];
@@ -45713,6 +45880,7 @@
         function _mcApprovalAllowed(it) {
             var ref = it && it.ref;
             switch (it.type) {
+                case 'tasksub':
                 case 'task':   return _scopedApprovalCan('approve.task', ref && ref.cohort ? { cohort: ref.cohort } : null);
                 case 'pitch':  return _scopedApprovalCan('approve.node');
                 case 'arena_external': return _scopedApprovalCan('approve.reward');
@@ -45723,6 +45891,7 @@
         function _mcApprovalActionAllowed(type, id) {
             try {
                 if (type === 'task') { var t = mcTasks.find(function (x) { return x && x.id === id; }); return _scopedApprovalCan('approve.task', t && t.cohort ? { cohort: t.cohort } : null); }
+                if (type === 'tasksub') { var t2 = mcTasks.find(function (x) { return x && x.id === String(id || '').split('::')[0]; }); return _scopedApprovalCan('approve.task', t2 && t2.cohort ? { cohort: t2.cohort } : null); }
                 if (type === 'pitch') return _scopedApprovalCan('approve.node');
                 if (type === 'arena_external') return _scopedApprovalCan('approve.reward');
                 if (type === 'module_completion') { var ma = mcApprovals.find(function (x) { return x && x.id === id; }); return _scopedApprovalCan('approve.node', ma && ma.nodeId ? { nodeId: ma.nodeId } : null); }
@@ -45734,7 +45903,13 @@
                 if (typeof pflxToast === 'function') pflxToast('Your access tier can’t approve this item.', 'error');
                 return;
             }
-            if (type === 'task') {
+            if (type === 'tasksub') {
+                // Per-player submission (July 20): id is '<taskId>::<playerId>'.
+                var __p = String(id || '').split('::');
+                if (typeof mcApprovePlayerSubmission === 'function') mcApprovePlayerSubmission(__p[0], __p[1]);
+                var __t = mcTasks.find(function(t) { return t && t.id === __p[0]; });
+                mcApprovals.push({ type:'tasksub', id:id, title:__t?__t.title:'', action:'approved', date:new Date().toISOString().split('T')[0], submittedBy: (typeof _pflxPlayerBrandById === 'function' && _pflxPlayerBrandById(__p[1])) || __p[1] || '' });
+            } else if (type === 'task') {
                 var tIdx = mcTasks.findIndex(function(t) { return t.id === id; });
                 if (tIdx >= 0) {
                     // Use the full reward-distributing approval function
@@ -45778,7 +45953,12 @@
                 if (typeof pflxToast === 'function') pflxToast('Your access tier can’t act on this item.', 'error');
                 return;
             }
-            if (type === 'task') {
+            if (type === 'tasksub') {
+                var __p = String(id || '').split('::');
+                if (typeof mcRejectPlayerSubmission === 'function') mcRejectPlayerSubmission(__p[0], __p[1]);
+                var __t = mcTasks.find(function(t) { return t && t.id === __p[0]; });
+                mcApprovals.push({ type:'tasksub', id:id, title:__t?__t.title:'', action:'rejected', date:new Date().toISOString().split('T')[0], submittedBy: (typeof _pflxPlayerBrandById === 'function' && _pflxPlayerBrandById(__p[1])) || __p[1] || '' });
+            } else if (type === 'task') {
                 var t = mcTasks.find(function(t) { return t.id === id; });
                 if (t) { t.status = 'open'; mcSaveData('tasks'); }
                 mcApprovals.push({ type:'task', id:id, title:t?t.title:'', action:'rejected', date:new Date().toISOString().split('T')[0], submittedBy:t?t.assignedTo:'' });
