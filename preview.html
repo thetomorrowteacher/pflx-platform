@@ -13321,10 +13321,20 @@
         'use strict';
 
         // ── 1. Global error handler — surface silent crashes ──
+        // July 20 (beta feedback — Hannah: "error shows multiple times
+        // non-stop until I close the tab"): the banner appended one row per
+        // error with no dedupe or cap, so a looping error flooded the screen
+        // (and ate memory). Now: identical messages collapse into a ×N
+        // counter, max 8 rows, and after 20 total errors the banner stops
+        // updating (console keeps logging).
+        var _pflxErrSeen = {};
+        var _pflxErrTotal = 0;
         window.onerror = function(msg, src, line, col, err) {
             console.error('[PFLX Error]', msg, 'at', src, 'line', line, ':', col, err);
-            // Show on-screen banner for debugging on iPad
             try {
+                _pflxErrTotal++;
+                if (_pflxErrTotal > 20) return false;
+                var key = String(msg).slice(0, 120) + '|' + line;
                 var d = document.getElementById('pflx-error-banner');
                 if (!d) {
                     d = document.createElement('div');
@@ -13333,7 +13343,18 @@
                     d.innerHTML = '<b>PFLX Error Log</b> <button onclick="this.parentElement.remove()" style="float:right;background:none;border:1px solid #ff3355;color:#ff3355;cursor:pointer;font-size:10px;padding:2px 6px;">X</button><hr style="border-color:#ff335540;margin:4px 0;">';
                     document.body ? document.body.prepend(d) : document.addEventListener('DOMContentLoaded', function() { document.body.prepend(d); });
                 }
-                d.innerHTML += '<div style="border-top:1px solid #ff335520;padding:2px 0;">' + msg + ' <span style="color:#8a92b0;">(line ' + line + ')</span></div>';
+                if (_pflxErrSeen[key]) {
+                    _pflxErrSeen[key].count++;
+                    var cEl = _pflxErrSeen[key].el && _pflxErrSeen[key].el.querySelector('.pflx-err-count');
+                    if (cEl) cEl.textContent = '×' + _pflxErrSeen[key].count;
+                    return false;
+                }
+                if (Object.keys(_pflxErrSeen).length >= 8) return false;
+                var row = document.createElement('div');
+                row.style.cssText = 'border-top:1px solid #ff335520;padding:2px 0;';
+                row.innerHTML = String(msg).replace(/</g, '&lt;') + ' <span style="color:#8a92b0;">(line ' + line + ')</span> <b class="pflx-err-count" style="color:#f5c842;"></b>';
+                d.appendChild(row);
+                _pflxErrSeen[key] = { count: 1, el: row };
             } catch(e) {}
             return false; // don't suppress
         };
@@ -13341,6 +13362,23 @@
         window.addEventListener('unhandledrejection', function(e) {
             console.error('[PFLX Unhandled Promise]', e.reason);
         });
+
+        // ── LITE-DEVICE detection (July 20, beta feedback — iPhone kept
+        // reloading and never reached the platform). iOS Safari kills pages
+        // that use too much memory and auto-reloads them; with the 4MB shell
+        // + background X-Coin iframe preload + fullscreen MP4 intro, phones
+        // loop forever. On lite devices we skip the heavy extras — sub-apps
+        // load on demand when actually opened.
+        window.pflxIsLiteDevice = function () {
+            try {
+                var ua = navigator.userAgent || '';
+                var isIphone = /iPhone|iPod/i.test(ua);
+                var isIpad = /iPad/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+                var smallScreen = Math.min(screen.width || 9999, screen.height || 9999) < 500;
+                var lowMem = typeof navigator.deviceMemory === 'number' && navigator.deviceMemory <= 2;
+                return isIphone || smallScreen || lowMem || (isIpad && lowMem);
+            } catch (e) { return false; }
+        };
 
         // ── 2. Safe localStorage wrapper for Safari Private Browsing ──
         // Safari Private Browsing throws QuotaExceededError on setItem,
@@ -18961,8 +18999,9 @@
                 role:           player ? player.role : 'Student',
                 cohort:         player ? (Array.isArray(player.cohorts) ? player.cohorts.join(', ') : player.cohort) : 'PlayerPool',
                 cohorts:        player && Array.isArray(player.cohorts) ? player.cohorts : (player && player.cohort ? [player.cohort] : ['PlayerPool']),
-                xc:             player ? (player.xc || 0) : 0,
-                totalXcoin:     player ? (player.totalXcoin || player.xc || 0) : 0,
+                // July 20: tolerate X-Coin-shaped records (balance in `xcoin`)
+                xc:             player ? ((player.xc != null ? player.xc : player.xcoin) || 0) : 0,
+                totalXcoin:     player ? (player.totalXcoin || (player.xc != null ? player.xc : player.xcoin) || 0) : 0,
                 image:          player ? (player.image || '') : '',
                 slogan:         player ? (player.slogan || '') : '',
                 interests:      player ? (player.interests || []) : [],
@@ -19067,7 +19106,9 @@
                 }
 
                 // Pre-load X-Coin iframe in background so Mission Control can sync data from Supabase
-                if (typeof preloadIframe === 'function') preloadIframe('xcoin');
+                // July 20: skipped on lite devices (iPhone memory-reload loop) —
+                // X-Coin loads on demand when the player opens it.
+                if (typeof preloadIframe === 'function' && !(window.pflxIsLiteDevice && window.pflxIsLiteDevice())) preloadIframe('xcoin');
 
                 // Play PFLX Motion Graphic intro (3-5s), then navigate to home
                 playMotionIntro().then(() => {
@@ -19083,6 +19124,9 @@
         /** Play the Official PFLX Transition video full-screen with sound, then fade into platform */
         function playMotionIntro() {
             return new Promise(resolve => {
+                // July 20: skip the fullscreen MP4 on lite devices (iPhone
+                // memory-reload loop) — decode cost alone can kill the tab.
+                if (window.pflxIsLiteDevice && window.pflxIsLiteDevice()) { resolve(); return; }
                 const container = document.getElementById('pflx-motion-intro');
                 const video = document.getElementById('pflx-motion-video');
                 if (!container || !video) { resolve(); return; }
@@ -21342,6 +21386,17 @@
             // X-Coin uses brandName; Console uses brand. Keep both in sync.
             if (!p.brand && p.brandName) p.brand = p.brandName;
             if (!p.brandName && p.brand) p.brandName = p.brand;
+            // ── XC field normalization (July 20, beta feedback — LIVSTUDIOS:
+            // dropdown said 1,800 while toolbar + X-Bot said 0) ──
+            // X-Coin stores the balance in `xcoin`, the Console in `xc`; rows
+            // shaped by one app leave the other field null and every surface
+            // reading the missing field showed 0. Fill whichever is absent
+            // (missing-fill only — never overwrite a present value).
+            var __xcNum = (p.xc === null || p.xc === undefined || p.xc === '') ? null : Number(p.xc);
+            var __xcoinNum = (p.xcoin === null || p.xcoin === undefined || p.xcoin === '') ? null : Number(p.xcoin);
+            if (__xcNum === null && __xcoinNum !== null && !isNaN(__xcoinNum)) { p.xc = __xcoinNum; __xcNum = __xcoinNum; }
+            if (__xcoinNum === null && __xcNum !== null && !isNaN(__xcNum)) p.xcoin = __xcNum;
+            if ((p.totalXcoin === null || p.totalXcoin === undefined || p.totalXcoin === '') && __xcNum !== null && !isNaN(__xcNum)) p.totalXcoin = __xcNum;
             // Ensure badges is always an array (some payloads omit the field).
             if (!Array.isArray(p.badges)) p.badges = [];
             return p;
