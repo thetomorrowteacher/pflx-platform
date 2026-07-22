@@ -20048,6 +20048,25 @@
                 });
             } catch (e) {}
 
+            // 5. Battle Arena external game submissions (July 15, Ennis) —
+            //    they lived only in the MC Approvals tab; now they surface on
+            //    the Homebase card too, resolved through mcApproveItem/mcRejectItem.
+            try {
+                (typeof mcApprovals !== 'undefined' && Array.isArray(mcApprovals) ? mcApprovals : []).forEach(function (a) {
+                    if (!a || a.type !== 'arena_external' || a.action !== 'pending') return;
+                    items.push({
+                        kind: 'arena',
+                        id: a.id,
+                        submittedAt: a.date,
+                        brand: a.submittedBy || 'Player',
+                        title: '🎮 Arena: ' + (a.title || 'Game submission'),
+                        sub: (a.reward && a.reward.xc ? '+' + a.reward.xc + ' XC on approval' : ''),
+                        link: a.link || '',
+                        file: ''
+                    });
+                });
+            } catch (e) {}
+
             // Sort newest-first
             items.sort(function (a, b) {
                 return new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0);
@@ -20064,22 +20083,46 @@
                 return;
             }
 
+            // ── BULK TOOLBAR (July 15, Ennis) ── select any set of items and
+            // approve/deny them together, or approve everything at once. There
+            // is no ordering rule anywhere: every pending item stands alone and
+            // can be resolved in any order.
+            var selectable = items.filter(function (it) { return it.kind !== 'trade'; }).length;
+            var toolbar = selectable > 0
+                ? '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 10px;margin-bottom:10px;background:rgba(0,212,255,0.05);border:1px solid rgba(0,212,255,0.2);border-radius:8px;">' +
+                    '<button onclick="homeApprovalSelectAll(true)" style="padding:5px 10px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.7);border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:0.05em;">SELECT ALL</button>' +
+                    '<button onclick="homeApprovalSelectAll(false)" style="padding:5px 10px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.7);border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:0.05em;">CLEAR</button>' +
+                    '<span id="approvals-sel-count" style="font-size:10px;color:rgba(255,255,255,0.45);font-family:monospace;">0 selected</span>' +
+                    '<span style="flex:1;"></span>' +
+                    '<button onclick="homeApprovalBulk(\'approve\', false)" style="padding:6px 12px;background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.5);color:#22c55e;border-radius:6px;font-size:10px;font-weight:800;cursor:pointer;letter-spacing:0.05em;">✓ APPROVE SELECTED</button>' +
+                    '<button onclick="homeApprovalBulk(\'deny\', false)" style="padding:6px 12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.4);color:#ef4444;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:0.05em;">✗ DENY SELECTED</button>' +
+                    '<button onclick="homeApprovalBulk(\'approve\', true)" style="padding:6px 12px;background:linear-gradient(135deg,#22c55e,#16a34a);border:none;color:#fff;border-radius:6px;font-size:10px;font-weight:800;cursor:pointer;letter-spacing:0.05em;">✓✓ APPROVE ALL</button>' +
+                  '</div>'
+                : '';
+            window._homeAppSel = {};
+
             // Render up to 10 — full list lives in MC Approvals tab
-            listEl.innerHTML = items.slice(0, 10).map(function (it) {
-                var icon = it.kind === 'reward' ? '🎯' : it.kind === 'coinsub' ? '🏅' : it.kind === 'trade' ? '🔁' : '📋';
-                var color = it.kind === 'reward' ? '#a78bfa' : it.kind === 'coinsub' ? '#f5c842' : it.kind === 'trade' ? '#3b82f6' : '#00d4ff';
+            listEl.innerHTML = toolbar + items.slice(0, 10).map(function (it) {
+                var icon = it.kind === 'reward' ? '🎯' : it.kind === 'coinsub' ? '🏅' : it.kind === 'trade' ? '🔁' : it.kind === 'arena' ? '🎮' : '📋';
+                var color = it.kind === 'reward' ? '#a78bfa' : it.kind === 'coinsub' ? '#f5c842' : it.kind === 'trade' ? '#3b82f6' : it.kind === 'arena' ? '#ec4899' : '#00d4ff';
                 var dataKind = it.kind;
                 var dataId = String(it.id || '').replace(/'/g, '');
+                var selKey = escapeHtml(dataKind + '|' + dataId);
                 var linkHtml = it.link
                     ? '<a href="' + escapeHtml(it.link) + '" target="_blank" rel="noopener" style="font-size:11px;color:#00d4ff;text-decoration:none;margin-right:8px;">🔗 Link</a>'
                     : '';
                 var fileHtml = it.file
                     ? '<span style="font-size:11px;color:#a78bfa;margin-right:8px;">📎 ' + escapeHtml(it.file) + '</span>'
                     : '';
+                var checkbox = it.kind !== 'trade'
+                    ? '<input type="checkbox" data-appr="' + selKey + '" onchange="homeApprovalToggle(this)" onclick="event.stopPropagation()" style="width:16px;height:16px;accent-color:#22c55e;cursor:pointer;flex-shrink:0;margin-top:2px;">'
+                    : '';
                 return '<div style="padding:12px 14px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid ' + color + '33;">' +
                     '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px;">' +
-                        '<div style="flex:1;min-width:0;">' +
-                            '<div style="font-size:13px;color:#e0e6ff;font-weight:700;margin-bottom:3px;">' + icon + ' ' + escapeHtml(it.title) + '</div>' +
+                        checkbox +
+                        // Clicking the item body opens the actual submission.
+                        '<div onclick="pflxOpenApprovalSource(\'' + dataKind + '\',\'' + escapeHtml(dataId) + '\')" title="Open this submission" style="flex:1;min-width:0;cursor:pointer;" onmouseover="this.style.opacity=0.8" onmouseout="this.style.opacity=1">' +
+                            '<div style="font-size:13px;color:#e0e6ff;font-weight:700;margin-bottom:3px;">' + icon + ' ' + escapeHtml(it.title) + ' <span style="font-size:9px;color:rgba(255,255,255,0.3);">↗</span></div>' +
                             '<div style="font-size:11px;color:rgba(255,255,255,0.45);font-family:\'Jura\',sans-serif;">@' + escapeHtml(it.brand) + (it.submittedAt ? ' · ' + new Date(it.submittedAt).toLocaleString() : '') + '</div>' +
                         '</div>' +
                     '</div>' +
@@ -20090,13 +20133,84 @@
                             '<button onclick="try{navigateTo(\'xcoin\')}catch(e){}" style="padding:7px 14px;background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.45);color:#6cb2ff;border-radius:6px;font-family:\'Share Tech Mono\',monospace;font-size:11px;font-weight:700;letter-spacing:0.06em;cursor:pointer;">⇲ REVIEW IN X-COIN</button>' +
                           '</div>'
                         : '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
-                            '<button onclick="pflxApproveSubmission(\'' + dataKind + '\',\'' + escapeHtml(dataId) + '\')" style="padding:7px 14px;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;border:none;border-radius:6px;font-family:\'Share Tech Mono\',monospace;font-size:11px;font-weight:800;letter-spacing:0.06em;cursor:pointer;">✓ APPROVE</button>' +
-                            '<button onclick="pflxDenySubmission(\'' + dataKind + '\',\'' + escapeHtml(dataId) + '\')" style="padding:7px 14px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.4);color:#ef4444;border-radius:6px;font-family:\'Share Tech Mono\',monospace;font-size:11px;font-weight:700;letter-spacing:0.06em;cursor:pointer;">✗ DENY</button>' +
+                            '<button onclick="pflxHomeResolve(\'approve\',\'' + dataKind + '\',\'' + escapeHtml(dataId) + '\')" style="padding:7px 14px;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;border:none;border-radius:6px;font-family:\'Share Tech Mono\',monospace;font-size:11px;font-weight:800;letter-spacing:0.06em;cursor:pointer;">✓ APPROVE</button>' +
+                            '<button onclick="pflxHomeResolve(\'deny\',\'' + dataKind + '\',\'' + escapeHtml(dataId) + '\')" style="padding:7px 14px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.4);color:#ef4444;border-radius:6px;font-family:\'Share Tech Mono\',monospace;font-size:11px;font-weight:700;letter-spacing:0.06em;cursor:pointer;">✗ DENY</button>' +
                           '</div>') +
                 '</div>';
             }).join('');
         }
         window.renderApprovalsCard = renderApprovalsCard;
+
+        // ── Approval helpers (July 15) ──
+        // One resolver for every kind — arena items route through the MC
+        // Approvals engine; everything else through the existing handlers.
+        window.pflxHomeResolve = function (action, kind, id) {
+            try {
+                if (kind === 'arena') {
+                    if (action === 'approve') { if (typeof mcApproveItem === 'function') mcApproveItem('arena_external', id); }
+                    else { if (typeof mcRejectItem === 'function') mcRejectItem('arena_external', id); }
+                    setTimeout(function () { try { renderApprovalsCard(); } catch (e) {} }, 300);
+                    return;
+                }
+                if (action === 'approve') pflxApproveSubmission(kind, id);
+                else pflxDenySubmission(kind, id);
+            } catch (e) { console.warn('[approvals] resolve failed', e); }
+        };
+        // Open the actual submission behind an approval item.
+        window.pflxOpenApprovalSource = function (kind, id) {
+            try {
+                if (kind === 'trade') { try { navigateTo('xcoin'); } catch (e) {} return; }
+                if (typeof navigateTo === 'function') navigateTo('mission-control');
+                if (kind === 'task' || kind === 'tasksub') {
+                    var tid = String(id).split('::')[0];
+                    setTimeout(function () { try { mcJumpToItem('task', tid); } catch (e) {} }, 500);
+                } else {
+                    // reward / coinsub / arena → the MC Approvals tab holds the full record
+                    setTimeout(function () { try { if (typeof mcNav === 'function') mcNav('approvals'); } catch (e) {} }, 500);
+                }
+            } catch (e) {}
+        };
+        window._homeAppSel = window._homeAppSel || {};
+        window.homeApprovalToggle = function (cb) {
+            var k = cb.getAttribute('data-appr');
+            if (cb.checked) window._homeAppSel[k] = 1; else delete window._homeAppSel[k];
+            var c = document.getElementById('approvals-sel-count');
+            if (c) c.textContent = Object.keys(window._homeAppSel).length + ' selected';
+        };
+        window.homeApprovalSelectAll = function (on) {
+            document.querySelectorAll('#approvals-list input[data-appr]').forEach(function (cb) {
+                cb.checked = on;
+                var k = cb.getAttribute('data-appr');
+                if (on) window._homeAppSel[k] = 1; else delete window._homeAppSel[k];
+            });
+            var c = document.getElementById('approvals-sel-count');
+            if (c) c.textContent = Object.keys(window._homeAppSel).length + ' selected';
+        };
+        window.homeApprovalBulk = function (action, all) {
+            var keys = all
+                ? Array.prototype.map.call(document.querySelectorAll('#approvals-list input[data-appr]'), function (cb) { return cb.getAttribute('data-appr'); })
+                : Object.keys(window._homeAppSel);
+            if (!keys.length) { if (typeof pflxToast === 'function') pflxToast('Select at least one submission first', 'warn'); return; }
+            if (!confirm((action === 'approve' ? 'Approve ' : 'Deny ') + keys.length + ' submission(s)?')) return;
+            var note = action === 'deny' ? (prompt('Optional note sent to every denied player:', '') || '') : '';
+            keys.forEach(function (k) {
+                var i = k.indexOf('|');
+                var kind = k.slice(0, i), id = k.slice(i + 1);
+                try {
+                    if (kind === 'arena') {
+                        if (action === 'approve') { if (typeof mcApproveItem === 'function') mcApproveItem('arena_external', id); }
+                        else { if (typeof mcRejectItem === 'function') mcRejectItem('arena_external', id); }
+                    } else if (action === 'approve') {
+                        pflxApproveSubmission(kind, id);
+                    } else {
+                        pflxDenySubmission(kind, id, note);
+                    }
+                } catch (e) { console.warn('[approvals] bulk item failed', kind, id, e); }
+            });
+            window._homeAppSel = {};
+            if (typeof pflxToast === 'function') pflxToast('✓ ' + keys.length + ' submission(s) ' + (action === 'approve' ? 'approved' : 'denied'), 'success');
+            setTimeout(function () { try { renderApprovalsCard(); } catch (e) {} }, 700);
+        };
 
         window.pflxApproveSubmission = function (kind, id) {
             try {
@@ -20215,13 +20329,16 @@
             }
         }
 
-        window.pflxDenySubmission = function (kind, id) {
+        window.pflxDenySubmission = function (kind, id, noteArg) {
             try {
                 if (_pflxApprovalEnforce() && !_pflxApprovalActionAllowed(kind, id)) {
                     if (typeof pflxToast === 'function') pflxToast('Your access tier can’t act on this item.', 'error');
                     return;
                 }
-                var note = prompt('Optional: explain why this is being denied (the player will see it).', '') || '';
+                // Bulk deny passes the note in (one prompt for the whole batch).
+                var note = (noteArg !== undefined && noteArg !== null)
+                    ? String(noteArg)
+                    : (prompt('Optional: explain why this is being denied (the player will see it).', '') || '');
                 if (kind === 'reward') {
                     var queue = _pflxLoadRewardRequests();
                     var i = queue.findIndex(function (r) { return r && r.id === id; });
@@ -60643,7 +60760,10 @@ RESPONSE RULES:
             var btn = document.getElementById('toolbar-live-btn');
             var badge = document.getElementById('toolbar-live-badge');
             if (!btn || !badge) return;
-            btn.style.display = _prIsHostView() ? 'inline-flex' : 'none';
+            // July 15 (Ennis): players see the Live Roster too — everyone can
+            // know who's active on the platform. Host-only extras (call toasts)
+            // stay host-only.
+            btn.style.display = 'inline-flex';
             badge.textContent = String(count);
             badge.style.display = count > 0 ? 'flex' : 'none';
             // Color badge by highest activity present
@@ -60730,7 +60850,7 @@ RESPONSE RULES:
         window.pflxPresenceTogglePanel = function () {
             var panel = document.getElementById('pflx-presence-panel');
             if (!panel) return;
-            if (!_prIsHostView()) { if (typeof pflxToast === 'function') pflxToast('Live Roster is a host-only view.', 'warn'); return; }
+            // July 15 (Ennis): open to every logged-in user, not just hosts.
             _prVisible = !(panel.style.display === 'flex');
             panel.style.display = _prVisible ? 'flex' : 'none';
             if (_prVisible) _prRenderPanel();
