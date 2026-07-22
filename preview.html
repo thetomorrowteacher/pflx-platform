@@ -32421,15 +32421,77 @@
             if (pl) { if (pl.brand) keys[pl.brand] = 1; if (pl.name) keys[pl.name] = 1; }
             return task.submissions.find(function (s) { return s && (keys[s.playerId] || keys[s.submittedBy] || keys[s.submittedById]); }) || null;
         }
+        // ── ROLL-UP REWARDS (July 15, Ennis) ── when a player has EVERY task
+        // in a Project approved, they receive the Project's own XC + badges;
+        // same for the Checkpoint once every task under it is approved for
+        // them. Paid exactly once per player via rec.completionAwards[pid].
+        function _mcRollupAwards(playerId) {
+            try {
+                if (!playerId || !window.PflxDataBus) return;
+                var player = (typeof pflxLookupPlayer === 'function') ? pflxLookupPlayer(playerId) : null;
+                var brand = (player && (player.brand || player.name)) || 'player';
+                function payOut(rec, kind, label) {
+                    rec.completionAwards = rec.completionAwards || {};
+                    if (rec.completionAwards[playerId]) return false;
+                    var xc = rec.xcReward || rec.xcAward || 0;
+                    var badges = Array.isArray(rec.rewardBadges) ? rec.rewardBadges : [];
+                    if (!xc && !badges.length) { rec.completionAwards[playerId] = Date.now(); return false; }
+                    if (xc) window.PflxDataBus.award(playerId, { xc: xc, source: 'mc', reason: kind + ':' + rec.id });
+                    badges.forEach(function (b) {
+                        window.PflxDataBus.award(playerId, { badge: _pflxResolveAwardBadge(b), source: 'mc', reason: kind + ':' + rec.id });
+                    });
+                    rec.completionAwards[playerId] = Date.now();
+                    try { if (typeof pflxToast === 'function') pflxToast('🏆 @' + brand + ' completed ' + label + (xc ? ' · +' + xc + ' XC' : '') + (badges.length ? ' · ' + badges.length + ' badge(s)' : ''), 'success', 5000); } catch (e) {}
+                    return true;
+                }
+                var cohorts = (typeof pflxPlayerCohorts === 'function') ? pflxPlayerCohorts(player || { id: playerId }) : [];
+                var changedP = false, changedC = false;
+                (typeof mcProjects !== 'undefined' && Array.isArray(mcProjects) ? mcProjects : []).forEach(function (proj) {
+                    if (!proj) return;
+                    var ts = (typeof mcChildTasksForProject === 'function') ? mcChildTasksForProject(proj) : [];
+                    var mine = ts.filter(function (t) { try { return pflxPlayerCanSeeItem(t, playerId, cohorts); } catch (e) { return false; } });
+                    if (!mine.length) return;
+                    var allApproved = mine.every(function (t) { return pflxTaskStateForPlayer(t, playerId) === 'approved'; });
+                    if (allApproved && payOut(proj, 'project', 'Project: ' + (proj.name || proj.title || 'Project'))) changedP = true;
+                });
+                (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints) ? mcCheckpoints : []).forEach(function (cp) {
+                    if (!cp) return;
+                    var pr = null;
+                    try { pr = pflxPlayerCheckpointProgress(cp, player || { id: playerId, cohort: '' }); } catch (e) {}
+                    if (!pr || !pr.total) return;
+                    if (pr.approved === pr.total && payOut(cp, 'checkpoint', 'Checkpoint: ' + (cp.name || 'Checkpoint'))) changedC = true;
+                });
+                if (changedP) { try { mcSaveData('projects'); } catch (e) {} }
+                if (changedC) { try { mcSaveData('checkpoints'); } catch (e) {} }
+            } catch (e) { console.warn('[MC] rollup awards failed', e); }
+        }
+        window._mcRollupAwards = _mcRollupAwards;
         function mcApprovePlayerSubmission(taskId, playerId) {
             var task = (mcTasks || []).find(function (t) { return t && t.id === taskId; });
             if (!task) return;
-            var unmet = _mcTaskUnmetDependencies(task);
-            if (unmet.length > 0) {
-                try { pflxPlaySfx('error'); } catch (e) {}
-                alert('Cannot approve — dependencies not yet approved:\n\n' + unmet.slice(0, 5).map(function (t) { return '• ' + (t.title || 'Untitled'); }).join('\n'));
-                return;
-            }
+            // ── Dependency check: PER-PLAYER and SOFT (July 15, Ennis) ──
+            // Old behavior blocked on TASK-level dependency approval, which
+            // (under the all-players completion rule) could never clear until
+            // all 43 players finished — and it ignored that THIS player had
+            // already been approved on the blocker. Now: check the dependency
+            // for this specific player, and even then only CONFIRM — hosts can
+            // approve in any order they choose.
+            try {
+                if (Array.isArray(task.dependsOn) && task.dependsOn.length) {
+                    var __unmetMine = task.dependsOn
+                        .map(function (id) { return (mcTasks || []).find(function (t) { return t && t.id === id; }); })
+                        .filter(function (d) {
+                            if (!d) return false;
+                            try { return pflxTaskStateForPlayer(d, playerId) !== 'approved'; } catch (e) { return !_mcTaskIsApproved(d); }
+                        });
+                    if (__unmetMine.length > 0) {
+                        var __ok = confirm('Heads up — this player is not yet approved on:\n\n' +
+                            __unmetMine.slice(0, 5).map(function (t) { return '• ' + (t.title || 'Untitled'); }).join('\n') +
+                            '\n\nApprove this submission anyway?');
+                        if (!__ok) return;
+                    }
+                }
+            } catch (e) {}
             var sub = _mcFindPlayerSub(task, playerId);
             if (!sub) { if (typeof pflxToast === 'function') pflxToast('Submission not found for that player.', 'error'); return; }
             if (sub.status === 'approved') return;
@@ -32455,6 +32517,19 @@
                     });
                 }
             } catch (eAward) { console.warn('[MC] per-player award failed', eAward); }
+            // Project/Checkpoint completion rewards for this player (July 15).
+            try { _mcRollupAwards(pid); } catch (e) {}
+            // Re-sync canonical numbers after any rollup payout.
+            try {
+                var canon2 = window.PflxDataBus ? window.PflxDataBus.get(pid) : null;
+                if (canon2) {
+                    var mi2 = mcPlayers.findIndex(function (p) { return p && p.id === pid; });
+                    if (mi2 >= 0) mcPlayers[mi2] = Object.assign({}, mcPlayers[mi2], {
+                        xc: canon2.xc, totalXcoin: canon2.totalXcoin, digitalBadges: canon2.digitalBadges,
+                        badgeCounts: canon2.badgeCounts, badges: canon2.badges, level: canon2.level, rank: canon2.rank
+                    });
+                }
+            } catch (e) {}
             try { _mcApplyStreakBonus(pid, task); } catch (e) {}
             try {
                 mcAutomationsFire('task.approved', {
@@ -32521,16 +32596,12 @@
                 }
                 return;
             }
-            // ── Dependency guard-rail ──
-            // Block approval until every task in dependsOn is approved.
-            // Ships an actionable alert listing the blockers so the host
-            // can jump to them directly.
+            // ── Dependency heads-up (July 15, Ennis: hosts approve in ANY
+            // order) ── dependencies are surfaced as a confirm, never a block.
             var unmet = _mcTaskUnmetDependencies(task);
             if (unmet.length > 0) {
-                try { pflxPlaySfx('error'); } catch (e) {}
                 var titles = unmet.slice(0, 5).map(function (t) { return '• ' + (t.title || 'Untitled'); }).join('\n');
-                alert('Cannot approve — the following dependencies are not yet approved:\n\n' + titles + (unmet.length > 5 ? '\n… and ' + (unmet.length - 5) + ' more' : ''));
-                return;
+                if (!confirm('Heads up — these dependency tasks are not fully approved yet:\n\n' + titles + (unmet.length > 5 ? '\n… and ' + (unmet.length - 5) + ' more' : '') + '\n\nApprove anyway?')) return;
             }
             pflxPlaySfx('success');
             task.status = 'approved';
