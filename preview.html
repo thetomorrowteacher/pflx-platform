@@ -22650,7 +22650,17 @@
         window.pflxTombstoneMergeCloud = function (cloud) {
             if (!cloud || typeof cloud !== 'object') return 0;
             var t = window.pflxTombstones, changed = 0;
-            Object.keys(cloud).forEach(function (k) { if (!t[k]) { t[k] = cloud[k]; changed++; } });
+            Object.keys(cloud).forEach(function (k) {
+                if (cloud[k] === 0 || cloud[k] === false) {
+                    // REVOKED deletion (July 15): a cloud value of 0 means "this
+                    // player was restored — stop treating them as deleted". Keep
+                    // the 0 marker locally so a stale device can't re-tombstone
+                    // them by pushing its old map back up.
+                    if (t[k] !== 0) { t[k] = 0; changed++; }
+                } else if (!t[k] && t[k] !== 0) {
+                    t[k] = cloud[k]; changed++;
+                }
+            });
             if (changed) _pflxTombSaveLocal();
             return changed;
         };
