@@ -12884,7 +12884,7 @@
             </div>
 
             <!-- X-BOT TOGGLE TAB (visible when panel is closed) -->
-            <div class="xbot-toggle-tab" id="xbot-toggle-tab" onclick="toggleXBotPanel()" title="Open X-Bot">
+            <div class="xbot-toggle-tab" id="xbot-toggle-tab" onclick="toggleXBotPanel()" title="Open X-Bot — drag to move">
                 <img src="public/X Official for PFLX.png" alt="X-Bot" style="width:24px;height:24px;object-fit:contain;filter:drop-shadow(0 0 4px rgba(0,240,255,0.5));">
             </div>
 
@@ -14360,6 +14360,27 @@
                     }
                 }
             } catch(e) {}
+            // ── CANON REFRESH (July 22, beta feedback: toolbar shows 0 XC while
+            // Home shows the real balance) ── pflx_user is X-Coin's device-local
+            // snapshot; on a fresh device it's stale zeros. The PflxDataBus canon
+            // (falling back to the live roster record) is the source of truth
+            // and always wins over pflx_user.
+            try {
+                var __canon = (window.PflxDataBus && activeSession.id) ? window.PflxDataBus.get(activeSession.id) : null;
+                if (!__canon && typeof pflxLookupPlayer === 'function') {
+                    var __rp = pflxLookupPlayer(activeSession.id);
+                    if (__rp) __canon = {
+                        xc: (__rp.xcoin != null ? __rp.xcoin : __rp.xc),
+                        totalXcoin: __rp.totalXcoin,
+                        digitalBadges: __rp.digitalBadges
+                    };
+                }
+                if (__canon) {
+                    if (__canon.xc != null) activeSession.xc = __canon.xc;
+                    if (__canon.totalXcoin != null) activeSession.totalXcoin = __canon.totalXcoin;
+                    if (__canon.digitalBadges != null) activeSession.digitalBadges = __canon.digitalBadges;
+                }
+            } catch (e) {}
 
             // Player name
             const nameEl = document.getElementById('toolbar-player-name');
@@ -18784,8 +18805,12 @@
                 const slogan = document.getElementById('slogan-input').value.trim();
                 if (!slogan) { shakeEl(document.getElementById('slogan-input')); return; }
                 newPlayerData.slogan = slogan;
-                // If imported player already picked a brand, skip brand creation
-                if (newPlayerData.isImported && newPlayerData.brandName && newPlayerData.brandName !== '') {
+                // If imported player already picked a brand, skip brand creation.
+                // July 22 (Kabir): placeholder brands like "BrandName?" don't
+                // count — those players still get the Create Your Brand page.
+                var __realBrand = newPlayerData.brandName && newPlayerData.brandName !== '' &&
+                    !/^brandname\??$|^\?+$|^tbd$|^n\/?a$/i.test(String(newPlayerData.brandName).trim());
+                if (newPlayerData.isImported && __realBrand) {
                     // Skip brand page, skip cohort page (they have a cohort), go to summary
                     fillSummary();
                     showOnboardPage(7);
@@ -23222,6 +23247,17 @@
                                     if (prev.claimed && !np.claimed) np.claimed = true;
                                     np.updatedAt = prev.updatedAt;
                                 }
+                                // ── ZERO-BALANCE GUARD (July 22, beta feedback:
+                                // Hannah/Alivia — toolbar and wallet showed 0 XC
+                                // while Home showed the real balance) ── the
+                                // timestamp guard above misses payloads with no
+                                // updatedAt at all. Absolute rule: an incoming
+                                // ZERO never overwrites a positive balance or a
+                                // non-empty badge list, timestamps or not.
+                                if ((np.xcoin == null || np.xcoin === 0) && prev.xcoin > 0) np.xcoin = prev.xcoin;
+                                if ((np.xc == null || np.xc === 0) && prev.xc > 0) np.xc = prev.xc;
+                                if ((np.totalXcoin == null || np.totalXcoin === 0) && prev.totalXcoin > 0) np.totalXcoin = prev.totalXcoin;
+                                if ((np.digitalBadges == null || np.digitalBadges === 0) && prev.digitalBadges > 0) np.digitalBadges = prev.digitalBadges;
                             }
                         });
                         mcPlayers = msg.data;
@@ -59799,10 +59835,24 @@ RESPONSE RULES:
                     .subscribe();
             } catch (e) {}
         }
+        // Membership check shared by the list, the unread badge, and thread-open.
+        function _pcThreadIsMine(t, me) {
+            if (!t) return false;
+            me = me || _pcMe();
+            if (Array.isArray(t.participants) &&
+                (t.participants.indexOf(me.id) !== -1 || (me.name && t.participants.indexOf(me.name) !== -1))) return true;
+            try {
+                var s = window.activeSession || {};
+                if (typeof pflxIsHostRole === 'function' && pflxIsHostRole(s.role)) return true;   // hosts moderate everything
+                if (t.cohort && s.cohort && String(t.cohort).trim().toLowerCase() === String(s.cohort).trim().toLowerCase()) return true;
+            } catch (e) {}
+            return false;
+        }
         function _pcRefreshBadge() {
             var me = _pcMe();
             var unread = 0;
             _pcThreads.forEach(function (t) {
+                if (!_pcThreadIsMine(t, me)) return;   // don't count chats that aren't mine
                 (t.messages || []).forEach(function (m) {
                     if (m.senderId !== me.id && !(Array.isArray(m.readBy) && m.readBy.indexOf(me.id) !== -1)) unread++;
                 });
@@ -60208,12 +60258,16 @@ RESPONSE RULES:
             if (!body) return;
             var me = _pcMe();
             if (!_pcCurrentThreadId) {
-                // Thread list
-                if (_pcThreads.length === 0) {
+                // Thread list — PRIVACY (July 22, beta feedback: "I can see
+                // chats I'm not even a part of"): only show threads I belong
+                // to. Membership = I'm a participant, it's my cohort's group
+                // chat, or I'm a host (moderation view).
+                var _mine = _pcThreads.filter(function (t) { return _pcThreadIsMine(t, me); });
+                if (_mine.length === 0) {
                     body.innerHTML = '<div style="padding:36px 20px;text-align:center;color:rgba(255,255,255,0.35);font-size:12px;">No conversations yet. Click <strong>+ NEW</strong> above to start one.</div>';
                     return;
                 }
-                var sorted = _pcThreads.slice().sort(function (a, b) { return (b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || ''); });
+                var sorted = _mine.slice().sort(function (a, b) { return (b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || ''); });
                 body.innerHTML = sorted.map(function (t) {
                     var last = (t.messages || []).slice(-1)[0];
                     var unread = (t.messages || []).filter(function (m) { return m.senderId !== me.id && !(Array.isArray(m.readBy) && m.readBy.indexOf(me.id) !== -1); }).length;
@@ -60918,6 +60972,48 @@ RESPONSE RULES:
                 document.addEventListener('visibilitychange', _prTrack);
             } catch (e) { console.warn('[presence] boot failed', e); }
         }
+        // ── X-Bot tab: draggable (July 22, beta feedback: "the icon overlaps
+        // other icons") ── grab and slide it anywhere along the right edge;
+        // the position is remembered per device. A short drag still counts as
+        // a click, so opening X-Bot works exactly as before.
+        (function () {
+            var tab = null, startY = 0, startTop = 0, moved = false;
+            function attach() {
+                tab = document.getElementById('xbot-toggle-tab');
+                if (!tab) { setTimeout(attach, 1500); return; }
+                try {
+                    var saved = parseFloat(localStorage.getItem('pflx_xbot_tab_top') || '');
+                    if (!isNaN(saved)) { tab.style.top = saved + 'px'; tab.style.transform = 'none'; }
+                } catch (e) {}
+                tab.addEventListener('pointerdown', function (e) {
+                    startY = e.clientY;
+                    startTop = tab.getBoundingClientRect().top;
+                    moved = false;
+                    function onMove(ev) {
+                        var dy = ev.clientY - startY;
+                        if (Math.abs(dy) > 6) moved = true;
+                        if (!moved) return;
+                        var top = Math.max(60, Math.min(window.innerHeight - 100, startTop + dy));
+                        tab.style.top = top + 'px';
+                        tab.style.transform = 'none';
+                    }
+                    function onUp() {
+                        document.removeEventListener('pointermove', onMove);
+                        document.removeEventListener('pointerup', onUp);
+                        if (moved) {
+                            try { localStorage.setItem('pflx_xbot_tab_top', String(tab.getBoundingClientRect().top)); } catch (e) {}
+                            // Swallow the click that follows a drag.
+                            var stop = function (ce) { ce.stopPropagation(); ce.preventDefault(); tab.removeEventListener('click', stop, true); };
+                            tab.addEventListener('click', stop, true);
+                            setTimeout(function () { tab.removeEventListener('click', stop, true); }, 250);
+                        }
+                    }
+                    document.addEventListener('pointermove', onMove);
+                    document.addEventListener('pointerup', onUp);
+                });
+            }
+            setTimeout(attach, 1200);
+        })();
         window.pflxPresenceTogglePanel = function () {
             var panel = document.getElementById('pflx-presence-panel');
             if (!panel) return;
