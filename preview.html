@@ -25629,8 +25629,13 @@
                 return;
             }
 
+            // July 23 (beta feedback — Kaitlin/Ayrene/Feba/Hannah: "0/0 tasks",
+            // 0% while their work was approved): cards showed the static
+            // cp.progress field + GLOBAL task status. Players now see THEIR
+            // OWN progress; hosts keep the aggregate.
+            var __cpsPid = (window.activeSession || {}).id || null;
+            var __cpsIsHost = (typeof window.pflxRole !== 'undefined' && window.pflxRole === 'host');
             checkpoints.forEach(function(cp) {
-                var pct = cp.progress || 0;
                 var isActive = cp.status === 'active' || cp.status === 'current';
                 var statusColor = isActive ? '#22c55e' : cp.status === 'completed' ? 'var(--cyan)' : 'rgba(255,255,255,0.3)';
                 var borderColor = isActive ? 'rgba(34,197,94,0.25)' : 'rgba(255,255,255,0.06)';
@@ -25648,7 +25653,11 @@
                 var cpTasks = ppGetTasks().filter(function(t) {
                     return ppItemInCheckpoint(t, cp.id) && ppItemAssignedToActivePlayer(t);
                 });
-                var cpDone = cpTasks.filter(function(t) { return t.completed || t.status === 'approved'; }).length;
+                var cpDone = cpTasks.filter(function(t) {
+                    if (__cpsIsHost) return (typeof _mcTaskHostComplete === 'function') ? _mcTaskHostComplete(t) : (t.completed || t.status === 'approved');
+                    try { return pflxTaskStateForPlayer(t, __cpsPid) === 'approved'; } catch (e) { return t.completed || t.status === 'approved'; }
+                }).length;
+                var pct = cpTasks.length ? Math.round(cpDone * 100 / cpTasks.length) : (cp.progress || 0);
 
                 // Outer card. overflow:hidden so the banner image can be flush
                 // against the top-left/top-right corners.
@@ -25722,11 +25731,20 @@
                 { label: cp.name || 'Detail', view: 'checkpoint-detail' }
             ]);
 
-            // Real aggregate progress across every player task in scope.
-            // Falls back to the pre-computed cp.progress if the MC helper
-            // isn't available (defensive — Player Portal can load before MC
-            // finishes booting).
-            var cpProg = (typeof _mcCheckpointProgress === 'function') ? _mcCheckpointProgress(cp) : { approved: 0, total: 0, pct: cp.progress || 0 };
+            // July 23 (beta feedback): the hero showed the COHORT-WIDE aggregate
+            // to players — 0% for everyone until ALL players finish (and "0 of
+            // 3 approved" even when THEIR tasks were approved). Players now see
+            // their OWN progress; hosts keep the aggregate.
+            var __cpdIsHost = (typeof window.pflxRole !== 'undefined' && window.pflxRole === 'host');
+            var cpProg;
+            if (!__cpdIsHost) {
+                var __cpdMe = window.activeSession || {};
+                var __ppProg = null;
+                try { __ppProg = pflxPlayerCheckpointProgress(cp, { id: __cpdMe.id, cohort: __cpdMe.cohort, cohorts: __cpdMe.cohorts }); } catch (e) {}
+                cpProg = __ppProg || { approved: 0, total: 0, pct: cp.progress || 0 };
+            } else {
+                cpProg = (typeof _mcCheckpointProgress === 'function') ? _mcCheckpointProgress(cp) : { approved: 0, total: 0, pct: cp.progress || 0 };
+            }
             var pct = cpProg.pct;
             var isActive = cp.status === 'active' || cp.status === 'current';
             var ppDetailAccentRgb = isActive ? '0,212,255' : cp.status === 'upcoming' ? '79,142,247' : '245,200,66';
@@ -25765,12 +25783,12 @@
             // ── CHECKPOINT PROGRESS hero panel ── mirrors MC's aggregate bar.
             html += '<div style="margin-bottom:14px;padding:16px 18px;background:rgba(' + ppDetailAccentRgb + ',0.06);border:1px solid rgba(' + ppDetailAccentRgb + ',0.30);border-radius:14px;">' +
                 '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:10px;">' +
-                    '<span style="font-family:Orbitron,sans-serif;font-size:12px;color:rgba(' + ppDetailAccentRgb + ',1);font-weight:800;letter-spacing:0.12em;">◆ CHECKPOINT PROGRESS</span>' +
+                    '<span style="font-family:Orbitron,sans-serif;font-size:12px;color:rgba(' + ppDetailAccentRgb + ',1);font-weight:800;letter-spacing:0.12em;">◆ ' + (__cpdIsHost ? 'CHECKPOINT PROGRESS (ALL PLAYERS)' : 'YOUR CHECKPOINT PROGRESS') + '</span>' +
                     '<span style="font-size:18px;color:' + (pct === 100 ? '#22c55e' : '#ffffff') + ';font-weight:900;font-family:monospace;">' + pct + '%</span>' +
                 '</div>' +
                 (typeof _mcProgressBarHtml === 'function' ? _mcProgressBarHtml(pct, { height: 14 }) : ppProgressBar(pct, '#f5c842')) +
                 '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12px;color:rgba(255,255,255,0.7);">' +
-                    '<span>✓ ' + cpProg.approved + ' of ' + cpProg.total + ' tasks approved</span>' +
+                    '<span>✓ ' + cpProg.approved + ' of ' + cpProg.total + (__cpdIsHost ? ' player-task completions' : ' of your tasks approved') + '</span>' +
                     (cpUrg && (cp.endDate || cp.dueDate) ? '<span style="color:rgba(' + cpUrg.rgb + ',1);font-weight:700;">📅 ' + cpUrg.label + '</span>' : '') +
                 '</div>' +
             '</div>';
@@ -44490,26 +44508,63 @@
            ═══════════════════════════════════════════════════════════════════ */
         (function () {
           'use strict';
-          // On init, load tracks from localStorage into window.pflxLoadingPlaylist
+          // On init, build window.pflxLoadingPlaylist. July 23 rework (Ennis:
+          // "music plays but it's not in my Sound Engine"): the legacy
+          // 'pflx_loading_playlist' key used to WIN over SE.config, so old
+          // fat copies kept playing as ghost tracks the panel never listed.
+          // Now SE.config.loadingMusic.tracks is the ONLY source of truth;
+          // legacy entries with audio are migrated INTO it (visible in the
+          // panel + stored in IndexedDB), then the legacy key is thinned.
           function syncPlaylistFromStorage() {
+            var cfgTracks = (typeof SE !== 'undefined' && SE.config && SE.config.loadingMusic && Array.isArray(SE.config.loadingMusic.tracks))
+                ? SE.config.loadingMusic.tracks : null;
+            // ── Legacy migration ──
             try {
               var raw = localStorage.getItem('pflx_loading_playlist');
-              if (raw) {
-                var arr = JSON.parse(raw);
-                if (Array.isArray(arr) && arr.length) {
-                  window.pflxLoadingPlaylist = arr.map(function(t) { return t.dataUrl || t.url; }).filter(Boolean);
+              var arr = raw ? JSON.parse(raw) : null;
+              if (Array.isArray(arr) && arr.length && cfgTracks) {
+                var fat = arr.filter(function (t) { return t && typeof t.dataUrl === 'string' && t.dataUrl.length > 1024; });
+                if (fat.length) {
+                  var migrated = 0;
+                  fat.forEach(function (t) {
+                    var exists = cfgTracks.some(function (c) { return c && ((t.id && c.id === t.id) || (t.name && c.name === t.name)); });
+                    if (exists) return;
+                    var trackId = t.id || ('lm-mig-' + Date.now() + '-' + Math.floor(Math.random() * 1000));
+                    var idbKey = 'se_lm_' + trackId;
+                    var rec = { id: trackId, name: t.name || 'Migrated track', url: t.url || '', idbKey: idbKey, dataUrl: t.dataUrl };
+                    cfgTracks.push(rec);
+                    migrated++;
+                    if (typeof pflxDBAudioSave === 'function') { try { pflxDBAudioSave(idbKey, t.dataUrl); } catch (e) {} }
+                  });
+                  if (migrated) {
+                    console.log('[PFLX] 🎵 migrated ' + migrated + ' ghost loading track(s) into the Sound Engine');
+                    if (typeof window.pflxSESaveConfigSafe === 'function') window.pflxSESaveConfigSafe();
+                    if (typeof window.pflxAdvRenderLoadingMusicList === 'function') { try { window.pflxAdvRenderLoadingMusicList(); } catch (e) {} }
+                  }
+                  // Thin the legacy key either way — audio never lives here again.
+                  try {
+                    localStorage.setItem('pflx_loading_playlist', JSON.stringify(cfgTracks.map(function (c) {
+                      return { id: c.id, name: c.name, url: c.url || '', idbKey: c.idbKey || '' };
+                    })));
+                  } catch (e) {}
                 }
               }
             } catch (e) {}
-            // Also sync from SE.config.loadingMusic.tracks if pflxLoadingPlaylist is empty
-            if ((!window.pflxLoadingPlaylist || !window.pflxLoadingPlaylist.length) && typeof SE !== 'undefined' && SE.config && SE.config.loadingMusic && SE.config.loadingMusic.tracks) {
-              var tracks = SE.config.loadingMusic.tracks;
-              if (tracks.length) {
-                window.pflxLoadingPlaylist = tracks.map(function(t) { return t.dataUrl || t.url; }).filter(Boolean);
-              }
+            // ── Single source of truth: SE.config ──
+            if (cfgTracks) {
+              window.pflxLoadingPlaylist = cfgTracks.map(function (t) { return t.dataUrl || t.url; }).filter(Boolean);
+            } else {
+              // SE not booted yet — legacy fallback until the next sync pass.
+              try {
+                var raw2 = localStorage.getItem('pflx_loading_playlist');
+                var arr2 = raw2 ? JSON.parse(raw2) : null;
+                if (Array.isArray(arr2) && arr2.length) {
+                  window.pflxLoadingPlaylist = arr2.map(function (t) { return t.dataUrl || t.url; }).filter(Boolean);
+                }
+              } catch (e) {}
             }
-            // July 23: tracks persisted via idbKey carry no dataUrl in the
-            // config — pull the audio back out of IndexedDB into memory.
+            // Tracks persisted via idbKey carry no dataUrl in the config —
+            // pull the audio back out of IndexedDB into memory.
             try { if (typeof window.pflxHydrateLoadingMusic === 'function') window.pflxHydrateLoadingMusic(); } catch (e) {}
           }
           syncPlaylistFromStorage();
