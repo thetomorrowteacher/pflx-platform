@@ -13380,6 +13380,27 @@
             } catch (e) { return false; }
         };
 
+        // ── SAFE Sound-Engine config save (July 23, QuotaExceededError) ──
+        // Audio payloads (base64 dataUrls) belong in IndexedDB, never in
+        // localStorage. This save strips any large dataUrl from the persisted
+        // copy (playback uses the in-memory / IndexedDB copy) and never
+        // throws — a quota failure logs + toasts instead of crashing the
+        // Save All Settings flow.
+        window.pflxSESaveConfigSafe = function () {
+            try {
+                if (typeof SE === 'undefined' || !SE.config) return false;
+                var thin = JSON.parse(JSON.stringify(SE.config, function (k, v) {
+                    return (k === 'dataUrl' && typeof v === 'string' && v.length > 65536) ? undefined : v;
+                }));
+                localStorage.setItem('pflx_sound_engine', JSON.stringify(thin));
+                return true;
+            } catch (e) {
+                console.warn('[SE] config save failed', e);
+                try { if (typeof pflxToast === 'function') pflxToast('⚠ Sound settings could not be saved (storage full). Audio files are kept in the media store — remove unused tracks and try again.', 'error'); } catch (e2) {}
+                return false;
+            }
+        };
+
         // ── 2. Safe localStorage wrapper for Safari Private Browsing ──
         // Safari Private Browsing throws QuotaExceededError on setItem,
         // and some iPadOS versions throw on getItem too.
@@ -16177,7 +16198,7 @@
             // writers to overwrite each other (toggling a setting via one path
             // didn't show up in the other on next read). Single key now.
             if (typeof SE !== 'undefined') {
-                localStorage.setItem('pflx_sound_engine', JSON.stringify(SE.config));
+                (window.pflxSESaveConfigSafe ? window.pflxSESaveConfigSafe() : localStorage.setItem('pflx_sound_engine', JSON.stringify(SE.config)));
                 localStorage.setItem('pflx_se_player_prefs', JSON.stringify(SE.playerPrefs));
             }
             // Save Loading Gallery
@@ -16823,7 +16844,7 @@
         function loadingMusicSave() {
             // Canonical key — same as seHostSave. The legacy 'pflx_se_config'
             // alias was removed to stop two writers competing.
-            try { localStorage.setItem('pflx_sound_engine', JSON.stringify(SE.config)); } catch(e) {}
+            try { (window.pflxSESaveConfigSafe ? window.pflxSESaveConfigSafe() : localStorage.setItem('pflx_sound_engine', JSON.stringify(SE.config))); } catch(e) {}
         }
 
         function loadingMusicSettingSave() {
@@ -44487,6 +44508,9 @@
                 window.pflxLoadingPlaylist = tracks.map(function(t) { return t.dataUrl || t.url; }).filter(Boolean);
               }
             }
+            // July 23: tracks persisted via idbKey carry no dataUrl in the
+            // config — pull the audio back out of IndexedDB into memory.
+            try { if (typeof window.pflxHydrateLoadingMusic === 'function') window.pflxHydrateLoadingMusic(); } catch (e) {}
           }
           syncPlaylistFromStorage();
           // Re-sync after a delay (SE may not be fully loaded yet)
@@ -45180,7 +45204,7 @@
               }
             }
             // Persist
-            try { localStorage.setItem('pflx_sound_engine', JSON.stringify(SE.config)); } catch (e) {}
+            try { (window.pflxSESaveConfigSafe ? window.pflxSESaveConfigSafe() : localStorage.setItem('pflx_sound_engine', JSON.stringify(SE.config))); } catch (e) {}
             if (typeof seApplyVolumes === 'function') seApplyVolumes();
           };
 
@@ -45203,6 +45227,21 @@
             }).join('');
           };
 
+          // July 23 (QuotaExceededError on save): loading-music audio now lives
+          // in IndexedDB like BGM/SFX tracks (idbKey pattern) — the config keeps
+          // only metadata, so 'pflx_sound_engine' stays small enough to save.
+          function _pflxThinLoadingTracks() {
+            return (SE.config.loadingMusic.tracks || []).map(function (t) {
+              return { id: t.id, name: t.name, url: t.url || '', idbKey: t.idbKey || '' };
+            });
+          }
+          function _pflxAdvLoadingSavedAll() {
+            if (typeof window.pflxSESaveConfigSafe === 'function') window.pflxSESaveConfigSafe();
+            window.pflxLoadingPlaylist = SE.config.loadingMusic.tracks.map(function (t) { return t.dataUrl || t.url; }).filter(Boolean);
+            try { localStorage.setItem('pflx_loading_playlist', JSON.stringify(_pflxThinLoadingTracks())); } catch (ex) {}
+            pflxAdvRenderLoadingMusicList();
+            if (typeof renderLoadingMusicList === 'function') renderLoadingMusicList();
+          }
           window.pflxAdvUploadLoadingMusic = function (input) {
             if (!input.files || !input.files.length) return;
             if (typeof SE === 'undefined') return;
@@ -45210,27 +45249,33 @@
             if (!Array.isArray(SE.config.loadingMusic.tracks)) SE.config.loadingMusic.tracks = [];
             var files = Array.from(input.files);
             var remaining = files.length;
+            function done() {
+              remaining--;
+              if (remaining <= 0) {
+                _pflxAdvLoadingSavedAll();
+                if (typeof pflxToast === 'function') pflxToast('Loading music added (' + SE.config.loadingMusic.tracks.length + ' tracks)', 'success');
+              }
+            }
             files.forEach(function (file) {
-              if (file.size > 10 * 1024 * 1024) { if (typeof pflxToast === 'function') pflxToast('Max 10MB: ' + file.name, 'error'); remaining--; return; }
+              if (file.size > 10 * 1024 * 1024) { if (typeof pflxToast === 'function') pflxToast('Max 10MB: ' + file.name, 'error'); done(); return; }
               var reader = new FileReader();
               reader.onload = function (e) {
-                SE.config.loadingMusic.tracks.push({
-                  id: 'lm-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
-                  name: file.name,
-                  url: '',
-                  dataUrl: e.target.result
+                var trackId = 'lm-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+                var idbKey = 'se_lm_' + trackId;
+                var dataUrl = e.target.result;
+                var savePromise = (typeof pflxDBAudioSave === 'function') ? pflxDBAudioSave(idbKey, dataUrl) : Promise.reject();
+                savePromise.then(function () {
+                  // Audio in IndexedDB; keep the dataUrl in MEMORY for instant
+                  // playback this session — the safe-save strips it from the
+                  // persisted config.
+                  SE.config.loadingMusic.tracks.push({ id: trackId, name: file.name, url: '', idbKey: idbKey, dataUrl: dataUrl });
+                  done();
+                }).catch(function () {
+                  // IndexedDB unavailable — memory-only track (never localStorage).
+                  SE.config.loadingMusic.tracks.push({ id: trackId, name: file.name, url: '', dataUrl: dataUrl });
+                  if (typeof pflxToast === 'function') pflxToast('⚠ ' + file.name + ' kept for this session only (media store unavailable)', 'error');
+                  done();
                 });
-                remaining--;
-                if (remaining <= 0) {
-                  try { localStorage.setItem('pflx_sound_engine', JSON.stringify(SE.config)); } catch (ex) {}
-                  // Also sync to pflxLoadingPlaylist
-                  window.pflxLoadingPlaylist = SE.config.loadingMusic.tracks.map(function (t) { return t.dataUrl || t.url; }).filter(Boolean);
-                  // Also save to pflx_loading_playlist
-                  try { localStorage.setItem('pflx_loading_playlist', JSON.stringify(SE.config.loadingMusic.tracks)); } catch (ex) {}
-                  pflxAdvRenderLoadingMusicList();
-                  if (typeof renderLoadingMusicList === 'function') renderLoadingMusicList();
-                  if (typeof pflxToast === 'function') pflxToast('Loading music added (' + SE.config.loadingMusic.tracks.length + ' tracks)', 'success');
-                }
               };
               reader.readAsDataURL(file);
             });
@@ -45239,14 +45284,30 @@
 
           window.pflxAdvRemoveLoadingTrack = function (i) {
             if (typeof SE === 'undefined' || !SE.config.loadingMusic || !SE.config.loadingMusic.tracks) return;
-            SE.config.loadingMusic.tracks.splice(i, 1);
-            try { localStorage.setItem('pflx_sound_engine', JSON.stringify(SE.config)); } catch (e) {}
-            window.pflxLoadingPlaylist = SE.config.loadingMusic.tracks.map(function (t) { return t.dataUrl || t.url; }).filter(Boolean);
-            try { localStorage.setItem('pflx_loading_playlist', JSON.stringify(SE.config.loadingMusic.tracks)); } catch (e) {}
-            pflxAdvRenderLoadingMusicList();
-            if (typeof renderLoadingMusicList === 'function') renderLoadingMusicList();
+            var removed = SE.config.loadingMusic.tracks.splice(i, 1)[0];
+            if (removed && removed.idbKey && typeof pflxDBAudioDelete === 'function') { try { pflxDBAudioDelete(removed.idbKey); } catch (e) {} }
+            _pflxAdvLoadingSavedAll();
             if (typeof pflxToast === 'function') pflxToast('Track removed', 'success');
           };
+
+          // Rehydrate loading-music audio from IndexedDB into memory (boot +
+          // after config loads) so playback keeps working with a thin config.
+          window.pflxHydrateLoadingMusic = function () {
+            try {
+              if (typeof SE === 'undefined' || !SE.config || !SE.config.loadingMusic) return;
+              var tracks = SE.config.loadingMusic.tracks || [];
+              function rebuild() {
+                window.pflxLoadingPlaylist = tracks.map(function (x) { return x.dataUrl || x.url; }).filter(Boolean);
+              }
+              var pending = tracks.filter(function (t) { return t && t.idbKey && !t.dataUrl; });
+              if (!pending.length) { rebuild(); return; }
+              pending.forEach(function (t) {
+                if (typeof pflxDBAudioLoad !== 'function') return;
+                pflxDBAudioLoad(t.idbKey).then(function (d) { if (d) t.dataUrl = d; rebuild(); }).catch(function () {});
+              });
+            } catch (e) {}
+          };
+          setTimeout(function () { try { window.pflxHydrateLoadingMusic(); } catch (e) {} }, 2500);
 
           window.pflxAdvPreviewLoadingMusic = function () {
             if (typeof previewLoadingMusic === 'function') { previewLoadingMusic(); return; }
@@ -45289,7 +45350,7 @@
             if (SE.config.ambient) {
               SE.config.ambient.enabled = false;
             }
-            try { localStorage.setItem('pflx_sound_engine', JSON.stringify(SE.config)); } catch (e) {}
+            try { (window.pflxSESaveConfigSafe ? window.pflxSESaveConfigSafe() : localStorage.setItem('pflx_sound_engine', JSON.stringify(SE.config))); } catch (e) {}
             if (typeof seApplyVolumes === 'function') seApplyVolumes();
             if (window.PFLX_AUDIO) {
               window.PFLX_AUDIO.liveFeedBase = 100;
@@ -51143,7 +51204,7 @@ RESPONSE RULES:
             SE.config.playlistMode = document.getElementById('se-playlist-mode')?.value || 'shuffle';
             var vol = document.getElementById('se-master-vol');
             if (vol) SE.config.masterVolume = parseInt(vol.value, 10) / 100;
-            try { localStorage.setItem('pflx_sound_engine', JSON.stringify(SE.config)); } catch(e) {}
+            try { (window.pflxSESaveConfigSafe ? window.pflxSESaveConfigSafe() : localStorage.setItem('pflx_sound_engine', JSON.stringify(SE.config))); } catch(e) {}
             seApplyVolumes();
             // Make BGM / Login Music toggles take effect on currently playing
             // audio — the previous behavior only applied to *future* audio
