@@ -22837,11 +22837,85 @@
         }
         window._mcMarkLocalWrite = _mcMarkLocalWrite;
 
+        // ── PER-TASK / PER-SUBMISSION MERGE (July 20, Ennis: "approvals keep
+        // resetting — Kabir + Kaitlin vanished") ──
+        // Tasks sync as ONE array with type-level last-write-wins. Every
+        // client (including every PLAYER's browser on submit) pushes the
+        // whole array — so a stale tab that loaded before the host's
+        // approvals wipes those approvals AND other players' submission
+        // entries on its next save. The type-level stamp can't catch it
+        // because the stale writer's stamp is NEWER.
+        // Fix: when a cloud tasks payload is ingested, merge it with local —
+        // union submissions per player (newest entry wins; a reviewed entry
+        // beats a pending one on ties), and per-task scalar fields from
+        // whichever side has the newer task.updatedAt. If the merge restores
+        // anything the cloud copy lost, a healing push is scheduled.
+        function _pflxSubMergeKey(s) { return String((s && (s.playerId || s.submittedById || s.submittedBy)) || ''); }
+        function _pflxSubMergeTime(s) {
+            if (!s) return 0;
+            var t = 0;
+            ['reviewedAt', 'date', 'submittedAt'].forEach(function (f) {
+                var v = s[f]; if (!v) return;
+                var ms = (typeof v === 'number') ? v : (Date.parse(v) || 0);
+                if (ms > t) t = ms;
+            });
+            return t;
+        }
+        function _mcMergeTaskSubmissions(a, b) {
+            var out = [], seen = {};
+            (Array.isArray(a) ? a : []).concat(Array.isArray(b) ? b : []).forEach(function (s) {
+                if (!s) return;
+                var k = _pflxSubMergeKey(s) || ('anon:' + (s.id || out.length));
+                var prev = seen[k];
+                if (!prev) { seen[k] = s; out.push(s); return; }
+                var tP = _pflxSubMergeTime(prev), tS = _pflxSubMergeTime(s);
+                var revP = prev.status === 'approved' || prev.status === 'rejected';
+                var revS = s.status === 'approved' || s.status === 'rejected';
+                if (tS > tP || (tS === tP && revS && !revP)) {
+                    out[out.indexOf(prev)] = s;
+                    seen[k] = s;
+                }
+            });
+            return out;
+        }
+        function _mcMergeTasksCollections(winner, loser) {
+            var loserById = {};
+            (Array.isArray(loser) ? loser : []).forEach(function (t) { if (t && t.id) loserById[t.id] = t; });
+            return (Array.isArray(winner) ? winner : []).map(function (w) {
+                var l = (w && w.id) ? loserById[w.id] : null;
+                if (!l) return w;
+                var base = ((l.updatedAt || 0) > (w.updatedAt || 0)) ? Object.assign({}, w, l) : Object.assign({}, w);
+                var mergedSubs = _mcMergeTaskSubmissions(w.submissions, l.submissions);
+                if (mergedSubs.length) base.submissions = mergedSubs;
+                return base;
+            });
+        }
+        window._mcMergeTasksCollections = _mcMergeTasksCollections;
+
         function _mcIngestCloudRow(key, payload) {
             var type = String(key || '').replace('pflx_mc_', '');
             if (MC_CLOUD_TYPES.indexOf(type) < 0) return false;
             var items = (payload && payload.items !== undefined) ? payload.items : payload;
             if (items === undefined || items === null) return false;
+            // Tasks: never adopt the cloud copy wholesale — merge with local so
+            // reviews/submissions this client holds are not lost to a stale
+            // writer. Heal-push only when the merge actually restored data.
+            if (type === 'tasks' && Array.isArray(items)) {
+                try {
+                    var __localTasks = (typeof mcTasks !== 'undefined' && Array.isArray(mcTasks)) ? mcTasks : [];
+                    if (__localTasks.length) {
+                        var __beforeJson = JSON.stringify(items);
+                        var __merged = _mcMergeTasksCollections(items, __localTasks);
+                        if (JSON.stringify(__merged) !== __beforeJson) {
+                            console.warn('[MC cloud] 🩹 tasks merge restored local reviews/submissions the cloud copy was missing — scheduling heal push');
+                            items = __merged;
+                            setTimeout(function () { try { mcCloudPush('tasks'); } catch (e) {} }, 2500);
+                        } else {
+                            items = __merged;
+                        }
+                    }
+                } catch (e) { console.warn('[MC cloud] tasks merge failed — adopting cloud copy', e); }
+            }
 
             // ── Stomp guard 3 ── compare timestamps before applying.
             var cloudStamp = (payload && typeof payload.updatedAt === 'number') ? payload.updatedAt : 0;
@@ -26497,6 +26571,7 @@
                     submittedAt: new Date().toISOString()
                 };
                 t.status = 'submitted';
+                t.updatedAt = Date.now();
                 mcTasks[i] = t;
                 mcSaveData('tasks');
                 try { logActivity(t.submission.submittedBy, 'task_submitted', { taskId: t.id, title: t.title }); } catch (e) {}
@@ -30171,6 +30246,7 @@
             if (!t.submissions) t.submissions = [];
             t.submissions.push(submission);
             t.status = 'submitted';
+            t.updatedAt = Date.now();
             t.submittedDate = new Date().toISOString().split('T')[0];
 
             mcSaveData('tasks');
@@ -32422,6 +32498,7 @@
             var reason = (typeof note === 'string') ? note : (prompt('Reason for rejecting this submission (optional, shared with the player):') || '');
             task.status = 'rejected';
             task.rejectedAt = new Date().toISOString().split('T')[0];
+            task.updatedAt = Date.now();
             if (reason) task.rejectionReason = reason;
             // Resolve submitter — same 3-shape chain as approve.
             var submitterId = (task.submission && task.submission.submittedBy) || null;
@@ -32534,6 +32611,7 @@
             pflxPlaySfx('success');
             sub.status = 'approved';
             sub.reviewedAt = new Date().toISOString();
+            task.updatedAt = Date.now();
             var pid = sub.playerId || playerId;
             try {
                 if (task.xcReward && window.PflxDataBus) {
@@ -32597,6 +32675,7 @@
             sub.status = 'rejected';
             sub.reviewedAt = new Date().toISOString();
             if (reason) sub.hostNote = reason;
+            task.updatedAt = Date.now();
             var pid = sub.playerId || playerId;
             try { _mcResetStreak(pid); } catch (e) {}
             // Task-level status untouched — other players' work stays in review.
@@ -32642,6 +32721,7 @@
             pflxPlaySfx('success');
             task.status = 'approved';
             task.approvedAt = new Date().toISOString().split('T')[0];
+            task.updatedAt = Date.now();
 
             // ── Auto-Reward Distribution (routed through PflxDataBus) ──
             // Every XC + badge mutation goes through PflxDataBus.award() so:
