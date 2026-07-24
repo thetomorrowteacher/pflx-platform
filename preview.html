@@ -9199,6 +9199,17 @@
                                             <label style="display:flex;align-items:center;gap:8px;font-size:11px;color:#e0e6ff;cursor:pointer;margin-top:6px;">
                                                 <input type="checkbox" id="mc-project-xbot-enabled" checked> Enable X-Bot communication
                                             </label>
+                                            <div id="mc-project-feed-checklist" style="margin-top:10px;padding:10px;border:1px solid rgba(245,200,66,0.2);border-radius:8px;background:rgba(245,200,66,0.04);">
+                                                <div style="font-size:10px;font-weight:800;letter-spacing:0.1em;color:#f5c842;margin-bottom:6px;">📡 PROJECT FEED CHECKLIST <span style="color:#8a93b8;font-weight:600;">(DarkCampus Project Channel)</span></div>
+                                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+                                                    <label style="display:flex;align-items:center;gap:6px;font-size:10px;color:#e0e6ff;cursor:pointer;"><input type="checkbox" id="mc-project-feed-alerts" checked> Alerts (new tasks / checkpoints / seasons)</label>
+                                                    <label style="display:flex;align-items:center;gap:6px;font-size:10px;color:#e0e6ff;cursor:pointer;"><input type="checkbox" id="mc-project-feed-reminders" checked> Reminders (daily briefing)</label>
+                                                    <label style="display:flex;align-items:center;gap:6px;font-size:10px;color:#e0e6ff;cursor:pointer;"><input type="checkbox" id="mc-project-feed-overviews" checked> Overviews</label>
+                                                    <label style="display:flex;align-items:center;gap:6px;font-size:10px;color:#e0e6ff;cursor:pointer;"><input type="checkbox" id="mc-project-feed-tasks" checked> Tasks</label>
+                                                    <label style="display:flex;align-items:center;gap:6px;font-size:10px;color:#e0e6ff;cursor:pointer;"><input type="checkbox" id="mc-project-feed-offers" checked> X-Coin Primary offers</label>
+                                                </div>
+                                                <div style="font-size:9px;color:#8a93b8;margin-top:6px;">Applies to this Project's linked Slack/Discord channel (link one in DarkCampus → Host Settings → PROJECTS).</div>
+                                            </div>
                                         </div>
                                     </div>
                                     <div style="display:flex;gap:8px;justify-content:flex-end;">
@@ -33492,6 +33503,7 @@
                 el = document.getElementById('mc-project-session-code'); if (el) el.value = p.sessionCode || '';
                 el = document.getElementById('mc-project-dc-channel'); if (el) el.checked = p.dcChannelEnabled !== false;
                 el = document.getElementById('mc-project-xbot-enabled'); if (el) el.checked = p.xbotEnabled !== false;
+                try { mcLoadProjectFeedOptions(p.id); } catch (eFeedOpts) { /* checklist defaults stay */ }
                 // Check assigned cohorts AND toggle the list visibility so
                 // the host can see which cohorts are selected. Previously
                 // the "All Cohorts" checkbox stayed hidden even when the
@@ -33541,6 +33553,7 @@
                 el = document.getElementById('mc-project-session-code'); if (el) el.value = '';
                 el = document.getElementById('mc-project-dc-channel'); if (el) el.checked = true;
                 el = document.getElementById('mc-project-xbot-enabled'); if (el) el.checked = true;
+                try { mcApplyProjectFeedOpts(null); } catch (eFeedReset) { /* defaults */ }
                 var allCohortsCheckbox = document.getElementById('mc-project-all-cohorts'); if (allCohortsCheckbox) allCohortsCheckbox.checked = true;
                 mcResetProjectBannerPreview();
             }
@@ -33551,6 +33564,63 @@
             var form = document.getElementById('mc-project-form');
             if (form) form.style.display = 'none';
             mcProjectEditIndex = -1;
+        }
+
+        // ── Project Feed checklist (DarkCampus Project Channels) ──
+        // Shared contract with DarkCampus: app_data key `dc_project_channels`
+        // holds [{id, projectId, feedOptions:{alerts,reminders,overviews,
+        // tasks,offers}, ...}]. MC ONLY patches feedOptions on links for
+        // this project — read-modify-write, never touching the rest of
+        // the link record (channel ids, cohort scoping, etc).
+        var MC_PROJECT_FEED_KEYS = ['alerts', 'reminders', 'overviews', 'tasks', 'offers'];
+        function mcProjectFeedOptsFromForm() {
+            var opts = {};
+            MC_PROJECT_FEED_KEYS.forEach(function (k) {
+                var el = document.getElementById('mc-project-feed-' + k);
+                opts[k] = el ? !!el.checked : true;
+            });
+            return opts;
+        }
+        function mcApplyProjectFeedOpts(opts) {
+            MC_PROJECT_FEED_KEYS.forEach(function (k) {
+                var el = document.getElementById('mc-project-feed-' + k);
+                if (el) el.checked = !opts || opts[k] !== false;
+            });
+        }
+        function mcLoadProjectFeedOptions(projectId) {
+            mcApplyProjectFeedOpts(null); // defaults while the cloud read is in flight
+            try {
+                var sb = window.pflxSupabase && window.pflxSupabase();
+                if (!sb || !projectId) return;
+                sb.from('app_data').select('data').eq('key', 'dc_project_channels').maybeSingle().then(function (res) {
+                    if (!res || res.error || !res.data || !Array.isArray(res.data.data)) return;
+                    var link = res.data.data.find(function (l) { return l && l.projectId === projectId; });
+                    if (link && link.feedOptions) mcApplyProjectFeedOpts(link.feedOptions);
+                });
+            } catch (e) { console.warn('[mc project feed] load failed', e); }
+        }
+        function mcSyncProjectFeedOptions(projectId) {
+            try {
+                var sb = window.pflxSupabase && window.pflxSupabase();
+                if (!sb || !projectId) return;
+                var opts = mcProjectFeedOptsFromForm();
+                sb.from('app_data').select('data').eq('key', 'dc_project_channels').maybeSingle().then(function (res) {
+                    // No links yet → nothing to patch (DarkCampus creates links)
+                    if (!res || res.error || !res.data || !Array.isArray(res.data.data)) return;
+                    var links = res.data.data;
+                    var touched = false;
+                    links.forEach(function (l) {
+                        if (l && l.projectId === projectId) {
+                            l.feedOptions = Object.assign({}, l.feedOptions || {}, opts);
+                            touched = true;
+                        }
+                    });
+                    if (!touched) return;
+                    sb.from('app_data').upsert({ key: 'dc_project_channels', data: links, updated_at: new Date().toISOString() }, { onConflict: 'key' }).then(function (r) {
+                        if (r && r.error) console.warn('[mc project feed] sync failed', r.error);
+                    });
+                });
+            } catch (e) { console.warn('[mc project feed] sync threw', e); }
         }
 
         function mcSaveProjectForm() {
@@ -33651,6 +33721,11 @@
             if (mcProjectEditIndex >= 0) { mcProjects[mcProjectEditIndex] = obj; }
             else { mcProjects.push(obj); }
             mcSaveData('projects');
+
+            // ── DarkCampus Project Feed checklist sync ──
+            // Patches feedOptions on this project's dc_project_channels
+            // links (if any) so MC and DarkCampus stay in lockstep.
+            try { mcSyncProjectFeedOptions(obj.id); } catch (eFeedSync) { /* best-effort */ }
 
             // ── Cascade cohortIds to associated tasks ──
             // A project's cohort scoping should flow through to every
