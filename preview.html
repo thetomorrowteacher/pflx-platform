@@ -24885,6 +24885,39 @@
             } catch (e) { return []; }
         }
         window.pflxEffectiveAssignees = pflxEffectiveAssignees;
+        // ── INACTIVE-HIERARCHY INHERITANCE (July 25, Ennis) ──
+        // A task/project whose parent hierarchy (project or checkpoint, via
+        // forward OR reverse pointers) is INACTIVE inherits that state: it is
+        // hidden from players entirely — not just locked — unless the item is
+        // directly assigned (playerId / assignedTo / assignedPlayers) or
+        // carries its OWN cohort assignment. Rationale: an inactive checkpoint
+        // is a host draft; its content leaking into player lists caused the
+        // "4th task" incident (players submitting a Beta task while Beta
+        // wasn't live). 'upcoming' stays visible-but-locked (finish early,
+        // unlock early — locked host decision, July 15).
+        function pflxItemHierarchyInactive(item) {
+            try {
+                if (!item) return false;
+                if (String(item.status || '').toLowerCase() === 'inactive') return true;
+                var pjs = (typeof mcProjects !== 'undefined' && Array.isArray(mcProjects)) ? mcProjects : [];
+                var cps = (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) ? mcCheckpoints : [];
+                var proj = null;
+                if (item.projectId) proj = pjs.find(function (p) { return p && p.id === item.projectId; });
+                if (!proj && item.id) proj = pjs.find(function (p) { return p && Array.isArray(p.taskIds) && p.taskIds.indexOf(item.id) >= 0; });
+                if (proj && String(proj.status || '').toLowerCase() === 'inactive') return true;
+                var cpId = item.roundId || item.checkpointId || (proj && (proj.checkpointId || proj.roundId)) || null;
+                var cp = null;
+                if (cpId) cp = cps.find(function (c) { return c && c.id === cpId; });
+                if (!cp && item.id) cp = cps.find(function (c) {
+                    return c && ((Array.isArray(c.taskIds) && c.taskIds.indexOf(item.id) >= 0) ||
+                                 (Array.isArray(c.projectIds) && c.projectIds.indexOf(item.id) >= 0));
+                });
+                if (!cp && proj) cp = cps.find(function (c) { return c && Array.isArray(c.projectIds) && c.projectIds.indexOf(proj.id) >= 0; });
+                if (cp && String(cp.status || '').toLowerCase() === 'inactive') return true;
+            } catch (e) {}
+            return false;
+        }
+        window.pflxItemHierarchyInactive = pflxItemHierarchyInactive;
         function pflxPlayerCanSeeItem(item, pid, cohorts, ctx, visit) {
             if (!item) return false;
             visit = visit || {};
@@ -24898,6 +24931,16 @@
                 // the job itself visible in any job-listing surface).
                 if (Array.isArray(item.hired) && item.hired.indexOf(pid) >= 0) return true;
             }
+            // 1b. INACTIVE HIERARCHY (July 25): hidden unless directly assigned
+            // (direct player grants above already returned true) or the item
+            // carries its own explicit player list / cohort assignment.
+            try {
+                if (pflxItemHierarchyInactive(item)) {
+                    var __directPl = pid && Array.isArray(item.assignedPlayers) && item.assignedPlayers.indexOf(pid) >= 0;
+                    var __ownCohort = pflxItemHasOwnCohort(item) && item.assignedTo !== 'all' && pflxItemCohortsMatch(item, cohorts || []);
+                    if (!__directPl && !__ownCohort) return false;
+                }
+            } catch (e) {}
             // 2. "Everyone" sentinel on item
             if (item.assignedTo === 'all' || item.cohort === 'all') return true;
             // 2b. PLAYER-LEVEL scope (July 12) — when the item (or its parent
