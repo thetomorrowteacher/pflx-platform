@@ -24750,6 +24750,20 @@
                 if (Array.isArray(cp.taskIds) && cp.taskIds.indexOf(item.id) !== -1) return true;
                 if (Array.isArray(cp.projectIds) && cp.projectIds.indexOf(item.id) !== -1) return true;
                 if (Array.isArray(cp.jobIds) && cp.jobIds.indexOf(item.id) !== -1) return true;
+                // July 25 (Kaitlin: checkpoint card read "0/0 tasks" with all
+                // work approved): a task wired ONLY through the checkpoint's
+                // project (cp.projectIds → project.taskIds, no pointers on
+                // the task itself) never resolved as "in" the checkpoint —
+                // the two-hop chain was missed here even after the July 15
+                // reverse-pointer fixes covered visibility. Walk it.
+                if (Array.isArray(cp.projectIds) && cp.projectIds.length) {
+                    if (item.projectId && cp.projectIds.indexOf(item.projectId) !== -1) return true;
+                    var __pjs = (typeof mcProjects !== 'undefined' && Array.isArray(mcProjects)) ? mcProjects : [];
+                    for (var __i = 0; __i < cp.projectIds.length; __i++) {
+                        var __pj = __pjs.find(function (p) { return p && p.id === cp.projectIds[__i]; });
+                        if (__pj && Array.isArray(__pj.taskIds) && __pj.taskIds.indexOf(item.id) !== -1) return true;
+                    }
+                }
             } catch (e) {}
             return false;
         }
