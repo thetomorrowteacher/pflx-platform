@@ -6716,7 +6716,7 @@
                                   both the datalist options and a hidden mirror
                                   for back-compat with code that reads .value.
                                 -->
-                                <input type="text" class="brand-select" id="brand-select" placeholder="Select or type your brand name…" autocomplete="off" list="brand-datalist" spellcheck="false">
+                                <input type="text" class="brand-select" id="brand-select" placeholder="Select or type your brand name…" autocomplete="off" list="brand-datalist" spellcheck="false" autocapitalize="characters" autocorrect="off" enterkeyhint="next">
                                 <datalist id="brand-datalist"></datalist>
                                 <input type="password" class="pin-input" id="pin-input" placeholder="••••" maxlength="4" autocomplete="current-password">
                                 <button class="login-btn" id="login-btn">Login</button>
@@ -17711,8 +17711,27 @@
                 } catch (e) {}
             })();
 
+            // ── v1.11 (July 25, Ennis's iPhone): BRANDS is keyed by EXACT
+            // uppercase brand, but phone keyboards autocapitalize only the
+            // first letter and autocorrect the rest — "Irenj3pg" missed the
+            // key and read as "wrong". Resolve the typed value tolerantly
+            // (trim → exact → uppercase → roster lookup) to the canonical key.
+            window.pflxResolveBrandKey = function (raw) {
+                var v = String(raw || '').trim();
+                if (!v) return v;
+                try {
+                    if (typeof BRANDS !== 'undefined') {
+                        if (BRANDS[v] !== undefined) return v;
+                        var up = v.toUpperCase();
+                        if (BRANDS[up] !== undefined) return up;
+                    }
+                    var pl = (typeof findPlayerByBrand === 'function') ? findPlayerByBrand(v) : null;
+                    if (pl && pl.brand && typeof BRANDS !== 'undefined' && BRANDS[pl.brand] !== undefined) return pl.brand;
+                } catch (e) {}
+                return v;
+            };
             document.getElementById('login-btn').addEventListener('click', () => {
-                const brand = document.getElementById('brand-select').value.trim();
+                const brand = window.pflxResolveBrandKey(document.getElementById('brand-select').value);
                 const pin = document.getElementById('pin-input').value;
                 if (!brand) { shakeEl(document.getElementById('brand-select')); return; }
                 if (BRANDS[brand] === pin) {
@@ -17754,6 +17773,65 @@
                     });
                 }
             } catch (e) {}
+
+            // ── v1.11 TOUCH BRAND PICKER (July 25, Ennis's iPhone) ──
+            // iOS Safari renders NO dropdown for <datalist> (Android is
+            // spotty), so "select your brand" did nothing on phones. On touch
+            // devices we swap in a custom tap-to-select suggestion list and
+            // live-uppercase typing; desktop keeps the native datalist.
+            try {
+                (function () {
+                    var inp = document.getElementById('brand-select');
+                    if (!inp) return;
+                    inp.addEventListener('input', function () {
+                        var up = inp.value.toUpperCase();
+                        if (inp.value !== up) inp.value = up;
+                        if (typeof renderSuggest === 'function') renderSuggest();
+                    });
+                    var isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
+                    if (!isTouch) return;
+                    inp.removeAttribute('list');   // kill half-working native datalist on touch
+                    var wrap = inp.parentElement;
+                    if (wrap && getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
+                    var box = document.createElement('div');
+                    box.id = 'brand-suggest-box';
+                    box.style.cssText = 'position:absolute;left:0;right:0;top:100%;z-index:60;background:#0d1326;border:1px solid rgba(0,240,255,0.35);border-radius:10px;margin-top:6px;max-height:230px;overflow:auto;display:none;box-shadow:0 12px 30px rgba(0,0,0,0.55);-webkit-overflow-scrolling:touch;';
+                    if (wrap) wrap.appendChild(box); else return;
+                    function claimedBrands() {
+                        try {
+                            return (typeof PLAYERS !== 'undefined' ? PLAYERS : [])
+                                .filter(function (p) { return p && p.brand && p.claimed; })
+                                .map(function (p) { return String(p.brand); })
+                                .sort();
+                        } catch (e) { return []; }
+                    }
+                    function renderSuggest() {
+                        var q = inp.value.trim().toUpperCase();
+                        var list = claimedBrands().filter(function (b) { return !q || b.toUpperCase().indexOf(q) !== -1; }).slice(0, 8);
+                        box.innerHTML = '';
+                        if (!list.length || (list.length === 1 && list[0].toUpperCase() === q)) { box.style.display = 'none'; return; }
+                        list.forEach(function (b) {
+                            var row = document.createElement('div');
+                            row.textContent = b;
+                            row.style.cssText = 'padding:13px 16px;font-size:15px;color:#e0e6ff;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.05);font-family:Jura,sans-serif;letter-spacing:0.04em;';
+                            // pointerdown fires before the input's blur — the tap
+                            // lands even though the field is about to lose focus.
+                            row.addEventListener('pointerdown', function (ev) {
+                                ev.preventDefault();
+                                inp.value = b;
+                                box.style.display = 'none';
+                                var pinEl = document.getElementById('pin-input');
+                                if (pinEl) pinEl.focus();
+                            });
+                            box.appendChild(row);
+                        });
+                        box.style.display = 'block';
+                    }
+                    inp.addEventListener('focus', renderSuggest);
+                    inp.addEventListener('input', renderSuggest);
+                    inp.addEventListener('blur', function () { setTimeout(function () { box.style.display = 'none'; }, 250); });
+                })();
+            } catch (e) { console.warn('[v1.11 brand picker]', e); }
 
             // ── RESUME UNFINISHED SIGNUP (July 19) — if a signup draft exists
             // (reload/crash mid-diagnostic), surface a resume button on the
