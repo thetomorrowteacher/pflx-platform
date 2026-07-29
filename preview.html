@@ -8352,6 +8352,7 @@
                                 <p class="mc-page-desc">Manage rounds, milestones, and checkpoint schedules.</p>
                                 <div style="display:flex;gap:10px;margin-bottom:20px;">
                                     <button class="mc-btn mc-btn-green" onclick="mcShowCPForm(-1)">+ New Checkpoint</button>
+                                    <button class="mc-btn mc-btn-purple" onclick="pflxScaffoldProgram()" title="Add the 10 program checkpoints (Alpha…Omega) as inactive template holders" style="margin-left:8px;">🏁 Scaffold 10-Week Program</button>
                                 </div>
 
                                 <!-- Checkpoint Form — hidden until user clicks +New Checkpoint or Edit on a card.
@@ -29651,6 +29652,49 @@
         var mcCPEditIndex = -1;
         function mcCreateCheckpoint() { mcShowCPForm(-1); }
         function mcEditCheckpoint(index) { mcShowCPForm(index); }
+        // Scaffold the 10-week program: add any of the 10 named checkpoints
+        // (Alpha…Omega) that don't already exist, in order, as INACTIVE template
+        // holders (hidden from players) the host fills in later. Skips ones that
+        // already exist (matched by the Greek word in the name).
+        function pflxScaffoldProgram() {
+            var order = ['Alpha', 'Beta', 'Gamma', 'Delta', 'Zeta', 'Theta', 'Nu', 'Sigma', 'Psi', 'Omega'];
+            if (!Array.isArray(mcCheckpoints)) mcCheckpoints = [];
+            var have = {};
+            mcCheckpoints.forEach(function (c) {
+                var n = String((c && c.name) || '').toLowerCase();
+                order.forEach(function (g) { if (n.indexOf(g.toLowerCase()) >= 0) have[g] = true; });
+            });
+            var seasonId = '';
+            try {
+                var act = (typeof mcSeasons !== 'undefined' ? mcSeasons : []).find(function (s) { return s && (s.isActive || s.active); });
+                seasonId = act ? act.id : ((typeof mcSeasons !== 'undefined' && mcSeasons[0] && mcSeasons[0].id) || '');
+            } catch (e) {}
+            var added = 0, now = Date.now();
+            order.forEach(function (g, i) {
+                if (have[g]) return;
+                mcCheckpoints.push({
+                    id: 'cp-' + now + '-' + i,
+                    name: 'Checkpoint ' + g,
+                    description: '', startDate: '', endDate: '',
+                    status: 'inactive', active: false,
+                    seasonId: seasonId, link: '', assignedTo: 'all', bannerImage: '',
+                    taskIds: [], projectIds: [], jobIds: [], rewardBadges: [], xcReward: 0,
+                    attachments: [], programOrder: i,
+                    createdBy: (typeof activeSession !== 'undefined' && activeSession) ? activeSession.brand : 'host',
+                    updatedAt: now + i
+                });
+                added++;
+            });
+            if (added) {
+                try { mcSaveData('checkpoints'); } catch (e) {}
+                try { mcRenderCheckpoints(); } catch (e) {}
+                try { mcLoadData(); } catch (e) {}
+            }
+            if (typeof pflxToast === 'function') {
+                pflxToast(added ? ('Added ' + added + ' inactive checkpoint' + (added > 1 ? 's' : '') + ' — customize them any time.') : 'All 10 program checkpoints already exist.', 'success');
+            }
+        }
+        window.pflxScaffoldProgram = pflxScaffoldProgram;
 
         function mcShowCPForm(index) {
             pflxPlaySfx('open');
