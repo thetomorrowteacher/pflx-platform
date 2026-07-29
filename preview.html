@@ -60515,6 +60515,9 @@ RESPONSE RULES:
                     if (m.senderId !== me.id && !(Array.isArray(m.readBy) && m.readBy.indexOf(me.id) !== -1)) unread++;
                 });
             });
+            // Glow the floating X-Bot icon green (larger pulse) while unread
+            // exists on the recipient's dashboard.
+            try { if (typeof window.pflxDockSetUnread === 'function') window.pflxDockSetUnread(unread); } catch (e) {}
             var badge = document.getElementById('toolbar-chat-badge');
             if (!badge) return;
             if (unread > 0) { badge.textContent = String(unread); badge.style.display = 'flex'; }
@@ -60881,6 +60884,16 @@ RESPONSE RULES:
             _pcThreads.push(thread);
             _pcSave();
             pflxChatOpenThread(thread.id);
+        };
+        // Open a DM with a specific player from anywhere (e.g. the Live roster).
+        // Opens the dock on the P2P Chat tab and jumps to (or creates) the DM.
+        window.pflxChatStartDM = function (playerId) {
+            var me = _pcMe();
+            if (!playerId || playerId === me.id) return;
+            var caps = _pcMyCaps();
+            if (!caps.dm) { if (typeof pflxToast === 'function') pflxToast('Direct messages are disabled for your cohort.', 'warn'); return; }
+            try { if (window.pflxDock && window.pflxDock.open) window.pflxDock.open('chat'); else if (typeof pflxChatToggle === 'function') pflxChatToggle(); } catch (e) {}
+            setTimeout(function () { try { _pcCommitNewThread([me.id, playerId], false, null, me); } catch (e) {} }, 140);
         };
         window.pflxChatPushBridge = function (kind) {
             if (!_pcCurrentThreadId) return;
@@ -61573,6 +61586,7 @@ RESPONSE RULES:
                 body.innerHTML = '<div style="padding:22px 14px;text-align:center;color:rgba(255,255,255,0.35);font-size:12px;">Nobody else is online.</div>';
                 return;
             }
+            var meId = (window.activeSession && window.activeSession.id) || null;
             body.innerHTML = rows.map(function (v) {
                 var color, glyph, label;
                 if (v.activity === 'in-call') { color = '#00d4ff'; glyph = '📹'; label = 'in a video call' + (v.threadName ? ' · ' + v.threadName : ''); }
@@ -61583,14 +61597,20 @@ RESPONSE RULES:
                     ? '<span style="font-size:8px;color:#ffd97a;background:rgba(255,204,102,0.14);border:1px solid rgba(255,204,102,0.4);border-radius:4px;padding:0 4px;margin-left:6px;letter-spacing:0.08em;">HOST</span>'
                     : '';
                 var cohortChip = v.cohort ? '<span style="font-size:9px;color:rgba(255,255,255,0.4);margin-left:6px;">' + escapeHtml(v.cohort) + '</span>' : '';
-                return '<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);">' +
+                // Clicking an online player opens a DM with them via X-Bot's P2P Chat.
+                var isSelf = !v.playerId || v.playerId === meId;
+                var clickAttr = isSelf ? '' : ' onclick="pflxChatStartDM(&quot;' + v.playerId + '&quot;)" title="Message ' + escapeHtml(v.name || '') + '" onmouseover="this.style.background=&quot;rgba(34,197,94,0.08)&quot;" onmouseout="this.style.background=&quot;transparent&quot;"';
+                var cursor = isSelf ? 'default' : 'pointer';
+                var dm = isSelf ? '<span style="font-size:9px;color:rgba(255,255,255,0.3);flex-shrink:0;">you</span>'
+                                : '<span style="font-size:14px;color:#22c55e;flex-shrink:0;" title="Message">💬</span>';
+                return '<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);cursor:' + cursor + ';transition:background 0.12s;"' + clickAttr + '>' +
                     '<div style="width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,0.06);display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden;">' +
                     (v.image ? '<img src="' + escapeHtml(v.image) + '" style="width:100%;height:100%;object-fit:cover;">' : '<span style="font-size:12px;color:rgba(255,255,255,0.6);font-weight:700;">' + escapeHtml((v.name || '?').substr(0, 1)) + '</span>') +
                     '</div>' +
                     '<div style="flex:1;min-width:0;">' +
                     '<div style="font-size:12px;color:#f0f0ff;font-weight:700;">' + escapeHtml(v.name) + roleBadge + cohortChip + '</div>' +
                     '<div style="font-size:10px;color:' + color + ';">' + glyph + ' ' + escapeHtml(label) + '</div>' +
-                    '</div>' +
+                    '</div>' + dm +
                     '</div>';
             }).join('');
         }
@@ -61901,17 +61921,31 @@ RESPONSE RULES:
             100% { box-shadow:0 6px 20px rgba(0,240,255,0.35),0 0 0 0 rgba(0,240,255,0); }
         }
         @keyframes pflxFabBob { 0%,100% { transform:scale(1); } 50% { transform:scale(1.06); } }
+        /* New-message state — green aura, larger + faster pulse than idle */
+        @keyframes pflxFabNewMsg {
+            0%   { box-shadow:0 6px 22px rgba(34,197,94,0.5),0 0 0 0 rgba(34,197,94,0.6); }
+            70%  { box-shadow:0 8px 34px rgba(34,197,94,0.7),0 0 0 26px rgba(34,197,94,0); }
+            100% { box-shadow:0 6px 22px rgba(34,197,94,0.5),0 0 0 0 rgba(34,197,94,0); }
+        }
+        @keyframes pflxFabBobBig { 0%,100% { transform:scale(1.02); } 50% { transform:scale(1.16); } }
         #pflx-dock-fab { position:fixed; z-index:100001; width:66px; height:66px; border-radius:50%;
             cursor:grab; background:radial-gradient(circle at 30% 30%,rgba(0,240,255,0.32),rgba(10,15,30,0.98));
             border:1px solid rgba(0,240,255,0.55); display:none; align-items:center; justify-content:center;
             touch-action:none; animation:pflxFabPulse 2.4s ease-out infinite, pflxFabBob 3.2s ease-in-out infinite; }
         #pflx-dock-fab.show { display:flex; }
+        #pflx-dock-fab.newmsg { border-color:rgba(34,197,94,0.85);
+            background:radial-gradient(circle at 30% 30%,rgba(34,197,94,0.4),rgba(8,20,12,0.98));
+            animation:pflxFabNewMsg 1.3s ease-out infinite, pflxFabBobBig 1.8s ease-in-out infinite; }
+        #pflx-dock-fab .pflx-fab-dot { position:absolute; top:0; right:0; width:16px; height:16px; border-radius:50%;
+            background:#22c55e; border:2px solid #061018; display:none; box-shadow:0 0 10px rgba(34,197,94,0.9); }
+        #pflx-dock-fab.newmsg .pflx-fab-dot { display:block; }
         #pflx-dock-fab:active { cursor:grabbing; }
         #pflx-dock-fab img { transition:transform 0.2s ease; }
         #pflx-dock-fab:hover img { transform:scale(1.12) rotate(-4deg); }
     </style>
     <div id="pflx-dock-fab" title="X-Bot — click to open, drag to move">
         <img src="public/X Official for PFLX.png" alt="X-Bot" style="width:40px;height:40px;object-fit:contain;filter:drop-shadow(0 0 8px rgba(0,240,255,0.7));pointer-events:none;">
+        <span class="pflx-fab-dot"></span>
     </div>
     <div id="pflx-dock">
         <div class="pflx-dock-header" id="pflx-dock-header">
@@ -62070,6 +62104,7 @@ RESPONSE RULES:
                 if (xb) xb.style.setProperty('display', 'none', 'important');
                 if (ch && ch.style.display !== 'flex' && _origChatToggle) { try { _origChatToggle(); } catch (e) {} }
                 if (ch) ch.style.setProperty('display', 'flex', 'important');
+                if (fab) fab.classList.remove('newmsg');   // viewing chat clears the glow
             } else {
                 if (ch) ch.style.setProperty('display', 'none', 'important');
                 if (xb) xb.style.setProperty('display', 'flex', 'important');
@@ -62177,7 +62212,14 @@ RESPONSE RULES:
             window.addEventListener('resize', render);
             window.toggleXBotPanel = function () { if (state.open && state.tab === 'xbot') closeDock(); else openDock('xbot'); };
             window.pflxChatToggle = function () { if (state.open && state.tab === 'chat') closeDock(); else openDock('chat'); };
-            window.pflxDock = { open: openDock, close: closeDock, showTab: showTab, readLast: readLast, state: state };
+            // Recipient glow: green aura + larger pulse while unread chat exists.
+            // Suppressed while the user is actively viewing the chat tab.
+            window.pflxDockSetUnread = function (n) {
+                if (!fab) return;
+                var glow = (n > 0) && !(state.open && state.tab === 'chat');
+                fab.classList.toggle('newmsg', glow);
+            };
+            window.pflxDock = { open: openDock, close: closeDock, showTab: showTab, readLast: readLast, setUnread: window.pflxDockSetUnread, state: state };
             state.open = false; render();
             setInterval(function () { if (!state.open) render(); }, 2000);
         }
