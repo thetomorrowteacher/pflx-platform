@@ -23049,7 +23049,45 @@
             // X-Coin so we don't shadow them).
         };
 
+        // Read-merge-write: before pushing tasks/checkpoints/projects, merge the
+        // queued local items with the CURRENT cloud row so a push can NEVER drop
+        // another writer's submissions/attachments. This is the root fix for
+        // "approvals vanish / progress wrong": a client with a partial list used
+        // to wholesale-overwrite the row, deleting everyone else's submissions.
+        function _mcMergeQueueWithCloud(client, types, done) {
+            var mergeable = { tasks: (typeof _mcMergeTasks === 'function' ? _mcMergeTasks : null),
+                              checkpoints: (typeof _mcMergeById === 'function' ? _mcMergeById : null),
+                              projects: (typeof _mcMergeById === 'function' ? _mcMergeById : null) };
+            var keys = types.filter(function (t) { return mergeable[t]; }).map(function (t) { return 'pflx_mc_' + t; });
+            if (!keys.length) { done(); return; }
+            client.from('app_data').select('key,data').in('key', keys).then(function (res) {
+                try {
+                    var byKey = {};
+                    ((res && res.data) || []).forEach(function (r) { byKey[r.key] = r.data; });
+                    types.forEach(function (t) {
+                        var fn = mergeable[t]; if (!fn) return;
+                        var c = byKey['pflx_mc_' + t];
+                        var cloudItems = (c && Array.isArray(c.items)) ? c.items : (Array.isArray(c) ? c : []);
+                        if (!cloudItems.length) return;
+                        var merged = fn(_mcCloudQueue[t] || [], cloudItems);
+                        _mcCloudQueue[t] = merged;
+                        try {
+                            if (t === 'tasks') { mcTasks = merged; _mcSetItemSafe('pflx_mc_tasks', mcTasks); }
+                            else if (t === 'checkpoints') { mcCheckpoints = merged; _mcSetItemSafe('pflx_mc_checkpoints', mcCheckpoints); }
+                            else if (t === 'projects') { mcProjects = merged; _mcSetItemSafe('pflx_mc_projects', mcProjects); }
+                        } catch (e) {}
+                    });
+                } catch (e) { console.warn('[MC cloud] merge-before-write failed', e); }
+                done();
+            }, function () { done(); });
+        }
         function _mcCloudFlush() {
+            var _c0 = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+            var _t0 = Object.keys(_mcCloudQueue);
+            if (!_c0 || !_t0.length) { _mcCloudTimer = null; return; }
+            _mcMergeQueueWithCloud(_c0, _t0, function () { _mcCloudFlushWrite(); });
+        }
+        function _mcCloudFlushWrite() {
             _mcCloudTimer = null;
             var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
             if (!client) return;
