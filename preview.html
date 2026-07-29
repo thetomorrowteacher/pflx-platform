@@ -22939,11 +22939,60 @@
                 default: return undefined;
             }
         }
+        // ── Merge-not-replace sync (July 9 fix) ────────────────────────────
+        // Cloud pulls used to REPLACE mcTasks wholesale, so a stale cloud row
+        // (right after a deploy, or a slower device) wiped a just-made approval
+        // and it "came back". These merge helpers union by id with
+        // last-write-wins on updatedAt, and merge per-player submissions so an
+        // approved status is never overwritten by an older 'pending' copy.
+        function _mcTs(x) { var v = x && (x.updatedAt || x.updated_at); if (typeof v === 'number') return v; var t = v ? new Date(v).getTime() : 0; return isFinite(t) ? t : 0; }
+        function _mcMergeTaskSubs(localSubs, incSubs) {
+            localSubs = Array.isArray(localSubs) ? localSubs : [];
+            incSubs = Array.isArray(incSubs) ? incSubs : [];
+            var byP = {}, order = [];
+            function key(s) { return s && (s.playerId || s.submittedById || s.submittedBy || s.id); }
+            function rank(s) { var st = (s && s.status) || 'pending'; return st === 'approved' ? 3 : st === 'rejected' ? 2 : 1; }
+            function rts(s) { var v = s && (s.reviewedAt || s.date || s.submittedAt); var t = v ? new Date(v).getTime() : 0; return isFinite(t) ? t : 0; }
+            localSubs.forEach(function (s) { var k = key(s); if (k != null) { byP[k] = s; order.push(k); } });
+            incSubs.forEach(function (s) {
+                var k = key(s); if (k == null) return;
+                if (!(k in byP)) { byP[k] = s; order.push(k); return; }
+                var ex = byP[k];
+                // A resolved decision (approved/rejected) beats pending; among the
+                // same rank, the newer review wins. This preserves approvals.
+                if (rank(s) > rank(ex) || (rank(s) === rank(ex) && rts(s) > rts(ex))) byP[k] = s;
+            });
+            return order.map(function (k) { return byP[k]; });
+        }
+        function _mcMergeTasks(local, incoming) {
+            local = Array.isArray(local) ? local : [];
+            incoming = Array.isArray(incoming) ? incoming : [];
+            var byId = {}, order = [];
+            local.forEach(function (t) { if (t && t.id) { byId[t.id] = t; order.push(t.id); } });
+            incoming.forEach(function (t) {
+                if (!t || !t.id) return;
+                if (!(t.id in byId)) { byId[t.id] = t; order.push(t.id); return; }
+                var loc = byId[t.id];
+                var newer = _mcTs(t) > _mcTs(loc) ? t : loc;
+                var merged = Object.assign({}, loc, newer);
+                var subs = _mcMergeTaskSubs(loc.submissions, t.submissions);
+                if (subs.length || Array.isArray(loc.submissions) || Array.isArray(t.submissions)) merged.submissions = subs;
+                // Whole-task status: keep the more-advanced status so a stale
+                // 'submitted' can never overwrite an 'approved'.
+                var R = { approved: 3, rejected: 2, submitted: 1, pending: 0 };
+                var ls = R[loc.status] || 0, is = R[t.status] || 0;
+                merged.status = is > ls ? t.status : (ls > is ? loc.status : newer.status);
+                byId[t.id] = merged;
+            });
+            return order.map(function (id) { return byId[id]; });
+        }
+        window._mcMergeTasks = _mcMergeTasks;
+
         function _mcApplyCollection(type, items) {
             switch (type) {
                 case 'players': mcPlayers = items; break;
                 case 'checkpoints': mcCheckpoints = items; break;
-                case 'tasks': mcTasks = items; break;
+                case 'tasks': mcTasks = _mcMergeTasks(mcTasks, items); break;
                 case 'projects': mcProjects = items; break;
                 case 'seasons': mcSeasons = items; break;
                 case 'announcements': mcAnnouncements = items; break;
@@ -23659,7 +23708,7 @@
                         dataUpdated = true;
                     }
                     if (msg.key === 'checkpoints' && msg.data && msg.data.length) { mcCheckpoints = msg.data; mcSaveData('checkpoints'); dataUpdated = true; }
-                    if (msg.key === 'tasks' && msg.data && msg.data.length) { mcTasks = msg.data; mcSaveData('tasks'); dataUpdated = true; }
+                    if (msg.key === 'tasks' && msg.data && msg.data.length) { mcTasks = _mcMergeTasks(mcTasks, msg.data); mcSaveData('tasks'); dataUpdated = true; }
                     if (msg.key === 'projects' && msg.data && msg.data.length) { mcProjects = msg.data; mcSaveData('projects'); dataUpdated = true; }
                     if (msg.key === 'seasons' && msg.data && msg.data.length) { mcSeasons = msg.data; mcSaveData('seasons'); dataUpdated = true; }
                     if (msg.key === 'badges' && msg.data && msg.data.length) { mcBadges = mcNormalizeBadges(msg.data); mcSaveData('badges'); dataUpdated = true; try { mcRefreshBadgePickers(); } catch (e) {} }
@@ -60718,6 +60767,47 @@ RESPONSE RULES:
             try { localStorage.setItem('pflx_chat_threads', JSON.stringify({ threads: _pcThreads })); } catch (e) {}
             _pcCloudPushDebounced();
         }
+        // Merge cloud threads into local instead of REPLACING — a wholesale
+        // replace wiped a just-sent message (its cloud push is debounced 700ms),
+        // making it "flash then disappear". Union threads by id, union messages
+        // by message id (never drop a local message), union participants, and
+        // take the newer thread metadata. Cross-device convergent.
+        function _pcMergeThreads(incoming) {
+            incoming = Array.isArray(incoming) ? incoming : [];
+            var byId = {}, order = [];
+            (Array.isArray(_pcThreads) ? _pcThreads : []).forEach(function (t) { if (t && t.id) { byId[t.id] = t; order.push(t.id); } });
+            incoming.forEach(function (t) {
+                if (!t || !t.id) return;
+                if (!(t.id in byId)) { byId[t.id] = t; order.push(t.id); return; }
+                var loc = byId[t.id];
+                var msgs = {}, morder = [];
+                (loc.messages || []).forEach(function (m) { if (m && m.id) { msgs[m.id] = m; morder.push(m.id); } });
+                (t.messages || []).forEach(function (m) {
+                    if (!m || !m.id) return;
+                    if (!(m.id in msgs)) { msgs[m.id] = m; morder.push(m.id); }
+                    else if (Array.isArray(m.readBy)) {
+                        var ex = msgs[m.id];
+                        ex.readBy = Object.keys(([].concat(ex.readBy || [], m.readBy)).reduce(function (a, k) { a[k] = 1; return a; }, {}));
+                    }
+                });
+                var mergedMsgs = morder.map(function (id) { return msgs[id]; }).sort(function (a, b) { return new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime(); });
+                var newer = (new Date(t.updatedAt || t.createdAt || 0).getTime() > new Date(loc.updatedAt || loc.createdAt || 0).getTime()) ? t : loc;
+                var parts = Object.keys(([].concat(loc.participants || [], t.participants || [])).reduce(function (a, k) { a[k] = 1; return a; }, {}));
+                byId[t.id] = Object.assign({}, loc, newer, { messages: mergedMsgs, participants: parts });
+            });
+            return order.map(function (id) { return byId[id]; });
+        }
+        // Immediate (non-debounced) push — used on send/new-thread so there is
+        // no window where a pull can clobber the local write.
+        function _pcCloudPushNow() {
+            if (_pcCloudTimer) { clearTimeout(_pcCloudTimer); _pcCloudTimer = null; }
+            var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+            if (!client) return;
+            _pcSelfWriting = true;
+            client.from('app_data').upsert([{ key: 'pflx_chat_threads', data: { threads: _pcThreads, updatedAt: Date.now() }, updated_at: new Date().toISOString() }], { onConflict: 'key' })
+                .then(function () { _pcSelfWriting = false; }, function () { _pcSelfWriting = false; });
+        }
+        window._pcMergeThreads = _pcMergeThreads;
         function _pcCloudPushDebounced() {
             if (_pcCloudTimer) clearTimeout(_pcCloudTimer);
             _pcCloudTimer = setTimeout(function () {
@@ -60741,7 +60831,7 @@ RESPONSE RULES:
                 var d = res.data[0].data;
                 var threads = (d && d.threads) || [];
                 if (Array.isArray(threads)) {
-                    _pcThreads = threads;
+                    _pcThreads = _pcMergeThreads(threads);
                     try { localStorage.setItem('pflx_chat_threads', JSON.stringify({ threads: _pcThreads })); } catch (e) {}
                     if (document.getElementById('pflx-chat-panel').style.display !== 'none') pflxChatRender();
                     _pcRefreshBadge();
@@ -60759,7 +60849,7 @@ RESPONSE RULES:
                         if (_pcSelfWriting) return; // ignore our own echo
                         var row = payload && (payload.new || payload.record);
                         if (row && row.data && Array.isArray(row.data.threads)) {
-                            _pcThreads = row.data.threads;
+                            _pcThreads = _pcMergeThreads(row.data.threads);
                             try { localStorage.setItem('pflx_chat_threads', JSON.stringify({ threads: _pcThreads })); } catch (e) {}
                             if (document.getElementById('pflx-chat-panel').style.display !== 'none') pflxChatRender();
                             _pcRefreshBadge();
@@ -61076,6 +61166,7 @@ RESPONSE RULES:
             });
             t.updatedAt = new Date().toISOString();
             _pcSave();
+            try { _pcCloudPushNow(); } catch (e) {}   // flush now — no clobber window
             input.value = '';
             pflxChatRender();
         };
