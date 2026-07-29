@@ -10819,6 +10819,16 @@
                                         </div>
                                         <p style="font-size: 11px; color: #8a92b0; margin: 8px 0 10px;">Export your NotebookLM notes (or any docs) as Markdown and import them here — as many as you like. When a player asks something, X-Bot pulls the most relevant passages from across every document into its answer, so the "brain" can be far bigger than any single prompt.</p>
                                         <div id="xbot-kb-docs" style="display: flex; flex-direction: column; gap: 6px;"></div>
+                                        <!-- ── LIVE KNOWLEDGE SOURCES (auto-refreshing URLs) ── -->
+                                        <div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(139,92,246,0.18);">
+                                            <div style="font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1.2px;color:#a78bfa;margin-bottom:4px;">🔄 LIVE SOURCES (auto-refresh every 15 min)</div>
+                                            <p style="font-size:10px;color:#8a92b0;margin:0 0 8px;">X-Bot always knows PFLX (built-in guide) and auto-loads the served Handoff/MD digest. Add a URL to any always-fresh doc — e.g. your <b>FeedForward responses published as CSV</b> — and X-Bot folds it into its brain and re-reads it automatically.</p>
+                                            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                                <input id="xbot-kb-src-url" type="text" placeholder="https://…/pub?output=csv  (FeedForward, docs, etc.)" style="flex:1;min-width:200px;background:rgba(10,18,40,0.8);border:1px solid rgba(139,92,246,0.25);color:#e0e6ff;padding:7px 10px;border-radius:7px;font-size:12px;">
+                                                <button onclick="(function(){var u=document.getElementById('xbot-kb-src-url');if(u&&u.value.trim()){window.xbotAddKBSource(u.value.trim());u.value='';}})()" style="padding:7px 14px;background:rgba(139,92,246,0.14);border:1px solid rgba(139,92,246,0.4);color:#c4b5fd;border-radius:7px;font-size:10px;font-weight:700;cursor:pointer;">＋ ADD SOURCE</button>
+                                            </div>
+                                            <div id="xbot-kb-sources" style="display:flex;flex-direction:column;gap:5px;margin-top:8px;"></div>
+                                        </div>
                                     </div>
                                     <div style="display: flex; align-items: center; gap: 16px; margin-top: 12px; flex-wrap: wrap;">
                                         <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #e0e6ff; cursor: pointer;">
@@ -48333,7 +48343,7 @@ RESPONSE RULES:
                             + (XBOT_KB.text || '').trim().slice(0, 10000) + '\n'
                             + (retrieved ? '\n══ RELEVANT NOTEBOOK PASSAGES (retrieved for this question) ══\n' + retrieved : '');
                         if (XBOT_KB.strict) {
-                            kbBlock += '\nSTRICT GROUNDING MODE IS ON: Answer ONLY using the HOST KNOWLEDGE BASE above and the live player state. '
+                            kbBlock += '\nSTRICT GROUNDING MODE IS ON: Answer ONLY using the knowledge provided above (host knowledge base + the PFLX platform guide + the retrieved passages) and the live player state. '
                                 + 'If the answer is not covered there, say you don\'t have that information and suggest asking the host. '
                                 + 'Do NOT use outside/general knowledge, do NOT guess, and never invent platform rules, prices, or policies.';
                         }
@@ -49089,7 +49099,24 @@ RESPONSE RULES:
                     : '<span style="color:#6a7290;">Empty — X-Bot currently answers from its built-in platform knowledge only.</span>';
             }
             try { if (typeof xbotRenderKBDocs === 'function') xbotRenderKBDocs(); } catch (e) {}
+            try { if (typeof xbotRenderKBSources === 'function') xbotRenderKBSources(); } catch (e) {}
         }
+        function xbotRenderKBSources() {
+            var holder = document.getElementById('xbot-kb-sources');
+            if (!holder) return;
+            var srcs = Array.isArray(window.XBOT_KB.sources) ? window.XBOT_KB.sources : [];
+            var sysN = Array.isArray(window.XBOT_SYS_DOCS) ? window.XBOT_SYS_DOCS.length : 0;
+            var baked = '<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;border:1px solid rgba(0,240,255,0.18);border-radius:7px;background:rgba(0,240,255,0.04);">' +
+                '<span style="font-size:12px;">🧩</span><span style="flex:1;font-size:11px;color:#cfe0ff;">Built-in PFLX guide + served Handoff/MD digest</span>' +
+                '<span style="font-size:9px;color:#34d399;font-family:\'Share Tech Mono\',monospace;">' + (sysN ? 'LOADED' : 'auto') + '</span></div>';
+            holder.innerHTML = baked + srcs.map(function (s) {
+                return '<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;border:1px solid rgba(139,92,246,0.18);border-radius:7px;background:rgba(10,18,40,0.5);">' +
+                    '<span style="font-size:12px;">🔗</span>' +
+                    '<span style="flex:1;font-size:11px;color:#e0e6ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(s.title || s.url) + '</span>' +
+                    '<button onclick="window.xbotRemoveKBSource(\'' + String(s.url).replace(/'/g, "\\'") + '\')" style="background:none;border:1px solid rgba(255,90,90,0.25);color:rgba(255,120,120,0.8);border-radius:5px;font-size:10px;padding:2px 8px;cursor:pointer;">✕</button></div>';
+            }).join('');
+        }
+        window.xbotRenderKBSources = xbotRenderKBSources;
         function xbotSaveKB() {
             var ta = document.getElementById('xbot-kb-text');
             var st = document.getElementById('xbot-kb-strict');
@@ -49154,10 +49181,85 @@ RESPONSE RULES:
         }
         window.xbotRenderKBDocs = xbotRenderKBDocs;
 
+        // ── Always-on PFLX knowledge + remote-loaded knowledge ─────────────
+        // X-Bot is grounded in PFLX general info by DEFAULT (the baked guide
+        // below), PLUS a served digest of the Handoff / MD docs, PLUS any host
+        // knowledge-source URLs (e.g. a published FeedForward responses CSV).
+        // The remote sources are re-fetched periodically so the brain "learns"
+        // as those docs change. None of this is training — it's prompt grounding.
+        window.XBOT_CORE_KB = [
+            '# PFLX — PrototypeFLX Platform Guide',
+            'PFLX (PrototypeFLX) is a gamified project-based learning platform. Players (students) earn X-Coin (XC) and Digital Badges by completing Tasks, Projects, and Checkpoints inside a Season. Hosts (teachers) run everything from Mission Control.',
+            '',
+            '## Roles & host tiers',
+            'Roles: Player, Instructor, Host, Master Host (admin). Host tiers layer on top: Master Host (full control + plus features: history, auto-backup, override, restore), Admin Host (full console + all approvals, no plus), Co-Host (multiple cohorts, scoped), Instructor (one cohort, scoped), Guest Instructor (one project/node, scoped). Scope is enforced by pflxCan().',
+            '',
+            '## X-Coin (XC) & Evolution Ranks',
+            'XC is the platform currency, earned from tasks/checkpoints/badges and spent on upgrades. Ranks unlock by total XC: Rank 1 Player (1,000), 2 Advanced Player (5,000), 3 Apprentice (15,000), 4 Manager/Head (50,000), 5 Director/Producer (125,000), 6 Mentor/Intern (250,000), 7 Associate (400,000), 8 Senior (600,000), 9 Chief (800,000), 10 Partner (1,000,000). Some ranks also require checkpoints completed and specific badges.',
+            '',
+            '## Digital Badges',
+            'Badges live in X-Coin (Digital Badge Management) and carry an XC value + artwork. Categories: Primary (behavior), Premium (achievement), Executive (jobs), Signature (skill mastery/certs). Earning a badge credits its XC to the player and shows in their portfolio with the badge image.',
+            '',
+            '## Modifiers: Upgrades, Fines & Penalties',
+            'Modifiers originate in X-Coin and function platform-wide. Upgrades/bonuses: XC add, XC multiplier (time-boxed), deadline extension, checkpoint/task bonus. Fines/penalties (taxes): XC deductions and freezes for missed deadlines, incomplete submissions, off-task behavior, etc. Auto-apply modifiers fire on events (task approved, checkpoint completed, missed deadline). Hosts can also apply any modifier manually from a player\'s detail.',
+            '',
+            '## Notifications & ticker',
+            'When a player earns a badge, an upgrade is used, or a fine is applied, that player sees a centered popup (with the item image + a sound unique to the type) over a dimmed screen; if offline, it replays at next login. The bottom ticker shows platform happenings live; hosts control it (hide names, per-cohort). Host broadcasts post a real-time "NEW BROADCAST — open X-Bot" ticker alert.',
+            '',
+            '## Mission Control: Checkpoints, Projects, Tasks',
+            'Hosts build Seasons → Checkpoints → Projects → Tasks. Players are assigned tasks; submissions are approved by hosts (which award XC + badges). The Progress dashboard shows each player\'s progress, tier-scoped. Jobs (Job Board) let players get hired into roles.',
+            '',
+            '## Chat & X-Bot dock',
+            'The floating X-Bot icon opens a dock with two tabs: X-BOT (AI assistant) and P2P CHAT (peer-to-peer direct + group messages, video/screen calls). Clicking an online player in the Live roster opens a DM. Groups can have a custom or Project-derived avatar. X-Bot has read-aloud (Web Speech). The icon glows green when you have unread messages.',
+            '',
+            '## Sub-apps',
+            'Core Pathways (guided learning modules/nodes), Battle Arena (competitive events), Open Space (EVE-style space exploration/combat with salvage, fabrication, bounties), DarkCampus (project communication + feeds). X-Coin is the economy layer across all of them.',
+            '',
+            '## How players progress (FAQ)',
+            'Q: How do I rank up? A: Earn total XC; each rank has an XC threshold (see above), and higher ranks also need checkpoints + specific badges. Q: How do I earn XC? A: Complete and get tasks/checkpoints approved, earn badges, win events. Q: What are fines? A: XC penalties for missed deadlines or off-task behavior, set by your host in X-Coin.'
+        ].join('\n');
+        window.XBOT_SYS_DOCS = [];   // remote-loaded (Handoff digest + host source URLs)
+        function xbotAllKBDocs() {
+            var host = xbotKBDocs();
+            var core = window.XBOT_CORE_KB ? [{ title: 'PFLX Platform Guide', text: window.XBOT_CORE_KB }] : [];
+            var sys = Array.isArray(window.XBOT_SYS_DOCS) ? window.XBOT_SYS_DOCS : [];
+            return core.concat(sys, host);
+        }
+        window.xbotAllKBDocs = xbotAllKBDocs;
+        // Fetch served knowledge (public/pflx-knowledge.md = Handoff + MD digest)
+        // plus any host-configured source URLs (e.g. a FeedForward responses CSV).
+        window.xbotLoadRemoteKB = function () {
+            var sources = [{ title: 'PFLX Handoff & Platform Notes', url: 'public/pflx-knowledge.md' }];
+            try { (Array.isArray(window.XBOT_KB.sources) ? window.XBOT_KB.sources : []).forEach(function (s) { if (s && s.url) sources.push({ title: s.title || s.url, url: s.url }); }); } catch (e) {}
+            var out = [], pending = sources.length;
+            if (!pending) { window.XBOT_SYS_DOCS = []; return; }
+            sources.forEach(function (s) {
+                fetch(s.url, { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : ''; }).then(function (txt) {
+                    if (txt && txt.trim()) out.push({ title: s.title, text: String(txt).slice(0, 120000) });
+                }).catch(function () {}).then(function () {
+                    if (--pending === 0) { window.XBOT_SYS_DOCS = out; try { xbotRefreshKBUI(); } catch (e) {} }
+                });
+            });
+        };
+        setTimeout(window.xbotLoadRemoteKB, 3500);
+        setInterval(window.xbotLoadRemoteKB, 15 * 60 * 1000);   // refresh → "learn & improve"
+        // Host: add/remove a knowledge source URL (FeedForward CSV, docs, etc.).
+        window.xbotAddKBSource = function (url, title) {
+            url = String(url || '').trim(); if (!url) return;
+            if (!Array.isArray(window.XBOT_KB.sources)) window.XBOT_KB.sources = [];
+            if (!window.XBOT_KB.sources.some(function (s) { return s.url === url; })) window.XBOT_KB.sources.push({ url: url, title: title || url });
+            xbotSaveKB(); window.xbotLoadRemoteKB();
+        };
+        window.xbotRemoveKBSource = function (url) {
+            if (!Array.isArray(window.XBOT_KB.sources)) return;
+            window.XBOT_KB.sources = window.XBOT_KB.sources.filter(function (s) { return s.url !== url; });
+            xbotSaveKB(); window.xbotLoadRemoteKB();
+        };
+
         var XBOT_STOPWORDS = { the:1, and:1, for:1, are:1, was:1, you:1, your:1, what:1, when:1, where:1, who:1, how:1, why:1, can:1, does:1, with:1, this:1, that:1, have:1, has:1, about:1, from:1, into:1, will:1, them:1, they:1, its:1, get:1, all:1, any:1, much:1, many:1 };
         function xbotRetrieve(query, maxChars) {
             try {
-                var docs = xbotKBDocs();
+                var docs = xbotAllKBDocs();
                 if (!docs.length || !query) return '';
                 var terms = String(query).toLowerCase().match(/[a-z0-9][a-z0-9'-]{2,}/g) || [];
                 terms = terms.filter(function (t) { return !XBOT_STOPWORDS[t]; });
