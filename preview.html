@@ -22987,13 +22987,30 @@
             return order.map(function (id) { return byId[id]; });
         }
         window._mcMergeTasks = _mcMergeTasks;
+        // Generic union + last-write-wins-by-updatedAt merge for checkpoints /
+        // projects (and any id'd collection). Newer record wins wholesale, so a
+        // Google attachment / embed added locally (which bumps updatedAt) is
+        // never wiped by a stale cloud pull or a patch-deploy boot pull.
+        function _mcMergeById(local, incoming) {
+            local = Array.isArray(local) ? local : [];
+            incoming = Array.isArray(incoming) ? incoming : [];
+            var byId = {}, order = [];
+            local.forEach(function (it) { if (it && it.id) { byId[it.id] = it; order.push(it.id); } });
+            incoming.forEach(function (it) {
+                if (!it || !it.id) return;
+                if (!(it.id in byId)) { byId[it.id] = it; order.push(it.id); return; }
+                byId[it.id] = _mcTs(it) > _mcTs(byId[it.id]) ? it : byId[it.id];
+            });
+            return order.map(function (id) { return byId[id]; });
+        }
+        window._mcMergeById = _mcMergeById;
 
         function _mcApplyCollection(type, items) {
             switch (type) {
                 case 'players': mcPlayers = items; break;
-                case 'checkpoints': mcCheckpoints = items; break;
+                case 'checkpoints': mcCheckpoints = _mcMergeById(mcCheckpoints, items); break;
                 case 'tasks': mcTasks = _mcMergeTasks(mcTasks, items); break;
-                case 'projects': mcProjects = items; break;
+                case 'projects': mcProjects = _mcMergeById(mcProjects, items); break;
                 case 'seasons': mcSeasons = items; break;
                 case 'announcements': mcAnnouncements = items; break;
                 case 'badges': mcBadges = mcNormalizeBadges(items); break;
@@ -23707,9 +23724,9 @@
                         mcSaveData('players');
                         dataUpdated = true;
                     }
-                    if (msg.key === 'checkpoints' && msg.data && msg.data.length) { mcCheckpoints = msg.data; mcSaveData('checkpoints'); dataUpdated = true; }
+                    if (msg.key === 'checkpoints' && msg.data && msg.data.length) { mcCheckpoints = _mcMergeById(mcCheckpoints, msg.data); mcSaveData('checkpoints'); dataUpdated = true; }
                     if (msg.key === 'tasks' && msg.data && msg.data.length) { mcTasks = _mcMergeTasks(mcTasks, msg.data); mcSaveData('tasks'); dataUpdated = true; }
-                    if (msg.key === 'projects' && msg.data && msg.data.length) { mcProjects = msg.data; mcSaveData('projects'); dataUpdated = true; }
+                    if (msg.key === 'projects' && msg.data && msg.data.length) { mcProjects = _mcMergeById(mcProjects, msg.data); mcSaveData('projects'); dataUpdated = true; }
                     if (msg.key === 'seasons' && msg.data && msg.data.length) { mcSeasons = msg.data; mcSaveData('seasons'); dataUpdated = true; }
                     if (msg.key === 'badges' && msg.data && msg.data.length) { mcBadges = mcNormalizeBadges(msg.data); mcSaveData('badges'); dataUpdated = true; try { mcRefreshBadgePickers(); } catch (e) {} }
                     if (msg.key === 'jobs' && msg.data && msg.data.length) { mcJobs = msg.data; mcSaveData('jobs'); dataUpdated = true; }
@@ -28966,6 +28983,7 @@
             pflxGoogle.attachModal(function (att) {
                 rec.attachments = rec.attachments || [];
                 rec.attachments.push({ id: att.id, kind: att.kind, fileId: att.fileId, url: att.url, embedUrl: att.embedUrl, title: att.title || '', addedAt: att.addedAt });
+                rec.updatedAt = Date.now();   // bump so merge-on-pull keeps this attachment
                 try { mcSaveData(_mcGSaveKey(kind)); } catch (e) {}
                 _mcGReRender(kind);
                 if (typeof pflxToast === 'function') pflxToast('Attached ' + att.label + '.', 'success');
@@ -28975,6 +28993,7 @@
             var coll = _mcGColl(kind); if (!coll) return;
             var rec = coll.find(function (x) { return x && x.id === id; }); if (!rec || !rec.attachments) return;
             rec.attachments = rec.attachments.filter(function (a) { return a.id !== attId; });
+            rec.updatedAt = Date.now();   // bump so the removal wins on merge
             try { mcSaveData(_mcGSaveKey(kind)); } catch (e) {}
             _mcGReRender(kind);
         }
