@@ -8234,6 +8234,17 @@
                                                 <input type="text" id="mc-player-form-nodes" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:10px;border-radius:8px;font-size:13px;box-sizing:border-box;" placeholder="e.g. cc-storyboard, da-storyboard">
                                                 <div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:4px;">Comma-separated node IDs (from the Core Pathways editor). Optional.</div>
                                             </div>
+                                            <!-- HOST CONTROL SCOPE checklist (v1.12) — checkpoint/project/task/node -->
+                                            <div id="mc-player-scope-controls" style="display:none;margin-top:14px;">
+                                                <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">Host Control Scope <span id="mc-scope-controls-hint" style="color:rgba(125,249,255,0.6);"></span></label>
+                                                <div style="font-size:10px;color:rgba(255,255,255,0.35);margin-bottom:8px;line-height:1.5;">Check exactly what this host controls. Checking a <b>Checkpoint</b> grants every Project and Task inside it; checking a <b>Project</b> grants its Tasks. Nothing checked = controls nothing.</div>
+                                                <div style="display:flex;gap:8px;margin-bottom:8px;">
+                                                    <input type="text" id="mc-scope-filter" placeholder="Filter…" style="flex:1;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px 10px;border-radius:8px;font-size:12px;box-sizing:border-box;">
+                                                    <button type="button" onclick="mcScopeClearAll()" style="padding:8px 12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#ef4444;border-radius:8px;font-size:11px;cursor:pointer;">Clear</button>
+                                                </div>
+                                                <div id="mc-scope-list" style="max-height:260px;overflow:auto;background:rgba(10,18,40,0.5);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px;"></div>
+                                                <div id="mc-scope-summary" style="font-size:11px;color:rgba(125,249,255,0.75);margin-top:8px;font-family:'Share Tech Mono',monospace;"></div>
+                                            </div>
                                         </div>
 
                                         <!-- Economy Section -->
@@ -19146,6 +19157,18 @@
                 badges:         player && Array.isArray(player.badges) ? player.badges : [],
                 rankOverride:   player ? (player.rankOverride || null) : null
             };
+            // v1.12 — carry host tier + control scope onto the session so
+            // pflxCan()/inScope() can enforce it. Copied only when present so a
+            // plain player session stays exactly as before.
+            try {
+                if (player) {
+                    if (player.hostTier) activeSession.hostTier = player.hostTier;
+                    if (Array.isArray(player.managedScope)) activeSession.managedScope = player.managedScope;
+                    if (Array.isArray(player.managedCohorts)) activeSession.managedCohorts = player.managedCohorts;
+                    if (Array.isArray(player.managedNodes)) activeSession.managedNodes = player.managedNodes;
+                    if (player.managedProjectId) activeSession.managedProjectId = player.managedProjectId;
+                }
+            } catch (e) {}
 
             // Resolve rank ONCE here so the toolbar / dashboard / sub-apps all read the same rank.
             try {
@@ -28154,11 +28177,132 @@
             var showNodes = (tier === 'cohost' || tier === 'instructor' || tier === 'guest');
             var el;
             if ((el = document.getElementById('mc-player-scope-cohorts'))) el.style.display = showCohorts ? 'block' : 'none';
-            if ((el = document.getElementById('mc-player-scope-project'))) el.style.display = showProject ? 'block' : 'none';
-            if ((el = document.getElementById('mc-player-scope-nodes'))) el.style.display = showNodes ? 'block' : 'none';
+            if ((el = document.getElementById('mc-player-scope-project'))) el.style.display = 'none';   // v1.12: replaced by the checklist
+            if ((el = document.getElementById('mc-player-scope-nodes'))) el.style.display = 'none';     // v1.12: replaced by the checklist
             var hint = document.getElementById('mc-scope-cohort-hint');
             if (hint) hint.textContent = tier === 'instructor' ? '(single cohort)' : tier === 'cohost' ? '(one or more)' : '';
+            // v1.12 — the Host Control Scope checklist shows for every scoped tier.
+            var showScope = (tier === 'guest' || tier === 'instructor' || tier === 'cohost');
+            if ((el = document.getElementById('mc-player-scope-controls'))) el.style.display = showScope ? 'block' : 'none';
+            var sh = document.getElementById('mc-scope-controls-hint');
+            if (sh) sh.textContent = tier === 'guest' ? '(Guest Host — pick ONE area)' : showScope ? '(pick one or more)' : '';
+            if (showScope) mcScopeRenderList();
         }
+
+        // ══ HOST CONTROL SCOPE checklist (v1.12, July 25, Ennis) ═════════════
+        // Grouped checkboxes over the real hierarchy — Checkpoints (with their
+        // Projects and Tasks nested), free-floating Projects/Tasks, and Core
+        // Pathway nodes. Selection lives in window._mcScopeSel until save.
+        window._mcScopeSel = [];
+        function mcScopeKey(e) { return e.type + ':' + e.id; }
+        function mcScopeHas(type, id) {
+            return (window._mcScopeSel || []).some(function (e) { return e.type === type && String(e.id) === String(id); });
+        }
+        window.mcScopeToggle = function (type, id, label) {
+            var tier = (document.getElementById('mc-player-form-tier') || {}).value || 'player';
+            var sel = window._mcScopeSel || (window._mcScopeSel = []);
+            var i = sel.findIndex(function (e) { return e.type === type && String(e.id) === String(id); });
+            if (i >= 0) { sel.splice(i, 1); }
+            else {
+                // Guest Host is a single-area tier — a new pick replaces the old.
+                if (tier === 'guest') sel.length = 0;
+                sel.push({ type: type, id: String(id), label: label || '' });
+            }
+            mcScopeRenderList();
+        };
+        window.mcScopeClearAll = function () { window._mcScopeSel = []; mcScopeRenderList(); };
+        function mcScopeRenderList() {
+            var box = document.getElementById('mc-scope-list');
+            if (!box) return;
+            var q = ((document.getElementById('mc-scope-filter') || {}).value || '').toLowerCase().trim();
+            var cps = (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) ? mcCheckpoints : [];
+            var pjs = (typeof mcProjects !== 'undefined' && Array.isArray(mcProjects)) ? mcProjects : [];
+            var tks = (typeof mcTasks !== 'undefined' && Array.isArray(mcTasks)) ? mcTasks : [];
+            function esc(s) { return (typeof escapeHtml === 'function') ? escapeHtml(String(s || '')) : String(s || ''); }
+            function match(label) { return !q || String(label || '').toLowerCase().indexOf(q) !== -1; }
+            function row(type, id, label, depth, meta) {
+                var on = mcScopeHas(type, id);
+                var colors = { checkpoint: '#00d4ff', project: '#a78bfa', task: '#f5c842', node: '#22c55e' };
+                return '<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-left:' + (depth * 18) + 'px;border-radius:6px;cursor:pointer;' +
+                    (on ? 'background:rgba(0,212,255,0.10);' : '') + '">' +
+                    '<input type="checkbox"' + (on ? ' checked' : '') + ' onchange="mcScopeToggle(\'' + type + '\',\'' + esc(id).replace(/'/g, "") + '\',\'' + esc(label).replace(/'/g, "") + '\')" style="accent-color:' + colors[type] + ';">' +
+                    '<span style="font-size:9px;color:' + colors[type] + ';text-transform:uppercase;letter-spacing:0.08em;font-weight:800;min-width:74px;">' + type + '</span>' +
+                    '<span style="font-size:12px;color:#e0e6ff;flex:1;">' + esc(label) + '</span>' +
+                    (meta ? '<span style="font-size:10px;color:rgba(255,255,255,0.35);">' + esc(meta) + '</span>' : '') +
+                    '</label>';
+            }
+            var html = '', claimedTasks = {}, claimedProjects = {};
+            cps.forEach(function (cp) {
+                if (!cp || !cp.id) return;
+                var cpName = cp.name || cp.title || cp.id;
+                var kids = '';
+                var cpProjects = pjs.filter(function (p) {
+                    return p && ((Array.isArray(cp.projectIds) && cp.projectIds.indexOf(p.id) !== -1) ||
+                                 String(p.checkpointId || '') === String(cp.id) || String(p.roundId || '') === String(cp.id));
+                });
+                cpProjects.forEach(function (p) {
+                    claimedProjects[p.id] = 1;
+                    if (match(p.name || p.title)) kids += row('project', p.id, p.name || p.title || p.id, 1);
+                    var pTasks = tks.filter(function (t) {
+                        return t && ((Array.isArray(p.taskIds) && p.taskIds.indexOf(t.id) !== -1) || String(t.projectId || '') === String(p.id));
+                    });
+                    pTasks.forEach(function (t) {
+                        claimedTasks[t.id] = 1;
+                        if (match(t.title || t.name)) kids += row('task', t.id, t.title || t.name || t.id, 2);
+                    });
+                });
+                tks.forEach(function (t) {
+                    if (!t || claimedTasks[t.id]) return;
+                    var inCp = (Array.isArray(cp.taskIds) && cp.taskIds.indexOf(t.id) !== -1) ||
+                               String(t.roundId || '') === String(cp.id) || String(t.checkpointId || '') === String(cp.id);
+                    if (!inCp) return;
+                    claimedTasks[t.id] = 1;
+                    if (match(t.title || t.name)) kids += row('task', t.id, t.title || t.name || t.id, 1);
+                });
+                if (match(cpName) || kids) {
+                    html += row('checkpoint', cp.id, cpName, 0, (cp.status || '')) + kids;
+                }
+            });
+            var orphanP = pjs.filter(function (p) { return p && !claimedProjects[p.id] && match(p.name || p.title); });
+            var orphanT = tks.filter(function (t) { return t && !claimedTasks[t.id] && match(t.title || t.name); });
+            if (orphanP.length || orphanT.length) {
+                html += '<div style="font-size:10px;color:rgba(255,255,255,0.3);margin:10px 0 4px;text-transform:uppercase;letter-spacing:0.1em;">Unattached</div>';
+                orphanP.forEach(function (p) { html += row('project', p.id, p.name || p.title || p.id, 0); });
+                orphanT.forEach(function (t) { html += row('task', t.id, t.title || t.name || t.id, 0); });
+            }
+            // Core Pathway nodes — from the live node registry when available.
+            try {
+                var nodes = (window.PFLX_PATHWAY_NODES && Array.isArray(window.PFLX_PATHWAY_NODES)) ? window.PFLX_PATHWAY_NODES : [];
+                var nodeRows = '';
+                nodes.forEach(function (n) {
+                    var nid = n && (n.id || n.nodeId); if (!nid) return;
+                    var nl = n.title || n.name || nid;
+                    if (match(nl)) nodeRows += row('node', nid, nl, 0);
+                });
+                // Any node already granted but not in the registry still shows.
+                (window._mcScopeSel || []).forEach(function (e) {
+                    if (e.type === 'node' && nodes.every(function (n) { return String(n.id || n.nodeId) !== String(e.id); })) {
+                        nodeRows += row('node', e.id, e.label || e.id, 0);
+                    }
+                });
+                if (nodeRows) html += '<div style="font-size:10px;color:rgba(255,255,255,0.3);margin:10px 0 4px;text-transform:uppercase;letter-spacing:0.1em;">Core Pathway Nodes</div>' + nodeRows;
+            } catch (e) {}
+            box.innerHTML = html || '<div style="font-size:12px;color:rgba(255,255,255,0.3);padding:6px;">Nothing matches that filter.</div>';
+            var sum = document.getElementById('mc-scope-summary');
+            if (sum) {
+                var sel = window._mcScopeSel || [];
+                sum.textContent = sel.length
+                    ? '✓ ' + sel.length + ' area' + (sel.length === 1 ? '' : 's') + ' granted: ' + sel.map(function (e) { return e.type + ' · ' + (e.label || e.id); }).join('  |  ')
+                    : '⚠ Nothing checked — this host controls nothing.';
+                sum.style.color = sel.length ? 'rgba(125,249,255,0.75)' : '#f5a500';
+            }
+        }
+        window.mcScopeRenderList = mcScopeRenderList;
+        try {
+            document.addEventListener('input', function (ev) {
+                if (ev.target && ev.target.id === 'mc-scope-filter') mcScopeRenderList();
+            });
+        } catch (e) {}
         // Populate the ACCESS & ROLE section from a player record (or blank for new).
         // The whole section is hidden unless the current user holds assign.tiers.
         function mcPopulateTierUI(p) {
@@ -28193,6 +28337,22 @@
             var nodesInput = document.getElementById('mc-player-form-nodes');
             if (nodesInput) nodesInput.value = (p && p.managedNodes && p.managedNodes.length) ? p.managedNodes.join(', ') : '';
             if (projSel) projSel.value = (p && p.managedProjectId) || '';
+            // v1.12 — seed the scope checklist from managedScope, folding in any
+            // legacy managedProjectId / managedNodes so old grants aren't lost.
+            var seed = [];
+            if (p && Array.isArray(p.managedScope)) {
+                p.managedScope.forEach(function (e) { if (e && e.type && e.id) seed.push({ type: e.type, id: String(e.id), label: e.label || '' }); });
+            }
+            if (p && p.managedProjectId && !seed.some(function (e) { return e.type === 'project' && String(e.id) === String(p.managedProjectId); })) {
+                seed.push({ type: 'project', id: String(p.managedProjectId), label: '' });
+            }
+            if (p && Array.isArray(p.managedNodes)) {
+                p.managedNodes.forEach(function (n) {
+                    if (n && !seed.some(function (e) { return e.type === 'node' && String(e.id) === String(n); })) seed.push({ type: 'node', id: String(n), label: '' });
+                });
+            }
+            window._mcScopeSel = seed;
+            var fEl = document.getElementById('mc-scope-filter'); if (fEl) fEl.value = '';
             mcTierScopeRefresh();
         }
         // Apply the selected tier + scope onto a player record. Guarded: only
@@ -28212,20 +28372,32 @@
             };
             if (tier === 'player') {
                 rec.role = 'player';
-                delete rec.hostTier; delete rec.managedCohorts; delete rec.managedNodes; delete rec.managedProjectId;
+                delete rec.hostTier; delete rec.managedCohorts; delete rec.managedNodes; delete rec.managedProjectId; delete rec.managedScope;
             } else {
                 var roleFor = { master: 'admin', admin: 'host', cohost: 'host', instructor: 'instructor', guest: 'instructor' };
                 rec.role = roleFor[tier] || 'host';
                 rec.hostTier = tier;
+                // v1.12 — the checklist is now the source of truth for area scope.
+                // Guest Host is single-area (enforced here as well as in the UI);
+                // the legacy fields are written alongside so any surface still
+                // reading managedProjectId / managedNodes keeps working.
+                var sel = (window._mcScopeSel || []).map(function (e) { return { type: e.type, id: String(e.id), label: e.label || '' }; });
+                if (tier === 'guest' && sel.length > 1) sel = sel.slice(-1);
                 if (tier === 'cohost') {
-                    rec.managedCohorts = csv('mc-player-form-cohorts'); rec.managedNodes = csv('mc-player-form-nodes'); delete rec.managedProjectId;
+                    rec.managedCohorts = csv('mc-player-form-cohorts');
                 } else if (tier === 'instructor') {
-                    rec.managedCohorts = csv('mc-player-form-cohorts').slice(0, 1); rec.managedNodes = csv('mc-player-form-nodes'); delete rec.managedProjectId;
-                } else if (tier === 'guest') {
-                    rec.managedProjectId = (document.getElementById('mc-player-form-project') || { value: '' }).value || null;
-                    rec.managedNodes = csv('mc-player-form-nodes'); delete rec.managedCohorts;
+                    rec.managedCohorts = csv('mc-player-form-cohorts').slice(0, 1);
+                } else {
+                    delete rec.managedCohorts;
+                }
+                if (tier === 'guest' || tier === 'instructor' || tier === 'cohost') {
+                    rec.managedScope = sel;
+                    var firstProj = sel.find(function (e) { return e.type === 'project'; });
+                    if (firstProj) rec.managedProjectId = firstProj.id; else delete rec.managedProjectId;
+                    var nodeIds = sel.filter(function (e) { return e.type === 'node'; }).map(function (e) { return e.id; });
+                    if (nodeIds.length) rec.managedNodes = nodeIds; else delete rec.managedNodes;
                 } else { // master / admin — global scope, clear any leftovers
-                    delete rec.managedCohorts; delete rec.managedNodes; delete rec.managedProjectId;
+                    delete rec.managedCohorts; delete rec.managedNodes; delete rec.managedProjectId; delete rec.managedScope;
                 }
             }
         }
@@ -59235,9 +59407,89 @@ RESPONSE RULES:
             function managedNodes(s)   { s = sessionOf(s); return (s && s.managedNodes) || []; }
             function managedProject(s) { s = sessionOf(s); return (s && s.managedProjectId) || null; }
 
+            // ── HOST CONTROL SCOPE (v1.12, July 25, Ennis) ──────────────────
+            // One unified list replaces the three legacy fields:
+            //   session.managedScope = [{type:'checkpoint'|'project'|'task'|'node', id:'…'}]
+            // Hierarchy rule (Ennis): granting a CHECKPOINT grants every Project
+            // and Task inside it; granting a PROJECT grants its Tasks. That's why
+            // scopeGrants() expands downward instead of comparing ids literally.
+            // Legacy records (managedProjectId / managedNodes) are folded in so
+            // nothing assigned under the old UI silently loses access.
+            function managedScope(s) {
+                s = sessionOf(s);
+                var out = [];
+                if (s && Array.isArray(s.managedScope)) {
+                    s.managedScope.forEach(function (e) { if (e && e.type && e.id) out.push({ type: e.type, id: String(e.id) }); });
+                }
+                if (s && s.managedProjectId) out.push({ type: 'project', id: String(s.managedProjectId) });
+                if (s && Array.isArray(s.managedNodes)) s.managedNodes.forEach(function (n) { if (n) out.push({ type: 'node', id: String(n) }); });
+                return out;
+            }
+            // Has this session been given an explicit scope at all? Used to tell
+            // "never assigned" (legacy grace) from "assigned nothing" (strict).
+            function scopeAssigned(s) {
+                s = sessionOf(s);
+                return !!(s && (Array.isArray(s.managedScope) || s.managedProjectId != null || Array.isArray(s.managedNodes)));
+            }
+            // Does the scope list cover this target? Walks the hierarchy DOWN
+            // from each granted entry.
+            function scopeGrants(scope, target) {
+                if (!target || !target.type || target.id == null) return false;
+                var tid = String(target.id);
+                var cps = (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) ? mcCheckpoints : [];
+                var pjs = (typeof mcProjects !== 'undefined' && Array.isArray(mcProjects)) ? mcProjects : [];
+                var tks = (typeof mcTasks !== 'undefined' && Array.isArray(mcTasks)) ? mcTasks : [];
+                function projectsOfCheckpoint(cpId) {
+                    var cp = cps.find(function (c) { return c && String(c.id) === String(cpId); });
+                    var ids = (cp && Array.isArray(cp.projectIds)) ? cp.projectIds.map(String) : [];
+                    pjs.forEach(function (p) {
+                        if (p && (String(p.checkpointId || '') === String(cpId) || String(p.roundId || '') === String(cpId))) ids.push(String(p.id));
+                    });
+                    return ids;
+                }
+                function tasksOfProject(pjId) {
+                    var pj = pjs.find(function (p) { return p && String(p.id) === String(pjId); });
+                    var ids = (pj && Array.isArray(pj.taskIds)) ? pj.taskIds.map(String) : [];
+                    tks.forEach(function (t) { if (t && String(t.projectId || '') === String(pjId)) ids.push(String(t.id)); });
+                    return ids;
+                }
+                function tasksOfCheckpoint(cpId) {
+                    var cp = cps.find(function (c) { return c && String(c.id) === String(cpId); });
+                    var ids = (cp && Array.isArray(cp.taskIds)) ? cp.taskIds.map(String) : [];
+                    tks.forEach(function (t) { if (t && (String(t.roundId || '') === String(cpId) || String(t.checkpointId || '') === String(cpId))) ids.push(String(t.id)); });
+                    projectsOfCheckpoint(cpId).forEach(function (pid) { ids = ids.concat(tasksOfProject(pid)); });
+                    return ids;
+                }
+                for (var i = 0; i < scope.length; i++) {
+                    var e = scope[i];
+                    if (e.type === target.type && String(e.id) === tid) return true;   // direct grant
+                    if (e.type === 'checkpoint') {
+                        if (target.type === 'project' && projectsOfCheckpoint(e.id).indexOf(tid) !== -1) return true;
+                        if (target.type === 'task' && tasksOfCheckpoint(e.id).indexOf(tid) !== -1) return true;
+                    }
+                    if (e.type === 'project' && target.type === 'task' && tasksOfProject(e.id).indexOf(tid) !== -1) return true;
+                }
+                return false;
+            }
+            window.pflxScopeGrants = scopeGrants;
+            window.pflxManagedScope = managedScope;
+
             function inScope(tier, ctx) {
                 if (tier === 'master' || tier === 'admin') return true; // global
                 if (!ctx) return true;                                   // no context → allow
+                // ── v1.12 SCOPE CHECK (strict, Ennis-approved) ──
+                // A scoped host (guest/instructor) acts ONLY inside the areas
+                // checked in Player Manager. Empty scope = controls nothing.
+                // Legacy grace applies only to accounts that were never given a
+                // scope at all — of which there are none as of July 25.
+                if (scopeAssigned()) {
+                    var __scope = managedScope();
+                    if (ctx.checkpointId != null) return scopeGrants(__scope, { type: 'checkpoint', id: ctx.checkpointId });
+                    if (ctx.projectId != null)    return scopeGrants(__scope, { type: 'project',    id: ctx.projectId });
+                    if (ctx.taskId != null)       return scopeGrants(__scope, { type: 'task',       id: ctx.taskId });
+                    if (ctx.nodeId != null)       return scopeGrants(__scope, { type: 'node',       id: ctx.nodeId });
+                    // cohort context falls through to the legacy check below
+                }
                 // Phase 3 semantics: read RAW session fields so we can tell
                 // "never assigned" (undefined → legacy grace, permissive) apart
                 // from "assigned, possibly empty" (array → STRICT membership).
