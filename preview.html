@@ -9212,6 +9212,13 @@
                                             <label style="display:flex;align-items:center;gap:8px;font-size:11px;color:#e0e6ff;cursor:pointer;">
                                                 <input type="checkbox" id="mc-project-dc-channel" checked> Auto-create private DarkCampus channel
                                             </label>
+                                            <div style="margin-top:8px;">
+                                                <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px;text-transform:uppercase;letter-spacing:1px;">🔗 Link DarkCampus Channel</label>
+                                                <select id="mc-project-dc-channel-select" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(139,92,246,0.3);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                                    <option value="">— Auto (use this project's own channel) —</option>
+                                                </select>
+                                                <div style="font-size:9px;color:#8a93b8;margin-top:4px;">Notifications (task completion, deadlines, @tags) post to this channel — and to its connected Slack/Discord once webhooks are set.</div>
+                                            </div>
                                             <label style="display:flex;align-items:center;gap:8px;font-size:11px;color:#e0e6ff;cursor:pointer;margin-top:6px;">
                                                 <input type="checkbox" id="mc-project-xbot-enabled" checked> Enable X-Bot communication
                                             </label>
@@ -16402,6 +16409,54 @@
             console.log('[broadcast→slack] (stub) channels:', channels, 'msg:', message);
             // TODO: POST to /api/pflx-slack { channels, message, from } once provisioned.
         }
+
+        // ── Project → DarkCampus Channel notification bridge (in-PFLX half) ──
+        // A Project is linked to a DarkCampus Project Channel via the shared
+        // `dc_project_channels` row (DarkCampus owns the link + its Slack/Discord
+        // webhook mapping + the feedOptions toggles: alerts/reminders/overviews/
+        // tasks/offers). This emits a structured event whenever a task completes,
+        // a deadline hits, or a member is @-tagged. DarkCampus's feed engine
+        // routes it to the channel (if that feed type is on) and, once its
+        // webhooks are provisioned, mirrors it to the connected Slack/Discord.
+        function pflxEmitProjectEvent(projectId, feedType, text, extra) {
+            if (!projectId || !text) return;
+            var proj = (typeof mcProjects !== 'undefined' ? mcProjects : []).find(function (p) { return p && p.id === projectId; });
+            var payload = Object.assign({
+                type: 'pflx_project_event',
+                projectId: projectId,
+                channelId: (proj && proj.dcChannelId) || '',     // host-linked DarkCampus channel (blank = auto)
+                feedType: feedType || 'alerts',                 // matches DarkCampus feedOptions keys
+                title: (proj && proj.name) || 'Project',
+                message: String(text),
+                from: (typeof activeSession !== 'undefined' && activeSession && activeSession.brand) || 'PFLX',
+                ts: Date.now()
+            }, extra || {});
+            // Live push to the DarkCampus iframe/app.
+            try { if (typeof mcBroadcastToApps === 'function') mcBroadcastToApps('pflx_project_event', payload); } catch (e) {}
+            // Durable cloud row DarkCampus can poll / replay (append, capped).
+            try {
+                var sb = window.pflxSupabase && window.pflxSupabase();
+                if (sb) {
+                    sb.from('app_data').select('data').eq('key', 'pflx_project_events').maybeSingle().then(function (res) {
+                        var list = (res && res.data && res.data.data && Array.isArray(res.data.data.items)) ? res.data.data.items : [];
+                        list.push(payload); if (list.length > 300) list = list.slice(-300);
+                        sb.from('app_data').upsert({ key: 'pflx_project_events', data: { items: list } }, { onConflict: 'key' }).then(function () {}, function () {});
+                    }, function () {});
+                }
+            } catch (e) {}
+            return payload;
+        }
+        window.pflxEmitProjectEvent = pflxEmitProjectEvent;
+        // Convenience: given a TASK, notify its parent project's channel.
+        function pflxTaskProjectNotify(task, feedType, text) {
+            if (!task) return;
+            var pid = task.projectId || (function () {
+                var p = (typeof mcProjects !== 'undefined' ? mcProjects : []).find(function (pr) { return pr && Array.isArray(pr.taskIds) && pr.taskIds.indexOf(task.id) >= 0; });
+                return p ? p.id : null;
+            })();
+            if (pid) pflxEmitProjectEvent(pid, feedType, text, { taskId: task.id });
+        }
+        window.pflxTaskProjectNotify = pflxTaskProjectNotify;
         // Append a broadcast into the X-Bot chat so "check X-Bot" shows it.
         window.pflxXbotAddBroadcast = function (message, from) {
             var box = document.getElementById('xbot-chat-messages');
@@ -29806,8 +29861,24 @@
         // holders (hidden from players) the host fills in later. Skips ones that
         // already exist (matched by the Greek word in the name).
         function pflxScaffoldProgram() {
-            var order = ['Alpha', 'Beta', 'Gamma', 'Delta', 'Zeta', 'Theta', 'Nu', 'Sigma', 'Psi', 'Omega'];
+            // Greek-alphabetical program (10). Theta dropped, Omicron kept.
+            var order = ['Alpha', 'Beta', 'Gamma', 'Delta', 'Zeta', 'Nu', 'Omicron', 'Sigma', 'Psi', 'Omega'];
+            // Greek letters that USED to be in the program and should be retired
+            // if they exist only as an empty inactive template holder.
+            var retired = ['Theta', 'Eta', 'Epsilon', 'Iota', 'Kappa', 'Lambda', 'Mu', 'Xi', 'Pi', 'Rho', 'Tau', 'Upsilon', 'Phi', 'Chi'];
             if (!Array.isArray(mcCheckpoints)) mcCheckpoints = [];
+            // Remove empty template holders for retired letters (e.g. Theta).
+            for (var _ri = mcCheckpoints.length - 1; _ri >= 0; _ri--) {
+                var _rc = mcCheckpoints[_ri];
+                if (!_rc) continue;
+                var _rn = String(_rc.name || '').toLowerCase();
+                var _isRetired = retired.some(function (g) { return _rn.indexOf(g.toLowerCase()) >= 0; });
+                var _empty = (!(_rc.taskIds || []).length && !(_rc.projectIds || []).length && !(_rc.jobIds || []).length);
+                if (_isRetired && _empty && (_rc.status === 'inactive' || _rc.status === 'upcoming')) {
+                    try { _mcTombstone('checkpoints', _rc.id); } catch (e) {}
+                    mcCheckpoints.splice(_ri, 1);
+                }
+            }
             var have = {};
             mcCheckpoints.forEach(function (c) {
                 var n = String((c && c.name) || '').toLowerCase();
@@ -29834,13 +29905,25 @@
                 });
                 added++;
             });
-            if (added) {
-                try { mcSaveData('checkpoints'); } catch (e) {}
-                try { mcRenderCheckpoints(); } catch (e) {}
-                try { mcLoadData(); } catch (e) {}
-            }
+            // Keep the whole program in Alpha…Omega order, always — stamp
+            // programOrder on every matching checkpoint (existing + new) and sort
+            // the list by it (non-program checkpoints keep their relative order
+            // after the program via the 999 fallback + stable sort).
+            var ordIdx = {}; order.forEach(function (g, i) { ordIdx[g.toLowerCase()] = i; });
+            mcCheckpoints.forEach(function (c) {
+                var n = String((c && c.name) || '').toLowerCase();
+                order.forEach(function (g) { if (n.indexOf(g.toLowerCase()) >= 0) { c.programOrder = ordIdx[g.toLowerCase()]; } });
+            });
+            mcCheckpoints.sort(function (a, b) {
+                var ao = (a && a.programOrder != null) ? a.programOrder : 999;
+                var bo = (b && b.programOrder != null) ? b.programOrder : 999;
+                return ao - bo;
+            });
+            try { mcSaveData('checkpoints'); } catch (e) {}
+            try { mcRenderCheckpoints(); } catch (e) {}
+            try { mcLoadData(); } catch (e) {}
             if (typeof pflxToast === 'function') {
-                pflxToast(added ? ('Added ' + added + ' inactive checkpoint' + (added > 1 ? 's' : '') + ' — customize them any time.') : 'All 10 program checkpoints already exist.', 'success');
+                pflxToast(added ? ('Added ' + added + ' inactive checkpoint' + (added > 1 ? 's' : '') + ' — Alpha…Omega, in order.') : 'All 10 program checkpoints exist — re-sorted in order.', 'success');
             }
         }
         window.pflxScaffoldProgram = pflxScaffoldProgram;
@@ -33459,6 +33542,8 @@
                 });
             } catch (e) {}
             try { if (window.pflxModifiers) window.pflxModifiers.fireEvent('task_approved', { playerId: pid, targetType: 'task', targetId: task.id, cohort: task.cohort }); } catch (e) {}
+            // Notify the parent project's DarkCampus channel of a completion.
+            try { if (typeof pflxTaskProjectNotify === 'function') pflxTaskProjectNotify(task, 'tasks', '✅ ' + (_pflxPlayerBrandById(pid) || 'A player') + ' completed "' + (task.title || 'a task') + '"'); } catch (e) {}
             // Whole-task completion: only when every assigned player is approved.
             try {
                 if (typeof _mcTaskHostComplete === 'function' && _mcTaskHostComplete(task)) {
@@ -34281,6 +34366,7 @@
                 el = document.getElementById('mc-project-max-players'); if (el) el.value = p.maxPlayers || 4;
                 el = document.getElementById('mc-project-session-code'); if (el) el.value = p.sessionCode || '';
                 el = document.getElementById('mc-project-dc-channel'); if (el) el.checked = p.dcChannelEnabled !== false;
+                try { mcLoadProjectDcChannels(p.dcChannelId || ''); } catch (eDc) {}
                 el = document.getElementById('mc-project-xbot-enabled'); if (el) el.checked = p.xbotEnabled !== false;
                 try { mcLoadProjectFeedOptions(p.id); } catch (eFeedOpts) { /* checklist defaults stay */ }
                 // Check assigned cohorts AND toggle the list visibility so
@@ -34331,6 +34417,7 @@
                 el = document.getElementById('mc-project-max-players'); if (el) el.value = 4;
                 el = document.getElementById('mc-project-session-code'); if (el) el.value = '';
                 el = document.getElementById('mc-project-dc-channel'); if (el) el.checked = true;
+                try { mcLoadProjectDcChannels(''); } catch (eDc) {}
                 el = document.getElementById('mc-project-xbot-enabled'); if (el) el.checked = true;
                 try { mcApplyProjectFeedOpts(null); } catch (eFeedReset) { /* defaults */ }
                 var allCohortsCheckbox = document.getElementById('mc-project-all-cohorts'); if (allCohortsCheckbox) allCohortsCheckbox.checked = true;
@@ -34366,6 +34453,32 @@
                 if (el) el.checked = !opts || opts[k] !== false;
             });
         }
+        // Populate the "Link DarkCampus Channel" dropdown from the shared
+        // dc_project_channels row (DarkCampus creates channels; the host picks
+        // which one this project posts to). Falls back to the auto option.
+        function mcLoadProjectDcChannels(selectedId) {
+            var sel = document.getElementById('mc-project-dc-channel-select');
+            if (!sel) return;
+            sel.innerHTML = '<option value="">— Auto (use this project\'s own channel) —</option>';
+            try {
+                var sb = window.pflxSupabase && window.pflxSupabase();
+                if (!sb) return;
+                sb.from('app_data').select('data').eq('key', 'dc_project_channels').maybeSingle().then(function (res) {
+                    if (!res || res.error || !res.data || !Array.isArray(res.data.data)) return;
+                    res.data.data.forEach(function (l) {
+                        if (!l) return;
+                        var id = l.channelId || l.id;
+                        var label = l.channelName || l.name || l.projectName || id;
+                        if (!id) return;
+                        var opt = document.createElement('option');
+                        opt.value = id; opt.textContent = '# ' + label;
+                        if (id === selectedId) opt.selected = true;
+                        sel.appendChild(opt);
+                    });
+                });
+            } catch (e) { console.warn('[mc project dc-channels] load failed', e); }
+        }
+        window.mcLoadProjectDcChannels = mcLoadProjectDcChannels;
         function mcLoadProjectFeedOptions(projectId) {
             mcApplyProjectFeedOpts(null); // defaults while the cloud read is in flight
             try {
@@ -34493,6 +34606,7 @@
                 maxPlayers: parseInt(document.getElementById('mc-project-max-players')?.value || '4', 10),
                 sessionCode: document.getElementById('mc-project-session-code')?.value || '',
                 dcChannelEnabled: document.getElementById('mc-project-dc-channel')?.checked || false,
+                dcChannelId: document.getElementById('mc-project-dc-channel-select')?.value || '',
                 xbotEnabled: document.getElementById('mc-project-xbot-enabled')?.checked || false,
                 coopPlayers: mcProjectEditIndex >= 0 && mcProjects[mcProjectEditIndex] ? (mcProjects[mcProjectEditIndex].coopPlayers || []) : []
             };
@@ -59474,6 +59588,11 @@ RESPONSE RULES:
                             window.pflxModifiers.fireEvent(trigger, { playerId: pid, targetType: targetType, targetId: it.id, cohort: it.cohort });
                         });
                         it._missFired = fired;
+                        // Deadline alert to the parent project's DarkCampus channel (once).
+                        if (targetType === 'task' && !it._missNotified) {
+                            it._missNotified = true;
+                            try { if (typeof pflxTaskProjectNotify === 'function') pflxTaskProjectNotify(it, 'reminders', '⏰ Deadline passed on "' + (it.title || 'a task') + '"'); } catch (e) {}
+                        }
                     });
                 }
                 sweep(typeof mcTasks !== 'undefined' ? mcTasks : null, 'task_missed_deadline', 'task', 'tasks');
@@ -61436,6 +61555,13 @@ RESPONSE RULES:
             t.updatedAt = new Date().toISOString();
             _pcSave();
             try { _pcCloudPushNow(); } catch (e) {}   // flush now — no clobber window
+            // If this is a Project group chat and the message @-tags members,
+            // route it to the project's DarkCampus channel (tags to members).
+            try {
+                if (t.fromProjectId && mentions.length && typeof window.pflxEmitProjectEvent === 'function') {
+                    window.pflxEmitProjectEvent(t.fromProjectId, 'alerts', '🏷 ' + me.name + ' tagged ' + mentions.length + ' member' + (mentions.length === 1 ? '' : 's') + ': ' + text, { taggedPlayers: mentions });
+                }
+            } catch (e) {}
             input.value = '';
             pflxChatRender();
         };
