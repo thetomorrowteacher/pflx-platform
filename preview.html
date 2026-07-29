@@ -29045,16 +29045,17 @@
                 // banner corner. Grid columns are wider than Projects so
                 // Checkpoint cards read as the higher tier.
                 var bannerBlock;
-                if (cp.bannerImage) {
+                if (cp.embedUrl || cp.bannerImage) {
                     bannerBlock = '<div style="position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;">' +
-                        '<img src="' + cp.bannerImage + '" style="width:100%;height:100%;object-fit:cover;display:block;filter:saturate(1.15) brightness(1.02);">' +
+                        (typeof pflxCoverMediaEl === 'function' ? pflxCoverMediaEl(cp.embedUrl, cp.bannerImage) : '<img src="' + cp.bannerImage + '" style="width:100%;height:100%;object-fit:cover;display:block;filter:saturate(1.15) brightness(1.02);">') +
+                        (cp.embedUrl ? '' :
                         '<div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(10,10,15,0) 0%, rgba(10,10,15,0.15) 45%, rgba(22,22,31,0.92) 100%);"></div>' +
                         '<div style="position:absolute;inset:0;box-shadow:inset 0 0 90px rgba(' + accentRgb + ',0.28);pointer-events:none;"></div>' +
                         '<div style="position:absolute;top:16px;left:16px;background:rgba(' + accentRgb + ',0.22);color:rgba(255,255,255,0.95);padding:5px 12px;border-radius:6px;font-size:10px;font-weight:800;border:1px solid rgba(' + accentRgb + ',0.55);backdrop-filter:blur(10px);text-transform:uppercase;letter-spacing:0.14em;font-family:Orbitron,sans-serif;">◆ Checkpoint</div>' +
                         '<div style="position:absolute;top:16px;right:16px;background:rgba(' + accentRgb + ',0.22);color:' + sc.text + ';padding:6px 14px;border-radius:14px;font-size:11px;font-weight:800;border:1px solid rgba(' + accentRgb + ',0.55);backdrop-filter:blur(10px);text-transform:uppercase;letter-spacing:0.1em;">' + (cp.status || 'upcoming') + '</div>' +
                         '<div style="position:absolute;left:24px;right:24px;bottom:20px;">' +
                           '<div style="font-family:Orbitron,sans-serif;font-size:28px;font-weight:900;color:#ffffff;text-shadow:0 2px 18px rgba(0,0,0,0.9), 0 0 22px rgba(' + accentRgb + ',0.35);letter-spacing:0.02em;line-height:1.1;">' + escapeHtml(cp.name) + '</div>' +
-                        '</div>' +
+                        '</div>') +
                       '</div>';
                 } else {
                     bannerBlock = '<div style="position:relative;width:100%;aspect-ratio:16/9;background:linear-gradient(135deg, rgba(' + accentRgb + ',0.20), rgba(' + accentRgb + ',0.05));display:flex;align-items:flex-end;padding:24px;box-shadow:inset 0 0 90px rgba(' + accentRgb + ',0.18);">' +
@@ -50960,6 +50961,30 @@ RESPONSE RULES:
         // Supports: YouTube / Vimeo videos, Canva, Google Slides, generic
         // iframe-able URLs, raw iframe HTML, and images. All rendered in a
         // sandboxed iframe for untrusted HTML to prevent script injection.
+        // Shared: normalize a share URL (YouTube / Vimeo / Google Slides / Canva
+        // / Google Doc) into an embeddable iframe src. Used by the portfolio AND
+        // Mission Control checkpoint/project covers.
+        window.pflxEmbedSrc = function (url) {
+            url = String(url || '').trim(); if (!url) return '';
+            var yt = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([A-Za-z0-9_-]{6,})/);
+            if (yt) return 'https://www.youtube.com/embed/' + yt[1];
+            var vm = url.match(/vimeo\.com\/(\d+)/);
+            if (vm) return 'https://player.vimeo.com/video/' + vm[1];
+            var gs = url.match(/docs\.google\.com\/presentation\/d\/([A-Za-z0-9_-]+)/);
+            if (gs) return 'https://docs.google.com/presentation/d/' + gs[1] + '/embed?start=false&loop=false';
+            var gd = url.match(/docs\.google\.com\/document\/d\/([A-Za-z0-9_-]+)/);
+            if (gd) return 'https://docs.google.com/document/d/' + gd[1] + '/preview';
+            if (/canva\.com\/design\//.test(url) && !/\/view/.test(url)) return url.replace(/\/(edit|watch).*$/, '') + '/view?embed';
+            return url;   // already an embed/iframe-able URL
+        };
+        // Media element for a cover: iframe (embedUrl) else image else ''.
+        window.pflxCoverMediaEl = function (embedUrl, imgUrl) {
+            if (embedUrl) {
+                return '<iframe src="' + escapeHtml(pflxEmbedSrc(embedUrl)) + '" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen sandbox="allow-scripts allow-same-origin allow-presentation allow-popups" style="width:100%;height:100%;border:0;display:block;background:#000;"></iframe>';
+            }
+            if (imgUrl) return '<img src="' + escapeHtml(imgUrl) + '" style="width:100%;height:100%;object-fit:cover;display:block;filter:saturate(1.15) brightness(1.02);">';
+            return '';
+        };
         function portfolioRenderProjectMedia(p) {
             if (!p) return '';
             const url = (p.embedUrl || '').trim();
