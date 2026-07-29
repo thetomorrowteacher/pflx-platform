@@ -8414,6 +8414,10 @@
                                             <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">Resource Link</label>
                                             <input type="url" id="mc-cp-link" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:10px;border-radius:8px;font-size:13px;box-sizing:border-box;" placeholder="https://...">
                                         </div>
+                                        <div style="grid-column:1/-1;">
+                                            <label style="display:block;font-size:11px;color:rgba(139,92,246,0.7);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">🖥 Embed (shows instead of the banner)</label>
+                                            <input type="url" id="mc-cp-embed" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(139,92,246,0.25);color:#e0e6ff;padding:10px;border-radius:8px;font-size:13px;box-sizing:border-box;" placeholder="YouTube, Google Slides, Canva, or any embed URL — leave blank to use the banner image">
+                                        </div>
                                     </div>
                                     <!-- Tier Variants — per-tier deadline + XC overrides.
                                          Schema: cp.tierVariants = { starter:{endDate,xc}, novice:{...}, pro:{...} }.
@@ -16364,15 +16368,16 @@
             // (3) Mission Control General Chat
             var targets = opts.targets || _pflxBroadcastTargets();
             if (targets.mcGeneral !== false) { try { pflxPostToGeneralChat(message, b.from); } catch (e) {} }
-            // (4) Discord channels (stub until webhook provisioned)
+            // (4) Discord + (5) Slack channels (stubbed until a webhook is provisioned)
             if (targets.discord && targets.discord.length) { try { pflxPostToDiscord(message, targets.discord, b.from); } catch (e) {} }
+            if (targets.slack && targets.slack.length) { try { pflxPostToSlack(message, targets.slack, b.from); } catch (e) {} }
             return b;
         }
         window.pflxPostBroadcast = pflxPostBroadcast;
 
         function _pflxBroadcastTargets() {
-            try { return JSON.parse(localStorage.getItem(PFLX_BROADCAST_TARGETS_KEY) || 'null') || { mcGeneral: true, discord: [] }; }
-            catch (e) { return { mcGeneral: true, discord: [] }; }
+            try { var t = JSON.parse(localStorage.getItem(PFLX_BROADCAST_TARGETS_KEY) || 'null') || {}; return { mcGeneral: t.mcGeneral !== false, discord: t.discord || [], slack: t.slack || [] }; }
+            catch (e) { return { mcGeneral: true, discord: [], slack: [] }; }
         }
         // Post a broadcast into the cohort's "Mission Control — General" group chat.
         function pflxPostToGeneralChat(message, from) {
@@ -16389,6 +16394,13 @@
         function pflxPostToDiscord(message, channels, from) {
             console.log('[broadcast→discord] (stub) channels:', channels, 'msg:', message);
             // TODO: POST to /api/pflx-discord { channels, message, from } once provisioned.
+        }
+        // Slack mirror — STUB. Wires to a serverless webhook once a Slack bot token
+        // / incoming-webhook URL + channel IDs are provisioned. Same shape as Discord.
+        var PFLX_SLACK_CHANNELS_KEY = 'pflx_slack_channels';
+        function pflxPostToSlack(message, channels, from) {
+            console.log('[broadcast→slack] (stub) channels:', channels, 'msg:', message);
+            // TODO: POST to /api/pflx-slack { channels, message, from } once provisioned.
         }
         // Append a broadcast into the X-Bot chat so "check X-Bot" shows it.
         window.pflxXbotAddBroadcast = function (message, from) {
@@ -16425,13 +16437,18 @@
                     '<input type="checkbox" data-kind="' + kind + '" value="' + (typeof escapeHtml === 'function' ? escapeHtml(val) : val) + '"' + (checked ? ' checked' : '') + ' style="width:17px;height:17px;accent-color:#00f0ff;">' +
                     '<span style="font-size:13px;color:#eaf2ff;">' + label + '</span></label>';
             };
+            var slackChannels = [];
+            try { slackChannels = JSON.parse(localStorage.getItem(PFLX_SLACK_CHANNELS_KEY) || 'null') || ['#software-upgrades', '#general', '#announcements']; } catch (e) { slackChannels = ['#software-upgrades']; }
             var discordRows = channels.map(function (c) { return row('💬 Discord ' + c, (sel.discord || []).indexOf(c) >= 0, c, 'discord'); }).join('');
+            var slackRows = slackChannels.map(function (c) { return row('💼 Slack ' + c, (sel.slack || []).indexOf(c) >= 0, c, 'slack'); }).join('');
             var html =
                 '<div style="font-family:Orbitron,sans-serif;font-size:14px;letter-spacing:2px;color:#00f0ff;margin-bottom:6px;">BROADCAST CHANNELS</div>' +
-                '<div style="font-size:12px;color:#8a93b0;margin-bottom:12px;">Where this broadcast is delivered. Discord delivery is inactive until a webhook is provisioned.</div>' +
+                '<div style="font-size:12px;color:#8a93b0;margin-bottom:12px;">Where this broadcast is delivered. Discord + Slack delivery are inactive until a webhook is provisioned.</div>' +
                 row('📋 Mission Control — General Chat', sel.mcGeneral !== false, 'mcGeneral', 'mc') +
                 '<div style="font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:1.5px;color:#8a93b0;margin:14px 0 4px;">DISCORD CHANNELS</div>' +
                 discordRows +
+                '<div style="font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:1.5px;color:#8a93b0;margin:14px 0 4px;">SLACK CHANNELS</div>' +
+                slackRows +
                 '<div style="display:flex;gap:8px;margin-top:14px;">' +
                 '<input id="pflx-bc-newchan" placeholder="Add #channel" style="flex:1;background:rgba(10,18,40,0.8);border:1px solid rgba(255,255,255,0.12);color:#e0e6ff;padding:7px 10px;border-radius:7px;font-size:12px;">' +
                 '<button id="pflx-bc-add" style="padding:7px 12px;background:rgba(139,92,246,0.14);border:1px solid rgba(139,92,246,0.4);color:#c4b5fd;border-radius:7px;font-size:11px;cursor:pointer;">Add</button></div>' +
@@ -16445,15 +16462,17 @@
                     close(); window.pflxBroadcastChannels();
                 });
                 card.querySelector('#pflx-bc-save').addEventListener('click', function () {
-                    var out = { mcGeneral: false, discord: [] };
+                    var out = { mcGeneral: false, discord: [], slack: [] };
                     card.querySelectorAll('input[type="checkbox"]').forEach(function (cb) {
                         if (!cb.checked) return;
-                        if (cb.getAttribute('data-kind') === 'mc') out.mcGeneral = true;
-                        else if (cb.getAttribute('data-kind') === 'discord') out.discord.push(cb.value);
+                        var k = cb.getAttribute('data-kind');
+                        if (k === 'mc') out.mcGeneral = true;
+                        else if (k === 'discord') out.discord.push(cb.value);
+                        else if (k === 'slack') out.slack.push(cb.value);
                     });
                     try { localStorage.setItem(PFLX_BROADCAST_TARGETS_KEY, JSON.stringify(out)); } catch (e) {}
                     var lbl = document.getElementById('xbot-broadcast-targets');
-                    if (lbl) lbl.textContent = '→ ' + [(out.mcGeneral ? 'MC General' : null), (out.discord.length ? out.discord.length + ' Discord' : null)].filter(Boolean).join(' · ') || '→ (no targets)';
+                    if (lbl) lbl.textContent = '→ ' + ([(out.mcGeneral ? 'MC General' : null), (out.discord.length ? out.discord.length + ' Discord' : null), (out.slack.length ? out.slack.length + ' Slack' : null)].filter(Boolean).join(' · ') || '(no targets)');
                     if (typeof pflxPlaySfx === 'function') pflxPlaySfx('save');
                     close();
                 });
@@ -29839,6 +29858,8 @@
             document.getElementById('mc-cp-end').value = cp ? (cp.endDate || '') : '';
             document.getElementById('mc-cp-status').value = cp ? (cp.status || 'upcoming') : 'upcoming';
             document.getElementById('mc-cp-link').value = cp ? (cp.link || '') : '';
+            { var _ceEl = document.getElementById('mc-cp-embed'); if (_ceEl) _ceEl.value = cp ? (cp.embedUrl || '') : ''; }
+            if (cp) { cp.updatedAt = cp.updatedAt || Date.now(); }
             document.getElementById('mc-cp-xc').value = cp ? (cp.xcReward || 0) : 0;
 
             // Tier variants — repopulate from cp.tierVariants. Open the
@@ -30123,6 +30144,7 @@
                 status: document.getElementById('mc-cp-status')?.value || 'upcoming',
                 seasonId: document.getElementById('mc-cp-season')?.value || '',
                 link: document.getElementById('mc-cp-link')?.value || '',
+                embedUrl: (document.getElementById('mc-cp-embed')?.value || '').trim(),
                 assignedTo: assignedTo,
                 bannerImage: bannerImage,
                 taskIds: taskIds,
