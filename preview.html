@@ -12694,6 +12694,20 @@
                     </div>
                 </div>
 
+                <!-- Host Broadcast Composer (host-only) — posts above the tabs -->
+                <div id="xbot-broadcast-composer" style="display:none;padding:10px 12px;border-bottom:1px solid rgba(0,240,255,0.12);background:linear-gradient(180deg,rgba(0,240,255,0.05),transparent);">
+                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                        <span style="font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1.5px;color:#00f0ff;">📡 HOST BROADCAST</span>
+                        <span style="flex:1;"></span>
+                        <button onclick="pflxBroadcastChannels()" title="Choose channels" style="background:rgba(139,92,246,0.14);border:1px solid rgba(139,92,246,0.4);color:#c4b5fd;border-radius:6px;font-size:10px;font-weight:700;padding:3px 8px;cursor:pointer;">🔗 Channels</button>
+                    </div>
+                    <textarea id="xbot-broadcast-text" rows="2" placeholder="Post a message to your cohort — appears in X-Bot + the ticker in real time..." style="width:100%;background:rgba(10,18,40,0.85);border:1px solid rgba(0,240,255,0.18);color:#e0e6ff;padding:8px 10px;border-radius:8px;font-family:'Rajdhani',sans-serif;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
+                    <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+                        <span id="xbot-broadcast-targets" style="flex:1;font-size:9px;color:#6a7290;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">→ Mission Control General Chat</span>
+                        <button onclick="pflxBroadcastSendFromComposer()" style="background:linear-gradient(135deg,#00d4ff,#7c3aed);border:none;color:#fff;border-radius:7px;font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1.5px;font-weight:700;padding:7px 16px;cursor:pointer;">SEND</button>
+                    </div>
+                </div>
+
                 <!-- Mode Tabs -->
                 <div class="xbot-mode-tabs">
                     <button class="xbot-mode-tab active" data-mode="chat" onclick="switchXBotMode('chat')">Chat</button>
@@ -16266,8 +16280,15 @@
             if (!payload || !payload.type) return;
             var d = payload.data || {};
             if (payload.type === 'pflx_host_broadcast') {
+                // Dedupe by broadcast id so multi-path delivery (BroadcastChannel +
+                // storage + Supabase realtime) only alerts once.
+                if (d.id) { if (!window._pflxSeenBroadcasts) window._pflxSeenBroadcasts = {}; if (window._pflxSeenBroadcasts[d.id]) return; window._pflxSeenBroadcasts[d.id] = 1; }
                 pflxShowBroadcastBanner(d.message || '');
                 try { pflxPlaySfx('broadcast'); } catch(e) {}
+                // Real-time bottom-ticker alert pointing users to X-Bot.
+                try { if (typeof window.pflxTickerRaw === 'function') window.pflxTickerRaw('📡', '#00f0ff', 'NEW BROADCAST' + (d.from ? ' from ' + d.from : '') + ' — open X-Bot to read it'); } catch(e) {}
+                // Stash into X-Bot so opening it shows the message.
+                try { if (typeof pflxXbotAddBroadcast === 'function') pflxXbotAddBroadcast(d.message || '', d.from || 'Host'); } catch(e) {}
             } else if (payload.type === 'pflx_host_freeze') {
                 pflxShowFreezeOverlay(d.message || '');
                 try { pflxPlaySfx('alarm'); } catch(e) {}
@@ -16298,6 +16319,162 @@
             clearTimeout(window._pflxBcastHide);
             window._pflxBcastHide = setTimeout(function(){ banner.style.display = 'none'; }, 8000);
         }
+
+        // ═══ Host broadcast pipeline ═══════════════════════════════════════
+        // Post → (1) local host-control dispatch (banner + ticker on same-browser
+        // clients) (2) Supabase pflx_broadcasts row for cross-device realtime
+        // (3) Mission Control General Chat post (4) selected Discord channels
+        // (stubbed until a webhook is provisioned). Every receiving client shows
+        // a real-time "NEW BROADCAST — open X-Bot" ticker alert (pflxHandleHostControl).
+        var PFLX_DISCORD_CHANNELS_KEY = 'pflx_discord_channels';       // host-defined channel list
+        var PFLX_BROADCAST_TARGETS_KEY = 'pflx_broadcast_targets';     // selected targets
+        function pflxBroadcastFrom() {
+            var s = (typeof activeSession !== 'undefined' && activeSession) ? activeSession : {};
+            return s.brand || s.name || 'Host';
+        }
+        function pflxPostBroadcast(message, opts) {
+            message = String(message || '').trim();
+            if (!message) return;
+            opts = opts || {};
+            var b = { id: 'bc-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6), message: message, from: opts.from || pflxBroadcastFrom(), at: Date.now(), targets: opts.targets || null };
+            // (1) local + same-browser realtime (banner/ticker via host-control)
+            try { pflxDispatchHostControl('broadcast', b); } catch (e) {}
+            // (2) cross-device durable realtime via Supabase app_data
+            try {
+                var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (client) {
+                    client.from('app_data').select('data').eq('key', 'pflx_broadcasts').then(function (res) {
+                        var list = (res && res.data && res.data[0] && Array.isArray(res.data[0].data && res.data[0].data.items)) ? res.data[0].data.items : [];
+                        list.push(b); if (list.length > 100) list = list.slice(-100);
+                        client.from('app_data').upsert({ key: 'pflx_broadcasts', data: { items: list } }).then(function () {}, function () {});
+                    }, function () {});
+                }
+            } catch (e) {}
+            // (3) Mission Control General Chat
+            var targets = opts.targets || _pflxBroadcastTargets();
+            if (targets.mcGeneral !== false) { try { pflxPostToGeneralChat(message, b.from); } catch (e) {} }
+            // (4) Discord channels (stub until webhook provisioned)
+            if (targets.discord && targets.discord.length) { try { pflxPostToDiscord(message, targets.discord, b.from); } catch (e) {} }
+            return b;
+        }
+        window.pflxPostBroadcast = pflxPostBroadcast;
+
+        function _pflxBroadcastTargets() {
+            try { return JSON.parse(localStorage.getItem(PFLX_BROADCAST_TARGETS_KEY) || 'null') || { mcGeneral: true, discord: [] }; }
+            catch (e) { return { mcGeneral: true, discord: [] }; }
+        }
+        // Post a broadcast into the cohort's "Mission Control — General" group chat.
+        function pflxPostToGeneralChat(message, from) {
+            if (typeof window.pflxChatEnsureGroupThread !== 'function') return;
+            var s = (typeof activeSession !== 'undefined' && activeSession) ? activeSession : {};
+            var cohort = s.cohort || (Array.isArray(s.cohorts) ? s.cohorts[0] : '') || 'PFLX';
+            var members = [];
+            try { members = (typeof PLAYERS !== 'undefined' ? PLAYERS : []).filter(function (p) { return p && (p.cohort === cohort || (Array.isArray(p.cohorts) && p.cohorts.indexOf(cohort) >= 0)); }).map(function (p) { return p.id; }); } catch (e) {}
+            var tid = window.pflxChatEnsureGroupThread('Mission Control — General', members, { open: false });
+            try { if (tid && typeof window.pflxChatSystemPost === 'function') window.pflxChatSystemPost(tid, '📡 ' + from + ': ' + message); } catch (e) {}
+        }
+        // Discord relay — STUB. Wires to a serverless webhook once a bot token +
+        // channel IDs are provisioned (see HANDOFF action items).
+        function pflxPostToDiscord(message, channels, from) {
+            console.log('[broadcast→discord] (stub) channels:', channels, 'msg:', message);
+            // TODO: POST to /api/pflx-discord { channels, message, from } once provisioned.
+        }
+        // Append a broadcast into the X-Bot chat so "check X-Bot" shows it.
+        window.pflxXbotAddBroadcast = function (message, from) {
+            var box = document.getElementById('xbot-chat-messages');
+            if (!box) return;
+            var div = document.createElement('div');
+            div.className = 'xbot-msg xbot-msg-bot';
+            div.innerHTML = '<div class="xbot-msg-avatar"><img src="public/X Official for PFLX.png" alt="X"></div>' +
+                '<div class="xbot-msg-bubble" style="border:1px solid rgba(0,240,255,0.35);background:rgba(0,240,255,0.06);">' +
+                '<div style="font-family:Orbitron,sans-serif;font-size:9px;letter-spacing:1.5px;color:#00f0ff;margin-bottom:4px;">📡 BROADCAST · ' + (from || 'Host') + '</div>' +
+                (typeof escapeHtml === 'function' ? escapeHtml(message) : message) + '</div>';
+            box.appendChild(div);
+            box.scrollTop = box.scrollHeight;
+        };
+
+        // Composer send (host-only) — reads the X-Bot broadcast textarea.
+        window.pflxBroadcastSendFromComposer = function () {
+            var ta = document.getElementById('xbot-broadcast-text');
+            var msg = ta ? ta.value.trim() : '';
+            if (!msg) return;
+            pflxPostBroadcast(msg, { targets: _pflxBroadcastTargets() });
+            if (ta) ta.value = '';
+            if (typeof pflxToast === 'function') pflxToast('Broadcast posted', 'success');
+        };
+
+        // Channel picker — MC General Chat + host-defined Discord channels (multi-select).
+        window.pflxBroadcastChannels = function () {
+            if (typeof openModal !== 'function') return;
+            var sel = _pflxBroadcastTargets();
+            var channels = [];
+            try { channels = JSON.parse(localStorage.getItem(PFLX_DISCORD_CHANNELS_KEY) || 'null') || ['#software-upgrades', '#general', '#announcements']; } catch (e) { channels = ['#software-upgrades']; }
+            var row = function (label, checked, val, kind) {
+                return '<label style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,0.06);cursor:pointer;">' +
+                    '<input type="checkbox" data-kind="' + kind + '" value="' + (typeof escapeHtml === 'function' ? escapeHtml(val) : val) + '"' + (checked ? ' checked' : '') + ' style="width:17px;height:17px;accent-color:#00f0ff;">' +
+                    '<span style="font-size:13px;color:#eaf2ff;">' + label + '</span></label>';
+            };
+            var discordRows = channels.map(function (c) { return row('💬 Discord ' + c, (sel.discord || []).indexOf(c) >= 0, c, 'discord'); }).join('');
+            var html =
+                '<div style="font-family:Orbitron,sans-serif;font-size:14px;letter-spacing:2px;color:#00f0ff;margin-bottom:6px;">BROADCAST CHANNELS</div>' +
+                '<div style="font-size:12px;color:#8a93b0;margin-bottom:12px;">Where this broadcast is delivered. Discord delivery is inactive until a webhook is provisioned.</div>' +
+                row('📋 Mission Control — General Chat', sel.mcGeneral !== false, 'mcGeneral', 'mc') +
+                '<div style="font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:1.5px;color:#8a93b0;margin:14px 0 4px;">DISCORD CHANNELS</div>' +
+                discordRows +
+                '<div style="display:flex;gap:8px;margin-top:14px;">' +
+                '<input id="pflx-bc-newchan" placeholder="Add #channel" style="flex:1;background:rgba(10,18,40,0.8);border:1px solid rgba(255,255,255,0.12);color:#e0e6ff;padding:7px 10px;border-radius:7px;font-size:12px;">' +
+                '<button id="pflx-bc-add" style="padding:7px 12px;background:rgba(139,92,246,0.14);border:1px solid rgba(139,92,246,0.4);color:#c4b5fd;border-radius:7px;font-size:11px;cursor:pointer;">Add</button></div>' +
+                '<div style="display:flex;justify-content:flex-end;margin-top:16px;"><button id="pflx-bc-save" style="padding:9px 20px;background:linear-gradient(135deg,#00d4ff,#7c3aed);border:none;color:#fff;border-radius:8px;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:1.5px;cursor:pointer;font-weight:700;">SAVE</button></div>';
+            openModal(html, function (card, close) {
+                card.querySelector('#pflx-bc-add').addEventListener('click', function () {
+                    var v = (card.querySelector('#pflx-bc-newchan').value || '').trim();
+                    if (!v) return; if (v[0] !== '#') v = '#' + v;
+                    var list = channels.slice(); if (list.indexOf(v) < 0) list.push(v);
+                    try { localStorage.setItem(PFLX_DISCORD_CHANNELS_KEY, JSON.stringify(list)); } catch (e) {}
+                    close(); window.pflxBroadcastChannels();
+                });
+                card.querySelector('#pflx-bc-save').addEventListener('click', function () {
+                    var out = { mcGeneral: false, discord: [] };
+                    card.querySelectorAll('input[type="checkbox"]').forEach(function (cb) {
+                        if (!cb.checked) return;
+                        if (cb.getAttribute('data-kind') === 'mc') out.mcGeneral = true;
+                        else if (cb.getAttribute('data-kind') === 'discord') out.discord.push(cb.value);
+                    });
+                    try { localStorage.setItem(PFLX_BROADCAST_TARGETS_KEY, JSON.stringify(out)); } catch (e) {}
+                    var lbl = document.getElementById('xbot-broadcast-targets');
+                    if (lbl) lbl.textContent = '→ ' + [(out.mcGeneral ? 'MC General' : null), (out.discord.length ? out.discord.length + ' Discord' : null)].filter(Boolean).join(' · ') || '→ (no targets)';
+                    if (typeof pflxPlaySfx === 'function') pflxPlaySfx('save');
+                    close();
+                });
+            });
+        };
+
+        // Show the composer for hosts; subscribe to cross-device broadcasts.
+        function pflxBroadcastInit() {
+            try {
+                var box = document.getElementById('xbot-broadcast-composer');
+                var role = String((typeof activeSession !== 'undefined' && activeSession && activeSession.role) || '').toLowerCase();
+                var isHost = role === 'host' || role === 'admin' || role === 'instructor' || role === 'master';
+                if (box) box.style.display = isHost ? 'block' : 'none';
+            } catch (e) {}
+        }
+        window.pflxBroadcastInit = pflxBroadcastInit;
+        function pflxBroadcastRealtimeInit() {
+            try {
+                var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (!client || !client.channel) return;
+                client.channel('pflx-broadcasts-live')
+                    .on('postgres_changes', { event: '*', schema: 'public', table: 'app_data', filter: 'key=eq.pflx_broadcasts' }, function (payload) {
+                        var row = payload && (payload.new || payload.record);
+                        var items = row && row.data && Array.isArray(row.data.items) ? row.data.items : [];
+                        var last = items[items.length - 1];
+                        if (last) pflxHandleHostControl({ type: 'pflx_host_broadcast', data: last, at: Date.now() });
+                    })
+                    .subscribe();
+            } catch (e) {}
+        }
+        setTimeout(function () { pflxBroadcastInit(); pflxBroadcastRealtimeInit(); }, 2500);
+        setInterval(pflxBroadcastInit, 3000);
 
         function pflxShowFreezeOverlay(msg) {
             var ov = document.getElementById('pflx-freeze-overlay');
@@ -60674,6 +60851,21 @@ RESPONSE RULES:
                 pflxChatOpenThread(t.id);
             }
             return t.id;
+        };
+        // Post a system message into a thread (used by host broadcasts → MC General).
+        window.pflxChatSystemPost = function (threadId, text) {
+            var t = _pcThreads.find(function (x) { return x.id === threadId; });
+            if (!t) return;
+            if (!Array.isArray(t.messages)) t.messages = [];
+            var me = _pcMe();
+            t.messages.push({
+                id: 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+                senderId: 'system', senderName: 'PFLX', text: String(text || ''),
+                system: true, at: new Date().toISOString(), readBy: [me.id]
+            });
+            t.updatedAt = new Date().toISOString();
+            _pcSave();
+            if (document.getElementById('pflx-chat-panel') && document.getElementById('pflx-chat-panel').style.display !== 'none') { try { pflxChatRender(); } catch (e) {} }
         };
         window.pflxChatOpenThread = function (threadId) {
             _pcCurrentThreadId = threadId;
