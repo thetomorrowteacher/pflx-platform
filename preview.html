@@ -22985,14 +22985,14 @@
                 merged.status = is > ls ? t.status : (ls > is ? loc.status : newer.status);
                 byId[t.id] = merged;
             });
-            return order.map(function (id) { return byId[id]; });
+            return _mcDropTombstoned('tasks', order.map(function (id) { return byId[id]; }));
         }
         window._mcMergeTasks = _mcMergeTasks;
         // Generic union + last-write-wins-by-updatedAt merge for checkpoints /
         // projects (and any id'd collection). Newer record wins wholesale, so a
         // Google attachment / embed added locally (which bumps updatedAt) is
         // never wiped by a stale cloud pull or a patch-deploy boot pull.
-        function _mcMergeById(local, incoming) {
+        function _mcMergeById(local, incoming, kind) {
             local = Array.isArray(local) ? local : [];
             incoming = Array.isArray(incoming) ? incoming : [];
             var byId = {}, order = [];
@@ -23002,16 +23002,69 @@
                 if (!(it.id in byId)) { byId[it.id] = it; order.push(it.id); return; }
                 byId[it.id] = _mcTs(it) > _mcTs(byId[it.id]) ? it : byId[it.id];
             });
-            return order.map(function (id) { return byId[id]; });
+            return _mcDropTombstoned(kind, order.map(function (id) { return byId[id]; }));
         }
         window._mcMergeById = _mcMergeById;
+
+        // ── Tombstones — so a DELETE survives merge-not-replace ──
+        // Union merge keeps any id present in EITHER side, which would resurrect
+        // a deleted item from a stale cloud copy. A tombstone records the delete
+        // (+ timestamp) so the merge drops it — unless the item was re-created
+        // with a newer updatedAt. Synced to Supabase so deletes propagate to
+        // every host/player, and survive patch deploys.
+        function _mcLoadTombstones() {
+            try { return JSON.parse(localStorage.getItem('pflx_mc_tombstones') || '{}') || {}; } catch (e) { return {}; }
+        }
+        function _mcDropTombstoned(kind, arr) {
+            if (!kind || !Array.isArray(arr)) return arr;
+            var tomb = _mcLoadTombstones()[kind] || {};
+            if (!Object.keys(tomb).length) return arr;
+            return arr.filter(function (it) {
+                var ts = it && it.id ? tomb[it.id] : 0;
+                if (!ts) return true;
+                return _mcTs(it) > ts;   // re-created after delete → keep
+            });
+        }
+        function _mcTombstone(kind, id) {
+            if (!kind || !id) return;
+            var tomb = _mcLoadTombstones(); tomb[kind] = tomb[kind] || {}; tomb[kind][id] = Date.now();
+            try { localStorage.setItem('pflx_mc_tombstones', JSON.stringify(tomb)); } catch (e) {}
+            try {
+                var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (client) {
+                    client.from('app_data').select('data').eq('key', 'pflx_mc_tombstones').then(function (res) {
+                        var cloud = (res && res.data && res.data[0] && res.data[0].data) || {};
+                        Object.keys(tomb).forEach(function (k) { cloud[k] = Object.assign({}, cloud[k] || {}, tomb[k]); });
+                        try { localStorage.setItem('pflx_mc_tombstones', JSON.stringify(cloud)); } catch (e) {}
+                        client.from('app_data').upsert({ key: 'pflx_mc_tombstones', data: cloud }, { onConflict: 'key' }).then(function () {}, function () {});
+                    }, function () {});
+                }
+            } catch (e) {}
+        }
+        window._mcTombstone = _mcTombstone;
+        // Pull cloud tombstones into localStorage once at boot so a fresh client
+        // honors deletes made elsewhere.
+        (function _mcSyncTombstones() {
+            try {
+                var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (!client) { setTimeout(_mcSyncTombstones, 3000); return; }
+                client.from('app_data').select('data').eq('key', 'pflx_mc_tombstones').then(function (res) {
+                    var cloud = (res && res.data && res.data[0] && res.data[0].data) || null;
+                    if (cloud) {
+                        var local = _mcLoadTombstones();
+                        Object.keys(cloud).forEach(function (k) { local[k] = Object.assign({}, local[k] || {}, cloud[k]); });
+                        try { localStorage.setItem('pflx_mc_tombstones', JSON.stringify(local)); } catch (e) {}
+                    }
+                }, function () {});
+            } catch (e) {}
+        })();
 
         function _mcApplyCollection(type, items) {
             switch (type) {
                 case 'players': mcPlayers = items; break;
-                case 'checkpoints': mcCheckpoints = _mcMergeById(mcCheckpoints, items); break;
+                case 'checkpoints': mcCheckpoints = _mcMergeById(mcCheckpoints, items, 'checkpoints'); break;
                 case 'tasks': mcTasks = _mcMergeTasks(mcTasks, items); break;
-                case 'projects': mcProjects = _mcMergeById(mcProjects, items); break;
+                case 'projects': mcProjects = _mcMergeById(mcProjects, items, 'projects'); break;
                 case 'seasons': mcSeasons = items; break;
                 case 'announcements': mcAnnouncements = items; break;
                 case 'badges': mcBadges = mcNormalizeBadges(items); break;
@@ -23069,7 +23122,7 @@
                         var c = byKey['pflx_mc_' + t];
                         var cloudItems = (c && Array.isArray(c.items)) ? c.items : (Array.isArray(c) ? c : []);
                         if (!cloudItems.length) return;
-                        var merged = fn(_mcCloudQueue[t] || [], cloudItems);
+                        var merged = fn(_mcCloudQueue[t] || [], cloudItems, t);
                         _mcCloudQueue[t] = merged;
                         try {
                             if (t === 'tasks') { mcTasks = merged; _mcSetItemSafe('pflx_mc_tasks', mcTasks); }
@@ -23763,9 +23816,9 @@
                         mcSaveData('players');
                         dataUpdated = true;
                     }
-                    if (msg.key === 'checkpoints' && msg.data && msg.data.length) { mcCheckpoints = _mcMergeById(mcCheckpoints, msg.data); mcSaveData('checkpoints'); dataUpdated = true; }
+                    if (msg.key === 'checkpoints' && msg.data && msg.data.length) { mcCheckpoints = _mcMergeById(mcCheckpoints, msg.data, 'checkpoints'); mcSaveData('checkpoints'); dataUpdated = true; }
                     if (msg.key === 'tasks' && msg.data && msg.data.length) { mcTasks = _mcMergeTasks(mcTasks, msg.data); mcSaveData('tasks'); dataUpdated = true; }
-                    if (msg.key === 'projects' && msg.data && msg.data.length) { mcProjects = _mcMergeById(mcProjects, msg.data); mcSaveData('projects'); dataUpdated = true; }
+                    if (msg.key === 'projects' && msg.data && msg.data.length) { mcProjects = _mcMergeById(mcProjects, msg.data, 'projects'); mcSaveData('projects'); dataUpdated = true; }
                     if (msg.key === 'seasons' && msg.data && msg.data.length) { mcSeasons = msg.data; mcSaveData('seasons'); dataUpdated = true; }
                     if (msg.key === 'badges' && msg.data && msg.data.length) { mcBadges = mcNormalizeBadges(msg.data); mcSaveData('badges'); dataUpdated = true; try { mcRefreshBadgePickers(); } catch (e) {} }
                     if (msg.key === 'jobs' && msg.data && msg.data.length) { mcJobs = msg.data; mcSaveData('jobs'); dataUpdated = true; }
@@ -30115,9 +30168,11 @@
 
         function mcDeleteCheckpoint(index) {
             pflxPlaySfx('click');
-            if (!confirm('Delete checkpoint "' + mcCheckpoints[index].name + '"?')) return;
+            var cp = mcCheckpoints[index]; if (!cp) return;
+            if (!confirm('Delete checkpoint "' + cp.name + '"?')) return;
             pflxPlaySfx('delete');
             mcCheckpoints.splice(index, 1);
+            try { _mcTombstone('checkpoints', cp.id); } catch (e) {}
             mcSaveData('checkpoints');
             mcRenderCheckpoints();
             mcLoadData();
@@ -33532,10 +33587,32 @@
         }
 
         function mcDeleteTask(index) {
-            if (!confirm('Delete task "' + mcTasks[index].title + '"?')) return;
+            var task = mcTasks[index];
+            if (!task) return;
+            // Find every checkpoint / project that references this task.
+            var inCps = (mcCheckpoints || []).filter(function (c) { return c && Array.isArray(c.taskIds) && c.taskIds.indexOf(task.id) >= 0; });
+            var inProjs = (mcProjects || []).filter(function (p) { return p && Array.isArray(p.taskIds) && p.taskIds.indexOf(task.id) >= 0; });
+            var connected = inCps.length + inProjs.length;
+            var msg = 'Delete task "' + (task.title || 'Untitled') + '"?';
+            if (connected) {
+                msg = '⚠ "' + (task.title || 'Untitled') + '" is attached to ' +
+                    inCps.length + ' checkpoint' + (inCps.length === 1 ? '' : 's') + ' and ' +
+                    inProjs.length + ' project' + (inProjs.length === 1 ? '' : 's') + '.\n\n' +
+                    'Deleting it will also remove it from them. Are you sure?';
+            }
+            if (!confirm(msg)) return;
             pflxPlaySfx('delete');
+            // Detach from every checkpoint / project (fixes "still in the
+            // checkpoint / comes back when clicked").
+            var cpDirty = false, projDirty = false;
+            inCps.forEach(function (c) { c.taskIds = c.taskIds.filter(function (id) { return id !== task.id; }); c.updatedAt = Date.now(); cpDirty = true; });
+            inProjs.forEach(function (p) { p.taskIds = p.taskIds.filter(function (id) { return id !== task.id; }); p.updatedAt = Date.now(); projDirty = true; });
             mcTasks.splice(index, 1);
+            // Tombstone so a stale cloud copy can't resurrect it via merge.
+            try { _mcTombstone('tasks', task.id); } catch (e) {}
             mcSaveData('tasks');
+            if (cpDirty) mcSaveData('checkpoints');
+            if (projDirty) mcSaveData('projects');
             mcRenderTasks();
             mcLoadData();
         }
@@ -34498,10 +34575,19 @@
         };
 
         function mcDeleteProject(index) {
-            if (!confirm('Delete project "' + (mcProjects[index].name || '') + '"?')) return;
+            var proj = mcProjects[index]; if (!proj) return;
+            // Warn if this project is attached to any checkpoint.
+            var inCps = (mcCheckpoints || []).filter(function (c) { return c && Array.isArray(c.projectIds) && c.projectIds.indexOf(proj.id) >= 0; });
+            var msg = 'Delete project "' + (proj.name || '') + '"?';
+            if (inCps.length) msg = '⚠ "' + (proj.name || '') + '" is attached to ' + inCps.length + ' checkpoint' + (inCps.length === 1 ? '' : 's') + '.\n\nDeleting it will also remove it from them. Are you sure?';
+            if (!confirm(msg)) return;
             pflxPlaySfx('delete');
+            var cpDirty = false;
+            inCps.forEach(function (c) { c.projectIds = c.projectIds.filter(function (id) { return id !== proj.id; }); c.updatedAt = Date.now(); cpDirty = true; });
             mcProjects.splice(index, 1);
+            try { _mcTombstone('projects', proj.id); } catch (e) {}
             mcSaveData('projects');
+            if (cpDirty) mcSaveData('checkpoints');
             mcRenderProjects();
         }
 
