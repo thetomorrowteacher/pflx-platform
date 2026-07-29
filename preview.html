@@ -23042,6 +23042,43 @@
             } catch (e) {}
         }
         window._mcTombstone = _mcTombstone;
+
+        // Earnings-safe player merge — union by id; a stale copy can NEVER zero
+        // out a player's XC or badges. totalXcoin is monotonic (only grows), so
+        // the higher-totalXcoin record is the more-current one; badges only grow
+        // (union); activity length breaks ties. Current spendable xc comes from
+        // the winning (most-current) record.
+        function _mcMergePlayers(local, incoming) {
+            local = Array.isArray(local) ? local : [];
+            incoming = Array.isArray(incoming) ? incoming : [];
+            var byId = {}, order = [];
+            function actN(p) { return Array.isArray(p && p.activity) ? p.activity.length : 0; }
+            function num(v) { return typeof v === 'number' ? v : (parseFloat(v) || 0); }
+            local.forEach(function (p) { if (p && p.id) { byId[p.id] = p; order.push(p.id); } });
+            incoming.forEach(function (p) {
+                if (!p || !p.id) return;
+                if (!(p.id in byId)) { byId[p.id] = p; order.push(p.id); return; }
+                var a = byId[p.id], b = p;
+                // winner = more-current record (higher lifetime XC, then more activity)
+                var aTot = num(a.totalXcoin), bTot = num(b.totalXcoin);
+                var win = (bTot > aTot || (bTot === aTot && actN(b) > actN(a))) ? b : a;
+                var lose = win === a ? b : a;
+                var merged = Object.assign({}, lose, win);
+                merged.totalXcoin = Math.max(aTot, bTot);
+                merged.xc = num(win.xc);
+                if ((merged.xc == null || merged.xc === 0) && Math.max(num(a.xc), num(b.xc)) > 0) merged.xc = Math.max(num(a.xc), num(b.xc));
+                // badges only grow — union the id list, max the counts
+                var bset = {}; [].concat(Array.isArray(a.badges) ? a.badges : [], Array.isArray(b.badges) ? b.badges : []).forEach(function (x) { if (x != null) bset[x] = 1; });
+                var badges = Object.keys(bset); if (badges.length) merged.badges = badges;
+                merged.digitalBadges = Math.max(num(a.digitalBadges), num(b.digitalBadges), badges.length);
+                var bc = {}; [a.badgeCounts || {}, b.badgeCounts || {}].forEach(function (o) { Object.keys(o).forEach(function (k) { bc[k] = Math.max(bc[k] || 0, num(o[k])); }); });
+                if (Object.keys(bc).length) merged.badgeCounts = bc;
+                merged.activity = actN(a) >= actN(b) ? a.activity : b.activity;
+                byId[p.id] = merged;
+            });
+            return order.map(function (id) { return byId[id]; });
+        }
+        window._mcMergePlayers = _mcMergePlayers;
         // Pull cloud tombstones into localStorage once at boot so a fresh client
         // honors deletes made elsewhere.
         (function _mcSyncTombstones() {
@@ -23061,7 +23098,7 @@
 
         function _mcApplyCollection(type, items) {
             switch (type) {
-                case 'players': mcPlayers = items; break;
+                case 'players': mcPlayers = (typeof _mcMergePlayers === 'function') ? _mcMergePlayers(mcPlayers, items) : items; break;
                 case 'checkpoints': mcCheckpoints = _mcMergeById(mcCheckpoints, items, 'checkpoints'); break;
                 case 'tasks': mcTasks = _mcMergeTasks(mcTasks, items); break;
                 case 'projects': mcProjects = _mcMergeById(mcProjects, items, 'projects'); break;
@@ -23110,7 +23147,8 @@
         function _mcMergeQueueWithCloud(client, types, done) {
             var mergeable = { tasks: (typeof _mcMergeTasks === 'function' ? _mcMergeTasks : null),
                               checkpoints: (typeof _mcMergeById === 'function' ? _mcMergeById : null),
-                              projects: (typeof _mcMergeById === 'function' ? _mcMergeById : null) };
+                              projects: (typeof _mcMergeById === 'function' ? _mcMergeById : null),
+                              players: (typeof _mcMergePlayers === 'function' ? _mcMergePlayers : null) };
             var keys = types.filter(function (t) { return mergeable[t]; }).map(function (t) { return 'pflx_mc_' + t; });
             if (!keys.length) { done(); return; }
             client.from('app_data').select('key,data').in('key', keys).then(function (res) {
@@ -23128,6 +23166,7 @@
                             if (t === 'tasks') { mcTasks = merged; _mcSetItemSafe('pflx_mc_tasks', mcTasks); }
                             else if (t === 'checkpoints') { mcCheckpoints = merged; _mcSetItemSafe('pflx_mc_checkpoints', mcCheckpoints); }
                             else if (t === 'projects') { mcProjects = merged; _mcSetItemSafe('pflx_mc_projects', mcProjects); }
+                            else if (t === 'players') { mcPlayers = merged; _mcSetItemSafe('pflx_mc_players', mcPlayers); }
                         } catch (e) {}
                     });
                 } catch (e) { console.warn('[MC cloud] merge-before-write failed', e); }
