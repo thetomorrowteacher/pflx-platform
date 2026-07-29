@@ -61852,5 +61852,211 @@ RESPONSE RULES:
         window.mcOpenCommandPalette = _cmdkOpen;
     })();
     </script>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         PFLX DOCK — unified floating X-Bot + Chat (July 9 2026, Opus)
+         Merges the X-Bot AI panel (#xbot-side-panel) and PFLX Chat
+         (#pflx-chat-panel) into ONE floating, movable, resizable window
+         anchored to a single floating X-Bot icon that sits above everything.
+         The panels are reparented into the dock body and shown by tab; their
+         internal logic is untouched. Position/size/tab persist per device.
+         ═══════════════════════════════════════════════════════════════════ -->
+    <style>
+        #pflx-dock { position:fixed; z-index:100000; display:none; flex-direction:column;
+            background:linear-gradient(180deg,rgba(10,15,30,0.98),rgba(8,12,24,0.98));
+            border:1px solid rgba(0,240,255,0.35); border-radius:14px;
+            box-shadow:0 24px 80px rgba(0,0,0,0.72),0 0 46px rgba(0,240,255,0.14);
+            overflow:hidden; min-width:320px; min-height:300px; }
+        #pflx-dock.open { display:flex; }
+        .pflx-dock-header { display:flex; align-items:center; gap:8px; padding:8px 10px;
+            cursor:grab; background:rgba(0,240,255,0.05); border-bottom:1px solid rgba(0,240,255,0.12);
+            flex-shrink:0; user-select:none; touch-action:none; }
+        .pflx-dock-header:active { cursor:grabbing; }
+        .pflx-dock-tab { padding:5px 12px; border-radius:7px; font-family:'Orbitron',sans-serif;
+            font-size:10px; font-weight:700; letter-spacing:1.2px; cursor:pointer; background:transparent;
+            border:1px solid transparent; color:rgba(255,255,255,0.5); }
+        .pflx-dock-tab.active { color:#00f0ff; background:rgba(0,240,255,0.1); border-color:rgba(0,240,255,0.35); }
+        .pflx-dock-hbtn { background:transparent; border:none; color:rgba(255,255,255,0.55);
+            font-size:16px; line-height:1; cursor:pointer; padding:2px 6px; }
+        .pflx-dock-hbtn:hover { color:#fff; }
+        .pflx-dock-body { flex:1; position:relative; overflow:hidden; min-height:0; }
+        .pflx-dock-resize { position:absolute; right:3px; bottom:3px; width:18px; height:18px;
+            cursor:nwse-resize; z-index:6; color:rgba(0,240,255,0.55); font-size:12px; line-height:18px;
+            text-align:center; user-select:none; touch-action:none; }
+        #pflx-dock-fab { position:fixed; z-index:100001; width:56px; height:56px; border-radius:50%;
+            cursor:grab; background:radial-gradient(circle at 30% 30%,rgba(0,240,255,0.28),rgba(10,15,30,0.98));
+            border:1px solid rgba(0,240,255,0.5); box-shadow:0 6px 26px rgba(0,240,255,0.4);
+            display:none; align-items:center; justify-content:center; touch-action:none; }
+        #pflx-dock-fab.show { display:flex; }
+        #pflx-dock-fab:active { cursor:grabbing; }
+    </style>
+    <div id="pflx-dock-fab" title="X-Bot — click to open, drag to move">
+        <img src="public/X Official for PFLX.png" alt="X-Bot" style="width:34px;height:34px;object-fit:contain;filter:drop-shadow(0 0 6px rgba(0,240,255,0.6));pointer-events:none;">
+    </div>
+    <div id="pflx-dock">
+        <div class="pflx-dock-header" id="pflx-dock-header">
+            <img src="public/X Official for PFLX.png" alt="" style="width:22px;height:22px;object-fit:contain;pointer-events:none;">
+            <button class="pflx-dock-tab active" data-dtab="xbot">X-BOT</button>
+            <button class="pflx-dock-tab" data-dtab="chat">💬 CHAT</button>
+            <span style="flex:1;"></span>
+            <button class="pflx-dock-hbtn" id="pflx-dock-min" title="Minimize">–</button>
+        </div>
+        <div class="pflx-dock-body" id="pflx-dock-body"></div>
+        <div class="pflx-dock-resize" id="pflx-dock-resize" title="Drag to resize">◢</div>
+    </div>
+    <script>
+    (function () {
+        'use strict';
+        var POSK = 'pflx_dock_pos', SIZEK = 'pflx_dock_size', TABK = 'pflx_dock_tab';
+        var dock, fab, body, header, resize;
+        var reparented = false;
+        var _origChatToggle = (typeof window.pflxChatToggle === 'function') ? window.pflxChatToggle : null;
+        var state = { x: 0, y: 0, w: 420, h: 560, open: false, tab: 'xbot' };
+
+        function clamp() {
+            var maxX = Math.max(0, window.innerWidth - 60);
+            var maxY = Math.max(0, window.innerHeight - 60);
+            state.x = Math.max(0, Math.min(maxX, state.x));
+            state.y = Math.max(0, Math.min(maxY, state.y));
+            state.w = Math.max(320, Math.min(window.innerWidth - 20, state.w));
+            state.h = Math.max(300, Math.min(window.innerHeight - 20, state.h));
+        }
+        function persist() {
+            try { localStorage.setItem(POSK, JSON.stringify({ x: state.x, y: state.y })); } catch (e) {}
+            try { localStorage.setItem(SIZEK, JSON.stringify({ w: state.w, h: state.h })); } catch (e) {}
+            try { localStorage.setItem(TABK, state.tab); } catch (e) {}
+        }
+        function restore() {
+            try { var p = JSON.parse(localStorage.getItem(POSK) || 'null'); if (p) { state.x = p.x; state.y = p.y; } else { state.x = window.innerWidth - 460; state.y = window.innerHeight - 640; } } catch (e) {}
+            try { var s = JSON.parse(localStorage.getItem(SIZEK) || 'null'); if (s) { state.w = s.w; state.h = s.h; } } catch (e) {}
+            try { var t = localStorage.getItem(TABK); if (t) state.tab = t; } catch (e) {}
+        }
+        function render() {
+            clamp();
+            if (!dock) return;
+            dock.style.left = state.x + 'px'; dock.style.top = state.y + 'px';
+            dock.style.width = state.w + 'px'; dock.style.height = state.h + 'px';
+            dock.classList.toggle('open', state.open);
+            // FAB sits at the dock's top-left corner; shown only when the dock
+            // is closed AND a user is signed in (keeps it off the login screen).
+            fab.style.left = state.x + 'px'; fab.style.top = state.y + 'px';
+            var signedIn = !!(window.activeSession && window.activeSession.id);
+            fab.classList.toggle('show', !state.open && signedIn);
+            if (state.open && !signedIn) { state.open = false; dock.classList.remove('open'); }
+        }
+
+        // Neutralize a reparented panel's own fixed positioning so it fills the body.
+        function dockify(el) {
+            if (!el) return;
+            var imp = [['position', 'static'], ['inset', 'auto'], ['top', 'auto'], ['left', 'auto'],
+                ['right', 'auto'], ['bottom', 'auto'], ['transform', 'none'], ['width', '100%'],
+                ['height', '100%'], ['max-height', 'none'], ['max-width', 'none'], ['border', 'none'],
+                ['border-radius', '0'], ['box-shadow', 'none'], ['transition', 'none'], ['z-index', 'auto']];
+            imp.forEach(function (kv) { try { el.style.setProperty(kv[0], kv[1], 'important'); } catch (e) {} });
+        }
+        function reparent() {
+            if (reparented) return;
+            var xb = document.getElementById('xbot-side-panel');
+            var ch = document.getElementById('pflx-chat-panel');
+            if (!body || (!xb && !ch)) return;
+            if (xb) { dockify(xb); xb.classList.add('active'); body.appendChild(xb); }
+            if (ch) { dockify(ch); body.appendChild(ch); }
+            // Retire the old edge launcher — the FAB replaces it.
+            var oldTab = document.getElementById('xbot-toggle-tab');
+            if (oldTab) oldTab.style.setProperty('display', 'none', 'important');
+            reparented = true;
+        }
+        function showTab(which) {
+            state.tab = which;
+            reparent();
+            var xb = document.getElementById('xbot-side-panel');
+            var ch = document.getElementById('pflx-chat-panel');
+            if (which === 'chat') {
+                if (xb) xb.style.setProperty('display', 'none', 'important');
+                // Reuse the original toggle once to run chat's load/caps side-effects.
+                if (ch && ch.style.display !== 'flex' && _origChatToggle) { try { _origChatToggle(); } catch (e) {} }
+                if (ch) ch.style.setProperty('display', 'flex', 'important');
+            } else {
+                if (ch) ch.style.setProperty('display', 'none', 'important');
+                if (xb) xb.style.setProperty('display', 'flex', 'important');
+            }
+            Array.prototype.forEach.call(header.querySelectorAll('.pflx-dock-tab'), function (b) {
+                b.classList.toggle('active', b.getAttribute('data-dtab') === which);
+            });
+            persist();
+        }
+        function openDock(tab) { state.open = true; render(); showTab(tab || state.tab || 'xbot'); persist(); }
+        function closeDock() { state.open = false; render(); persist(); }
+
+        // Unified drag (header when open, fab when closed) → moves the whole unit.
+        function makeDrag(el, isFab) {
+            if (!el) return;
+            el.addEventListener('pointerdown', function (e) {
+                if (e.target && (e.target.classList.contains('pflx-dock-tab') || e.target.classList.contains('pflx-dock-hbtn') || e.target.id === 'pflx-dock-resize')) return;
+                e.preventDefault();
+                var sx = e.clientX, sy = e.clientY, ox = state.x, oy = state.y, moved = false;
+                try { el.setPointerCapture(e.pointerId); } catch (er) {}
+                function mv(ev) {
+                    var dx = ev.clientX - sx, dy = ev.clientY - sy;
+                    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) moved = true;
+                    state.x = ox + dx; state.y = oy + dy; render();
+                }
+                function up(ev) {
+                    el.removeEventListener('pointermove', mv);
+                    el.removeEventListener('pointerup', up);
+                    try { el.releasePointerCapture(e.pointerId); } catch (er) {}
+                    if (!moved && isFab) { openDock(state.tab); }   // tap the fab = open
+                    else persist();
+                }
+                el.addEventListener('pointermove', mv);
+                el.addEventListener('pointerup', up);
+            });
+        }
+        function makeResize(el) {
+            if (!el) return;
+            el.addEventListener('pointerdown', function (e) {
+                e.preventDefault(); e.stopPropagation();
+                var sx = e.clientX, sy = e.clientY, ow = state.w, oh = state.h;
+                try { el.setPointerCapture(e.pointerId); } catch (er) {}
+                function mv(ev) { state.w = ow + (ev.clientX - sx); state.h = oh + (ev.clientY - sy); render(); }
+                function up() { el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); persist(); }
+                el.addEventListener('pointermove', mv);
+                el.addEventListener('pointerup', up);
+            });
+        }
+
+        function init(tries) {
+            dock = document.getElementById('pflx-dock');
+            fab = document.getElementById('pflx-dock-fab');
+            body = document.getElementById('pflx-dock-body');
+            header = document.getElementById('pflx-dock-header');
+            resize = document.getElementById('pflx-dock-resize');
+            if (!dock || !fab || !body) { if ((tries || 0) < 20) return void setTimeout(function () { init((tries || 0) + 1); }, 800); return; }
+            restore();
+            reparent();
+            render();
+            makeDrag(header, false);
+            makeDrag(fab, true);
+            makeResize(resize);
+            Array.prototype.forEach.call(header.querySelectorAll('.pflx-dock-tab'), function (b) {
+                b.addEventListener('click', function () { showTab(b.getAttribute('data-dtab')); });
+            });
+            document.getElementById('pflx-dock-min').addEventListener('click', closeDock);
+            window.addEventListener('resize', render);
+
+            // Repoint the existing entry points to drive the dock.
+            window.toggleXBotPanel = function () { if (state.open && state.tab === 'xbot') closeDock(); else openDock('xbot'); };
+            window.pflxChatToggle = function () { if (state.open && state.tab === 'chat') closeDock(); else openDock('chat'); };
+            window.pflxDock = { open: openDock, close: closeDock, showTab: showTab, state: state };
+            // Start closed — just the floating icon is visible (once signed in).
+            state.open = false; render();
+            // Light poll so the icon appears right after login without wiring
+            // into the session flow.
+            setInterval(function () { if (!state.open) render(); }, 2000);
+        }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(function () { init(0); }, 1000); });
+        else setTimeout(function () { init(0); }, 1000);
+    })();
+    </script>
 </body>
 </html>
