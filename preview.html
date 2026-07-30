@@ -16398,16 +16398,27 @@
         }
         // Discord relay — STUB. Wires to a serverless webhook once a bot token +
         // channel IDs are provisioned (see HANDOFF action items).
+        // Serverless relay base (same deployment as the AI proxy). The relays
+        // read their webhook/token config from Vercel env vars, so this is LIVE
+        // the moment those env vars are set — no client change needed. If a relay
+        // returns 503 (not configured) it's a harmless no-op.
+        var PFLX_RELAY_BASE = 'https://pflx-pathway-portal.vercel.app';
         function pflxPostToDiscord(message, channels, from) {
-            console.log('[broadcast→discord] (stub) channels:', channels, 'msg:', message);
-            // TODO: POST to /api/pflx-discord { channels, message, from } once provisioned.
+            try {
+                fetch(PFLX_RELAY_BASE + '/api/pflx-discord', {
+                    method: 'POST', headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ channels: channels || [], message: message, from: from || 'PFLX' })
+                }).catch(function () {});
+            } catch (e) {}
         }
-        // Slack mirror — STUB. Wires to a serverless webhook once a Slack bot token
-        // / incoming-webhook URL + channel IDs are provisioned. Same shape as Discord.
         var PFLX_SLACK_CHANNELS_KEY = 'pflx_slack_channels';
         function pflxPostToSlack(message, channels, from) {
-            console.log('[broadcast→slack] (stub) channels:', channels, 'msg:', message);
-            // TODO: POST to /api/pflx-slack { channels, message, from } once provisioned.
+            try {
+                fetch(PFLX_RELAY_BASE + '/api/pflx-slack', {
+                    method: 'POST', headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ channels: channels || [], message: message, from: from || 'PFLX' })
+                }).catch(function () {});
+            } catch (e) {}
         }
 
         // ── Project → DarkCampus Channel notification bridge (in-PFLX half) ──
