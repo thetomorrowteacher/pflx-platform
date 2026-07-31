@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 17;
+      window.PFLX_PATCH   = 18;
       window.PFLX_BUILD   = '2026.07';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -74,6 +74,35 @@
       };
       if (document.readyState !== 'loading') window.pflxApplyVersion();
       else document.addEventListener('DOMContentLoaded', window.pflxApplyVersion);
+
+      // ── Fullscreen toggle (global) ────────────────────────────────
+      // Defined at the top so the LOGIN screen's button works before the
+      // post-login init runs, and with Safari/webkit prefixes (the old
+      // handler used only requestFullscreen(), which is undefined on iOS
+      // Safari → the button did nothing).
+      window.pflxToggleFullscreen = function () {
+        try {
+          var d = document, el = d.documentElement;
+          var isFs = d.fullscreenElement || d.webkitFullscreenElement || d.webkitCurrentFullScreenElement || d.mozFullScreenElement;
+          if (!isFs) {
+            var req = el.requestFullscreen || el.webkitRequestFullscreen || el.webkitRequestFullScreen || el.mozRequestFullScreen || el.msRequestFullscreen;
+            if (req) { var r = req.call(el); if (r && r.catch) r.catch(function () {}); }
+          } else {
+            var ex = d.exitFullscreen || d.webkitExitFullscreen || d.webkitCancelFullScreen || d.mozCancelFullScreen || d.msExitFullscreen;
+            if (ex) ex.call(d);
+          }
+        } catch (e) { console.warn('[fs] toggle failed', e); }
+      };
+      (function () {
+        function _fsIcons() {
+          var isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+          var exp = document.getElementById('login-fs-icon-expand'), shr = document.getElementById('login-fs-icon-shrink');
+          if (exp) exp.style.display = isFs ? 'none' : 'block';
+          if (shr) shr.style.display = isFs ? 'block' : 'none';
+        }
+        document.addEventListener('fullscreenchange', _fsIcons);
+        document.addEventListener('webkitfullscreenchange', _fsIcons);
+      })();
 
       // Lazy-init the client only when something asks for it, so the main app
       // doesn't pay the connection cost unless publish or public-view runs.
@@ -6754,7 +6783,7 @@
                     <div class="login-scanline"></div>
                     <div class="login-particles" id="login-particles"></div>
                     <!-- Fullscreen toggle on login -->
-                    <button class="login-fullscreen-btn" id="login-fs-btn" title="Toggle Fullscreen">
+                    <button class="login-fullscreen-btn" id="login-fs-btn" title="Toggle Fullscreen" onclick="window.pflxToggleFullscreen()">
                         <svg id="login-fs-icon-expand" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <polyline points="15 3 21 3 21 9"></polyline>
                             <polyline points="9 21 3 21 3 15"></polyline>
@@ -17276,6 +17305,7 @@
             // Canonical key — same as seHostSave. The legacy 'pflx_se_config'
             // alias was removed to stop two writers competing.
             try { (window.pflxSESaveConfigSafe ? window.pflxSESaveConfigSafe() : localStorage.setItem('pflx_sound_engine', JSON.stringify(SE.config))); } catch(e) {}
+            try { window.seCloudSave && window.seCloudSave(); } catch (e) {}
         }
 
         function loadingMusicSettingSave() {
@@ -19660,8 +19690,9 @@
                 document.querySelector('.toolbar').style.display = 'flex'; window.activeSession = activeSession; if (typeof pflxHeartbeat === 'function') pflxHeartbeat(); if (typeof pflxAnalyticsRecordSignup === 'function') pflxAnalyticsRecordSignup(activeSession); if (typeof pflxAnalyticsTouchSession === 'function') pflxAnalyticsTouchSession(); if (typeof pflxInjectRolePill === 'function') pflxInjectRolePill();
                 updateToolbarStatus();
                 initPlatform(displayName);
-                // Sound: stop login music, reinit with player prefs, start home music
-                seStopLoginMusic();
+                // Sound: fade the login music out as the intro/platform takes
+                // over (then it's fully off), reinit with player prefs, start home music.
+                (window.seFadeOutLoginMusic ? window.seFadeOutLoginMusic(1200) : seStopLoginMusic());
                 seInit();
 
                 // ── Clear stale SSO flag so X-Coin's RoleGuard can do initial redirects ──
@@ -52486,6 +52517,63 @@ RESPONSE RULES:
         }
 
         // ── Host Save/Load ──────────────────────────────────────────
+        // ── Sound settings cloud persistence ──────────────────────────
+        // Mirrors the sound config to Supabase app_data (key
+        // `pflx_sound_engine_settings`) so host sound choices survive patch
+        // deploys AND follow the host across devices — the same durability
+        // goal as Mission Control's data. Only settings + URL-based tracks are
+        // synced (uploaded-blob tracks stay local; they're too big for the row
+        // and are stripped from localStorage already).
+        function _seCloudSubset() {
+            var c = (typeof SE !== 'undefined' && SE.config) ? SE.config : {};
+            function urlTracks(list) {
+                return (Array.isArray(list) ? list : [])
+                    .filter(function (t) { return t && t.url && !t.dataUrl; })
+                    .map(function (t) { return { id: t.id, name: t.name, url: t.url }; });
+            }
+            var lm = c.loadingMusic || {};
+            return {
+                bgmEnabled: c.bgmEnabled, sfxEnabled: c.sfxEnabled, loginMusicEnabled: c.loginMusicEnabled,
+                playlistMode: c.playlistMode,
+                masterVolume: c.masterVolume, bgmVolume: c.bgmVolume, sfxVolume: c.sfxVolume,
+                voiceVolume: c.voiceVolume, ambientVolume: c.ambientVolume,
+                tabTracks: c.tabTracks || {},
+                ambient: { enabled: !!(c.ambient && c.ambient.enabled) },
+                loadingMusic: { enabled: lm.enabled, shuffle: lm.shuffle, volume: lm.volume, muteLiveStreamWhilePlaying: lm.muteLiveStreamWhilePlaying, tracks: urlTracks(lm.tracks) },
+                _urlTracks: urlTracks(c.tracks)
+            };
+        }
+        function _seUnionTracks(obj, key, incoming) {
+            if (!Array.isArray(incoming) || !incoming.length) return;
+            var cur = Array.isArray(obj[key]) ? obj[key] : [];
+            var ids = {}; cur.forEach(function (t) { if (t && t.id) ids[t.id] = true; });
+            incoming.forEach(function (t) { if (t && t.id && !ids[t.id]) { cur.push(t); ids[t.id] = true; } });
+            obj[key] = cur;
+        }
+        function _seApplyCloud(d) {
+            try {
+                if (!d || typeof d !== 'object' || typeof SE === 'undefined') return;
+                var c = SE.config;
+                ['bgmEnabled', 'sfxEnabled', 'loginMusicEnabled', 'playlistMode', 'masterVolume', 'bgmVolume', 'sfxVolume', 'voiceVolume', 'ambientVolume'].forEach(function (k) { if (typeof d[k] !== 'undefined') c[k] = d[k]; });
+                if (d.tabTracks && typeof d.tabTracks === 'object') c.tabTracks = Object.assign({}, c.tabTracks, d.tabTracks);
+                if (d.ambient && c.ambient) c.ambient.enabled = !!d.ambient.enabled;
+                if (d.loadingMusic) {
+                    c.loadingMusic = c.loadingMusic || {};
+                    ['enabled', 'shuffle', 'volume', 'muteLiveStreamWhilePlaying'].forEach(function (k) { if (typeof d.loadingMusic[k] !== 'undefined') c.loadingMusic[k] = d.loadingMusic[k]; });
+                    _seUnionTracks(c.loadingMusic, 'tracks', d.loadingMusic.tracks);
+                }
+                if (Array.isArray(d._urlTracks)) _seUnionTracks(c, 'tracks', d._urlTracks);
+                try { (window.pflxSESaveConfigSafe ? window.pflxSESaveConfigSafe() : localStorage.setItem('pflx_sound_engine', JSON.stringify(c))); } catch (e) {}
+                try { if (typeof seApplyVolumes === 'function') seApplyVolumes(); } catch (e) {}
+            } catch (e) { console.warn('[se-cloud] apply failed', e); }
+        }
+        window.seCloudSave = function () {
+            try { if (window.pflxCloudKvPush) window.pflxCloudKvPush('pflx_sound_engine_settings', _seCloudSubset()); } catch (e) {}
+        };
+        window.seCloudLoad = function () {
+            try { if (window.pflxCloudKvLoad) window.pflxCloudKvLoad('pflx_sound_engine_settings', _seApplyCloud); } catch (e) {}
+        };
+
         function seHostSave() {
             SE.config.bgmEnabled = document.getElementById('toggle-bgm')?.checked !== false;
             SE.config.sfxEnabled = document.getElementById('toggle-sfx')?.checked !== false;
@@ -52515,6 +52603,7 @@ RESPONSE RULES:
                     }
                 }
             } catch (e) {}
+            try { window.seCloudSave && window.seCloudSave(); } catch (e) {}
         }
 
         function seHostLoad() {
@@ -52804,6 +52893,27 @@ RESPONSE RULES:
         function seStopLoginMusic() {
             if (SE.loginAudio) { SE.loginAudio.pause(); SE.loginAudio.currentTime = 0; }
         }
+
+        // Fade the login-screen music out (used the moment login succeeds and
+        // the intro video takes over the audio), then fully stop + reset it so
+        // it is OFF once the player is inside the platform. ms = fade length.
+        window.seFadeOutLoginMusic = function (ms) {
+            try {
+                var a = (typeof SE !== 'undefined') && SE.loginAudio;
+                if (!a) return;
+                ms = ms || 1200;
+                if (a.paused) { try { a.currentTime = 0; } catch (e) {} return; }
+                var steps = 24, i = 0, v0 = (typeof a.volume === 'number') ? a.volume : 1;
+                var iv = setInterval(function () {
+                    i++;
+                    try { a.volume = Math.max(0, v0 * (1 - i / steps)); } catch (e) {}
+                    if (i >= steps) {
+                        clearInterval(iv);
+                        try { a.pause(); a.currentTime = 0; a.volume = v0; } catch (e) {}
+                    }
+                }, Math.max(16, ms / steps));
+            } catch (e) { try { seStopLoginMusic(); } catch (_e) {} }
+        };
 
         // ── Ambient/HUD Sound ───────────────────────────────────────
         function sePlayAmbient() {
@@ -54192,11 +54302,7 @@ RESPONSE RULES:
 
             // Fullscreen toggle helper
             function toggleFullscreen() {
-                if (!document.fullscreenElement) {
-                    document.documentElement.requestFullscreen().catch(err => console.warn(err));
-                } else {
-                    document.exitFullscreen();
-                }
+                if (window.pflxToggleFullscreen) return window.pflxToggleFullscreen();
             }
             function updateFsIcons() {
                 const isFs = !!document.fullscreenElement;
@@ -54215,8 +54321,10 @@ RESPONSE RULES:
             const toolbarFsBtn = document.getElementById('toolbar-fs-btn');
             if (toolbarFsBtn) toolbarFsBtn.addEventListener('click', toggleFullscreen);
 
-            // Login screen fullscreen button
-            var lfb = document.getElementById('login-fs-btn'); if (lfb) lfb.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); toggleFullscreen(); });
+            // Login screen fullscreen button uses an inline onclick →
+            // window.pflxToggleFullscreen (bound at the top so it works before
+            // this post-login init runs). No addEventListener here — a second
+            // binding would double-toggle and cancel itself out.
 
             // Music toggle — the inline onclick on #music-toggle already opens the
             // quick audio settings panel (seTogglePlayerPanel). The legacy pflxMusic
@@ -55618,6 +55726,9 @@ RESPONSE RULES:
             try { initLoginParticles(); } catch(e) { console.error('[PFLX] initLoginParticles failed', e); }
             // Sound Engine init + login music auto-play
             try { seInit(); } catch(e) { console.error('[PFLX] seInit failed', e); }
+            // Pull cloud sound settings (survives patches + follows the host across
+            // devices) before starting login music, so toggles/volumes are honored.
+            try { window.seCloudLoad && window.seCloudLoad(); } catch(e) { console.warn('[PFLX] seCloudLoad failed', e); }
             try { sePlayLoginMusic(); } catch(e) { console.error('[PFLX] sePlayLoginMusic failed', e); }
             // PFLX Bridge: universal cloud save toast + SSO + host/player toggle
             try { pflxBridgeInit(); } catch(e) { console.warn('[PflxBridge] init failed', e); }
