@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 21;
+      window.PFLX_PATCH   = 22;
       window.PFLX_BUILD   = '2026.07';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -3060,10 +3060,15 @@
             top: 0; left: 0; right: 0; bottom: 0;
             z-index: 500;
             align-items: center;
-            justify-content: center;
+            justify-content: safe center;
             flex-direction: column;
             background: radial-gradient(ellipse at 50% 40%, rgba(20, 30, 60, 1) 0%, rgba(8, 12, 24, 1) 70%, rgba(4, 6, 14, 1) 100%);
-            overflow: hidden;
+            /* Whole login scrolls as one page (logo → box → TTT credit); the
+               credit is no longer a cut-off fixed footer. overflow-x hidden so a
+               wide logo never adds a horizontal scrollbar. */
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: 40px 0;
         }
 
         .login-view.active {
@@ -3132,8 +3137,10 @@
             width: 100%;
             max-width: 520px;
             padding: 20px 40px 40px;
-            max-height: 100vh;
-            overflow-y: auto;
+            /* No internal scroll / no max-height — the parent .login-view is the
+               single scroll container now. (overflow-y:auto here forced
+               overflow-x to clip, which cut the wide TTT logo.) */
+            overflow: visible;
             scrollbar-width: none;
             transition: max-width 0.3s ease;
         }
@@ -3306,18 +3313,18 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            flex-wrap: wrap;
-            gap: 16px;
+            flex-wrap: nowrap;
+            gap: 18px;
             text-decoration: none;
             opacity: 0.85;
             transition: opacity .3s ease, filter .3s ease;
             filter: drop-shadow(0 0 8px rgba(0,240,255,0.14));
+            max-width: 100%;
         }
         .ttt-credit:hover { opacity: 1; filter: drop-shadow(0 0 14px rgba(0,240,255,0.45)); }
-        /* Logo is the prominent element — flex-shrink:0 stops the flex row from
-           squeezing its width (which, with object-fit:contain + fixed height,
-           letterboxed it small). PRODUCTION stays a small understated caption. */
-        .ttt-credit-logo { height: 150px; width: auto; max-width: 96vw; object-fit: contain; display: block; flex-shrink: 0; }
+        /* Logo is the prominent element. flex:0 0 auto + max-width:none →
+           the flex row never shrinks/letterboxes it. PRODUCTION stays small. */
+        .ttt-credit-logo { height: 160px; width: auto; max-width: none; object-fit: contain; display: block; flex: 0 0 auto; }
         .ttt-credit-label {
             font-family: 'Jura', sans-serif;
             font-size: 13px;
@@ -3335,7 +3342,11 @@
             background: rgba(210, 218, 240, 0.30);
         }
         @media (max-width: 900px) {
-            .ttt-credit-logo { height: 92px; }
+            .ttt-credit-logo { height: 110px; }
+        }
+        @media (max-width: 600px) {
+            .ttt-credit-logo { height: 72px; }
+            .ttt-credit-label { font-size: 11px; letter-spacing: 3px; }
         }
 
         /* LOGIN STEP SYSTEM */
