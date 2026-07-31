@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 20;
+      window.PFLX_PATCH   = 21;
       window.PFLX_BUILD   = '2026.07';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -3131,7 +3131,7 @@
             gap: 0;
             width: 100%;
             max-width: 520px;
-            padding: 20px 40px 200px;
+            padding: 20px 40px 40px;
             max-height: 100vh;
             overflow-y: auto;
             scrollbar-width: none;
@@ -3184,18 +3184,22 @@
             width: 100%;
             height: 100%;
             object-fit: contain;
-            filter: drop-shadow(0 0 50px rgba(0, 240, 255, 0.5)) drop-shadow(0 0 100px rgba(95, 91, 205, 0.3));
+            /* Glow follows the logo's alpha shape (drop-shadow), never a box.
+               Kept to a moderate blur — the huge 100px shadow amplified the
+               PNG's faint edge alpha into a rectangular halo during the pulse. */
+            filter: drop-shadow(0 0 26px rgba(0, 240, 255, 0.45));
+            animation: logoImgGlow 4s ease-in-out infinite;
         }
 
+        /* Container pulse animates ONLY transform — no filter on the box, so no
+           square glow. The shape-following glow lives on the <img> above. */
         @keyframes logoPulse {
-            0%, 100% {
-                filter: drop-shadow(0 0 25px rgba(0, 240, 255, 0.4));
-                transform: scale(1);
-            }
-            50% {
-                filter: drop-shadow(0 0 50px rgba(0, 240, 255, 0.7)) drop-shadow(0 0 100px rgba(95, 91, 205, 0.4));
-                transform: scale(1.03);
-            }
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.03); }
+        }
+        @keyframes logoImgGlow {
+            0%, 100% { filter: drop-shadow(0 0 20px rgba(0, 240, 255, 0.35)); }
+            50% { filter: drop-shadow(0 0 34px rgba(0, 240, 255, 0.6)); }
         }
 
         .login-subtitle {
@@ -3294,12 +3298,10 @@
            overflow-y:auto → overflow-x clipped, so a wide logo placed inside it
            gets cut to the 520px panel). Anchored to the full-screen .login-view. */
         .login-credit-footer {
-            position: absolute;
-            left: 0; right: 0; bottom: 22px;
+            width: 100%;
             display: flex; flex-direction: column; align-items: center;
-            gap: 12px; z-index: 3; padding: 0 16px; pointer-events: none;
+            gap: 10px; z-index: 3; margin-top: 6px; padding: 0 16px 30px;
         }
-        .login-credit-footer .ttt-credit, .login-credit-footer .login-version { pointer-events: auto; }
         .ttt-credit {
             display: inline-flex;
             align-items: center;
@@ -13928,9 +13930,10 @@
 
                     var html = '<div class="pflx-pp-container">';
 
-                    // Banner
-                    if (data.banner) {
-                        html += '<div style="margin-bottom:16px;border-radius:20px;overflow:hidden;border:1px solid rgba(255,255,255,0.06);"><img src="' + escapeHtmlPP(data.banner) + '" alt="" style="width:100%;height:220px;object-fit:cover;display:block;"></div>';
+                    // Banner — personal upload, else the host's PFLX default.
+                    var __ppBanner = data.banner || (window.PFLX_DEFAULT_BANNER || '');
+                    if (__ppBanner) {
+                        html += '<div style="margin-bottom:16px;border-radius:20px;overflow:hidden;border:1px solid rgba(255,255,255,0.06);"><img src="' + escapeHtmlPP(__ppBanner) + '" alt="" style="width:100%;height:220px;object-fit:cover;display:block;"></div>';
                     }
 
                     // Header
@@ -51188,8 +51191,9 @@ RESPONSE RULES:
             const bannerImg = document.getElementById('portfolio-banner-img');
             const bannerEmpty = document.getElementById('portfolio-banner-empty');
             if (bannerImg && bannerEmpty) {
-                if (data.banner) {
-                    bannerImg.src = data.banner;
+                var __pbanner = (typeof window.pflxResolveBanner === 'function') ? window.pflxResolveBanner(data.banner) : data.banner;
+                if (__pbanner) {
+                    bannerImg.src = __pbanner;
                     bannerImg.style.display = 'block';
                     bannerEmpty.style.display = 'none';
                 } else {
@@ -51857,8 +51861,11 @@ RESPONSE RULES:
                     if (typeof pflxToast === 'function') pflxToast('Profile image updated', 'success');
                 } catch (e) { console.warn('[portfolio] avatar apply failed', e); }
             };
-            // Compress when the helper is available, else fall back to raw read
-            if (typeof pflxCompressImage === 'function') {
+            // GIF-aware: GIFs pass through raw (animation preserved); other
+            // images compressed. Falls back to compress/raw if the helper is absent.
+            if (typeof window.pflxReadImageForUpload === 'function') {
+                window.pflxReadImageForUpload(file, { maxW: 512, maxH: 512, quality: 0.85, gifMaxMB: 3 }, apply);
+            } else if (typeof pflxCompressImage === 'function') {
                 pflxCompressImage(file, { maxW: 512, maxH: 512, quality: 0.85 })
                     .then(apply)
                     .catch(function () {
@@ -52035,27 +52042,29 @@ RESPONSE RULES:
                 alert('Banner file too large. Please pick an image under 10MB.');
                 return;
             }
-            pflxCompressImage(file, { maxW: 1920, maxH: 600, quality: 0.85 })
-                .then(function (compressedDataUrl) {
+            var __applyBanner = function (dataUrl) {
+                if (!dataUrl) { alert('Could not process this image. Try a different file.'); return; }
+                try {
                     const data = portfolioLoadData();
-                    data.banner = compressedDataUrl;
-                    try {
-                        portfolioSaveData(data);
-                        portfolioRender();
-                    } catch (err) {
-                        // Quota exceeded even after compression — surface a useful message.
-                        if (err && /quota/i.test(String(err.message || err.name || ''))) {
-                            alert('Browser storage is full. Try removing the existing banner first, or use a smaller image.');
-                        } else {
-                            console.warn('[portfolio] banner save failed', err);
-                            alert('Could not save banner: ' + (err && err.message ? err.message : 'unknown error'));
-                        }
+                    data.banner = dataUrl;
+                    portfolioSaveData(data);
+                    portfolioRender();
+                } catch (err) {
+                    if (err && /quota/i.test(String(err.message || err.name || ''))) {
+                        alert('Browser storage is full. Try removing the existing banner first, or use a smaller image/GIF.');
+                    } else {
+                        console.warn('[portfolio] banner save failed', err);
+                        alert('Could not save banner: ' + (err && err.message ? err.message : 'unknown error'));
                     }
-                })
-                .catch(function (err) {
-                    console.warn('[portfolio] banner compress failed', err);
-                    alert('Could not process this image. Try a different file.');
-                });
+                }
+            };
+            // GIF-aware: animated GIFs pass through raw (preserve animation),
+            // other images are compressed.
+            if (typeof window.pflxReadImageForUpload === 'function') {
+                window.pflxReadImageForUpload(file, { maxW: 1920, maxH: 600, quality: 0.85, gifMaxMB: 4 }, __applyBanner);
+            } else {
+                pflxCompressImage(file, { maxW: 1920, maxH: 600, quality: 0.85 }).then(__applyBanner).catch(function () { alert('Could not process this image. Try a different file.'); });
+            }
         }
         function portfolioRemoveBanner() {
             const data = portfolioLoadData();
@@ -54187,13 +54196,29 @@ RESPONSE RULES:
             // surfaces XC, Checkpoint progress, and Rank live. Duplicating
             // them on Home Base made the page feel crowded for no information
             // gain. Quests and Position were placeholders ("—") anyway.
+            // Banner — shared with the Portfolio (portfolioLoadData().banner),
+            // falling back to the host's PFLX default. A dark left→right gradient
+            // veil keeps the avatar + name readable over any image/GIF.
+            var __homeBanner = '';
+            try { __homeBanner = (window.pflxResolveBanner ? window.pflxResolveBanner((typeof portfolioLoadData === 'function' ? (portfolioLoadData().banner || '') : '')) : ''); } catch (e) {}
+            var __isHostHome = false;
+            try { __isHostHome = (window.pflxRole === 'host') || /host|admin|instructor|master/i.test(String((s && s.role) || '')); } catch (e) {}
+            playerHeader.style.position = 'relative';
+            playerHeader.style.overflow = 'hidden';
             playerHeader.innerHTML = `
-                <div class="player-avatar-lg" onclick="document.getElementById('home-avatar-input').click()" title="Click to change your profile image">
+                <div class="home-hero-banner" style="position:absolute;inset:0;z-index:0;${__homeBanner ? `background-image:url('${__homeBanner}');background-size:cover;background-position:center;` : 'background:linear-gradient(135deg, rgba(0,240,255,0.05), rgba(255,0,255,0.05));'}"></div>
+                <div class="home-hero-veil" style="position:absolute;inset:0;z-index:1;background:linear-gradient(90deg, var(--dark-bg) 0%, rgba(8,12,24,0.92) 30%, rgba(8,12,24,0.55) 62%, rgba(8,12,24,0.28) 100%);"></div>
+                <div style="position:absolute;top:12px;right:14px;z-index:4;display:flex;gap:8px;">
+                    ${__isHostHome ? `<button onclick="pflxSetDefaultBannerFromCurrent()" title="Set your current banner as the PFLX default for everyone" style="width:32px;height:32px;border-radius:50%;background:rgba(10,18,40,0.82);border:1px solid rgba(255,215,0,0.45);color:var(--gold);cursor:pointer;font-size:13px;line-height:1;">&#x2605;</button>` : ''}
+                    <button onclick="document.getElementById('home-banner-input').click()" title="Change your banner (image or GIF)" style="width:32px;height:32px;border-radius:50%;background:rgba(10,18,40,0.82);border:1px solid rgba(0,240,255,0.32);color:var(--cyan);cursor:pointer;font-size:13px;line-height:1;">&#x1F5BC;</button>
+                </div>
+                <input type="file" id="home-banner-input" accept="image/*,image/gif" style="display:none;" onchange="pflxHomeBannerUpload(this)">
+                <div class="player-avatar-lg" style="position:relative;z-index:2;" onclick="document.getElementById('home-avatar-input').click()" title="Click to change your profile image (image or GIF)">
                     <img src="${heroAvatarSrc}" alt="${displayName}" style="width:100%;height:100%;border-radius:50%;object-fit:${heroAvatarFit};">
                     <div class="avatar-cam-badge" aria-hidden="true">&#x1F4F7;</div>
-                    <input type="file" id="home-avatar-input" accept="image/*" style="display:none;" onclick="event.stopPropagation();" onchange="pflxHomeAvatarUpload(this)">
+                    <input type="file" id="home-avatar-input" accept="image/*,image/gif" style="display:none;" onclick="event.stopPropagation();" onchange="pflxHomeAvatarUpload(this)">
                 </div>
-                <div class="player-identity">
+                <div class="player-identity" style="position:relative;z-index:2;">
                     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
                         <div class="player-name">${displayName}</div>
                         <span id="home-studio-chip">${studioChip}</span>
@@ -55809,6 +55834,7 @@ RESPONSE RULES:
             // Pull cloud sound settings (survives patches + follows the host across
             // devices) before starting login music, so toggles/volumes are honored.
             try { window.seCloudLoad && window.seCloudLoad(); } catch(e) { console.warn('[PFLX] seCloudLoad failed', e); }
+            try { window.pflxLoadDefaultBanner && window.pflxLoadDefaultBanner(); } catch(e) { console.warn('[PFLX] pflxLoadDefaultBanner failed', e); }
             try { sePlayLoginMusic(); } catch(e) { console.error('[PFLX] sePlayLoginMusic failed', e); }
             // PFLX Bridge: universal cloud save toast + SSO + host/player toggle
             try { pflxBridgeInit(); } catch(e) { console.warn('[PflxBridge] init failed', e); }
@@ -58279,9 +58305,42 @@ RESPONSE RULES:
                         try { if (typeof pflxToast === 'function') pflxToast('Profile image updated', 'success'); } catch (e) {}
                     } catch (e) { console.warn('[home-avatar] save failed', e); }
                 };
-                if (typeof _pcDownscaleImage === 'function') _pcDownscaleImage(input.files[0], finish);
+                if (typeof window.pflxReadImageForUpload === 'function') window.pflxReadImageForUpload(input.files[0], { maxW: 512, maxH: 512, quality: 0.85, gifMaxMB: 3 }, finish);
+                else if (typeof _pcDownscaleImage === 'function') _pcDownscaleImage(input.files[0], finish);
                 else { var r = new FileReader(); r.onload = function (e) { finish(e.target.result); }; r.readAsDataURL(input.files[0]); }
             } catch (e) { console.warn('[home-avatar] error', e); }
+        };
+
+        // Home Base banner upload — shared with the Portfolio (writes
+        // portfolioLoadData().banner via portfolioSaveData, which persists local
+        // + cloud). Supports GIFs (animation preserved).
+        window.pflxHomeBannerUpload = function (input) {
+            try {
+                if (!input || !input.files || !input.files[0]) return;
+                var save = function (dataUrl) {
+                    if (!dataUrl) { if (typeof pflxToast === 'function') pflxToast('Could not read that image', 'warn'); return; }
+                    try {
+                        var data = (typeof portfolioLoadData === 'function') ? portfolioLoadData() : {};
+                        data.banner = dataUrl;
+                        if (typeof portfolioSaveData === 'function') portfolioSaveData(data);
+                        if (typeof pflxRefreshAllUI === 'function') pflxRefreshAllUI();
+                        if (typeof pflxToast === 'function') pflxToast('Banner updated', 'success');
+                    } catch (e) { console.warn('[home-banner] save failed', e); }
+                };
+                if (typeof window.pflxReadImageForUpload === 'function') window.pflxReadImageForUpload(input.files[0], { maxW: 1920, maxH: 600, quality: 0.85, gifMaxMB: 4 }, save);
+                else { var r = new FileReader(); r.onload = function (e) { save(String(e.target.result || '')); }; r.readAsDataURL(input.files[0]); }
+                input.value = '';
+            } catch (e) { console.warn('[home-banner] error', e); }
+        };
+
+        // Host-only: promote the current personal banner to the PFLX default
+        // (applies to everyone who hasn't set their own).
+        window.pflxSetDefaultBannerFromCurrent = function () {
+            try {
+                var b = (typeof portfolioLoadData === 'function') ? (portfolioLoadData().banner || '') : '';
+                if (!b) { if (typeof pflxToast === 'function') pflxToast('Upload a banner first, then set it as the PFLX default.', 'warn'); return; }
+                if (typeof window.pflxSetDefaultBanner === 'function') window.pflxSetDefaultBanner(b);
+            } catch (e) { console.warn('[default-banner] set failed', e); }
         };
 
         window.pflxSignOut = function () {
