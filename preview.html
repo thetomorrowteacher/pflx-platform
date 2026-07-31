@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 23;
+      window.PFLX_PATCH   = 24;
       window.PFLX_BUILD   = '2026.07';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -51138,12 +51138,34 @@ RESPONSE RULES:
             const id = activeSession ? activeSession.brand || activeSession.name : 'guest';
             const raw = localStorage.getItem('pflx_portfolio_' + id);
             const defaults = { bio: '', privateBio: '', tagline: '', banner: '', hideRealName: true, projects: [], published: false, publishId: '' };
-            try { return raw ? { ...defaults, ...JSON.parse(raw) } : defaults; } catch(e) { return defaults; }
+            try {
+                const d = raw ? { ...defaults, ...JSON.parse(raw) } : { ...defaults };
+                // If the banner was too big for localStorage, restore it from the
+                // in-memory cache (set on upload) so it still renders this session.
+                if (!d.banner && window.__pflxBannerCache && window.__pflxBannerCache[id]) d.banner = window.__pflxBannerCache[id];
+                return d;
+            } catch(e) { return { ...defaults }; }
         }
 
+        window.__pflxBannerCache = window.__pflxBannerCache || {};
         function portfolioSaveData(data) {
             const id = activeSession ? activeSession.brand || activeSession.name : 'guest';
-            localStorage.setItem('pflx_portfolio_' + id, JSON.stringify(data));
+            // Keep the (large) banner in an in-memory cache so it always shows
+            // this session + survives even when localStorage is full.
+            if (data && data.banner) window.__pflxBannerCache[id] = data.banner;
+            // localStorage is shared/near-full (roster images, etc.). A banner
+            // dataURL can push it over quota — so write the FULL object if it
+            // fits, else fall back to a banner-stripped copy. Either way the
+            // full data (with banner) still goes to the cloud below, and the
+            // in-memory cache keeps the banner visible now.
+            try {
+                localStorage.setItem('pflx_portfolio_' + id, JSON.stringify(data));
+            } catch (quotaErr) {
+                try {
+                    var light = Object.assign({}, data); delete light.banner;
+                    localStorage.setItem('pflx_portfolio_' + id, JSON.stringify(light));
+                } catch (e2) { /* even the light copy failed — cloud + cache still hold it */ }
+            }
             // ── Bridge: broadcast portfolio update to all PFLX apps ──
             try {
                 if (typeof mcBroadcastToApps === 'function') {
@@ -52075,7 +52097,7 @@ RESPONSE RULES:
             // GIF-aware: animated GIFs pass through raw (preserve animation),
             // other images are compressed.
             if (typeof window.pflxReadImageForUpload === 'function') {
-                window.pflxReadImageForUpload(file, { maxW: 1920, maxH: 600, quality: 0.85, gifMaxMB: 4 }, __applyBanner);
+                window.pflxReadImageForUpload(file, { maxW: 1600, maxH: 480, quality: 0.72, gifMaxMB: 2.5 }, __applyBanner);
             } else {
                 pflxCompressImage(file, { maxW: 1920, maxH: 600, quality: 0.85 }).then(__applyBanner).catch(function () { alert('Could not process this image. Try a different file.'); });
             }
@@ -58341,7 +58363,7 @@ RESPONSE RULES:
                         if (typeof pflxToast === 'function') pflxToast('Banner updated', 'success');
                     } catch (e) { console.warn('[home-banner] save failed', e); }
                 };
-                if (typeof window.pflxReadImageForUpload === 'function') window.pflxReadImageForUpload(input.files[0], { maxW: 1920, maxH: 600, quality: 0.85, gifMaxMB: 4 }, save);
+                if (typeof window.pflxReadImageForUpload === 'function') window.pflxReadImageForUpload(input.files[0], { maxW: 1600, maxH: 480, quality: 0.72, gifMaxMB: 2.5 }, save);
                 else { var r = new FileReader(); r.onload = function (e) { save(String(e.target.result || '')); }; r.readAsDataURL(input.files[0]); }
                 input.value = '';
             } catch (e) { console.warn('[home-banner] error', e); }
