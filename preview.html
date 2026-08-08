@@ -13617,6 +13617,52 @@
             } catch (e) { return false; }
         };
 
+        // ══ SUBMISSION UPLOADS → SUPABASE STORAGE (v1.17, July 29, Ennis) ══
+        // Base64 uploads used to be embedded straight into the submission and
+        // therefore into the `pflx_mc_tasks` cloud row, which grew to 19 MB —
+        // 99.6% of it images. Every boot pull dragged 20 MB down (killing
+        // iPhones on parse), and single-row reads began exceeding Postgres's
+        // statement timeout. Uploads now go to the `pflx-submissions` Storage
+        // bucket and the submission keeps only a URL. Readers still honour a
+        // legacy `fileData` so nothing already submitted breaks.
+        window.PFLX_UPLOAD_BUCKET = 'pflx-submissions';
+        // Turn a base64 data URL into a Blob without a fetch() round-trip.
+        function pflxDataUrlToBlob(dataUrl) {
+            var parts = String(dataUrl || '').split(',');
+            var mime = (parts[0].match(/data:([^;]+)/) || [])[1] || 'application/octet-stream';
+            var bin = atob(parts[1] || '');
+            var len = bin.length, arr = new Uint8Array(len);
+            for (var i = 0; i < len; i++) arr[i] = bin.charCodeAt(i);
+            return new Blob([arr], { type: mime });
+        }
+        // Upload and return a public URL. Resolves to '' when Storage is
+        // unavailable so the caller can fall back rather than lose the work.
+        window.pflxUploadSubmissionFile = async function (dataUrl, fileName, playerId) {
+            try {
+                if (!dataUrl || String(dataUrl).indexOf('data:') !== 0) return '';
+                var sb = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (!sb || !sb.storage) return '';
+                var safe = String(fileName || 'upload').replace(/[^A-Za-z0-9._-]/g, '_').slice(-60);
+                var path = (playerId || 'anon') + '/' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '-' + safe;
+                var blob = pflxDataUrlToBlob(dataUrl);
+                var res = await sb.storage.from(window.PFLX_UPLOAD_BUCKET)
+                    .upload(path, blob, { contentType: blob.type, upsert: false });
+                if (res && res.error) { console.warn('[upload] storage error', res.error.message); return ''; }
+                var pub = sb.storage.from(window.PFLX_UPLOAD_BUCKET).getPublicUrl(path);
+                return (pub && pub.data && pub.data.publicUrl) || '';
+            } catch (e) { console.warn('[upload] failed', e); return ''; }
+        };
+        // Normalize whatever a submission carries into something renderable:
+        // new fileUrl, legacy base64 string, or the legacy {name,type,data} shape.
+        window.pflxSubmissionFileSrc = function (sub) {
+            if (!sub) return '';
+            if (sub.fileUrl) return sub.fileUrl;
+            var fd = sub.fileData;
+            if (typeof fd === 'string' && fd) return fd;
+            if (fd && typeof fd === 'object' && fd.data) return fd.data;
+            return '';
+        };
+
         // ── SAFE Sound-Engine config save (July 23, QuotaExceededError) ──
         // Audio payloads (base64 dataUrls) belong in IndexedDB, never in
         // localStorage. This save strips any large dataUrl from the persisted
@@ -27401,7 +27447,7 @@
         // Persist a submission on the task and flip status to 'submitted'.
         // mcSaveData('tasks') already fires pflx_mc_changed so every other
         // surface (X-Coin home, Pathways chips, etc.) updates the count.
-        window.ppSubmitTask = function (taskId) {
+        window.ppSubmitTask = async function (taskId) {   // v1.17: async — uploads go to Storage first
             try {
                 if (typeof mcTasks === 'undefined' || !Array.isArray(mcTasks)) return;
                 var i = mcTasks.findIndex(function (t) { return t && t.id === taskId; });
@@ -27447,6 +27493,24 @@
                 // t.submission/t.status stays as a compatibility signal only —
                 // one player submitting no longer marks the task for everyone.
                 var __spid = (window.activeSession && window.activeSession.id) || null;
+                // v1.17 — push the upload to Storage and keep only its URL.
+                // If Storage is unreachable we keep the base64 so the student
+                // never loses their evidence; the row-size guard below still
+                // refuses anything that would bloat the cloud row again.
+                var fileUrl = '';
+                if (fileData && String(fileData).indexOf('data:') === 0) {
+                    try {
+                        setOk && setOk('Uploading evidence…');
+                        fileUrl = await window.pflxUploadSubmissionFile(fileData, fileName, __spid);
+                    } catch (e) {}
+                    if (fileUrl) fileData = '';
+                    else if (String(fileData).length > 1200000) {
+                        setErr('That file is too large to attach right now (' +
+                               Math.round(String(fileData).length / 1400000 * 1.05) +
+                               ' MB). Upload it to Drive and paste the link instead.');
+                        return;
+                    }
+                }
                 var __sname = (window.activeSession && (window.activeSession.brand || window.activeSession.name)) || 'Player';
                 var subEntry = {
                     id: 'sub-' + Date.now(),
@@ -27457,7 +27521,8 @@
                     description: desc.trim(),
                     link: link.trim() || null,
                     fileName: fileName || null,
-                    fileData: fileData || null,
+                    fileUrl: fileUrl || null,          // v1.17 — Storage URL
+                    fileData: fileData || null,        // legacy fallback only
                     checklist: checks,
                     status: 'pending'
                 };
@@ -31336,7 +31401,7 @@
             mcSubmitTaskIndex = -1;
         }
 
-        function mcPlayerSubmitTask() {
+        async function mcPlayerSubmitTask() {   // v1.17: async — uploads go to Storage first
             if (mcSubmitTaskIndex < 0 || !mcTasks[mcSubmitTaskIndex]) return;
             var t = mcTasks[mcSubmitTaskIndex];
             // CHECKPOINT PROGRESSION GATE (July 15) — hard stop even if the modal was reached
@@ -31366,6 +31431,20 @@
             pflxPlaySfx('save');
 
             var fileName = mcSubmitFileName || '';
+            // v1.17 — send the upload to Storage; keep base64 only if Storage
+            // is unreachable, and refuse anything big enough to re-bloat the row.
+            var __mcFileData = mcSubmitFileData || '';
+            var __mcFileUrl = '';
+            if (__mcFileData && String(__mcFileData).indexOf('data:') === 0) {
+                var __pid = (typeof activeSession !== 'undefined' && activeSession) ? activeSession.id : 'anon';
+                try { __mcFileUrl = await window.pflxUploadSubmissionFile(__mcFileData, fileName, __pid); } catch (e) {}
+                if (__mcFileUrl) __mcFileData = '';
+                else if (String(__mcFileData).length > 1200000) {
+                    pflxPlaySfx('error');
+                    alert('That file is too large to attach right now. Upload it to Drive and paste the link instead.');
+                    return;
+                }
+            }
 
             var submission = {
                 id: 'sub-' + Date.now(),
@@ -31378,7 +31457,8 @@
                 description: document.getElementById('mc-submit-notes')?.value || '',
                 fileName: fileName,
                 fileType: mcSubmitFileType || '',
-                fileData: mcSubmitFileData || '',
+                fileUrl: __mcFileUrl || null,      // v1.17 — Storage URL
+                fileData: __mcFileData || '',      // legacy fallback only
                 checklistCompleted: [],
                 status: 'pending'
             };
@@ -55769,10 +55849,18 @@ RESPONSE RULES:
                 var subHTML = '<div style="font-size:12px;color:rgba(255,255,255,0.6);line-height:1.6;">';
                 if (sub.link) subHTML += '<div><strong>Link:</strong> <a href="' + escapeHtml(sub.link) + '" target="_blank" style="color:var(--cyan);">View submission</a></div>';
                 if (sub.description) subHTML += '<div><strong>Notes:</strong> ' + escapeHtml(sub.description) + '</div>';
-                if (sub.fileData && sub.fileData.name) {
-                    subHTML += '<div><strong>File:</strong> ' + escapeHtml(sub.fileData.name) + '</div>';
-                    if (sub.fileData.type.startsWith('image/')) {
-                        subHTML += '<img src="' + sub.fileData.data + '" style="max-width:100%;max-height:150px;margin-top:8px;border:1px solid rgba(0,240,255,0.2);border-radius:4px;">';
+                // v1.17 — render from the Storage URL when present, else the
+                // legacy base64 (string OR {name,type,data} shape).
+                var __src = (typeof window.pflxSubmissionFileSrc === 'function') ? window.pflxSubmissionFileSrc(sub) : '';
+                var __fname = sub.fileName || (sub.fileData && sub.fileData.name) || '';
+                var __ftype = sub.fileType || (sub.fileData && sub.fileData.type) || '';
+                if (__src || __fname) {
+                    if (__fname) subHTML += '<div><strong>File:</strong> ' + escapeHtml(__fname) + '</div>';
+                    var __isImg = /^image\//.test(__ftype) || /\.(png|jpe?g|gif|webp)(\?|$)/i.test(__src) || /^data:image\//.test(__src);
+                    if (__src && __isImg) {
+                        subHTML += '<img src="' + escapeHtml(__src) + '" style="max-width:100%;max-height:150px;margin-top:8px;border:1px solid rgba(0,240,255,0.2);border-radius:4px;">';
+                    } else if (__src) {
+                        subHTML += '<div><a href="' + escapeHtml(__src) + '" target="_blank" rel="noopener" style="color:var(--cyan);">Open attachment</a></div>';
                     }
                 }
                 subHTML += '</div>';
