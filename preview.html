@@ -31303,7 +31303,15 @@
                         ? '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(245,200,66,0.12);color:#f5c842;border:1px solid rgba(245,200,66,0.4);border-radius:8px;cursor:pointer;flex:1;min-width:90px;font-weight:700;" onclick="pflxSubmitTaskPhaseUI(' + JSON.stringify(t.id) + ')">📤 Submit ' + ((function(){ try { var s = pflxComputeFlpStatus(t); return s ? s.phaseName : 'Work'; } catch(e){ return 'Work'; }})()) + '</button>'
                         : '') +
                     (t.status === 'submitted'
-                        ? '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(34,197,94,0.1);color:#22c55e;border:1px solid rgba(34,197,94,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:70px;" onclick="mcApproveTask(' + realIndex + ')">✓ Approve</button>'
+                        ? (function () {
+                            // v1.20 — say what this button actually DOES. It approves
+                            // EVERY pending entry on the task (v1.14 behaviour), which
+                            // looked like "I approved one and they all vanished".
+                            var __np = 0;
+                            try { __np = (t.submissions || []).filter(function (s) { return s && (s.status || 'pending') === 'pending'; }).length; } catch (e) {}
+                            var __lbl = __np > 1 ? ('✓ Approve all ' + __np + ' pending') : '✓ Approve';
+                            return '<button class="mc-btn" style="padding:6px 12px;font-size:11px;background:rgba(34,197,94,0.1);color:#22c55e;border:1px solid rgba(34,197,94,0.3);border-radius:8px;cursor:pointer;flex:1;min-width:70px;" onclick="mcApproveTask(' + realIndex + ')">' + __lbl + '</button>';
+                          })()
                         : '') +
                     (_mcTaskHostComplete(t)
                         ? '<div style="padding:6px 12px;font-size:11px;background:rgba(34,197,94,0.05);color:#22c55e;border:1px dashed rgba(34,197,94,0.35);border-radius:8px;flex:1;min-width:90px;text-align:center;letter-spacing:0.04em;font-weight:700;">✓ COMPLETED</div>'
@@ -34024,6 +34032,50 @@
             try { if (typeof mcBroadcastToApps === 'function') mcBroadcastToApps('pflx_task_rejected', { taskId: task.id, playerId: pid, reason: reason }); } catch (e) {}
             try { if (typeof pflxToast === 'function') pflxToast('Submission rejected for @' + (_pflxPlayerBrandById(pid) || 'player'), 'warning'); } catch (e) {}
         }
+        // ── UNDO LAST APPROVAL BATCH (v1.20, July 29, Ennis) ────────────
+        // Reverses the most recent task-level batch: each affected entry goes
+        // back to 'pending', the task's completion flag is recomputed, and any
+        // XC paid by that batch is clawed back through the SAME PflxDataBus
+        // path that paid it (so every surface updates and the ledger is
+        // consistent). Badges are NOT revoked — removing an earned badge from
+        // a student is a host decision, not an automatic one.
+        window.pflxUndoApprovals = function () {
+            var b = window._mcLastApprovalBatch;
+            if (!b || !b.playerIds || !b.playerIds.length) {
+                if (typeof pflxToast === 'function') pflxToast('Nothing to undo.', 'info');
+                return false;
+            }
+            var task = (mcTasks || []).find(function (t) { return t && t.id === b.taskId; });
+            if (!task) { if (typeof pflxToast === 'function') pflxToast('That task no longer exists.', 'error'); return false; }
+            if (!confirm('Undo the approval of ' + b.playerIds.length + ' submission(s) on "' + b.title + '"?\n\n' +
+                         (task.xcReward ? 'This also reverses ' + task.xcReward + ' XC per player. ' : '') +
+                         'Badges already earned are NOT removed.')) return false;
+            var n = 0;
+            b.playerIds.forEach(function (pid) {
+                var sub = (typeof _mcFindPlayerSub === 'function') ? _mcFindPlayerSub(task, pid) : null;
+                if (!sub || sub.status !== 'approved') return;
+                sub.status = 'pending';
+                delete sub.reviewedAt;
+                n++;
+                try {
+                    if (task.xcReward && window.PflxDataBus) {
+                        window.PflxDataBus.award(pid, { xc: -Math.abs(task.xcReward), source: 'mc',
+                            reason: 'undo:task:' + task.id });
+                    }
+                } catch (e) { console.warn('[undo] xc reversal failed for', pid, e); }
+            });
+            task.updatedAt = Date.now();
+            if (typeof _mcTaskHostComplete === 'function' && !_mcTaskHostComplete(task)) {
+                task.status = 'submitted';
+                delete task.approvedAt;
+            }
+            try { mcSaveData('tasks'); mcSaveData('players'); } catch (e) {}
+            try { mcRenderTasks(); } catch (e) {}
+            try { if (typeof renderApprovalsCard === 'function') renderApprovalsCard(); } catch (e) {}
+            window._mcLastApprovalBatch = null;
+            if (typeof pflxToast === 'function') pflxToast('↩ Reversed ' + n + ' approval' + (n === 1 ? '' : 's') + ' on "' + b.title + '"', 'warning', 6000);
+            return true;
+        };
         window.mcApprovePlayerSubmission = mcApprovePlayerSubmission;
         window.mcRejectPlayerSubmission = mcRejectPlayerSubmission;
 
@@ -34039,9 +34091,32 @@
             if (Array.isArray(task.submissions) && task.submissions.length) {
                 var __pend = task.submissions.filter(function (s) { return s && (s.status || 'pending') === 'pending'; });
                 if (__pend.length) {
+                    // v1.20 — a batch of 4+ gets a confirm naming the players, and
+                    // every batch is journalled so it can be undone.
+                    if (__pend.length > 3) {
+                        var __names = __pend.slice(0, 8).map(function (s) {
+                            return (typeof _pflxPlayerBrandById === 'function' && _pflxPlayerBrandById(s.playerId)) || s.playerName || 'player';
+                        }).join(', ');
+                        if (!confirm('Approve ALL ' + __pend.length + ' pending submissions on "' + (task.title || 'this task') + '"?\n\n' +
+                                     __names + (__pend.length > 8 ? ' … +' + (__pend.length - 8) + ' more' : '') +
+                                     (task.xcReward ? '\n\nEach approved player receives ' + task.xcReward + ' XC.' : '') +
+                                     '\n\nUse the ✓ chip beside a single player to approve just that one.')) return;
+                    }
+                    window._mcLastApprovalBatch = {
+                        taskId: task.id,
+                        title: task.title || 'task',
+                        at: Date.now(),
+                        playerIds: __pend.map(function (s) { return s.playerId || s.submittedById || s.submittedBy; }).filter(Boolean)
+                    };
                     __pend.forEach(function (s) {
                         try { mcApprovePlayerSubmission(task.id, s.playerId || s.submittedById || s.submittedBy); } catch (e) {}
                     });
+                    try {
+                        if (typeof pflxToast === 'function') {
+                            pflxToast('✓ Approved ' + __pend.length + ' submission' + (__pend.length === 1 ? '' : 's') +
+                                      ' on "' + (task.title || 'task') + '" — type pflxUndoApprovals() to reverse', 'success', 8000);
+                        }
+                    } catch (e) {}
                 } else if (typeof _mcTaskHostComplete === 'function' && _mcTaskHostComplete(task)) {
                     task.status = 'approved';
                     task.approvedAt = new Date().toISOString().split('T')[0];
