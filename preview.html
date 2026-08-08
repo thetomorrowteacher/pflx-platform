@@ -62001,15 +62001,70 @@ RESPONSE RULES:
             } catch (e) {}
             return false;
         }
+        // ══ INCOMING MESSAGE / CALL ALERTS (v1.19, July 29, Ennis) ═══════
+        // The dock icon glowed green but said nothing — a player looking at
+        // another tab never knew. Now a NEW unread also rings and raises a
+        // named toast ("New Message from BRAND"), and an inbound call raises
+        // an "Incoming Call" banner. Only genuinely NEW messages alert, so a
+        // re-render can't spam; muted automatically while the chat is open.
+        window._pcSeenMsgIds = window._pcSeenMsgIds || {};
+        window._pcAlertPrimed = window._pcAlertPrimed || false;
+        window.pflxIncomingAlert = function (kind, who, body) {
+            try {
+                var isCall = (kind === 'call');
+                try { pflxPlaySfx(isCall ? 'alarm' : 'notification'); } catch (e) {}
+                var id = 'pflx-incoming-alert';
+                var old = document.getElementById(id); if (old) old.remove();
+                var el = document.createElement('div');
+                el.id = id;
+                el.style.cssText = 'position:fixed;right:22px;bottom:110px;z-index:100050;min-width:250px;max-width:340px;' +
+                    'background:linear-gradient(180deg,#12121c,#0a0a14);border:1px solid ' +
+                    (isCall ? 'rgba(34,197,94,0.65)' : 'rgba(0,212,255,0.5)') + ';border-radius:14px;padding:14px 16px;' +
+                    'box-shadow:0 18px 48px rgba(0,0,0,0.6), 0 0 30px ' + (isCall ? 'rgba(34,197,94,0.25)' : 'rgba(0,212,255,0.18)') + ';' +
+                    'font-family:Jura,sans-serif;color:#e0e6ff;cursor:pointer;animation:stepFadeIn 0.28s ease;';
+                el.innerHTML =
+                    '<div style="display:flex;align-items:center;gap:10px;">' +
+                        '<div style="font-size:26px;">' + (isCall ? '📞' : '💬') + '</div>' +
+                        '<div style="flex:1;min-width:0;">' +
+                            '<div style="font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:0.12em;color:' +
+                                (isCall ? '#22c55e' : '#00d4ff') + ';font-weight:800;">' +
+                                (isCall ? 'INCOMING CALL' : 'NEW MESSAGE') + '</div>' +
+                            '<div style="font-size:14px;font-weight:700;margin-top:2px;">' + escapeHtml(who || 'Player') + '</div>' +
+                            (body ? '<div style="font-size:12px;color:rgba(255,255,255,0.6);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(String(body).slice(0, 60)) + '</div>' : '') +
+                        '</div>' +
+                    '</div>';
+                el.onclick = function () { try { if (window.pflxChatToggle) window.pflxChatToggle(); } catch (e) {} el.remove(); };
+                document.body.appendChild(el);
+                setTimeout(function () { var n = document.getElementById(id); if (n) n.remove(); }, isCall ? 30000 : 7000);
+            } catch (e) { console.warn('[incoming alert]', e); }
+        };
         function _pcRefreshBadge() {
             var me = _pcMe();
             var unread = 0;
+            var freshest = null;
             _pcThreads.forEach(function (t) {
                 if (!_pcThreadIsMine(t, me)) return;   // don't count chats that aren't mine
                 (t.messages || []).forEach(function (m) {
-                    if (m.senderId !== me.id && !(Array.isArray(m.readBy) && m.readBy.indexOf(me.id) !== -1)) unread++;
+                    if (m.senderId !== me.id && !(Array.isArray(m.readBy) && m.readBy.indexOf(me.id) !== -1)) {
+                        unread++;
+                        // v1.19 — alert once per message id, and never on the
+                        // first pass after load (that would fire for history).
+                        var mid = m.id || (t.id + ':' + (m.ts || m.timestamp || ''));
+                        if (!window._pcSeenMsgIds[mid]) {
+                            window._pcSeenMsgIds[mid] = 1;
+                            if (window._pcAlertPrimed && !freshest) {
+                                freshest = { who: m.senderName || m.senderBrand || 'Player', body: m.text || m.body || '' };
+                            }
+                        }
+                    }
                 });
             });
+            if (freshest) {
+                var chatOpen = false;
+                try { chatOpen = !!(window.pflxDock && window.pflxDock.state && window.pflxDock.state.open && window.pflxDock.state.tab === 'chat'); } catch (e) {}
+                if (!chatOpen) window.pflxIncomingAlert('message', freshest.who, freshest.body);
+            }
+            window._pcAlertPrimed = true;
             // Glow the floating X-Bot icon green (larger pulse) while unread
             // exists on the recipient's dashboard.
             try { if (typeof window.pflxDockSetUnread === 'function') window.pflxDockSetUnread(unread); } catch (e) {}
@@ -62746,6 +62801,12 @@ RESPONSE RULES:
             var who = msg.name || 'Someone';
             var kind = msg.mode === 'screen' ? 'screen-sharing' : 'video call';
             var context = t.type === 'group' ? ' in ' + (t.name || 'group') : '';
+            // v1.19 — ring + "INCOMING CALL" banner BEFORE the blocking
+            // confirm, so a player on another tab actually notices. The
+            // confirm is deferred a tick so the banner paints and the sound
+            // starts first (confirm() freezes rendering while it is open).
+            try { window.pflxIncomingAlert('call', who, kind + context); } catch (e) {}
+            var __ask = function () {
             var accept = confirm('📞 ' + who + ' started a ' + kind + context + '. Join?');
             if (!accept) return;
             _pcCallJoinExisting(threadId, msg.mode || 'video').catch(function (err) {
@@ -62753,6 +62814,8 @@ RESPONSE RULES:
                 pflxToast('Could not join: ' + (err.message || 'error'), 'warn');
                 pflxChatCallHangup();
             });
+            };
+            setTimeout(__ask, 120);
         }
         function _pcCallOpenPanel(threadId) {
             var panel = document.getElementById('pflx-chat-panel');
