@@ -29667,10 +29667,25 @@
             }
             return null;
         }
+        // v1.15 (July 29, Ennis: "Beta tasks show on the player dashboard but
+        // every project row on the HOST card reads 0 tasks"). This resolver
+        // only honored the REVERSE pointer (project.taskIds) while its sibling
+        // mcChildTasksForCheckpoint honors both directions — so a task wired
+        // forward (task.projectId, which the task form writes) counted at
+        // checkpoint level and vanished at project level. Host approvals hang
+        // off these child lists, so submissions on such tasks were unreachable
+        // from the project card. Now symmetric: union of both directions.
         function mcChildTasksForProject(project) {
-            if (!project || !Array.isArray(project.taskIds)) return [];
+            if (!project || !project.id) return [];
+            var out = {};
             var map = {}; mcTasks.forEach(function (t) { if (t && t.id) map[t.id] = t; });
-            return project.taskIds.map(function (id) { return map[id]; }).filter(Boolean);
+            if (Array.isArray(project.taskIds)) {
+                project.taskIds.forEach(function (id) { if (map[id]) out[id] = map[id]; });
+            }
+            mcTasks.forEach(function (t) {
+                if (t && t.id && String(t.projectId || '') === String(project.id)) out[t.id] = t;
+            });
+            return Object.keys(out).map(function (k) { return out[k]; });
         }
         function mcChildProjectsForCheckpoint(cp) {
             if (!cp) return [];
