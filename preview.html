@@ -13652,14 +13652,128 @@
                 return (pub && pub.data && pub.data.publicUrl) || '';
             } catch (e) { console.warn('[upload] failed', e); return ''; }
         };
+        // ══ GOOGLE DRIVE SUBMISSIONS (v1.18, July 29, Ennis) ══════════════
+        // Testers already live in Drive — the FeedForward Form drops every
+        // screenshot into a Drive folder — so a pasted Drive link is the
+        // lowest-friction evidence path AND it puts zero bytes in the
+        // database. The catch is that a Drive share link renders as a bare
+        // hyperlink, so reviewing meant opening a tab per submission. Drive
+        // exposes a thumbnail endpoint that DOES hotlink, so we convert.
+        window.pflxDriveFileId = function (url) {
+            var u = String(url || '');
+            if (!/drive\.google\.com|docs\.google\.com/i.test(u)) return '';
+            var m = u.match(/\/file\/d\/([A-Za-z0-9_-]{10,})/)      // /file/d/ID/view
+                 || u.match(/[?&]id=([A-Za-z0-9_-]{10,})/)          // ?id=ID / open?id=ID
+                 || u.match(/\/d\/([A-Za-z0-9_-]{10,})/);           // /d/ID (docs)
+            return m ? m[1] : '';
+        };
+        // Renderable image URL for a Drive link ('' when it isn't one).
+        window.pflxDriveThumb = function (url, width) {
+            var id = window.pflxDriveFileId(url);
+            return id ? ('https://drive.google.com/thumbnail?id=' + id + '&sz=w' + (width || 1000)) : '';
+        };
+        // ── GOOGLE PICKER (v1.18 option 2) ──────────────────────────────
+        // Lets a student attach straight from their Drive: Google handles the
+        // upload and permissions dialog, PFLX stores only the link. Dormant
+        // until a host sets a client id, because school Workspace accounts
+        // often block third-party OAuth and a dead button is worse than none.
+        //   window.PFLX_GOOGLE_CLIENT_ID = '…apps.googleusercontent.com'
+        // (set in Host Controls → Google Connect, or here as a constant.)
+        window.PFLX_GOOGLE_CLIENT_ID = window.PFLX_GOOGLE_CLIENT_ID || '';
+        window.pflxDriveConfigured = function () { return !!window.PFLX_GOOGLE_CLIENT_ID; };
+        function _pflxLoadScript(src) {
+            return new Promise(function (res, rej) {
+                if (document.querySelector('script[src="' + src + '"]')) return res();
+                var s = document.createElement('script');
+                s.src = src; s.async = true; s.onload = res; s.onerror = rej;
+                document.head.appendChild(s);
+            });
+        }
+        // Opens the picker and resolves to { link, name } (or null if cancelled).
+        window.pflxPickFromDrive = async function () {
+            if (!window.PFLX_GOOGLE_CLIENT_ID) {
+                if (typeof pflxToast === 'function') pflxToast('Drive picker not configured yet — paste a Drive link instead.', 'info', 5000);
+                return null;
+            }
+            await _pflxLoadScript('https://accounts.google.com/gsi/client');
+            await _pflxLoadScript('https://apis.google.com/js/api.js');
+            var token = await new Promise(function (res) {
+                try {
+                    var tc = google.accounts.oauth2.initTokenClient({
+                        client_id: window.PFLX_GOOGLE_CLIENT_ID,
+                        scope: 'https://www.googleapis.com/auth/drive.file',
+                        callback: function (r) { res(r && r.access_token ? r.access_token : ''); }
+                    });
+                    tc.requestAccessToken();
+                } catch (e) { res(''); }
+            });
+            if (!token) return null;
+            await new Promise(function (res) { gapi.load('picker', res); });
+            return await new Promise(function (res) {
+                var picker = new google.picker.PickerBuilder()
+                    .addView(new google.picker.DocsUploadView())
+                    .addView(google.picker.ViewId.DOCS)
+                    .setOAuthToken(token)
+                    .setCallback(async function (d) {
+                        if (d.action === google.picker.Action.CANCEL) return res(null);
+                        if (d.action !== google.picker.Action.PICKED) return;
+                        var f = (d.docs || [])[0];
+                        if (!f) return res(null);
+                        // Make it link-readable so the host isn't stuck requesting access.
+                        try {
+                            await fetch('https://www.googleapis.com/drive/v3/files/' + f.id + '/permissions', {
+                                method: 'POST',
+                                headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ role: 'reader', type: 'anyone' })
+                            });
+                        } catch (e) { console.warn('[drive] share failed — host may need to request access', e); }
+                        res({ link: 'https://drive.google.com/file/d/' + f.id + '/view', name: f.name || 'Drive file' });
+                    })
+                    .build();
+                picker.setVisible(true);
+            });
+        };
+        // ── MANAGED DRIVE UPLOAD (v1.18 option 3) ───────────────────────
+        // Posts the file to the DarkCampus /api/drive-upload route, which
+        // uses a service account to drop it in the HOST's Drive folder — no
+        // student OAuth, so school Workspace restrictions can't block it.
+        // Returns '' when the route isn't configured so callers fall back.
+        window.PFLX_DRIVE_UPLOAD_ENDPOINT = window.PFLX_DRIVE_UPLOAD_ENDPOINT
+            || 'https://pflx-darkcampus.vercel.app/api/drive-upload';
+        window.pflxManagedDriveUpload = async function (dataUrl, fileName, playerBrand) {
+            try {
+                if (!dataUrl || String(dataUrl).indexOf('data:') !== 0) return '';
+                var res = await fetch(window.PFLX_DRIVE_UPLOAD_ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ dataUrl: dataUrl, fileName: fileName, playerBrand: playerBrand })
+                });
+                if (!res.ok) { console.warn('[drive-upload] http', res.status); return ''; }
+                var j = await res.json();
+                return (j && j.link) || '';
+            } catch (e) { console.warn('[drive-upload] failed', e); return ''; }
+        };
+
+        // Wired to the "Choose from Drive" button beside a link input.
+        window.pflxDrivePickInto = async function (inputId) {
+            var picked = await window.pflxPickFromDrive();
+            if (!picked) return;
+            var el = document.getElementById(inputId);
+            if (el) { el.value = picked.link; el.dispatchEvent(new Event('input', { bubbles: true })); }
+            if (typeof pflxToast === 'function') pflxToast('📎 Attached from Drive: ' + picked.name, 'success');
+        };
+
         // Normalize whatever a submission carries into something renderable:
-        // new fileUrl, legacy base64 string, or the legacy {name,type,data} shape.
+        // Storage URL → legacy base64 (string or {name,type,data}) → Drive link.
         window.pflxSubmissionFileSrc = function (sub) {
             if (!sub) return '';
             if (sub.fileUrl) return sub.fileUrl;
             var fd = sub.fileData;
             if (typeof fd === 'string' && fd) return fd;
             if (fd && typeof fd === 'object' && fd.data) return fd.data;
+            // v1.18 — a Drive link becomes a previewable image
+            var dt = window.pflxDriveThumb(sub.link || sub.url || '');
+            if (dt) return dt;
             return '';
         };
 
@@ -27389,6 +27503,10 @@
                 if (task.allowLinkSubmit !== false) {
                     html += '<div style="font-size:11px;letter-spacing:0.1em;color:rgba(255,255,255,0.4);margin-bottom:6px;">LINK</div>' +
                         '<input id="' + sid + '-link" type="url" value="' + escapeHtml(existing.link || '') + '" placeholder="https://drive.google.com/…" style="width:100%;padding:10px 12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:#fff;font-size:13px;font-family:\'Share Tech Mono\',monospace;outline:none;margin-bottom:8px;">' +
+                        // v1.18 — one-tap Drive attach; only rendered once a host configures the client id
+                        ((typeof window.pflxDriveConfigured === 'function' && window.pflxDriveConfigured())
+                          ? '<button type="button" onclick="pflxDrivePickInto(\'' + sid + '-link\')" style="padding:8px 14px;background:rgba(66,133,244,0.12);border:1px solid rgba(66,133,244,0.45);color:#8ab4f8;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;margin-bottom:10px;">📁 Choose from Google Drive</button>'
+                          : '') +
                         '<div style="font-size:11px;color:rgba(0,212,255,0.65);background:rgba(0,212,255,0.04);border:1px dashed rgba(0,212,255,0.2);padding:10px 12px;border-radius:8px;margin-bottom:14px;line-height:1.6;">' +
                         '💡 <b>Google Drive tip:</b> Upload your file to Drive → click <b>Share</b> → change to <b>"Anyone with the link"</b> → copy the link and paste it above. This lets your host open it without requesting access. PFLX will eventually integrate directly with host@prototypeflx.com Drive for managed uploads.' +
                         '</div>';
@@ -27502,6 +27620,14 @@
                     try {
                         setOk && setOk('Uploading evidence…');
                         fileUrl = await window.pflxUploadSubmissionFile(fileData, fileName, __spid);
+                        // v1.18 — if Supabase Storage is unavailable (as during
+                        // the July 29 outage), try the host's managed Drive
+                        // folder before falling back to keeping base64.
+                        if (!fileUrl && window.pflxManagedDriveUpload) {
+                            setOk && setOk('Uploading to Drive…');
+                            fileUrl = await window.pflxManagedDriveUpload(fileData, fileName,
+                                (window.activeSession && (window.activeSession.brand || window.activeSession.name)) || 'player');
+                        }
                     } catch (e) {}
                     if (fileUrl) fileData = '';
                     else if (String(fileData).length > 1200000) {
@@ -31438,6 +31564,12 @@
             if (__mcFileData && String(__mcFileData).indexOf('data:') === 0) {
                 var __pid = (typeof activeSession !== 'undefined' && activeSession) ? activeSession.id : 'anon';
                 try { __mcFileUrl = await window.pflxUploadSubmissionFile(__mcFileData, fileName, __pid); } catch (e) {}
+                if (!__mcFileUrl && window.pflxManagedDriveUpload) {   // v1.18 Drive fallback
+                    try {
+                        __mcFileUrl = await window.pflxManagedDriveUpload(__mcFileData, fileName,
+                            (typeof activeSession !== 'undefined' && activeSession && (activeSession.brand || activeSession.name)) || 'player');
+                    } catch (e) {}
+                }
                 if (__mcFileUrl) __mcFileData = '';
                 else if (String(__mcFileData).length > 1200000) {
                     pflxPlaySfx('error');
@@ -55856,7 +55988,8 @@ RESPONSE RULES:
                 var __ftype = sub.fileType || (sub.fileData && sub.fileData.type) || '';
                 if (__src || __fname) {
                     if (__fname) subHTML += '<div><strong>File:</strong> ' + escapeHtml(__fname) + '</div>';
-                    var __isImg = /^image\//.test(__ftype) || /\.(png|jpe?g|gif|webp)(\?|$)/i.test(__src) || /^data:image\//.test(__src);
+                    var __isImg = /^image\//.test(__ftype) || /\.(png|jpe?g|gif|webp)(\?|$)/i.test(__src)
+                        || /^data:image\//.test(__src) || /drive\.google\.com\/thumbnail/.test(__src);
                     if (__src && __isImg) {
                         subHTML += '<img src="' + escapeHtml(__src) + '" style="max-width:100%;max-height:150px;margin-top:8px;border:1px solid rgba(0,240,255,0.2);border-radius:4px;">';
                     } else if (__src) {
