@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 27;
+      window.PFLX_PATCH   = 28;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -23563,7 +23563,20 @@
                 var a = byId[p.id], b = p;
                 // winner = more-current record (higher lifetime XC, then more activity)
                 var aTot = num(a.totalXcoin), bTot = num(b.totalXcoin);
-                var win = (bTot > aTot || (bTot === aTot && actN(b) > actN(a))) ? b : a;
+                // ── RECENCY FIRST (Aug 9, Ennis) ── XC alone cannot decide a
+                // record whose XC did not change. A host renaming a brand, or
+                // fixing a cohort, produces two copies with IDENTICAL totals —
+                // the old tiebreak then silently kept the STALE one. Observed:
+                // ARYANA / KIYAN reverted to "BrandName?" on the next sync even
+                // though the NEUROFLUX merge (which did move XC) survived.
+                // A newer per-record updatedAt now wins outright; earnings
+                // safety below is applied regardless of who wins, so recency
+                // can never cost anyone coins or badges.
+                var aU = num(a.updatedAt), bU = num(b.updatedAt), win;
+                if (aU && bU && aU !== bU) win = (bU > aU) ? b : a;
+                else if (bU && !aU) win = b;
+                else if (aU && !bU) win = a;
+                else win = (bTot > aTot || (bTot === aTot && actN(b) > actN(a))) ? b : a;
                 var lose = win === a ? b : a;
                 var merged = Object.assign({}, lose, win);
                 merged.totalXcoin = Math.max(aTot, bTot);
