@@ -13459,6 +13459,26 @@
             requestAllTickerEvents();
         }, 60000);
 
+        // PARTIAL FIX (Aug 9): the bottom ticker's request to a sub-app
+        // iframe (xcoin-frame, darkcampus-frame, etc.) is a no-op while that
+        // frame's src is still "about:blank" — nobody is listening yet.
+        // Previously the only re-request was the 60s interval, so after a
+        // player/host first opened X-Coin or DarkCampus, a fresh XC award
+        // could sit unreflected on the ticker for up to a minute. Re-request
+        // immediately whenever one of these frames finishes loading (i.e.
+        // every time someone actually navigates into that app), so events
+        // populate right away instead of waiting on the next poll.
+        // NOTE: this fixes the PARENT-SIDE polling only. It does not cover
+        // "X-Coin feed channel in DarkCampus / Discord / Slack" — that's a
+        // webhook/posting path that lives inside the separate xcoin-app and
+        // darkcampus deployments, which still need to be investigated.
+        try {
+            ['xcoin-frame', 'arena-frame', 'darkcampus-frame', 'pathway-frame'].forEach(function (id) {
+                var f = document.getElementById(id);
+                if (f) f.addEventListener('load', function () { setTimeout(requestAllTickerEvents, 600); });
+            });
+        } catch (e) {}
+
         // Expose for manual refresh
         window.pflxRenderTicker = pflxRenderTicker;
     })();
