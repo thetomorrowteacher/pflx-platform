@@ -57,8 +57,8 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 26;
-      window.PFLX_BUILD   = '2026.07';
+      window.PFLX_PATCH   = 27;
+      window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
       window.pflxVersionLogin = function () { return 'System Version ' + window.PFLX_VERSION + ' · Patch ' + window.PFLX_PATCH + ' · Secure Connection'; };
@@ -23161,6 +23161,41 @@
                     console.warn('[MC→X-Coin sync] ✋ SHRINK-blocked for "' + k + '" — local has ' + n + ' vs cloud baseline ' + _mcCloudBaseline[k] + '. Looks like default/mock state. Set window._mcAllowShrink = true to override.');
                     return;
                 }
+                // ── READ-MERGE-WRITE for the roster (Aug 9, Ennis) ──
+                // This legacy path pushes mcPlayers WHOLESALE onto the shared
+                // 'users' row. mcCloudPush got _mcMergeQueueWithCloud back in
+                // July; this one never did — so a tab holding a pre-edit
+                // roster silently reverted host edits on 'users' while the
+                // canonical pflx_mc_players row kept the correct values. That
+                // split is exactly what reverted the NEUROFLUX merge twice.
+                // Merge against the CURRENT cloud row first; tombstoned
+                // players are dropped by _mcMergePlayers, so a delete stays
+                // deleted.
+                if (k === 'players') {
+                    var _c = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                    if (_c && typeof _mcMergePlayers === 'function') {
+                        _c.from('app_data').select('data').eq('key', 'users').single().then(function (res) {
+                            var cloud = (res && res.data && res.data.data) || [];
+                            var out = d;
+                            try {
+                                if (Array.isArray(cloud) && cloud.length) out = _mcMergePlayers(d, cloud);
+                            } catch (e) { console.warn('[MC→X-Coin sync] users merge failed, sending local', e); }
+                            try {
+                                xcoinFrame.contentWindow.postMessage(JSON.stringify({
+                                    type: 'pflx_cloud_save', key: 'users', data: out
+                                }), '*');
+                            } catch (e) {}
+                        }, function () {
+                            // Cloud unreadable — send local rather than lose the edit.
+                            try {
+                                xcoinFrame.contentWindow.postMessage(JSON.stringify({
+                                    type: 'pflx_cloud_save', key: 'users', data: d
+                                }), '*');
+                            } catch (e) {}
+                        });
+                        return;
+                    }
+                }
                 xcoinFrame.contentWindow.postMessage(JSON.stringify({
                     type: 'pflx_cloud_save', key: syncMap[k].key, data: d
                 }), '*');
@@ -23516,6 +23551,14 @@
             local.forEach(function (p) { if (p && p.id) { byId[p.id] = p; order.push(p.id); } });
             incoming.forEach(function (p) {
                 if (!p || !p.id) return;
+                // ── Aug 9 (Ennis) ── A merge must never RESURRECT a removed
+                // player. Without this, a stale device that still holds the
+                // pre-delete roster re-adds them on its next sync, and the
+                // duplicate the host just merged away comes straight back —
+                // observed live with Essence Johnson's two NEUROFLUX rows,
+                // which reverted twice. Tombstones already exist (July 15);
+                // this is the ingest path that never consulted them.
+                try { if (window.pflxIsTombstoned && window.pflxIsTombstoned(p)) return; } catch (e) {}
                 if (!(p.id in byId)) { byId[p.id] = p; order.push(p.id); return; }
                 var a = byId[p.id], b = p;
                 // winner = more-current record (higher lifetime XC, then more activity)
