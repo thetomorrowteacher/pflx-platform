@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 28;
+      window.PFLX_PATCH   = 29;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -20206,6 +20206,8 @@
                 _ppFilteredTasksForActive().forEach(function (t) {
                     if (!t || !t.dueDate) return;
                     if (t.status === 'approved' || t.completed) return;
+                    // A finished checkpoint stops its tasks nagging (Aug 9).
+                    try { if (window.pflxItemHierarchyClosed && window.pflxItemHierarchyClosed(t)) return; } catch (e) {}
                     items.push({
                         id: t.id,
                         kind: 'task',
@@ -25418,6 +25420,9 @@
                     var overdueTasks = (mcTasks || []).filter(function (t) {
                         if (!t || t.status === 'approved') return false;
                         if (!t.dueDate) return false;
+                        // Same rule the player dashboard uses — a task under a
+                        // completed/archived parent is done nagging (Aug 9).
+                        try { if (window.pflxItemHierarchyClosed && window.pflxItemHierarchyClosed(t)) return false; } catch (e) {}
                         return _mcUrgencyForDueDate(t.dueDate).days < 0;
                     });
                     // Overdue projects (endDate/dueDate < today, status !== completed)
@@ -25425,6 +25430,7 @@
                         if (!p || p.status === 'completed') return false;
                         var d = p.dueDate || p.endDate || p.deadline;
                         if (!d) return false;
+                        try { if (window.pflxItemHierarchyClosed && window.pflxItemHierarchyClosed(p)) return false; } catch (e) {}
                         return _mcUrgencyForDueDate(d).days < 0;
                     });
                     totalCount = awaiting.length + overdueTasks.length + overdueProjects.length;
@@ -25933,6 +25939,44 @@
             return false;
         }
         window.pflxItemHierarchyInactive = pflxItemHierarchyInactive;
+
+        // ── CLOSED-HIERARCHY INHERITANCE (Aug 9, Ennis) ──
+        // The sibling of the rule above, for the OTHER end of the lifecycle.
+        // pflxItemHierarchyInactive covers a host DRAFT (inactive → hide it).
+        // This covers a FINISHED parent: a task under a checkpoint that is
+        // 'completed' or 'archived' must stop counting down. Reported by
+        // Kaitlin and LIVSTUDIOS as "65 days overdue when it has been
+        // completed" — 'Complete Projects/Courses' sat under Checkpoint Alpha
+        // (completed) with dueDate 2026-06-04 and kept accruing overdue days
+        // on every player dashboard.
+        // Deliberately NOT hidden, only de-escalated: players keep seeing their
+        // finished work and its history; it simply stops nagging. Checkpoints
+        // themselves were already guarded (status must be 'active' to enter the
+        // deadline list); tasks and projects never were.
+        function pflxItemHierarchyClosed(item) {
+            try {
+                if (!item) return false;
+                var CLOSED = { completed: 1, archived: 1 };
+                if (CLOSED[String(item.status || '').toLowerCase()]) return true;
+                var pjs = (typeof mcProjects !== 'undefined' && Array.isArray(mcProjects)) ? mcProjects : [];
+                var cps = (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) ? mcCheckpoints : [];
+                var proj = null;
+                if (item.projectId) proj = pjs.find(function (p) { return p && p.id === item.projectId; });
+                if (!proj && item.id) proj = pjs.find(function (p) { return p && Array.isArray(p.taskIds) && p.taskIds.indexOf(item.id) >= 0; });
+                if (proj && CLOSED[String(proj.status || '').toLowerCase()]) return true;
+                var cpId = item.roundId || item.checkpointId || (proj && (proj.checkpointId || proj.roundId)) || null;
+                var cp = null;
+                if (cpId) cp = cps.find(function (c) { return c && c.id === cpId; });
+                if (!cp && item.id) cp = cps.find(function (c) {
+                    return c && ((Array.isArray(c.taskIds) && c.taskIds.indexOf(item.id) >= 0) ||
+                                 (Array.isArray(c.projectIds) && c.projectIds.indexOf(item.id) >= 0));
+                });
+                if (!cp && proj) cp = cps.find(function (c) { return c && Array.isArray(c.projectIds) && c.projectIds.indexOf(proj.id) >= 0; });
+                if (cp && CLOSED[String(cp.status || '').toLowerCase()]) return true;
+            } catch (e) {}
+            return false;
+        }
+        window.pflxItemHierarchyClosed = pflxItemHierarchyClosed;
         function pflxPlayerCanSeeItem(item, pid, cohorts, ctx, visit) {
             if (!item) return false;
             visit = visit || {};
