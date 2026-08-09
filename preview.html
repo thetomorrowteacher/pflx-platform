@@ -46681,7 +46681,15 @@
 
             // Per-Tab Audio (preserve existing container)
             html += '<div class="dashboard-card" style="margin-bottom:14px;">';
-            html += '<h4 style="color:var(--cyan);margin-bottom:14px;font-family:\'Orbitron\',sans-serif;font-size:12px;letter-spacing:1px;">PER-TAB AUDIO</h4>';
+            html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px;">';
+            html += '<h4 style="color:var(--cyan);margin:0;font-family:\'Orbitron\',sans-serif;font-size:12px;letter-spacing:1px;">PER-TAB AUDIO</h4>';
+            html += '<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#9ba3c9;cursor:pointer;font-family:\'Jura\',sans-serif;"><input type="checkbox" id="se-apply-multiple-toggle" onchange="seToggleApplyMultiple(this.checked)"' + (SE.applyMultipleMode ? ' checked' : '') + '> Apply 1 song to multiple pages</label>';
+            html += '</div>';
+            html += '<div id="se-apply-multiple-bar" style="display:' + (SE.applyMultipleMode ? 'flex' : 'none') + ';align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;padding:10px;background:rgba(0,240,255,0.04);border:1px solid rgba(0,240,255,0.12);border-radius:8px;">';
+            html += '<select id="se-apply-multiple-track" style="background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.12);color:#e0e6ff;padding:6px 10px;border-radius:6px;font-family:\'Jura\',sans-serif;font-size:11px;"><option value="">— Select a track —</option>' + (SE.config.tracks || []).map(function (t) { return '<option value="' + t.id + '">' + escapeHtml(t.name) + '</option>'; }).join('') + '</select>';
+            html += '<button onclick="seApplyToMultiple()" class="hmc-btn-sm hmc-btn-cyan">Apply to Checked Pages</button>';
+            html += '<span style="font-size:10px;color:#6a7290;">Check the pages below, pick a track, then apply.</span>';
+            html += '</div>';
             html += '<div id="se-tab-tracks" style="display:flex;flex-direction:column;gap:10px;"></div>';
             html += '</div>';
 
@@ -46717,6 +46725,18 @@
 
             // Render loading music list
             pflxAdvRenderLoadingMusicList();
+
+            // FIX (Aug 9): buildAdvancedSoundPanel() rebuilds the whole panel
+            // (including the #se-tab-tracks / #se-sfx-list / #se-track-library
+            // containers) but never re-populated them itself — only
+            // seHostLoad() did, and that runs BEFORE this 100ms-delayed
+            // rebuild wipes the DOM again. Net effect: every time the host
+            // opened the Sound tab, Per-Tab Audio + SFX Library + Track
+            // Library rendered empty. Populate them here so they're always
+            // filled immediately after any rebuild, no matter what triggered it.
+            try { if (typeof seRenderTabTracks === 'function') seRenderTabTracks(); } catch (e) {}
+            try { if (typeof seRenderSFXList === 'function') seRenderSFXList(); } catch (e) {}
+            try { if (typeof seRenderTrackLibrary === 'function') seRenderTrackLibrary(); } catch (e) {}
           }
 
           // ── Update handler for all advanced controls ──
@@ -53224,6 +53244,7 @@ RESPONSE RULES:
             if (!container) return;
             var tracks = SE.config.tracks || [];
             var tabTracks = SE.config.tabTracks || {};
+            var multiMode = !!SE.applyMultipleMode;
             container.innerHTML = SE_TABS.map(function(tab) {
                 var current = tabTracks[tab] || '';
                 var opts = '<option value="">— None —</option>' + tracks.map(function(t) {
@@ -53231,6 +53252,7 @@ RESPONSE RULES:
                 }).join('');
                 var label = tab.replace(/-/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
                 return '<div style="display:flex;align-items:center;gap:10px;">' +
+                    (multiMode ? '<input type="checkbox" class="se-tab-apply-check" value="' + tab + '" style="accent-color:var(--cyan);flex-shrink:0;">' : '') +
                     '<span style="font-size:12px;color:#e0e6ff;font-weight:700;min-width:120px;">' + label + '</span>' +
                     '<select onchange="seTabTrackChange(\'' + tab + '\', this.value)" style="flex:1;background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.12);color:#e0e6ff;padding:5px 10px;border-radius:6px;font-family:\'Jura\',sans-serif;font-size:11px;">' + opts + '</select>' +
                     '<label style="cursor:pointer;"><span class="hmc-btn-sm hmc-btn-cyan" style="font-size:10px;">Upload</span><input type="file" accept="audio/*" style="display:none;" onchange="seUploadTabTrack(\'' + tab + '\', this)"></label>' +
@@ -53243,6 +53265,29 @@ RESPONSE RULES:
             SE.config.tabTracks[tab] = trackId;
             seHostSave();
         }
+
+        // ── Apply-to-multiple-pages mode ──────────────────────────────
+        // Lets the host assign ONE track to several pages at once instead of
+        // picking a track per-tab one at a time. Toggling shows a checkbox on
+        // each per-tab row; check the pages you want, pick a track, and Apply.
+        window.seToggleApplyMultiple = function (checked) {
+            SE.applyMultipleMode = !!checked;
+            var bar = document.getElementById('se-apply-multiple-bar');
+            if (bar) bar.style.display = SE.applyMultipleMode ? 'flex' : 'none';
+            seRenderTabTracks();
+        };
+
+        window.seApplyToMultiple = function () {
+            var trackSel = document.getElementById('se-apply-multiple-track');
+            var trackId = trackSel && trackSel.value;
+            if (!trackId) { alert('Pick a track to apply first.'); return; }
+            var checked = Array.prototype.slice.call(document.querySelectorAll('.se-tab-apply-check:checked'));
+            if (checked.length === 0) { alert('Check at least one page to apply the track to.'); return; }
+            if (!SE.config.tabTracks) SE.config.tabTracks = {};
+            checked.forEach(function (cb) { SE.config.tabTracks[cb.value] = trackId; });
+            seHostSave();
+            seRenderTabTracks();
+        };
 
         function seUploadTabTrack(tab, input) {
             if (!input.files || !input.files[0]) return;
@@ -53418,12 +53463,56 @@ RESPONSE RULES:
             if (track) {
                 SE.loginAudio.src = track.dataUrl || track.url;
                 seApplyVolumes();
-                SE.loginAudio.play().catch(function() {});
+                // FIX (Aug 9): browsers block audio-with-sound autoplay before
+                // the user has interacted with the page at all. play() was
+                // being called with .catch(function(){}) which silently
+                // swallowed that rejection, so login music never actually
+                // started until the user had already clicked elsewhere. Arm a
+                // one-time retry on the first click/keydown/touch so it plays
+                // as soon as the browser allows it.
+                var playPromise = SE.loginAudio.play();
+                if (playPromise && typeof playPromise.catch === 'function') {
+                    playPromise.catch(function () { seArmLoginMusicGestureRetry(); });
+                }
             }
+        }
+
+        // Autoplay-with-sound is blocked by browsers until the visitor
+        // interacts with the page. If sePlayLoginMusic() was blocked, wait
+        // for the very first click/keydown/touchstart anywhere on the login
+        // screen and retry once, then stop listening.
+        var _seLoginGestureArmed = false;
+        var _seLoginGestureRetryFn = null;
+        function seArmLoginMusicGestureRetry() {
+            if (_seLoginGestureArmed) return;
+            _seLoginGestureArmed = true;
+            _seLoginGestureRetryFn = function () {
+                seDisarmLoginMusicGestureRetry();
+                try {
+                    if (SE.loginAudio && SE.loginAudio.paused && SE.config.loginMusicEnabled && !SE.playerPrefs.muteAll && SE.playerPrefs.musicOn) {
+                        SE.loginAudio.play().catch(function () {});
+                    }
+                } catch (e) {}
+            };
+            document.addEventListener('click', _seLoginGestureRetryFn, true);
+            document.addEventListener('keydown', _seLoginGestureRetryFn, true);
+            document.addEventListener('touchstart', _seLoginGestureRetryFn, true);
+        }
+
+        function seDisarmLoginMusicGestureRetry() {
+            if (!_seLoginGestureArmed || !_seLoginGestureRetryFn) return;
+            document.removeEventListener('click', _seLoginGestureRetryFn, true);
+            document.removeEventListener('keydown', _seLoginGestureRetryFn, true);
+            document.removeEventListener('touchstart', _seLoginGestureRetryFn, true);
+            _seLoginGestureArmed = false;
+            _seLoginGestureRetryFn = null;
         }
 
         function seStopLoginMusic() {
             if (SE.loginAudio) { SE.loginAudio.pause(); SE.loginAudio.currentTime = 0; }
+            // Also disarm any pending gesture-retry listener so a late click
+            // right after login doesn't restart the login track.
+            seDisarmLoginMusicGestureRetry();
         }
 
         // Fade the login-screen music out (used the moment login succeeds and
@@ -61436,11 +61525,19 @@ RESPONSE RULES:
             }
 
             // Render badge list HTML
+            // FIX (Aug 9): badges are stored in two different shapes across the
+            // codebase — full objects {id,name,type,xc,awardedAt} (from this
+            // Edit Player "AWARD BADGE" flow) and plain id strings like
+            // "badge-self-directed-player" (awarded via task/checkpoint
+            // rewardBadges). Every string-shaped badge rendered generically as
+            // just "Badge" here, so hosts couldn't tell which badges a player
+            // actually earned. pmBadgeNormalize() turns either shape into a
+            // consistent display object without touching the stored data.
             function renderBadgeListHtml(badges) {
                 if (!badges || badges.length === 0) {
                     return '<div style="color:#6a7290;font-size:11px;font-family:Rajdhani,sans-serif;text-align:center;padding:12px;">No badges earned yet.</div>';
                 }
-                return badges.map(function (b, i) {
+                return badges.map(pmBadgeNormalize).map(function (b, i) {
                     var safeName = (b.name || 'Badge').replace(/"/g, '&quot;').replace(/</g, '&lt;');
                     var xcChip = (b.xc || 0) > 0 ? '<span style="color:#facc15;font-family:Share Tech Mono,monospace;font-size:10px;margin-left:6px;">+' + b.xc + ' XC</span>' : '';
                     return '<div data-badge-row="' + i + '" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(10,18,40,0.6);border:1px solid rgba(167,139,250,0.18);border-radius:8px;">' +
@@ -61462,7 +61559,7 @@ RESPONSE RULES:
                   fld('pm-ed-email',    'Email (host-only)', '1 / span 2', '', 'email', p.email || '') +
                   cohortMultiSelectHtml('pm-ed-cohorts', cohortsArr) +
                   accessSelectHtml('pm-ed-access', accessNow) +
-                  fld('pm-ed-xc',       'XC', '1 / span 2', '', 'number', String(p.xc || 0)) +
+                  xcStepperFld('pm-ed-xc', 'XC', '1 / span 2', p.xc || 0) +
                   '<div style="display:flex;flex-direction:column;gap:4px;font-family:Rajdhani,sans-serif;font-size:11px;color:#8a92b0;grid-column:1 / span 2;">RANK OVERRIDE (optional — if set, overrides XC-derived rank)<select id="pm-ed-rank" style="' + inputCss() + '">' + rankOpts + '</select></div>' +
                   '<div style="display:flex;flex-direction:column;gap:4px;font-family:Rajdhani,sans-serif;font-size:11px;color:#8a92b0;grid-column:1 / span 2;">STARTUP STUDIO (house)<select id="pm-ed-studio" style="' + inputCss() + '">' + studioOpts + '</select></div>' +
                   '<label style="grid-column:1 / span 2;display:flex;align-items:center;gap:8px;font-family:Rajdhani,sans-serif;font-size:13px;color:#8a92b0;"><input type="checkbox" id="pm-ed-bypass"' + (p.onboardingComplete !== false ? ' checked' : '') + '> Onboarding complete (bypass wizard at next login)</label>' +
@@ -61517,6 +61614,7 @@ RESPONSE RULES:
                     wireCohortAdder(card);
                     wirePinToggles(card);
                     wireAccessSelect(card, 'pm-ed-access');
+                    wireXcStepper(card);
                     card.querySelector('#pm-ed-cancel').onclick = close;
 
                     // Profile picture
@@ -61845,6 +61943,60 @@ RESPONSE RULES:
                 '</select></label>';
         }
         function shake(id) { var el = document.getElementById(id); if (el && typeof shakeEl === 'function') shakeEl(el); }
+
+        // ── Badge normalize (Aug 9 fix) ──
+        // Badges live in two shapes across the codebase: rich objects (Edit
+        // Player "AWARD BADGE") and plain id strings (task/checkpoint
+        // rewardBadges). This turns either into a consistent display object —
+        // used only for rendering, never written back over the original data.
+        function pmBadgeIdToName(idStr) {
+            return ((idStr || 'Badge') + '')
+                .replace(/^badge-/, '')
+                .replace(/-/g, ' ')
+                .replace(/\b\w/g, function (c) { return c.toUpperCase(); }) || 'Badge';
+        }
+        function pmBadgeNormalize(b) {
+            if (b && typeof b === 'object') {
+                return {
+                    id: b.id || ('badge-' + Math.random().toString(36).slice(2, 8)),
+                    name: b.name || pmBadgeIdToName(b.id || ''),
+                    type: b.type || 'Signature',
+                    xc: b.xc || 0,
+                    awardedAt: b.awardedAt || null
+                };
+            }
+            var idStr = (b || '') + '';
+            return { id: idStr, name: pmBadgeIdToName(idStr), type: 'Signature', xc: 0, awardedAt: null };
+        }
+
+        // ── XC stepper field (Aug 9 fix) ──
+        // Replaces the plain "type a number" XC input in Edit Player with a
+        // click-to-adjust stepper (−10/−1/+1/+10) alongside the number field,
+        // so a host can choose an XC amount without having to type it in.
+        // Same input id (pm-ed-xc) as before, so every existing read/save
+        // site keeps working unchanged.
+        function xcStepperFld(id, label, gridCol, value) {
+            var v = parseInt(value, 10) || 0;
+            return '<label style="display:flex;flex-direction:column;gap:4px;font-family:Rajdhani,sans-serif;font-size:11px;color:#8a92b0;' + (gridCol ? 'grid-column:' + gridCol + ';' : '') + '">' + label +
+                '<div style="display:flex;align-items:center;gap:6px;">' +
+                    '<button type="button" data-xc-step="-10" style="' + btnCss('') + 'padding:8px 10px;font-size:12px;">−10</button>' +
+                    '<button type="button" data-xc-step="-1" style="' + btnCss('') + 'padding:8px 10px;font-size:12px;">−1</button>' +
+                    '<input id="' + id + '" type="number" value="' + v + '" style="' + inputCss() + 'flex:1;text-align:center;">' +
+                    '<button type="button" data-xc-step="1" style="' + btnCss('') + 'padding:8px 10px;font-size:12px;">+1</button>' +
+                    '<button type="button" data-xc-step="10" style="' + btnCss('') + 'padding:8px 10px;font-size:12px;">+10</button>' +
+                '</div>' +
+            '</label>';
+        }
+        function wireXcStepper(card) {
+            var xcField = card.querySelector('#pm-ed-xc');
+            if (!xcField) return;
+            card.querySelectorAll('[data-xc-step]').forEach(function (btn) {
+                btn.onclick = function () {
+                    var delta = parseInt(btn.getAttribute('data-xc-step'), 10) || 0;
+                    xcField.value = String(Math.max(0, (parseInt(xcField.value, 10) || 0) + delta));
+                };
+            });
+        }
     })();
     </script>
 
