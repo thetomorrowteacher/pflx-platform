@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 35;
+      window.PFLX_PATCH   = 36;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -23574,6 +23574,18 @@
             };
             // STOMP GUARD 2 for this path too: empty local data never
             // overwrites a cloud row that had items at pull time.
+            // Legacy flat keys that also have a merge fn — the collections
+            // hosts actually edit day to day (roster, approvals-bearing
+            // tasks, checkpoints, projects). Every other syncMap entry
+            // (seasons/jobs/pitches/studios/cohortgroups/pflxranks/sessions)
+            // keeps the old iframe-relay behavior below, now at least gated
+            // and logged instead of silently vanishing.
+            var LEGACY_MERGERS = {
+                players: { cloudKey: 'users', merge: _mcMergePlayers, toCloudShape: _mcPlayerToXCoinUser },
+                tasks: { cloudKey: 'tasks', merge: _mcMergeTasks },
+                checkpoints: { cloudKey: 'checkpoints', merge: function (loc, inc) { return _mcMergeById(loc, inc, 'checkpoints'); } },
+                projects: { cloudKey: 'projects', merge: function (loc, inc) { return _mcMergeById(loc, inc, 'projects'); } }
+            };
             function _syncOne(k) {
                 var d = syncMap[k].data;
                 var n = Array.isArray(d) ? d.length : (d && typeof d === 'object') ? Object.keys(d).length : 0;
@@ -23585,40 +23597,61 @@
                     console.warn('[MC→X-Coin sync] ✋ SHRINK-blocked for "' + k + '" — local has ' + n + ' vs cloud baseline ' + _mcCloudBaseline[k] + '. Looks like default/mock state. Set window._mcAllowShrink = true to override.');
                     return;
                 }
-                // ── READ-MERGE-WRITE for the roster (Aug 9, Ennis) ──
-                // This legacy path pushes mcPlayers WHOLESALE onto the shared
-                // 'users' row. mcCloudPush got _mcMergeQueueWithCloud back in
-                // July; this one never did — so a tab holding a pre-edit
-                // roster silently reverted host edits on 'users' while the
-                // canonical pflx_mc_players row kept the correct values. That
-                // split is exactly what reverted the NEUROFLUX merge twice.
-                // Merge against the CURRENT cloud row first; tombstoned
-                // players are dropped by _mcMergePlayers, so a delete stays
-                // deleted.
-                if (k === 'players') {
-                    var _c = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
-                    if (_c && typeof _mcMergePlayers === 'function') {
-                        _c.from('app_data').select('data').eq('key', 'users').single().then(function (res) {
-                            var cloud = (res && res.data && res.data.data) || [];
-                            var out = d;
-                            try {
-                                if (Array.isArray(cloud) && cloud.length) out = _mcMergePlayers(d, cloud);
-                            } catch (e) { console.warn('[MC→X-Coin sync] users merge failed, sending local', e); }
+                // ── READ-MERGE-WRITE DIRECT TO SUPABASE (Aug 10, Ennis) ──
+                // This legacy mirror used to go ONLY through the X-Coin
+                // iframe's postMessage bridge. That relay silently drops
+                // every message whenever the X-Coin panel hasn't been
+                // opened this session — the iframe stays src="about:blank",
+                // PflxBridge never mounts, nothing is listening, and there
+                // is no queue or retry on the receiving end. No error, no
+                // warning: the legacy 'users'/'tasks'/'checkpoints'/
+                // 'projects' rows just go stale while the canonical
+                // pflx_mc_* rows keep updating. That split is exactly the
+                // mechanism behind "approvals reset with old data" and the
+                // NEUROFLUX reverts (see _mcMergePlayers above). Fix: write
+                // these legacy keys DIRECTLY to Supabase from MC — the same
+                // client already used for pflx_mc_* and the tombstone sync
+                // — with a proper read-merge-write, so persistence never
+                // depends on whether a hidden iframe happened to load.
+                // 'players' already had the read-merge-write half of this
+                // (Aug 9); it still only sent over the fragile relay, so it
+                // gets the same direct-write treatment here.
+                var lm = LEGACY_MERGERS[k];
+                var _c = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (lm && _c) {
+                    _c.from('app_data').select('data').eq('key', lm.cloudKey).single().then(function (res) {
+                        var cloud = (res && res.data && res.data.data) || [];
+                        var merged = d;
+                        try {
+                            if (Array.isArray(cloud) && cloud.length) merged = lm.merge(d, cloud);
+                        } catch (e) { console.warn('[MC→X-Coin sync] ' + lm.cloudKey + ' merge failed, sending local', e); }
+                        var forCloud = lm.toCloudShape ? merged.map(lm.toCloudShape) : merged;
+                        _c.from('app_data').upsert({ key: lm.cloudKey, data: forCloud }, { onConflict: 'key' }).then(function () {
+                            console.log('[MC→X-Coin sync] ✓ direct-wrote "' + lm.cloudKey + '" (' + forCloud.length + ' items)');
+                        }, function (err) { console.warn('[MC→X-Coin sync] direct write failed for "' + lm.cloudKey + '"', err); });
+                        // Best-effort only: nudge an already-open X-Coin tab so
+                        // its in-memory mocks + UI refresh immediately. Never
+                        // depend on this reaching anything — the write above
+                        // already happened regardless.
+                        if (_xcoinStoreReady && xcoinFrame && xcoinFrame.contentWindow) {
                             try {
                                 xcoinFrame.contentWindow.postMessage(JSON.stringify({
-                                    type: 'pflx_cloud_save', key: 'users', data: out
+                                    type: 'pflx_cloud_save', key: lm.cloudKey, data: forCloud
                                 }), '*');
                             } catch (e) {}
-                        }, function () {
-                            // Cloud unreadable — send local rather than lose the edit.
-                            try {
-                                xcoinFrame.contentWindow.postMessage(JSON.stringify({
-                                    type: 'pflx_cloud_save', key: 'users', data: d
-                                }), '*');
-                            } catch (e) {}
-                        });
-                        return;
-                    }
+                        }
+                    }, function () {
+                        console.warn('[MC→X-Coin sync] could not read cloud "' + lm.cloudKey + '" for merge — skipping this round rather than risk a blind overwrite.');
+                    });
+                    return;
+                }
+                // Fallback for keys without a merge fn, or if the Supabase
+                // client isn't available yet: only use the iframe relay when
+                // X-Coin's bridge has actually signaled it's mounted and
+                // listening — otherwise this is a silent no-op, so say so.
+                if (!_xcoinStoreReady || !xcoinFrame || !xcoinFrame.contentWindow) {
+                    console.warn('[MC→X-Coin sync] ✋ skipped "' + k + '" — X-Coin bridge not ready (panel never opened this session?); nothing would receive this push.');
+                    return;
                 }
                 xcoinFrame.contentWindow.postMessage(JSON.stringify({
                     type: 'pflx_cloud_save', key: syncMap[k].key, data: d
@@ -24018,6 +24051,39 @@
             return order.map(function (id) { return byId[id]; });
         }
         window._mcMergePlayers = _mcMergePlayers;
+        // MC's player shape (brand/xc/badges[]) → X-Coin's User shape
+        // (brandName/xcoin/digitalBadges). Only needed for the 'players' →
+        // 'users' legacy key: X-Coin's own PflxBridge used to do this mapping
+        // when MC's push reached it through the iframe. Now that MC writes
+        // 'users' directly to Supabase (see _syncOne, Aug 10 fix), MC has to
+        // apply the same mapping itself so nothing reading 'users' in X-Coin's
+        // shape breaks. Copied verbatim from PflxBridge.tsx's pflx_cloud_save
+        // 'users' case — keep the two in sync if that mapping ever changes.
+        function _mcPlayerToXCoinUser(p) {
+            return {
+                id: p.id || String(Math.random()).slice(2, 10),
+                name: p.name || p.brand || 'Unknown',
+                brandName: p.brand || p.brandName || p.name || '',
+                role: (p.role === 'admin' ? 'admin' : 'player'),
+                avatar: p.avatar || '',
+                digitalBadges: typeof p.digitalBadges === 'number' ? p.digitalBadges : 0,
+                xcoin: typeof p.xcoin === 'number' ? p.xcoin : (typeof p.xc === 'number' ? p.xc : 0),
+                totalXcoin: typeof p.totalXcoin === 'number' ? p.totalXcoin : (typeof p.xc === 'number' ? p.xc : 0),
+                level: typeof p.level === 'number' ? p.level : 1,
+                rank: typeof p.rank === 'number' ? p.rank : 1,
+                cohort: p.cohort || '',
+                pathway: p.pathway || '',
+                joinedAt: p.joinedAt || new Date().toISOString(),
+                email: p.email || '',
+                image: p.image || '',
+                pin: p.pin || '',
+                claimed: !!p.claimed,
+                isHost: p.role === 'admin' || !!p.isHost,
+                studioId: p.studioId || '',
+                badgeCounts: p.badgeCounts || { primary: 0, premium: 0, executive: 0, signature: 0 }
+            };
+        }
+        window._mcPlayerToXCoinUser = _mcPlayerToXCoinUser;
         // Pull cloud tombstones into localStorage once at boot so a fresh client
         // honors deletes made elsewhere.
         (function _mcSyncTombstones() {
