@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 30;
+      window.PFLX_PATCH   = 31;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -18456,12 +18456,22 @@
                 (function () {
                     var inp = document.getElementById('brand-select');
                     if (!inp) return;
+                    // v1.31 FIX: isTouch must be known BEFORE the listener is
+                    // wired, and the listener must be gated by it. Previously
+                    // this listener was attached unconditionally and called
+                    // renderSuggest() on every keystroke on ALL devices, but
+                    // renderSuggest()'s `box` element is only ever created
+                    // below in the touch-only branch — on desktop `box` stays
+                    // undefined forever, so `box.innerHTML = ''` threw
+                    // "Cannot set properties of undefined (setting
+                    // 'innerHTML')" on every keystroke in the login brand
+                    // field, non-touch devices only.
+                    var isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
                     inp.addEventListener('input', function () {
                         var up = inp.value.toUpperCase();
                         if (inp.value !== up) inp.value = up;
-                        if (typeof renderSuggest === 'function') renderSuggest();
+                        if (isTouch && typeof renderSuggest === 'function') renderSuggest();
                     });
-                    var isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
                     if (!isTouch) return;
                     inp.removeAttribute('list');   // kill half-working native datalist on touch
                     var wrap = inp.parentElement;
