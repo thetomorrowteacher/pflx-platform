@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 33;
+      window.PFLX_PATCH   = 34;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -8666,8 +8666,67 @@
                                 <h1 class="mc-page-title">Checkpoints</h1>
                                 <p class="mc-page-desc">Manage rounds, milestones, and checkpoint schedules.</p>
                                 <div style="display:flex;gap:10px;margin-bottom:20px;">
-                                    <button class="mc-btn mc-btn-green" onclick="mcShowCPForm(-1)">+ New Checkpoint</button>
+                                    <button class="mc-btn mc-btn-green" onclick="mcOpenCPFormSmart(-1)">+ New Checkpoint</button>
                                     <button class="mc-btn mc-btn-purple" onclick="pflxScaffoldProgram()" title="Add the 10 program checkpoints (Alpha…Omega) as inactive template holders" style="margin-left:8px;">🏁 Scaffold 10-Week Program</button>
+                                </div>
+
+                                <!-- v1.34 QUICK / ADVANCED CHECKPOINT FORM MODE TABS -->
+                                <div id="mc-cp-form-mode-tabs" style="display:none;gap:8px;margin-bottom:10px;">
+                                    <button type="button" id="mc-cp-mode-tab-quick" class="mc-subtab" onclick="mcSwitchCPFormMode('quick')">&#9889; Quick</button>
+                                    <button type="button" id="mc-cp-mode-tab-advanced" class="mc-subtab" onclick="mcSwitchCPFormMode('advanced')">&#9881; Advanced Settings</button>
+                                </div>
+
+                                <!-- v1.34 QUICK CHECKPOINT FORM -->
+                                <div id="mc-quick-cp-form" style="display:none;background:rgba(10,18,40,0.5);border:1px solid rgba(0,212,255,0.3);border-radius:12px;padding:20px;margin-bottom:20px;">
+                                    <div style="font-size:14px;font-weight:700;color:#00d4ff;margin-bottom:16px;">QUICK CHECKPOINT</div>
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Name *</label>
+                                        <input type="text" id="mc-qcp-name" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="Checkpoint name">
+                                    </div>
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Description</label>
+                                        <textarea id="mc-qcp-desc" rows="2" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;resize:vertical;" placeholder="What is this checkpoint about?"></textarea>
+                                    </div>
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Digital Badges</label>
+                                        <div style="position:relative;">
+                                            <div id="mc-qcheckpoint-badges-chips" onclick="mcQBadgeDropdownToggle('qcheckpoint')" style="min-height:38px;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:6px 8px;cursor:pointer;display:flex;flex-wrap:wrap;gap:4px;align-items:center;box-sizing:border-box;">
+                                                <span style="color:rgba(255,255,255,0.35);font-size:12px;">Select badges&hellip;</span>
+                                            </div>
+                                            <div id="mc-qcheckpoint-badges-dropdown" style="display:none;position:absolute;z-index:20;top:100%;left:0;right:0;margin-top:4px;background:#0c1220;border:1px solid rgba(0,212,255,0.3);border-radius:8px;padding:8px;max-height:220px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.5);">
+                                                <input type="text" id="mc-qcheckpoint-badges-search" placeholder="Search badges&hellip;" oninput="mcQBadgeFilter('qcheckpoint')" style="width:100%;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px 8px;border-radius:5px;font-size:12px;margin-bottom:6px;box-sizing:border-box;">
+                                                <div id="mc-qcheckpoint-badges-list"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Fine / Tax Allocation <span style="font-weight:400;text-transform:none;color:rgba(255,255,255,0.3);">(from X-Coin)</span></label>
+                                        <div style="position:relative;">
+                                            <div id="mc-qcheckpoint-finetax-chips" onclick="mcQFineDropdownToggle('qcheckpoint')" style="min-height:38px;background:rgba(10,18,40,0.7);border:1px solid rgba(239,68,68,0.15);border-radius:6px;padding:6px 8px;cursor:pointer;display:flex;flex-wrap:wrap;gap:4px;align-items:center;box-sizing:border-box;">
+                                                <span style="color:rgba(255,255,255,0.35);font-size:12px;">Select fines/taxes&hellip;</span>
+                                            </div>
+                                            <div id="mc-qcheckpoint-finetax-dropdown" style="display:none;position:absolute;z-index:20;top:100%;left:0;right:0;margin-top:4px;background:#0c1220;border:1px solid rgba(239,68,68,0.3);border-radius:8px;padding:8px;max-height:220px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.5);">
+                                                <input type="text" id="mc-qcheckpoint-finetax-search" placeholder="Search fines/taxes&hellip;" oninput="mcQFineFilter('qcheckpoint')" style="width:100%;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px 8px;border-radius:5px;font-size:12px;margin-bottom:6px;box-sizing:border-box;">
+                                                <div id="mc-qcheckpoint-finetax-list"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div style="margin-bottom:12px;">
+                                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                                            <label style="font-size:11px;color:rgba(255,255,255,0.4);text-transform:uppercase;">Links</label>
+                                            <button type="button" class="mc-btn" style="font-size:10px;padding:4px 10px;" onclick="mcQLAdd('qcheckpoint')">+ Add Link</button>
+                                        </div>
+                                        <div id="mc-qcheckpoint-quicklinks-list"></div>
+                                        <div id="mc-qcheckpoint-quicklinks-empty" style="font-size:11px;color:rgba(255,255,255,0.25);">No links yet. Paste a YouTube, Slides, Canva, or Drive link for a live preview.</div>
+                                    </div>
+                                    <div style="margin-bottom:16px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Cohorts <span style="font-weight:400;text-transform:none;color:rgba(255,255,255,0.3);">(top of the hierarchy — leave blank for ALL)</span></label>
+                                        <div id="mc-qcp-cohorts" style="display:flex;flex-direction:column;gap:4px;max-height:120px;overflow-y:auto;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px;"></div>
+                                    </div>
+                                    <div style="display:flex;gap:8px;justify-content:flex-end;">
+                                        <button class="mc-btn" onclick="mcCancelQuickCPForm()" style="padding:8px 16px;">Cancel</button>
+                                        <button class="mc-btn mc-btn-green" onclick="mcSaveQuickCPForm()" style="padding:8px 16px;">Save</button>
+                                    </div>
                                 </div>
 
                                 <!-- Checkpoint Form — hidden until user clicks +New Checkpoint or Edit on a card.
@@ -8837,7 +8896,92 @@
                                         <button onclick="mcSetTasksView('calendar')" data-view="calendar" class="mc-view-btn" title="Calendar view" style="padding:6px 12px;font-size:11px;font-weight:700;background:transparent;color:rgba(255,255,255,0.5);border:1px solid transparent;border-radius:6px;cursor:pointer;letter-spacing:0.06em;">📅 CALENDAR</button>
                                         <button onclick="mcSetTasksView('table')" data-view="table" class="mc-view-btn" title="Table view" style="padding:6px 12px;font-size:11px;font-weight:700;background:transparent;color:rgba(255,255,255,0.5);border:1px solid transparent;border-radius:6px;cursor:pointer;letter-spacing:0.06em;">▦ TABLE</button>
                                     </div>
-                                    <button class="mc-btn mc-btn-green" onclick="mcShowTaskForm(-1)">+ New Task</button>
+                                    <button class="mc-btn mc-btn-green" onclick="mcOpenTaskFormSmart(-1)">+ New Task</button>
+                                </div>
+
+                                <!-- v1.34 QUICK / ADVANCED TASK FORM MODE TABS -->
+                                <div id="mc-task-form-mode-tabs" style="display:none;gap:8px;margin-bottom:10px;">
+                                    <button type="button" id="mc-task-mode-tab-quick" class="mc-subtab" onclick="mcSwitchTaskFormMode('quick')">&#9889; Quick</button>
+                                    <button type="button" id="mc-task-mode-tab-advanced" class="mc-subtab" onclick="mcSwitchTaskFormMode('advanced')">&#9881; Advanced Settings</button>
+                                </div>
+
+                                <!-- v1.34 QUICK TASK FORM -->
+                                <div id="mc-quick-task-form" style="display:none;background:rgba(10,18,40,0.5);border:1px solid rgba(0,212,255,0.3);border-radius:12px;padding:20px;margin-bottom:20px;">
+                                    <div style="font-size:14px;font-weight:700;color:#00d4ff;margin-bottom:16px;">QUICK TASK</div>
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Title *</label>
+                                        <input type="text" id="mc-qtask-title" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="Task title">
+                                    </div>
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Description</label>
+                                        <textarea id="mc-qtask-desc" rows="2" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;resize:vertical;" placeholder="What does the player need to do?"></textarea>
+                                    </div>
+                                    <div style="margin-bottom:12px;">
+                                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                                            <label style="font-size:11px;color:rgba(255,255,255,0.4);text-transform:uppercase;">Subtasks (Checklist)</label>
+                                            <button type="button" class="mc-btn" style="font-size:10px;padding:4px 10px;" onclick="mcQTAddSubtaskRow()">+ Add Item</button>
+                                        </div>
+                                        <div id="mc-qtask-subtasks-list"></div>
+                                        <div id="mc-qtask-subtasks-empty" style="font-size:11px;color:rgba(255,255,255,0.25);">No subtasks yet.</div>
+                                    </div>
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Digital Badges</label>
+                                        <div style="position:relative;">
+                                            <div id="mc-qtask-badges-chips" onclick="mcQBadgeDropdownToggle('qtask')" style="min-height:38px;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:6px 8px;cursor:pointer;display:flex;flex-wrap:wrap;gap:4px;align-items:center;box-sizing:border-box;">
+                                                <span style="color:rgba(255,255,255,0.35);font-size:12px;">Select badges&hellip;</span>
+                                            </div>
+                                            <div id="mc-qtask-badges-dropdown" style="display:none;position:absolute;z-index:20;top:100%;left:0;right:0;margin-top:4px;background:#0c1220;border:1px solid rgba(0,212,255,0.3);border-radius:8px;padding:8px;max-height:220px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.5);">
+                                                <input type="text" id="mc-qtask-badges-search" placeholder="Search badges&hellip;" oninput="mcQBadgeFilter('qtask')" style="width:100%;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px 8px;border-radius:5px;font-size:12px;margin-bottom:6px;box-sizing:border-box;">
+                                                <div id="mc-qtask-badges-list"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Fine / Tax Allocation <span style="font-weight:400;text-transform:none;color:rgba(255,255,255,0.3);">(from X-Coin)</span></label>
+                                        <div style="position:relative;">
+                                            <div id="mc-qtask-finetax-chips" onclick="mcQFineDropdownToggle('qtask')" style="min-height:38px;background:rgba(10,18,40,0.7);border:1px solid rgba(239,68,68,0.15);border-radius:6px;padding:6px 8px;cursor:pointer;display:flex;flex-wrap:wrap;gap:4px;align-items:center;box-sizing:border-box;">
+                                                <span style="color:rgba(255,255,255,0.35);font-size:12px;">Select fines/taxes&hellip;</span>
+                                            </div>
+                                            <div id="mc-qtask-finetax-dropdown" style="display:none;position:absolute;z-index:20;top:100%;left:0;right:0;margin-top:4px;background:#0c1220;border:1px solid rgba(239,68,68,0.3);border-radius:8px;padding:8px;max-height:220px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.5);">
+                                                <input type="text" id="mc-qtask-finetax-search" placeholder="Search fines/taxes&hellip;" oninput="mcQFineFilter('qtask')" style="width:100%;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px 8px;border-radius:5px;font-size:12px;margin-bottom:6px;box-sizing:border-box;">
+                                                <div id="mc-qtask-finetax-list"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div style="margin-bottom:12px;">
+                                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                                            <label style="font-size:11px;color:rgba(255,255,255,0.4);text-transform:uppercase;">Links</label>
+                                            <button type="button" class="mc-btn" style="font-size:10px;padding:4px 10px;" onclick="mcQLAdd('qtask')">+ Add Link</button>
+                                        </div>
+                                        <div id="mc-qtask-quicklinks-list"></div>
+                                        <div id="mc-qtask-quicklinks-empty" style="font-size:11px;color:rgba(255,255,255,0.25);">No links yet. Paste a YouTube, Slides, Canva, or Drive link for a live preview.</div>
+                                    </div>
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Cohorts</label>
+                                        <div id="mc-qtask-cohorts" style="display:flex;flex-direction:column;gap:4px;max-height:120px;overflow-y:auto;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px;"></div>
+                                    </div>
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Players <span style="font-weight:400;text-transform:none;color:rgba(255,255,255,0.3);">(no cohort checked above = all players; check a cohort to narrow this list. Also used to scope Fine/Tax to specific players.)</span></label>
+                                        <div id="mc-qtask-players-list" style="display:flex;flex-direction:column;gap:4px;max-height:160px;overflow-y:auto;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px;"></div>
+                                    </div>
+                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Checkpoint</label>
+                                            <select id="mc-qtask-checkpoint" onchange="mcQTOnCheckpointChange()" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                                <option value="">None</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Project <span style="font-weight:400;text-transform:none;color:rgba(255,255,255,0.3);">(sets Checkpoint automatically)</span></label>
+                                            <select id="mc-qtask-project" onchange="mcQTOnProjectChange()" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                                <option value="">None</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div style="display:flex;gap:8px;justify-content:flex-end;">
+                                        <button class="mc-btn" onclick="mcCancelQuickTaskForm()" style="padding:8px 16px;">Cancel</button>
+                                        <button class="mc-btn mc-btn-green" onclick="mcSaveQuickTaskForm()" style="padding:8px 16px;">Save</button>
+                                    </div>
                                 </div>
 
                                 <!-- Task Form -->
@@ -8948,6 +9092,17 @@
                                             <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Due Date</label>
                                             <input type="date" id="mc-task-due" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
                                         </div>
+                                    </div>
+                                    <!-- v1.34 Project assign — writes task.projectId directly.
+                                         Previously project→task linking only happened from the
+                                         Project form's own task checkboxes; ~15 places elsewhere
+                                         in the app already read task.projectId, so this closes
+                                         that gap and keeps Quick/Advanced in sync. -->
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Project <span style="font-weight:400;text-transform:none;color:rgba(255,255,255,0.3);">(optional — obeys the Checkpoint above)</span></label>
+                                        <select id="mc-task-project" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                            <option value="">None</option>
+                                        </select>
                                     </div>
                                     <!-- Core Pathway node picker.
                                          A single grouped dropdown lists every Core Pathway with
@@ -9303,7 +9458,84 @@
                                 <h1 class="mc-page-title">Projects</h1>
                                 <p class="mc-page-desc">Manage team projects, pitches, and deliverables.</p>
                                 <div style="display:flex;gap:10px;margin-bottom:20px;">
-                                    <button class="mc-btn mc-btn-green" onclick="mcShowProjectForm(-1)">+ New Project</button>
+                                    <button class="mc-btn mc-btn-green" onclick="mcOpenProjectFormSmart(-1)">+ New Project</button>
+                                </div>
+
+                                <!-- v1.34 QUICK / ADVANCED PROJECT FORM MODE TABS -->
+                                <div id="mc-project-form-mode-tabs" style="display:none;gap:8px;margin-bottom:10px;">
+                                    <button type="button" id="mc-project-mode-tab-quick" class="mc-subtab" onclick="mcSwitchProjectFormMode('quick')">&#9889; Quick</button>
+                                    <button type="button" id="mc-project-mode-tab-advanced" class="mc-subtab" onclick="mcSwitchProjectFormMode('advanced')">&#9881; Advanced Settings</button>
+                                </div>
+
+                                <!-- v1.34 QUICK PROJECT FORM -->
+                                <div id="mc-quick-project-form" style="display:none;background:rgba(10,18,40,0.5);border:1px solid rgba(0,212,255,0.3);border-radius:12px;padding:20px;margin-bottom:20px;">
+                                    <div style="font-size:14px;font-weight:700;color:#00d4ff;margin-bottom:16px;">QUICK PROJECT</div>
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Title *</label>
+                                        <input type="text" id="mc-qproject-title" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="Project title">
+                                    </div>
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Description</label>
+                                        <textarea id="mc-qproject-desc" rows="2" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;resize:vertical;" placeholder="What is this project about?"></textarea>
+                                    </div>
+                                    <div style="margin-bottom:12px;">
+                                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                                            <label style="font-size:11px;color:rgba(255,255,255,0.4);text-transform:uppercase;">Subtasks (Checklist)</label>
+                                            <button type="button" class="mc-btn" style="font-size:10px;padding:4px 10px;" onclick="mcQPAddSubtaskRow()">+ Add Item</button>
+                                        </div>
+                                        <div id="mc-qproject-subtasks-list"></div>
+                                        <div id="mc-qproject-subtasks-empty" style="font-size:11px;color:rgba(255,255,255,0.25);">No subtasks yet.</div>
+                                    </div>
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Digital Badges</label>
+                                        <div style="position:relative;">
+                                            <div id="mc-qproject-badges-chips" onclick="mcQBadgeDropdownToggle('qproject')" style="min-height:38px;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:6px 8px;cursor:pointer;display:flex;flex-wrap:wrap;gap:4px;align-items:center;box-sizing:border-box;">
+                                                <span style="color:rgba(255,255,255,0.35);font-size:12px;">Select badges&hellip;</span>
+                                            </div>
+                                            <div id="mc-qproject-badges-dropdown" style="display:none;position:absolute;z-index:20;top:100%;left:0;right:0;margin-top:4px;background:#0c1220;border:1px solid rgba(0,212,255,0.3);border-radius:8px;padding:8px;max-height:220px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.5);">
+                                                <input type="text" id="mc-qproject-badges-search" placeholder="Search badges&hellip;" oninput="mcQBadgeFilter('qproject')" style="width:100%;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px 8px;border-radius:5px;font-size:12px;margin-bottom:6px;box-sizing:border-box;">
+                                                <div id="mc-qproject-badges-list"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Fine / Tax Allocation <span style="font-weight:400;text-transform:none;color:rgba(255,255,255,0.3);">(from X-Coin)</span></label>
+                                        <div style="position:relative;">
+                                            <div id="mc-qproject-finetax-chips" onclick="mcQFineDropdownToggle('qproject')" style="min-height:38px;background:rgba(10,18,40,0.7);border:1px solid rgba(239,68,68,0.15);border-radius:6px;padding:6px 8px;cursor:pointer;display:flex;flex-wrap:wrap;gap:4px;align-items:center;box-sizing:border-box;">
+                                                <span style="color:rgba(255,255,255,0.35);font-size:12px;">Select fines/taxes&hellip;</span>
+                                            </div>
+                                            <div id="mc-qproject-finetax-dropdown" style="display:none;position:absolute;z-index:20;top:100%;left:0;right:0;margin-top:4px;background:#0c1220;border:1px solid rgba(239,68,68,0.3);border-radius:8px;padding:8px;max-height:220px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.5);">
+                                                <input type="text" id="mc-qproject-finetax-search" placeholder="Search fines/taxes&hellip;" oninput="mcQFineFilter('qproject')" style="width:100%;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px 8px;border-radius:5px;font-size:12px;margin-bottom:6px;box-sizing:border-box;">
+                                                <div id="mc-qproject-finetax-list"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div style="margin-bottom:12px;">
+                                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                                            <label style="font-size:11px;color:rgba(255,255,255,0.4);text-transform:uppercase;">Links</label>
+                                            <button type="button" class="mc-btn" style="font-size:10px;padding:4px 10px;" onclick="mcQLAdd('qproject')">+ Add Link</button>
+                                        </div>
+                                        <div id="mc-qproject-quicklinks-list"></div>
+                                        <div id="mc-qproject-quicklinks-empty" style="font-size:11px;color:rgba(255,255,255,0.25);">No links yet. Paste a YouTube, Slides, Canva, or Drive link for a live preview.</div>
+                                    </div>
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Cohorts</label>
+                                        <div id="mc-qproject-cohorts" style="display:flex;flex-direction:column;gap:4px;max-height:120px;overflow-y:auto;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px;"></div>
+                                    </div>
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Players <span style="font-weight:400;text-transform:none;color:rgba(255,255,255,0.3);">(no cohort checked above = all players)</span></label>
+                                        <div id="mc-qproject-players-list" style="display:flex;flex-direction:column;gap:4px;max-height:160px;overflow-y:auto;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px;"></div>
+                                    </div>
+                                    <div style="margin-bottom:16px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Checkpoint <span style="font-weight:400;text-transform:none;color:rgba(255,255,255,0.3);">(parent layer)</span></label>
+                                        <select id="mc-qproject-checkpoint" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                            <option value="">None</option>
+                                        </select>
+                                    </div>
+                                    <div style="display:flex;gap:8px;justify-content:flex-end;">
+                                        <button class="mc-btn" onclick="mcCancelQuickProjectForm()" style="padding:8px 16px;">Cancel</button>
+                                        <button class="mc-btn mc-btn-green" onclick="mcSaveQuickProjectForm()" style="padding:8px 16px;">Save</button>
+                                    </div>
                                 </div>
 
                                 <!-- Project Form -->
@@ -25756,13 +25988,12 @@
         // This only toggles the "mc-sidebar-open" class the CSS keys
         // off of; it never touches mcNav's own tab-switching/rendering,
         // so player-view routing and panel rendering are untouched.
-        //
-        // The open/closed class lives on .mission-control-view (not
-        // .mc-layout) because the toggle button and backdrop are DOM
-        // siblings of .mc-layout, not descendants — see the CSS note
-        // above .mission-control-view.mc-sidebar-open in the
-        // @media(max-width:768px) block.
         try {
+            // The open/closed class lives on .mission-control-view (not
+            // .mc-layout) because the toggle button and backdrop are DOM
+            // siblings of .mc-layout, not descendants — see the CSS note
+            // above .mission-control-view.mc-sidebar-open in the
+            // @media(max-width:768px) block.
             window.mcToggleMobileSidebar = function (forceOpen) {
                 var view = document.querySelector('.mission-control-view');
                 if (!view) return;
@@ -30620,8 +30851,8 @@
         }
 
         var mcCPEditIndex = -1;
-        function mcCreateCheckpoint() { mcShowCPForm(-1); }
-        function mcEditCheckpoint(index) { mcShowCPForm(index); }
+        function mcCreateCheckpoint() { mcOpenCPFormSmart(-1); }
+        function mcEditCheckpoint(index) { mcOpenCPFormSmart(index); }
         // Scaffold the 10-week program: add any of the 10 named checkpoints
         // (Alpha…Omega) that don't already exist, in order, as INACTIVE template
         // holders (hidden from players) the host fills in later. Skips ones that
@@ -30893,6 +31124,8 @@
         function mcCancelCPForm() {
             var form = document.getElementById('mc-cp-form');
             if (form) form.style.display = 'none';
+            var tabs = document.getElementById('mc-cp-form-mode-tabs');
+            if (tabs) tabs.style.display = 'none';
             mcCPEditIndex = -1;
         }
 
@@ -31000,6 +31233,10 @@
                 projectIds: projectIds,
                 jobIds: jobIds,
                 rewardBadges: rewardBadges,
+                // v1.34 — fineTaxIds/links live only in Quick UI for now;
+                // preserve them so an Advanced save doesn't wipe what Quick set.
+                fineTaxIds: mcCPEditIndex >= 0 ? (mcCheckpoints[mcCPEditIndex].fineTaxIds || []) : [],
+                links: mcCPEditIndex >= 0 ? (mcCheckpoints[mcCPEditIndex].links || []) : [],
                 xcReward: xcReward,
                 // Only emit the field when at least one tier has overrides so
                 // legacy checkpoints don't get an empty object.
@@ -32045,6 +32282,15 @@
                 });
             }
 
+            // v1.34 Populate project dropdown — writes task.projectId directly.
+            var projSel = document.getElementById('mc-task-project');
+            if (projSel) {
+                projSel.innerHTML = '<option value="">None</option>';
+                mcProjects.forEach(function(p) {
+                    projSel.innerHTML += '<option value="' + p.id + '">' + escapeHtml(p.name) + '</option>';
+                });
+            }
+
             // Populate cohort checkboxes
             var cohortDiv = document.getElementById('mc-task-cohorts');
             if (cohortDiv) {
@@ -32089,6 +32335,7 @@
                 })();
                 el = document.getElementById('mc-task-desc'); if (el) el.value = t.description || '';
                 el = document.getElementById('mc-task-checkpoint'); if (el) el.value = t.roundId || '';
+                el = document.getElementById('mc-task-project'); if (el) el.value = t.projectId || '';
                 el = document.getElementById('mc-task-xc'); if (el) el.value = t.xcReward || 50;
                 el = document.getElementById('mc-task-due'); if (el) el.value = t.dueDate || '';
                 el = document.getElementById('mc-task-mode'); if (el) el.value = t.completionMode || 'one-time';
@@ -32173,6 +32420,7 @@
                 var el;
                 el = document.getElementById('mc-task-category'); if (el) el.value = '';
                 el = document.getElementById('mc-task-checkpoint'); if (el) el.value = '';
+                el = document.getElementById('mc-task-project'); if (el) el.value = '';
                 el = document.getElementById('mc-task-xc'); if (el) el.value = 50;
                 el = document.getElementById('mc-task-due'); if (el) el.value = '';
                 el = document.getElementById('mc-task-mode'); if (el) el.value = 'one-time';
@@ -32242,8 +32490,45 @@
         function mcCancelTaskForm() {
             var form = document.getElementById('mc-task-form');
             if (form) form.style.display = 'none';
+            var tabs = document.getElementById('mc-task-form-mode-tabs');
+            if (tabs) tabs.style.display = 'none';
             mcTaskEditIndex = -1;
         }
+
+        // ═══════════════════════════════════════════════════════════════════
+        //  v1.34 QUICK / ADVANCED TASK FORM SWITCHER — "+ New Task" and every
+        //  task Edit action route through here instead of straight into
+        //  mcShowTaskForm. Default view is tier-driven: Guest Host and
+        //  Instructor Host land on Quick (per Ennis: "Lower host levels...
+        //  will mostly use this quicker version"); Cohost/Master keep the
+        //  existing Advanced-by-default behavior. Both tiers can always
+        //  reach the other mode via the tab bar — nothing is hard-gated.
+        // ═══════════════════════════════════════════════════════════════════
+        window.mcOpenTaskFormSmart = function (index) {
+            var tabs = document.getElementById('mc-task-form-mode-tabs');
+            if (tabs) tabs.style.display = 'flex';
+            var tier = (typeof window.pflxHostTier === 'function') ? (window.pflxHostTier() || 'master') : 'master';
+            var defaultMode = (tier === 'guest' || tier === 'instructor') ? 'quick' : 'advanced';
+            mcSwitchTaskFormMode(defaultMode, index);
+        };
+        window.mcSwitchTaskFormMode = function (mode, index) {
+            if (typeof index !== 'number') index = (typeof mcTaskEditIndex === 'number') ? mcTaskEditIndex : -1;
+            var quickForm = document.getElementById('mc-quick-task-form');
+            var advForm = document.getElementById('mc-task-form');
+            var quickTab = document.getElementById('mc-task-mode-tab-quick');
+            var advTab = document.getElementById('mc-task-mode-tab-advanced');
+            if (mode === 'quick') {
+                if (advForm) advForm.style.display = 'none';
+                mcShowQuickTaskForm(index);
+                if (quickTab) quickTab.classList.add('active');
+                if (advTab) advTab.classList.remove('active');
+            } else {
+                if (quickForm) quickForm.style.display = 'none';
+                mcShowTaskForm(index);
+                if (advTab) advTab.classList.add('active');
+                if (quickTab) quickTab.classList.remove('active');
+            }
+        };
 
         // ═══════════════════════════════════════════════════════════════════
         //  FUTURE LEARNING PROTOCOL — phase configuration (host-editable)
@@ -32880,6 +33165,898 @@
         }
         window.mcTaskOnTrackingChange = mcTaskOnTrackingChange;
 
+        // ═══════════════════════════════════════════════════════════════════
+        //  v1.34 QUICK LINK WIDGET (shared) — multi-link insert with a live
+        //  embed preview, used by the Quick Task / Quick Project / Quick
+        //  Checkpoint forms. Each scope ('qtask','qproject','qcheckpoint')
+        //  gets its own in-memory array so multiple Quick forms can exist on
+        //  the same page without clobbering each other. Reuses the existing
+        //  window.pflxEmbedSrc() normalizer (YouTube/Vimeo/Google/Canva →
+        //  iframe-able src) so the preview matches what players will
+        //  eventually see, not a bespoke re-implementation.
+        // ═══════════════════════════════════════════════════════════════════
+        window._mcQL = window._mcQL || {};
+        function _mcQLState(scope) {
+            if (!window._mcQL[scope]) window._mcQL[scope] = [];
+            return window._mcQL[scope];
+        }
+        function _mcQLRowHtml(scope, item) {
+            var id = item.id;
+            var hasUrl = !!(item.url && item.url.trim());
+            var src = hasUrl ? pflxEmbedSrc(item.url.trim()) : '';
+            return '<div class="mc-ql-row" data-qlid="' + escapeHtml(id) + '" style="border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px;margin-bottom:8px;background:rgba(0,0,0,0.2);">' +
+                '<div style="display:grid;grid-template-columns:1fr 1.4fr auto;gap:6px;align-items:center;">' +
+                    '<input type="text" class="mc-ql-label" placeholder="Label (optional)" value="' + escapeHtml(item.label || '') + '" ' +
+                        'oninput="mcQLUpdate(' + JSON.stringify(scope) + ',' + JSON.stringify(id) + ',\'label\',this.value)" ' +
+                        'style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px 8px;border-radius:5px;font-size:12px;">' +
+                    '<input type="url" class="mc-ql-url" placeholder="https://…  (YouTube, Slides, Canva, Drive, or any link)" value="' + escapeHtml(item.url || '') + '" ' +
+                        'oninput="mcQLUpdate(' + JSON.stringify(scope) + ',' + JSON.stringify(id) + ',\'url\',this.value)" ' +
+                        'style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px 8px;border-radius:5px;font-size:12px;">' +
+                    '<button type="button" class="mc-btn" style="padding:6px 10px;font-size:11px;background:rgba(239,68,68,0.10);color:#ef4444;border:1px solid rgba(239,68,68,0.35);" onclick="mcQLRemove(' + JSON.stringify(scope) + ',' + JSON.stringify(id) + ')">✕</button>' +
+                '</div>' +
+                '<div id="mc-ql-preview-' + escapeHtml(id) + '" style="' + (hasUrl ? '' : 'display:none;') + 'margin-top:6px;position:relative;width:100%;max-width:360px;aspect-ratio:16/9;border-radius:6px;overflow:hidden;background:#000;border:1px solid rgba(255,255,255,0.08);">' +
+                    (hasUrl ? '<iframe src="' + escapeHtml(src) + '" style="width:100%;height:100%;border:0;" sandbox="allow-scripts allow-same-origin allow-presentation allow-popups" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>' : '') +
+                '</div>' +
+            '</div>';
+        }
+        function _mcQLRender(scope) {
+            var host = document.getElementById('mc-' + scope + '-quicklinks-list');
+            var empty = document.getElementById('mc-' + scope + '-quicklinks-empty');
+            if (!host) return;
+            var items = _mcQLState(scope);
+            if (items.length === 0) {
+                host.innerHTML = '';
+                if (empty) empty.style.display = 'block';
+                return;
+            }
+            if (empty) empty.style.display = 'none';
+            host.innerHTML = items.map(function (it) { return _mcQLRowHtml(scope, it); }).join('');
+        }
+        window.mcQLInit = function (scope, links) {
+            window._mcQL[scope] = (links || []).map(function (l, i) {
+                return { id: l.id || ('ql-' + Date.now() + '-' + i), label: l.label || '', url: l.url || '' };
+            });
+            _mcQLRender(scope);
+        };
+        window.mcQLAdd = function (scope) {
+            _mcQLState(scope).push({ id: 'ql-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5), label: '', url: '' });
+            _mcQLRender(scope);
+            var inputs = document.querySelectorAll('#mc-' + scope + '-quicklinks-list .mc-ql-label');
+            if (inputs.length) inputs[inputs.length - 1].focus();
+        };
+        window.mcQLRemove = function (scope, id) {
+            window._mcQL[scope] = _mcQLState(scope).filter(function (it) { return it.id !== id; });
+            _mcQLRender(scope);
+        };
+        // Update in-memory state on every keystroke, but only touch the ONE
+        // preview iframe for this row (never a full re-render) so focus and
+        // cursor position in the other inputs are never disturbed.
+        window.mcQLUpdate = function (scope, id, field, value) {
+            var items = _mcQLState(scope);
+            var item = items.find(function (it) { return it.id === id; });
+            if (!item) return;
+            item[field] = value;
+            if (field !== 'url') return;
+            var wrap = document.getElementById('mc-ql-preview-' + id);
+            if (!wrap) return;
+            var url = (value || '').trim();
+            if (!url) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
+            wrap.style.display = '';
+            wrap.innerHTML = '<iframe src="' + escapeHtml(pflxEmbedSrc(url)) + '" style="width:100%;height:100%;border:0;" sandbox="allow-scripts allow-same-origin allow-presentation allow-popups" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>';
+        };
+        // Read out the current, saveable link list for a scope — drops rows
+        // with no URL (a label-only row is not a usable link).
+        window.mcQLRead = function (scope) {
+            return _mcQLState(scope).filter(function (it) { return it.url && it.url.trim(); })
+                .map(function (it) { return { id: it.id, label: (it.label || '').trim(), url: it.url.trim() }; });
+        };
+
+        // ═══════════════════════════════════════════════════════════════════
+        //  v1.34 MULTI-SELECT BADGE DROPDOWN (shared) — a click-to-open,
+        //  searchable checkbox list with chip display, used anywhere a Quick
+        //  form needs "multi select a dropdown of digital badges" instead of
+        //  the Advanced form's plain checkbox stack. Scoped the same way as
+        //  the Quick Link widget above (one array per scope key).
+        // ═══════════════════════════════════════════════════════════════════
+        window._mcQB = window._mcQB || {};
+        function _mcQBState(scope) {
+            if (!window._mcQB[scope]) window._mcQB[scope] = [];
+            return window._mcQB[scope];
+        }
+        function _mcQBRenderList(scope, filterText) {
+            var host = document.getElementById('mc-' + scope + '-badges-list');
+            if (!host) return;
+            var all = mcGetAllBadges();
+            var ft = (filterText || '').toLowerCase();
+            var selected = _mcQBState(scope);
+            var filtered = ft ? all.filter(function (b) { return (b.name || '').toLowerCase().indexOf(ft) !== -1; }) : all;
+            host.innerHTML = filtered.length === 0 ? '<div style="font-size:11px;color:rgba(255,255,255,0.3);padding:4px;">No badges found</div>' :
+                filtered.map(function (b) {
+                    var checked = selected.indexOf(b.id) !== -1;
+                    return '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;padding:4px 2px;">' +
+                        '<input type="checkbox" ' + (checked ? 'checked' : '') + ' onchange="mcQBadgeToggle(' + JSON.stringify(scope) + ',' + JSON.stringify(b.id) + ',this.checked)"> ' +
+                        '<span style="flex:1;">' + escapeHtml(b.name) + '</span>' +
+                        '<span style="color:#f5c842;font-weight:700;font-size:11px;">' + (b.xc || 0) + ' XC</span></label>';
+                }).join('');
+        }
+        function _mcQBRenderChips(scope) {
+            var host = document.getElementById('mc-' + scope + '-badges-chips');
+            if (!host) return;
+            var selected = _mcQBState(scope);
+            var all = mcGetAllBadges();
+            var chipsHtml = selected.map(function (id) {
+                var b = all.find(function (x) { return x.id === id; });
+                var name = b ? b.name : id;
+                return '<span style="background:rgba(0,212,255,0.12);border:1px solid rgba(0,212,255,0.35);color:#00d4ff;border-radius:12px;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px;">' + escapeHtml(name) +
+                    '<span onclick="event.stopPropagation();mcQBadgeToggle(' + JSON.stringify(scope) + ',' + JSON.stringify(id) + ',false)" style="cursor:pointer;color:#ef4444;font-weight:700;">&#10005;</span></span>';
+            }).join('');
+            host.innerHTML = chipsHtml || '<span style="color:rgba(255,255,255,0.35);font-size:12px;">Select badges&hellip;</span>';
+        }
+        window.mcQBadgeInit = function (scope, selectedIds) {
+            window._mcQB[scope] = (selectedIds || []).slice();
+            _mcQBRenderChips(scope);
+        };
+        window.mcQBadgeFilter = function (scope) {
+            var el = document.getElementById('mc-' + scope + '-badges-search');
+            _mcQBRenderList(scope, el ? el.value : '');
+        };
+        window.mcQBadgeToggle = function (scope, badgeId, isChecked) {
+            var arr = _mcQBState(scope);
+            var idx = arr.indexOf(badgeId);
+            if (isChecked && idx === -1) arr.push(badgeId);
+            if (!isChecked && idx !== -1) arr.splice(idx, 1);
+            _mcQBRenderChips(scope);
+            _mcQBRenderList(scope, (document.getElementById('mc-' + scope + '-badges-search') || {}).value || '');
+        };
+        window.mcQBadgeDropdownToggle = function (scope) {
+            var dd = document.getElementById('mc-' + scope + '-badges-dropdown');
+            if (!dd) return;
+            var isOpen = dd.style.display !== 'none';
+            document.querySelectorAll('[id^="mc-"][id$="-badges-dropdown"]').forEach(function (el) { el.style.display = 'none'; });
+            dd.style.display = isOpen ? 'none' : 'block';
+            if (!isOpen) {
+                _mcQBRenderList(scope);
+                var s = document.getElementById('mc-' + scope + '-badges-search');
+                if (s) { s.value = ''; s.focus(); }
+            }
+        };
+        window.mcQBadgeRead = function (scope) { return _mcQBState(scope).slice(); };
+        document.addEventListener('click', function (ev) {
+            document.querySelectorAll('[id^="mc-"][id$="-badges-dropdown"]').forEach(function (dd) {
+                if (dd.style.display === 'none') return;
+                var scope = dd.id.replace(/^mc-/, '').replace(/-badges-dropdown$/, '');
+                var chips = document.getElementById('mc-' + scope + '-badges-chips');
+                if (dd.contains(ev.target)) return;
+                if (chips && chips.contains(ev.target)) return;
+                dd.style.display = 'none';
+            });
+        });
+
+        // ═══════════════════════════════════════════════════════════════════
+        //  v1.34 MULTI-SELECT FINE/TAX DROPDOWN (shared) — mirrors the badge
+        //  dropdown above exactly, but its catalog is X-Coin's modifiers list
+        //  (mcModifiers) filtered to type 'tax'/'fine' — the same source the
+        //  existing Season "Fines & Taxes" picker already reads from
+        //  (mcSeasonAddModifier). This lets a host tag a task/project/
+        //  checkpoint with the fines/taxes that apply to it.
+        // ═══════════════════════════════════════════════════════════════════
+        window._mcQF = window._mcQF || {};
+        function _mcQFState(scope) {
+            if (!window._mcQF[scope]) window._mcQF[scope] = [];
+            return window._mcQF[scope];
+        }
+        function _mcQFCatalog() {
+            return (mcModifiers || []).filter(function (m) { return (m.type || '') === 'tax' || (m.type || '') === 'fine'; })
+                .map(function (m) { return { id: m.id || m.name, name: m.name || m.id }; });
+        }
+        function _mcQFRenderList(scope, filterText) {
+            var host = document.getElementById('mc-' + scope + '-finetax-list');
+            if (!host) return;
+            var all = _mcQFCatalog();
+            var ft = (filterText || '').toLowerCase();
+            var selected = _mcQFState(scope);
+            var filtered = ft ? all.filter(function (m) { return (m.name || '').toLowerCase().indexOf(ft) !== -1; }) : all;
+            host.innerHTML = filtered.length === 0 ? '<div style="font-size:11px;color:rgba(255,255,255,0.3);padding:4px;">No fines/taxes defined in X-Coin yet</div>' :
+                filtered.map(function (m) {
+                    var checked = selected.indexOf(m.id) !== -1;
+                    return '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;padding:4px 2px;">' +
+                        '<input type="checkbox" ' + (checked ? 'checked' : '') + ' onchange="mcQFineToggle(' + JSON.stringify(scope) + ',' + JSON.stringify(m.id) + ',this.checked)"> ' +
+                        '<span style="flex:1;">&#x1F4B8; ' + escapeHtml(m.name) + '</span></label>';
+                }).join('');
+        }
+        function _mcQFRenderChips(scope) {
+            var host = document.getElementById('mc-' + scope + '-finetax-chips');
+            if (!host) return;
+            var selected = _mcQFState(scope);
+            var all = _mcQFCatalog();
+            var chipsHtml = selected.map(function (id) {
+                var m = all.find(function (x) { return x.id === id; });
+                var name = m ? m.name : id;
+                return '<span style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.35);color:#f87171;border-radius:12px;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px;">&#x1F4B8; ' + escapeHtml(name) +
+                    '<span onclick="event.stopPropagation();mcQFineToggle(' + JSON.stringify(scope) + ',' + JSON.stringify(id) + ',false)" style="cursor:pointer;color:#ef4444;font-weight:700;">&#10005;</span></span>';
+            }).join('');
+            host.innerHTML = chipsHtml || '<span style="color:rgba(255,255,255,0.35);font-size:12px;">Select fines/taxes&hellip;</span>';
+        }
+        window.mcQFineInit = function (scope, selectedIds) {
+            window._mcQF[scope] = (selectedIds || []).slice();
+            _mcQFRenderChips(scope);
+        };
+        window.mcQFineFilter = function (scope) {
+            var el = document.getElementById('mc-' + scope + '-finetax-search');
+            _mcQFRenderList(scope, el ? el.value : '');
+        };
+        window.mcQFineToggle = function (scope, id, isChecked) {
+            var arr = _mcQFState(scope);
+            var idx = arr.indexOf(id);
+            if (isChecked && idx === -1) arr.push(id);
+            if (!isChecked && idx !== -1) arr.splice(idx, 1);
+            _mcQFRenderChips(scope);
+            _mcQFRenderList(scope, (document.getElementById('mc-' + scope + '-finetax-search') || {}).value || '');
+        };
+        window.mcQFineDropdownToggle = function (scope) {
+            var dd = document.getElementById('mc-' + scope + '-finetax-dropdown');
+            if (!dd) return;
+            var isOpen = dd.style.display !== 'none';
+            document.querySelectorAll('[id^="mc-"][id$="-finetax-dropdown"]').forEach(function (el) { el.style.display = 'none'; });
+            dd.style.display = isOpen ? 'none' : 'block';
+            if (!isOpen) {
+                _mcQFRenderList(scope);
+                var s = document.getElementById('mc-' + scope + '-finetax-search');
+                if (s) { s.value = ''; s.focus(); }
+            }
+        };
+        window.mcQFineRead = function (scope) { return _mcQFState(scope).slice(); };
+        document.addEventListener('click', function (ev) {
+            document.querySelectorAll('[id^="mc-"][id$="-finetax-dropdown"]').forEach(function (dd) {
+                if (dd.style.display === 'none') return;
+                var scope = dd.id.replace(/^mc-/, '').replace(/-finetax-dropdown$/, '');
+                var chips = document.getElementById('mc-' + scope + '-finetax-chips');
+                if (dd.contains(ev.target)) return;
+                if (chips && chips.contains(ev.target)) return;
+                dd.style.display = 'none';
+            });
+        });
+
+        // ═══════════════════════════════════════════════════════════════════
+        //  v1.34 MULTI-SELECT PLAYER PICKER (shared) — "no cohort checked =
+        //  all players; checking a cohort narrows the list" per Ennis. Same
+        //  scoping rule the Advanced form's mcRenderTaskAssignedPlayers /
+        //  mcRenderProjectAssignedPlayers already use, reimplemented here as
+        //  a state-array widget (like the Quick Link/Badge/Fine widgets
+        //  above) so it composes cleanly with the Quick forms. This is also
+        //  how a Fine/Tax gets scoped to one player instead of a whole
+        //  cohort — assignedPlayers narrows who a task (and therefore its
+        //  fineTaxIds) actually applies to.
+        // ═══════════════════════════════════════════════════════════════════
+        window._mcQPlayers = window._mcQPlayers || {};
+        function _mcQPlayersState(scope) {
+            if (!window._mcQPlayers[scope]) window._mcQPlayers[scope] = [];
+            return window._mcQPlayers[scope];
+        }
+        function _mcQPlayersPool(scope) {
+            var checked = [];
+            document.querySelectorAll('.mc-' + scope + '-cohort-cb:checked').forEach(function (cb) { checked.push(cb.value); });
+            var norm = function (x) { return String(x == null ? '' : x).toLowerCase().trim(); };
+            var acceptable = new Set();
+            (mcCohortGroups || []).forEach(function (g) {
+                if (g && (checked.indexOf(g.id) !== -1 || checked.indexOf(g.name) !== -1)) { acceptable.add(norm(g.id)); acceptable.add(norm(g.name)); }
+            });
+            checked.forEach(function (v) { acceptable.add(norm(v)); });
+            function playerCohortTags(p) {
+                var out = [];
+                if (p.cohort) out.push(p.cohort);
+                if (Array.isArray(p.cohorts)) out = out.concat(p.cohorts);
+                return out;
+            }
+            var pool = (typeof _mcRoster === 'function') ? _mcRoster() : ((typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) ? mcPlayers : []);
+            // No cohort checked → every player is available (per Ennis).
+            // One or more checked → narrow to players in those cohorts.
+            return acceptable.size
+                ? pool.filter(function (p) { return p && (p.role || 'player') === 'player' && playerCohortTags(p).some(function (c) { return acceptable.has(norm(c)); }); })
+                : pool.filter(function (p) { return p && (p.role || 'player') === 'player'; });
+        }
+        function _mcQPlayersRenderList(scope) {
+            var host = document.getElementById('mc-' + scope + '-players-list');
+            if (!host) return;
+            var scoped = _mcQPlayersPool(scope);
+            var selected = _mcQPlayersState(scope);
+            if (scoped.length === 0) {
+                host.innerHTML = '<div style="padding:8px;color:rgba(255,255,255,0.3);font-size:11px;">No players available.</div>';
+                return;
+            }
+            host.innerHTML = scoped.map(function (p) {
+                var checked = selected.indexOf(p.id) !== -1;
+                var name = escapeHtml(p.brand || p.brandName || p.name || 'Player');
+                var cohortChip = p.cohort ? '<span style="font-size:9px;color:rgba(255,255,255,0.35);margin-left:6px;">' + escapeHtml(p.cohort) + '</span>' : '';
+                return '<label style="display:flex;align-items:center;gap:8px;padding:4px 6px;cursor:pointer;font-size:11px;color:#e0e6ff;">' +
+                    '<input type="checkbox" class="mc-' + scope + '-player-cb" value="' + escapeHtml(p.id) + '" ' + (checked ? 'checked' : '') + ' onchange="mcQPlayersToggle(' + JSON.stringify(scope) + ',' + JSON.stringify(p.id) + ',this.checked)">' +
+                    '<span style="flex:1;">' + name + cohortChip + '</span></label>';
+            }).join('');
+        }
+        window.mcQPlayersInit = function (scope, selectedIds) {
+            window._mcQPlayers[scope] = (selectedIds || []).slice();
+            _mcQPlayersRenderList(scope);
+        };
+        // Cohort checkboxes call this on change — re-scopes the pool and
+        // drops any selected player who fell outside the new scope.
+        window.mcQPlayersOnCohortChange = function (scope) {
+            var pool = _mcQPlayersPool(scope);
+            var poolIds = pool.map(function (p) { return p.id; });
+            window._mcQPlayers[scope] = _mcQPlayersState(scope).filter(function (id) { return poolIds.indexOf(id) !== -1; });
+            _mcQPlayersRenderList(scope);
+        };
+        window.mcQPlayersToggle = function (scope, playerId, isChecked) {
+            var arr = _mcQPlayersState(scope);
+            var idx = arr.indexOf(playerId);
+            if (isChecked && idx === -1) arr.push(playerId);
+            if (!isChecked && idx !== -1) arr.splice(idx, 1);
+        };
+        window.mcQPlayersRead = function (scope) { return _mcQPlayersState(scope).slice(); };
+
+        // ═══════════════════════════════════════════════════════════════════
+        //  v1.34 GENERIC SUBTASK-CHECKLIST ROW EDITOR (shared) — same
+        //  {id,label,link,completed} shape as the Advanced Task/Project
+        //  subtask editors below, parameterized by DOM id so Quick forms can
+        //  reuse it without id collisions.
+        // ═══════════════════════════════════════════════════════════════════
+        function _mcGenericRenderSubtaskRows(listId, emptyId, subtasks, removeFnName) {
+            var host = document.getElementById(listId);
+            var empty = document.getElementById(emptyId);
+            if (!host) return;
+            subtasks = subtasks || [];
+            if (subtasks.length === 0) {
+                host.innerHTML = '';
+                if (empty) empty.style.display = 'block';
+                return;
+            }
+            if (empty) empty.style.display = 'none';
+            host.innerHTML = subtasks.map(function (s, i) {
+                var sid = (s.id || ('st-' + Date.now() + '-' + i)).replace(/"/g, '');
+                return '<div class="mc-subtask-row" data-sid="' + escapeHtml(sid) + '" style="display:grid;grid-template-columns:1fr 1fr auto;gap:6px;align-items:center;margin-bottom:6px;">' +
+                    '<input type="text" class="mc-subtask-label" data-sid="' + escapeHtml(sid) + '" placeholder="Step label" value="' + escapeHtml(s.label || '') + '" style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px 8px;border-radius:5px;font-size:12px;">' +
+                    '<input type="url" class="mc-subtask-link" data-sid="' + escapeHtml(sid) + '" placeholder="Optional link (https://…)" value="' + escapeHtml(s.link || '') + '" style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px 8px;border-radius:5px;font-size:12px;">' +
+                    '<button type="button" class="mc-btn" style="padding:6px 10px;font-size:11px;background:rgba(239,68,68,0.10);color:#ef4444;border:1px solid rgba(239,68,68,0.35);" onclick="' + removeFnName + '(' + JSON.stringify(sid) + ')">✕</button>' +
+                '</div>';
+            }).join('');
+        }
+        function _mcGenericReadSubtaskRows(listId) {
+            var out = [];
+            document.querySelectorAll('#' + listId + ' .mc-subtask-row').forEach(function (row) {
+                var sid = row.getAttribute('data-sid');
+                var labelEl = row.querySelector('.mc-subtask-label');
+                var linkEl = row.querySelector('.mc-subtask-link');
+                var label = (labelEl ? labelEl.value : '').trim();
+                if (!label) return;
+                out.push({ id: sid, label: label, link: (linkEl ? linkEl.value : '').trim(), completed: false });
+            });
+            return out;
+        }
+
+        // ── Quick Task Form (v1.34) ────────────────────────────────────────
+        function _mcQTRenderSubtasks(subtasks) { _mcGenericRenderSubtaskRows('mc-qtask-subtasks-list', 'mc-qtask-subtasks-empty', subtasks, 'mcQTRemoveSubtaskRow'); }
+        function _mcQTReadSubtasks() { return _mcGenericReadSubtaskRows('mc-qtask-subtasks-list'); }
+        window.mcQTAddSubtaskRow = function () {
+            var cur = _mcQTReadSubtasks();
+            cur.push({ id: 'st-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5), label: '', link: '', completed: false });
+            _mcQTRenderSubtasks(cur);
+            var rows = document.querySelectorAll('#mc-qtask-subtasks-list .mc-subtask-label');
+            if (rows.length) rows[rows.length - 1].focus();
+        };
+        window.mcQTRemoveSubtaskRow = function (sid) {
+            var cur = _mcQTReadSubtasks().filter(function (s) { return s.id !== sid; });
+            _mcQTRenderSubtasks(cur);
+        };
+
+        // Populate the Checkpoint + Project dropdowns. Project options are
+        // filtered to the chosen Checkpoint when one is set (hierarchy rule:
+        // "each layer obeys the parent layer" — a task can't be assigned to
+        // a project that lives outside the checkpoint it's also assigned to).
+        function _mcQTPopulateHierarchyDropdowns(selectedCheckpointId, selectedProjectId) {
+            var cpSel = document.getElementById('mc-qtask-checkpoint');
+            var projSel = document.getElementById('mc-qtask-project');
+            if (cpSel) {
+                cpSel.innerHTML = '<option value="">None</option>';
+                mcCheckpoints.forEach(function (c) { cpSel.innerHTML += '<option value="' + c.id + '">' + escapeHtml(c.name) + '</option>'; });
+                cpSel.value = selectedCheckpointId || '';
+            }
+            if (projSel) {
+                var cpId = selectedCheckpointId || '';
+                var eligible = mcProjects.filter(function (p) { return !cpId || p.checkpointId === cpId; });
+                projSel.innerHTML = '<option value="">None</option>';
+                eligible.forEach(function (p) { projSel.innerHTML += '<option value="' + p.id + '">' + escapeHtml(p.name) + '</option>'; });
+                // Keep the selection if it's still eligible after filtering.
+                projSel.value = (selectedProjectId && eligible.some(function (p) { return p.id === selectedProjectId; })) ? selectedProjectId : '';
+            }
+        }
+        // Picking a Project auto-derives (and locks) the Checkpoint from the
+        // project's own checkpointId — the child obeys the parent.
+        window.mcQTOnProjectChange = function () {
+            var projSel = document.getElementById('mc-qtask-project');
+            var projId = projSel ? projSel.value : '';
+            var proj = projId ? mcProjects.find(function (p) { return p.id === projId; }) : null;
+            if (proj && proj.checkpointId) {
+                _mcQTPopulateHierarchyDropdowns(proj.checkpointId, projId);
+            }
+        };
+        // Changing the Checkpoint re-filters the Project list; if the
+        // currently-picked project falls outside the new checkpoint it's
+        // cleared rather than left in an inconsistent state.
+        window.mcQTOnCheckpointChange = function () {
+            var cpSel = document.getElementById('mc-qtask-checkpoint');
+            var projSel = document.getElementById('mc-qtask-project');
+            _mcQTPopulateHierarchyDropdowns(cpSel ? cpSel.value : '', projSel ? projSel.value : '');
+        };
+
+        // v1.34 — keep project.taskIds (the Advanced Project form's own
+        // checkbox-based ownership list) in sync whenever a task's
+        // projectId is set from either the Quick or Advanced Task form.
+        // Removes the task id from every OTHER project first so a task
+        // can't end up double-claimed after being reassigned.
+        function _mcSyncTaskProjectLink(taskId, projectId) {
+            if (!taskId || typeof mcProjects === 'undefined' || !Array.isArray(mcProjects)) return;
+            var changed = false;
+            mcProjects.forEach(function (p) {
+                if (!p) return;
+                var ids = Array.isArray(p.taskIds) ? p.taskIds : (p.taskIds = []);
+                var has = ids.indexOf(taskId) !== -1;
+                var shouldHave = projectId && p.id === projectId;
+                if (shouldHave && !has) { ids.push(taskId); changed = true; }
+                if (!shouldHave && has) { ids.splice(ids.indexOf(taskId), 1); changed = true; }
+            });
+            if (changed) { try { mcSaveData('projects'); } catch (e) {} }
+        }
+
+        window.mcShowQuickTaskForm = function (index) {
+            mcTaskEditIndex = index;
+            var form = document.getElementById('mc-quick-task-form');
+            if (!form) return;
+            form.style.display = 'block';
+
+            var cohortDiv = document.getElementById('mc-qtask-cohorts');
+            if (cohortDiv) {
+                cohortDiv.innerHTML = mcCohortGroups.length === 0 ? '<span style="font-size:11px;color:rgba(255,255,255,0.25);">No cohort groups defined</span>' :
+                    mcCohortGroups.map(function (g) {
+                        return '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;">' +
+                            '<input type="checkbox" class="mc-qtask-cohort-cb" value="' + g.id + '" onchange="mcQPlayersOnCohortChange(\'qtask\')"> ' + escapeHtml(g.name) + '</label>';
+                    }).join('');
+            }
+
+            var t = (index >= 0 && mcTasks[index]) ? mcTasks[index] : null;
+            document.getElementById('mc-qtask-title').value = t ? (t.title || '') : '';
+            document.getElementById('mc-qtask-desc').value = t ? (t.description || '') : '';
+            _mcQTRenderSubtasks(t ? (t.subtasks || []) : []);
+            mcQBadgeInit('qtask', t ? (t.rewardBadges || []) : []);
+            mcQFineInit('qtask', t ? (t.fineTaxIds || []) : []);
+            mcQLInit('qtask', t ? (t.links || []) : []);
+            _mcQTPopulateHierarchyDropdowns(t ? (t.roundId || '') : '', t ? (t.projectId || '') : '');
+            document.querySelectorAll('.mc-qtask-cohort-cb').forEach(function (cb) {
+                cb.checked = !!(t && Array.isArray(t.assignedTo) && t.assignedTo.indexOf(cb.value) >= 0);
+            });
+            // Player picker — pool depends on which cohort checkboxes just got
+            // set above, so this must run after them.
+            mcQPlayersInit('qtask', t ? (t.assignedPlayers || []) : []);
+            form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        };
+
+        window.mcCancelQuickTaskForm = function () {
+            var form = document.getElementById('mc-quick-task-form');
+            if (form) form.style.display = 'none';
+            var tabs = document.getElementById('mc-task-form-mode-tabs');
+            if (tabs) tabs.style.display = 'none';
+            mcTaskEditIndex = -1;
+        };
+
+        window.mcSaveQuickTaskForm = function () {
+            var title = (document.getElementById('mc-qtask-title')?.value || '').trim();
+            if (!title) { pflxPlaySfx('error'); alert('Task title is required.'); return; }
+            pflxPlaySfx('save');
+
+            var assignedTo = [];
+            document.querySelectorAll('.mc-qtask-cohort-cb:checked').forEach(function (cb) { assignedTo.push(cb.value); });
+
+            var existing = (mcTaskEditIndex >= 0 && mcTasks[mcTaskEditIndex]) ? mcTasks[mcTaskEditIndex] : null;
+            var subtaskRows = (function () {
+                var rows = _mcQTReadSubtasks();
+                if (existing && Array.isArray(existing.subtasks)) {
+                    var prior = {};
+                    existing.subtasks.forEach(function (s) { prior[s.id] = s; });
+                    rows.forEach(function (r) {
+                        var p = prior[r.id];
+                        if (p) { r.completed = !!p.completed; r.completedAt = p.completedAt || null; r.completedBy = p.completedBy || null; }
+                    });
+                }
+                return rows;
+            })();
+
+            var obj = {
+                id: existing ? existing.id : 'task-' + Date.now(),
+                title: title,
+                description: document.getElementById('mc-qtask-desc')?.value || '',
+                category: existing ? (existing.category || '') : '',
+                flpTracking: existing ? (existing.flpTracking || 'bypass') : 'bypass',
+                subtasks: subtaskRows,
+                checklist: existing ? (existing.checklist || []) : [],
+                links: mcQLRead('qtask'),
+                rewardBadges: mcQBadgeRead('qtask'),
+                // v1.34 — Fine/Tax allocation. New field; not yet read by any
+                // auto-apply logic elsewhere (those still run at the Season
+                // level via mcModifiers), this just lets the host tag which
+                // fines/taxes conceptually apply to this task for now.
+                fineTaxIds: mcQFineRead('qtask'),
+                totalXc: existing ? (existing.totalXc || existing.xcReward || 0) : 0,
+                roundId: document.getElementById('mc-qtask-checkpoint')?.value || '',
+                projectId: document.getElementById('mc-qtask-project')?.value || '',
+                xcReward: existing ? (existing.xcReward || 50) : 50,
+                dueDate: existing ? (existing.dueDate || '') : '',
+                completionMode: existing ? (existing.completionMode || 'one-time') : 'one-time',
+                requirement: existing ? (existing.requirement || 'required') : 'required',
+                assignedTo: assignedTo,
+                // v1.34 — "no cohort checked = all players; checking a cohort
+                // narrows the list" (see mcQPlayersRead). Empty selection here
+                // means every player in the assigned cohort(s) — same
+                // semantics the Advanced form already uses.
+                assignedPlayers: mcQPlayersRead('qtask'),
+                link: existing ? (existing.link || '') : '',
+                status: existing ? (existing.status || 'open') : 'open',
+                priority: existing ? (existing.priority || 'normal') : 'normal',
+                dependsOn: existing ? (existing.dependsOn || []) : [],
+                recurring: existing ? (existing.recurring || null) : null,
+                peerReviewCount: existing ? (existing.peerReviewCount || 0) : 0,
+                selfEvalRequired: existing ? (existing.selfEvalRequired || 'none') : 'none',
+                postFeedbackUpload: existing ? (existing.postFeedbackUpload || false) : false,
+                createdBy: existing ? (existing.createdBy || 'host') : (activeSession ? activeSession.brand : 'host'),
+                createdAt: existing ? (existing.createdAt || new Date().toISOString().split('T')[0]) : new Date().toISOString().split('T')[0],
+                attachments: existing ? (existing.attachments || []) : [],
+                allowFileUpload: existing ? (existing.allowFileUpload !== false) : true,
+                allowLinkSubmit: existing ? (existing.allowLinkSubmit !== false) : true,
+                submitInstructions: existing ? (existing.submitInstructions || '') : '',
+                deadlinePenalty: existing ? (existing.deadlinePenalty || null) : null,
+                upgradeInteractions: existing ? (existing.upgradeInteractions || { allowTimeExtend: false, allowMultiplier: false, allowShield: false }) : { allowTimeExtend: false, allowMultiplier: false, allowShield: false },
+                timeframeInherit: existing ? (existing.timeframeInherit || 'Global') : 'Global',
+                timeframeScope: existing ? (existing.timeframeScope || 'Season') : 'Season',
+                submissions: existing ? (existing.submissions || []) : [],
+                pathwayId: existing ? (existing.pathwayId || '') : '',
+                pathwayNodeName: existing ? (existing.pathwayNodeName || '') : '',
+                pathwayNodeId: existing ? (existing.pathwayNodeId || '') : '',
+                nodeType: existing ? (existing.nodeType || 'course') : 'course',
+                coopMode: existing ? (existing.coopMode || 'solo') : 'solo',
+                maxPlayers: existing ? (existing.maxPlayers || 4) : 4,
+                sessionCode: existing ? (existing.sessionCode || '') : '',
+                dcChannelEnabled: existing ? (existing.dcChannelEnabled || false) : false,
+                xbotEnabled: existing ? (existing.xbotEnabled || false) : false,
+                coopPlayers: existing ? (existing.coopPlayers || []) : [],
+                tierVariants: existing ? (existing.tierVariants || undefined) : undefined
+            };
+
+            if (mcTaskEditIndex >= 0) { mcTasks[mcTaskEditIndex] = obj; }
+            else { mcTasks.push(obj); }
+            mcSaveData('tasks');
+            _mcSyncTaskProjectLink(obj.id, obj.projectId);
+
+            if (typeof pflxSyncBus !== 'undefined') {
+                pflxSyncBus.publish('mc:tasks', { action: mcTaskEditIndex >= 0 ? 'update' : 'create', task: obj });
+            }
+
+            mcCancelQuickTaskForm();
+            mcRenderTasks();
+            mcLoadData();
+            if (typeof mcBroadcastToApps === 'function') mcBroadcastToApps('pflx_task_updated', obj);
+        };
+
+        // ── Quick Project Form (v1.34) ─────────────────────────────────────
+        // NOTE: the Advanced Project form requires >=1 task to be checked at
+        // save time (a structural leftover from when Project→Task was the
+        // ONLY way to link the two). Quick Project intentionally does NOT
+        // enforce that — a host can now create an empty project shell here
+        // and populate it afterward by picking this Project from the Quick
+        // (or Advanced) Task form's own Project-assign dropdown, since tasks
+        // now carry their own projectId (see _mcSyncTaskProjectLink above).
+        function _mcQPRenderSubtasks(subtasks) { _mcGenericRenderSubtaskRows('mc-qproject-subtasks-list', 'mc-qproject-subtasks-empty', subtasks, 'mcQPRemoveSubtaskRow'); }
+        function _mcQPReadSubtasks() { return _mcGenericReadSubtaskRows('mc-qproject-subtasks-list'); }
+        window.mcQPAddSubtaskRow = function () {
+            var cur = _mcQPReadSubtasks();
+            cur.push({ id: 'st-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5), label: '', link: '', completed: false });
+            _mcQPRenderSubtasks(cur);
+            var rows = document.querySelectorAll('#mc-qproject-subtasks-list .mc-subtask-label');
+            if (rows.length) rows[rows.length - 1].focus();
+        };
+        window.mcQPRemoveSubtaskRow = function (sid) {
+            var cur = _mcQPReadSubtasks().filter(function (s) { return s.id !== sid; });
+            _mcQPRenderSubtasks(cur);
+        };
+
+        window.mcShowQuickProjectForm = function (index) {
+            mcProjectEditIndex = index;
+            var form = document.getElementById('mc-quick-project-form');
+            if (!form) return;
+            form.style.display = 'block';
+
+            var cohortDiv = document.getElementById('mc-qproject-cohorts');
+            if (cohortDiv) {
+                cohortDiv.innerHTML = mcCohortGroups.length === 0 ? '<span style="font-size:11px;color:rgba(255,255,255,0.25);">No cohort groups defined</span>' :
+                    mcCohortGroups.map(function (g) {
+                        return '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;">' +
+                            '<input type="checkbox" class="mc-qproject-cohort-cb" value="' + g.id + '" onchange="mcQPlayersOnCohortChange(\'qproject\')"> ' + escapeHtml(g.name) + '</label>';
+                    }).join('');
+            }
+            var cpSel = document.getElementById('mc-qproject-checkpoint');
+            if (cpSel) {
+                cpSel.innerHTML = '<option value="">None</option>';
+                mcCheckpoints.forEach(function (c) { cpSel.innerHTML += '<option value="' + c.id + '">' + escapeHtml(c.name) + '</option>'; });
+            }
+
+            var p = (index >= 0 && mcProjects[index]) ? mcProjects[index] : null;
+            document.getElementById('mc-qproject-title').value = p ? (p.name || '') : '';
+            document.getElementById('mc-qproject-desc').value = p ? (p.description || '') : '';
+            _mcQPRenderSubtasks(p ? (p.subtasks || []) : []);
+            mcQBadgeInit('qproject', p ? (p.rewardBadges || []) : []);
+            mcQFineInit('qproject', p ? (p.fineTaxIds || []) : []);
+            mcQLInit('qproject', p ? (p.links || []) : []);
+            if (cpSel) cpSel.value = p ? (p.checkpointId || '') : '';
+            document.querySelectorAll('.mc-qproject-cohort-cb').forEach(function (cb) {
+                cb.checked = !!(p && Array.isArray(p.cohortIds) && p.cohortIds.indexOf(cb.value) >= 0);
+            });
+            mcQPlayersInit('qproject', p ? (p.assignedPlayers || []) : []);
+            form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        };
+
+        window.mcCancelQuickProjectForm = function () {
+            var form = document.getElementById('mc-quick-project-form');
+            if (form) form.style.display = 'none';
+            var tabs = document.getElementById('mc-project-form-mode-tabs');
+            if (tabs) tabs.style.display = 'none';
+            mcProjectEditIndex = -1;
+        };
+
+        window.mcSaveQuickProjectForm = function () {
+            var title = (document.getElementById('mc-qproject-title')?.value || '').trim();
+            if (!title) { pflxPlaySfx('error'); alert('Project title is required.'); return; }
+            pflxPlaySfx('save');
+
+            var cohortIds = [];
+            document.querySelectorAll('.mc-qproject-cohort-cb:checked').forEach(function (cb) { cohortIds.push(cb.value); });
+
+            var existing = (mcProjectEditIndex >= 0 && mcProjects[mcProjectEditIndex]) ? mcProjects[mcProjectEditIndex] : null;
+            var subtaskRows = (function () {
+                var rows = _mcQPReadSubtasks();
+                if (existing && Array.isArray(existing.subtasks)) {
+                    var prior = {};
+                    existing.subtasks.forEach(function (s) { prior[s.id] = s; });
+                    rows.forEach(function (r) {
+                        var p = prior[r.id];
+                        if (p) { r.completed = !!p.completed; r.completedAt = p.completedAt || null; r.completedBy = p.completedBy || null; }
+                    });
+                }
+                return rows;
+            })();
+
+            var obj = {
+                id: existing ? existing.id : 'proj-' + Date.now(),
+                name: title,
+                description: document.getElementById('mc-qproject-desc')?.value || '',
+                status: existing ? (existing.status || 'planning') : 'planning',
+                startedAt: existing ? (existing.startedAt || '') : '',
+                dueDate: existing ? (existing.dueDate || '') : '',
+                flpTracking: existing ? (existing.flpTracking || 'bypass') : 'bypass',
+                assignedPlayers: mcQPlayersRead('qproject'),
+                subtasks: subtaskRows,
+                budget: existing ? (existing.budget || 0) : 0,
+                team: existing ? (existing.team || []) : [],
+                checkpointId: document.getElementById('mc-qproject-checkpoint')?.value || '',
+                link: existing ? (existing.link || '') : '',
+                // taskIds stays whatever _mcSyncTaskProjectLink has already
+                // written from the Task side — Quick Project doesn't pick
+                // tasks directly (see note above).
+                taskIds: existing ? (existing.taskIds || []) : [],
+                rewardBadges: mcQBadgeRead('qproject'),
+                fineTaxIds: mcQFineRead('qproject'),
+                links: mcQLRead('qproject'),
+                cohortIds: cohortIds,
+                timeframeInherit: existing ? (existing.timeframeInherit || 'global') : 'global',
+                timeframeScope: existing ? (existing.timeframeScope || 'checkpoint') : 'checkpoint',
+                pathway: existing ? (existing.pathway || '') : '',
+                pathwayNodeName: existing ? (existing.pathwayNodeName || '') : '',
+                skillLevel: existing ? (existing.skillLevel || 'beginner') : 'beginner',
+                learningObjectives: existing ? (existing.learningObjectives || '') : '',
+                deliverables: existing ? (existing.deliverables || '') : '',
+                bannerImage: existing ? (existing.bannerImage || '') : '',
+                attachments: existing ? (existing.attachments || []) : [],
+                createdAt: existing ? (existing.createdAt || new Date().toISOString().split('T')[0]) : new Date().toISOString().split('T')[0],
+                nodeType: existing ? (existing.nodeType || 'course') : 'course',
+                coopMode: existing ? (existing.coopMode || 'solo') : 'solo',
+                maxPlayers: existing ? (existing.maxPlayers || 4) : 4,
+                sessionCode: existing ? (existing.sessionCode || '') : '',
+                dcChannelEnabled: existing ? (existing.dcChannelEnabled || false) : false,
+                dcChannelId: existing ? (existing.dcChannelId || '') : '',
+                xbotEnabled: existing ? (existing.xbotEnabled || false) : false,
+                coopPlayers: existing ? (existing.coopPlayers || []) : []
+            };
+
+            if (mcProjectEditIndex >= 0) { mcProjects[mcProjectEditIndex] = obj; }
+            else { mcProjects.push(obj); }
+            mcSaveData('projects');
+
+            if (typeof pflxSyncBus !== 'undefined') {
+                pflxSyncBus.publish('mc:projects', { action: mcProjectEditIndex >= 0 ? 'update' : 'create', project: obj });
+            }
+
+            mcCancelQuickProjectForm();
+            if (typeof mcRenderProjects === 'function') mcRenderProjects();
+            mcLoadData();
+        };
+
+        window.mcOpenProjectFormSmart = function (index) {
+            var tabs = document.getElementById('mc-project-form-mode-tabs');
+            if (tabs) tabs.style.display = 'flex';
+            var tier = (typeof window.pflxHostTier === 'function') ? (window.pflxHostTier() || 'master') : 'master';
+            var defaultMode = (tier === 'guest' || tier === 'instructor') ? 'quick' : 'advanced';
+            mcSwitchProjectFormMode(defaultMode, index);
+        };
+        window.mcSwitchProjectFormMode = function (mode, index) {
+            if (typeof index !== 'number') index = (typeof mcProjectEditIndex === 'number') ? mcProjectEditIndex : -1;
+            var quickForm = document.getElementById('mc-quick-project-form');
+            var advForm = document.getElementById('mc-project-form');
+            var quickTab = document.getElementById('mc-project-mode-tab-quick');
+            var advTab = document.getElementById('mc-project-mode-tab-advanced');
+            if (mode === 'quick') {
+                if (advForm) advForm.style.display = 'none';
+                mcShowQuickProjectForm(index);
+                if (quickTab) quickTab.classList.add('active');
+                if (advTab) advTab.classList.remove('active');
+            } else {
+                if (quickForm) quickForm.style.display = 'none';
+                mcShowProjectForm(index);
+                if (advTab) advTab.classList.add('active');
+                if (quickTab) quickTab.classList.remove('active');
+            }
+        };
+
+        // ── Quick Checkpoint Form (v1.34) ──────────────────────────────────
+        // Checkpoint is the TOP of the hierarchy (Checkpoint > Project >
+        // Task) so it has no parent-assign field of its own — Projects and
+        // Tasks point up to it instead. Cohort assignment mirrors the
+        // Advanced Checkpoint form's own semantics exactly: an array of
+        // cohort NAME strings (not mcCohortGroups ids — checkpoints have
+        // always used player.cohort names directly), with an empty
+        // selection meaning "all cohorts", same as mcCPAllCohorts default.
+        function _mcQCPCohortNames() {
+            try { if (window.pflxCohortHub) return window.pflxCohortHub.names(); } catch (e) {}
+            var set = {};
+            (mcPlayers || []).forEach(function (p) {
+                if (!p) return;
+                String(p.cohort || '').split(/[,;]/).forEach(function (c) { c = c.trim(); if (c) set[c] = 1; });
+            });
+            return Object.keys(set).sort();
+        }
+        window.mcShowQuickCPForm = function (index) {
+            mcCPEditIndex = index;
+            var form = document.getElementById('mc-quick-cp-form');
+            if (!form) return;
+            form.style.display = 'block';
+
+            var cohortDiv = document.getElementById('mc-qcp-cohorts');
+            var names = _mcQCPCohortNames();
+            if (cohortDiv) {
+                cohortDiv.innerHTML = names.length === 0 ? '<span style="font-size:11px;color:rgba(255,255,255,0.25);">No cohorts found yet</span>' :
+                    names.map(function (n) {
+                        return '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;">' +
+                            '<input type="checkbox" class="mc-qcp-cohort-cb" value="' + escapeHtml(n) + '"> ' + escapeHtml(n) + '</label>';
+                    }).join('');
+            }
+
+            var cp = (index >= 0 && mcCheckpoints[index]) ? mcCheckpoints[index] : null;
+            document.getElementById('mc-qcp-name').value = cp ? (cp.name || '') : '';
+            document.getElementById('mc-qcp-desc').value = cp ? (cp.description || '') : '';
+            // rewardBadges on checkpoints is stored as {name,xc} objects (not
+            // badge id strings like Task/Project) — translate to ids for the
+            // shared dropdown widget, translate back on save.
+            var selectedBadgeIds = [];
+            if (cp && Array.isArray(cp.rewardBadges)) {
+                var allBadges = mcGetAllBadges();
+                cp.rewardBadges.forEach(function (b) {
+                    var found = allBadges.find(function (x) { return x.name === (b.name || b); });
+                    if (found) selectedBadgeIds.push(found.id);
+                });
+            }
+            mcQBadgeInit('qcheckpoint', selectedBadgeIds);
+            mcQFineInit('qcheckpoint', cp ? (cp.fineTaxIds || []) : []);
+            mcQLInit('qcheckpoint', cp ? (cp.links || []) : []);
+            var assignedTo = cp ? cp.assignedTo : 'all';
+            var assignedList = Array.isArray(assignedTo) ? assignedTo : [];
+            document.querySelectorAll('.mc-qcp-cohort-cb').forEach(function (cb) {
+                cb.checked = assignedList.indexOf(cb.value) >= 0;
+            });
+            form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        };
+
+        window.mcCancelQuickCPForm = function () {
+            var form = document.getElementById('mc-quick-cp-form');
+            if (form) form.style.display = 'none';
+            var tabs = document.getElementById('mc-cp-form-mode-tabs');
+            if (tabs) tabs.style.display = 'none';
+            mcCPEditIndex = -1;
+        };
+
+        window.mcSaveQuickCPForm = function () {
+            var name = (document.getElementById('mc-qcp-name')?.value || '').trim();
+            if (!name) { pflxPlaySfx('error'); alert('Checkpoint name is required.'); return; }
+            pflxPlaySfx('save');
+
+            var cohortNames = [];
+            document.querySelectorAll('.mc-qcp-cohort-cb:checked').forEach(function (cb) { cohortNames.push(cb.value); });
+            var assignedTo = cohortNames.length > 0 ? cohortNames : 'all';
+
+            var allBadges = mcGetAllBadges();
+            var rewardBadges = mcQBadgeRead('qcheckpoint').map(function (id) {
+                var b = allBadges.find(function (x) { return x.id === id; });
+                return b ? { name: b.name, xc: b.xc } : { name: id, xc: 0 };
+            });
+
+            var existing = (mcCPEditIndex >= 0 && mcCheckpoints[mcCPEditIndex]) ? mcCheckpoints[mcCPEditIndex] : null;
+
+            var obj = {
+                id: existing ? existing.id : 'cp-' + Date.now(),
+                attachments: existing ? (existing.attachments || []) : [],
+                name: name,
+                description: document.getElementById('mc-qcp-desc')?.value || '',
+                startDate: existing ? (existing.startDate || '') : '',
+                endDate: existing ? (existing.endDate || '') : '',
+                status: existing ? (existing.status || 'upcoming') : 'upcoming',
+                seasonId: existing ? (existing.seasonId || '') : '',
+                link: existing ? (existing.link || '') : '',
+                embedUrl: existing ? (existing.embedUrl || '') : '',
+                assignedTo: assignedTo,
+                bannerImage: existing ? (existing.bannerImage || '') : '',
+                taskIds: existing ? (existing.taskIds || []) : [],
+                projectIds: existing ? (existing.projectIds || []) : [],
+                jobIds: existing ? (existing.jobIds || []) : [],
+                rewardBadges: rewardBadges,
+                fineTaxIds: mcQFineRead('qcheckpoint'),
+                links: mcQLRead('qcheckpoint'),
+                xcReward: existing ? (existing.xcReward || 0) : 0,
+                tierVariants: existing ? existing.tierVariants : undefined,
+                createdBy: activeSession ? activeSession.brand : 'host'
+            };
+
+            if (mcCPEditIndex >= 0) { mcCheckpoints[mcCPEditIndex] = obj; }
+            else { mcCheckpoints.push(obj); }
+            mcSaveData('checkpoints');
+
+            if (typeof pflxSyncBus !== 'undefined') {
+                pflxSyncBus.publish('mc:checkpoints', { action: mcCPEditIndex >= 0 ? 'update' : 'create', checkpoint: obj });
+            }
+
+            mcCancelQuickCPForm();
+            if (typeof mcRenderCheckpoints === 'function') mcRenderCheckpoints();
+            mcLoadData();
+        };
+
+        window.mcOpenCPFormSmart = function (index) {
+            var tabs = document.getElementById('mc-cp-form-mode-tabs');
+            if (tabs) tabs.style.display = 'flex';
+            var tier = (typeof window.pflxHostTier === 'function') ? (window.pflxHostTier() || 'master') : 'master';
+            var defaultMode = (tier === 'guest' || tier === 'instructor') ? 'quick' : 'advanced';
+            mcSwitchCPFormMode(defaultMode, index);
+        };
+        window.mcSwitchCPFormMode = function (mode, index) {
+            if (typeof index !== 'number') index = (typeof mcCPEditIndex === 'number') ? mcCPEditIndex : -1;
+            var quickForm = document.getElementById('mc-quick-cp-form');
+            var advForm = document.getElementById('mc-cp-form');
+            var quickTab = document.getElementById('mc-cp-mode-tab-quick');
+            var advTab = document.getElementById('mc-cp-mode-tab-advanced');
+            if (mode === 'quick') {
+                if (advForm) advForm.style.display = 'none';
+                mcShowQuickCPForm(index);
+                if (quickTab) quickTab.classList.add('active');
+                if (advTab) advTab.classList.remove('active');
+            } else {
+                if (quickForm) quickForm.style.display = 'none';
+                mcShowCPForm(index);
+                if (advTab) advTab.classList.add('active');
+                if (quickTab) quickTab.classList.remove('active');
+            }
+        };
+
         // ── Subtask Editor (host side) ────────────────────────────────────
         // Add/remove/edit checklist rows inside the task form. Each row has a
         // label input + URL input + delete button. Save reads all rows into
@@ -33390,6 +34567,10 @@
                     return Object.keys(v).length ? v : undefined;
                 })(),
                 roundId: document.getElementById('mc-task-checkpoint')?.value || '',
+                // v1.34 — writes directly onto the task (see Quick Task form
+                // note above); keeps the project's own taskIds checkbox list
+                // in sync below so either direction of editing stays correct.
+                projectId: document.getElementById('mc-task-project')?.value || '',
                 xcReward: parseInt(document.getElementById('mc-task-xc')?.value || '50', 10),
                 dueDate: document.getElementById('mc-task-due')?.value || '',
                 completionMode: document.getElementById('mc-task-mode')?.value || 'one-time',
@@ -33418,6 +34599,10 @@
                 selfEvalRequired: document.getElementById('mc-task-self-eval')?.value || 'none',
                 postFeedbackUpload: document.getElementById('mc-task-post-feedback-upload')?.checked || false,
                 rewardBadges: rewardBadges,
+                // v1.34 — Fine/Tax allocation lives only in the Quick form's
+                // UI for now; preserve it on Advanced saves so re-saving a
+                // task from Advanced doesn't silently wipe what Quick set.
+                fineTaxIds: mcTaskEditIndex >= 0 ? (mcTasks[mcTaskEditIndex].fineTaxIds || []) : [],
                 createdBy: mcTaskEditIndex >= 0 ? (mcTasks[mcTaskEditIndex].createdBy || 'host') : (activeSession ? activeSession.brand : 'host'),
                 createdAt: mcTaskEditIndex >= 0 ? (mcTasks[mcTaskEditIndex].createdAt || new Date().toISOString().split('T')[0]) : new Date().toISOString().split('T')[0],
                 // ATTACHMENT PRESERVE (July 15) — see checkpoint save.
@@ -33462,6 +34647,7 @@
             if (mcTaskEditIndex >= 0) { mcTasks[mcTaskEditIndex] = obj; }
             else { mcTasks.push(obj); }
             mcSaveData('tasks');
+            _mcSyncTaskProjectLink(obj.id, obj.projectId);
 
             // Publish to sync bus
             if (typeof pflxSyncBus !== 'undefined') {
@@ -33486,7 +34672,7 @@
         }
 
         function mcEditTask(index) {
-            mcShowTaskForm(index);
+            mcOpenTaskFormSmart(index);
         }
 
         // ── Streak system ──
@@ -35266,6 +36452,8 @@
         function mcCancelProjectForm() {
             var form = document.getElementById('mc-project-form');
             if (form) form.style.display = 'none';
+            var tabs = document.getElementById('mc-project-form-mode-tabs');
+            if (tabs) tabs.style.display = 'none';
             mcProjectEditIndex = -1;
         }
 
@@ -35420,6 +36608,11 @@
                 link: document.getElementById('mc-project-link')?.value || '',
                 taskIds: taskIds,
                 rewardBadges: rewardBadges,
+                // v1.34 — fineTaxIds and the Quick-form multi-link list live
+                // only in Quick UI for now; preserve them here so saving from
+                // Advanced doesn't wipe what Quick set.
+                fineTaxIds: mcProjectEditIndex >= 0 ? (mcProjects[mcProjectEditIndex].fineTaxIds || []) : [],
+                links: mcProjectEditIndex >= 0 ? (mcProjects[mcProjectEditIndex].links || []) : [],
                 cohortIds: cohortIds,
                 timeframeInherit: document.getElementById('mc-project-timeframe-inherit')?.value || 'global',
                 timeframeScope: document.getElementById('mc-project-timeframe-scope')?.value || 'checkpoint',
@@ -35540,7 +36733,7 @@
         }
 
         function mcEditProject(index) {
-            mcShowProjectForm(index);
+            mcOpenProjectFormSmart(index);
         }
 
         // ── DUPLICATE (July 12) — clone a Project / Task / Job / Season.
@@ -64000,8 +65193,8 @@ RESPONSE RULES:
             });
             // Quick create
             actions.push({ label: 'New Checkpoint', icon: '＋', group: 'CREATE', keywords: 'new create add checkpoint', run: function () { try { mcNav('checkpoints'); mcCreateCheckpoint(); } catch (e) {} } });
-            actions.push({ label: 'New Project',    icon: '＋', group: 'CREATE', keywords: 'new create add project', run: function () { try { mcNav('projects'); mcShowProjectForm(-1); } catch (e) {} } });
-            actions.push({ label: 'New Task',       icon: '＋', group: 'CREATE', keywords: 'new create add task', run: function () { try { mcNav('tasks'); mcShowTaskForm(-1); } catch (e) {} } });
+            actions.push({ label: 'New Project',    icon: '＋', group: 'CREATE', keywords: 'new create add project', run: function () { try { mcNav('projects'); mcOpenProjectFormSmart(-1); } catch (e) {} } });
+            actions.push({ label: 'New Task',       icon: '＋', group: 'CREATE', keywords: 'new create add task', run: function () { try { mcNav('tasks'); mcOpenTaskFormSmart(-1); } catch (e) {} } });
             actions.push({ label: 'New from Template…', icon: '📄', group: 'CREATE', keywords: 'template new from spawn', run: function () { try { pflxOpenTemplatePicker(); } catch (e) {} } });
             actions.push({ label: 'My Portfolio', icon: '🏆', group: 'NAVIGATE', keywords: 'portfolio resume showcase approved', run: function () { try { if (typeof ppNav === 'function') ppNav('portfolio'); } catch (e) {} } });
             actions.push({ label: 'Sprints…', icon: '🏃', group: 'NAVIGATE', keywords: 'sprint cycle timebox', run: function () { try { pflxOpenSprintsPicker(); } catch (e) {} } });
