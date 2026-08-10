@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 32;
+      window.PFLX_PATCH   = 33;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -4122,6 +4122,11 @@
             height: calc(100vh - var(--toolbar-height) - var(--ticker-height));
             overflow: hidden;
         }
+        /* v1.33 MOBILE MC SIDEBAR DRAWER — hidden on desktop; the
+           @media (max-width:768px) block below turns these on and
+           turns .mc-sidebar into an off-canvas drawer. */
+        .mc-mobile-sidebar-toggle { display: none; }
+        .mc-sidebar-backdrop { display: none; }
         .mc-sidebar {
             width: 230px;
             min-width: 230px;
@@ -5473,6 +5478,99 @@
                 left: 12px;
                 right: 12px;
                 min-width: 0;
+            }
+        }
+
+        /* MOBILE — Aug 10 fix #2: .mc-sidebar (Mission Control) is a
+           permanently-fixed 230px/180px-wide column (see base rule
+           above and the 1024px override) with NO phone breakpoint at
+           all, and no toggle/drawer mechanism existed anywhere in this
+           file to extend. On a 386px-wide phone that left .mc-content
+           only ~200px, and .mc-stat-grid still overflowed it
+           (measured scrollWidth 306px vs 200px client width) — content
+           was clipped and needed horizontal scrolling to read. Fix:
+           .mc-sidebar becomes an off-canvas drawer (position:fixed,
+           slid off-screen via transform, toggled by a hamburger button
+           wired to mcToggleMobileSidebar() — see the mcNav() area of
+           the script), so .mc-content gets the full viewport width. */
+        @media (max-width: 768px) {
+            .mc-mobile-sidebar-toggle {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                position: absolute;
+                top: 14px;
+                left: 14px;
+                width: 38px;
+                height: 38px;
+                border-radius: 10px;
+                border: 1px solid rgba(0,212,255,0.25);
+                background: rgba(6,9,13,0.92);
+                color: var(--cyan);
+                font-size: 18px;
+                z-index: 56;
+                cursor: pointer;
+            }
+
+            .mc-layout {
+                position: relative;
+                overflow: visible;
+            }
+
+            .mc-sidebar {
+                position: fixed;
+                top: var(--toolbar-height);
+                bottom: 0;
+                left: 0;
+                width: 240px;
+                min-width: 240px;
+                max-width: 82vw;
+                height: auto;
+                transform: translateX(-100%);
+                transition: transform 0.25s ease;
+                z-index: 55;
+                box-shadow: 8px 0 24px rgba(0,0,0,0.4);
+            }
+
+            /* NOTE: the toggle button and backdrop are DOM siblings of
+               .mc-layout (inserted just before it), not descendants, so
+               the open-state class has to live on their shared ancestor
+               .mission-control-view — a .mc-layout.mc-sidebar-open
+               descendant selector would never match the backdrop. Caught
+               live: the backdrop rendered display:none forever until
+               this was fixed. */
+            .mission-control-view.mc-sidebar-open .mc-sidebar {
+                transform: translateX(0);
+            }
+
+            .mc-sidebar-backdrop {
+                position: fixed;
+                top: var(--toolbar-height);
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0,0,0,0.5);
+                z-index: 50;
+            }
+
+            .mission-control-view.mc-sidebar-open .mc-sidebar-backdrop {
+                display: block;
+            }
+
+            .mc-content {
+                width: 100%;
+                min-width: 0;
+                padding: 56px 16px 24px;
+            }
+
+            .mc-stat-grid {
+                grid-template-columns: repeat(2,1fr) !important;
+            }
+
+            .mc-table {
+                display: block;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
             }
         }
 
@@ -7161,6 +7259,10 @@
                     <button class="app-refresh-btn" onclick="pflxRefreshMC(this)" title="Refresh Mission Control" style="z-index:60;">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                     </button>
+                    <!-- v1.33 MOBILE: hamburger toggle + backdrop for the
+                         off-canvas .mc-sidebar drawer (phones only). -->
+                    <button class="mc-mobile-sidebar-toggle" onclick="mcToggleMobileSidebar()" title="Menu" aria-label="Toggle Mission Control menu">&#9776;</button>
+                    <div class="mc-sidebar-backdrop" onclick="mcToggleMobileSidebar(false)"></div>
                     <div class="mc-layout">
                         <!-- LEFT SIDEBAR -->
                         <div class="mc-sidebar">
@@ -25647,6 +25749,36 @@
             // My Work widget refresh (only shown on Dashboard, but harmless elsewhere).
             try { if (typeof pflxRenderMyWork === 'function') pflxRenderMyWork(); } catch (e) {}
         }
+
+        // ── v1.33 MOBILE MC SIDEBAR DRAWER (Aug 10) ──
+        // .mc-sidebar has no phone breakpoint — see the @media
+        // (max-width:768px) CSS block near .mc-mobile-sidebar-toggle.
+        // This only toggles the "mc-sidebar-open" class the CSS keys
+        // off of; it never touches mcNav's own tab-switching/rendering,
+        // so player-view routing and panel rendering are untouched.
+        //
+        // The open/closed class lives on .mission-control-view (not
+        // .mc-layout) because the toggle button and backdrop are DOM
+        // siblings of .mc-layout, not descendants — see the CSS note
+        // above .mission-control-view.mc-sidebar-open in the
+        // @media(max-width:768px) block.
+        try {
+            window.mcToggleMobileSidebar = function (forceOpen) {
+                var view = document.querySelector('.mission-control-view');
+                if (!view) return;
+                var open = (typeof forceOpen === 'boolean') ? forceOpen : !view.classList.contains('mc-sidebar-open');
+                view.classList.toggle('mc-sidebar-open', open);
+            };
+            // Auto-close the drawer once a sidebar nav button is tapped,
+            // so picking a section doesn't leave the drawer covering it.
+            document.addEventListener('click', function (ev) {
+                var view = document.querySelector('.mission-control-view');
+                if (!view || !view.classList.contains('mc-sidebar-open')) return;
+                if (ev.target.closest && ev.target.closest('.mc-nav-btn')) {
+                    window.mcToggleMobileSidebar(false);
+                }
+            });
+        } catch (e) { console.warn('[v1.33 mc sidebar drawer]', e); }
 
         // ── Dashboard ───────────────────────────────────────────────
         function mcRenderDashboard() {
