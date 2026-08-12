@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 45;
+      window.PFLX_PATCH   = 47;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -6647,7 +6647,13 @@
                     <span class="tr-dot"></span>
                     <span class="tr-label" id="tr-label-text">HOST VIEW</span>
                 </button>
-                <button class="toolbar-chat-btn" id="toolbar-chat-btn" type="button" title="Open PFLX Chat — direct + group messages" onclick="pflxChatToggle()">
+                <!-- v1.47 (Ennis): "Remove Chat from top toolbar. Its not needed.
+                     This will provide more space." Hidden rather than deleted —
+                     other code (unread-badge mirrors at ~L59948/~L65074) reads
+                     #toolbar-chat-badge via null-guarded lookups, so keeping the
+                     node in the DOM (just invisible) is the safer no-risk path
+                     to reclaiming the toolbar space Ennis asked for. -->
+                <button class="toolbar-chat-btn" id="toolbar-chat-btn" type="button" title="Open PFLX Chat — direct + group messages" onclick="pflxChatToggle()" style="display:none;">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                     <span class="tcb-label">CHAT</span>
                     <span class="dc-qc-badge" id="toolbar-chat-badge" style="position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;background:#ff3b6c;color:#fff;border-radius:9px;font-size:10px;display:none;align-items:center;justify-content:center;padding:0 5px;font-family:'Share Tech Mono',monospace;font-weight:700;"></span>
@@ -7335,6 +7341,18 @@
                                 <button class="mc-nav-btn mc-host-only" data-mc="calendar" onclick="mcNav('calendar')">
                                     <span class="mc-icon">&#x1F4C5;</span> Calendar
                                 </button>
+                                <!-- v1.47 (Ennis) — hierarchy order in the sidebar now
+                                     matches the actual Season → Program → Checkpoint →
+                                     Project → Task chain: Seasons moved up from TOOLS,
+                                     and Programs is promoted to its own top-level tab
+                                     (was previously only reachable nested inside a
+                                     Season's Advanced form — see mc-panel-programs). -->
+                                <button class="mc-nav-btn mc-host-only" data-mc="seasons" onclick="mcNav('seasons')">
+                                    <span class="mc-icon">&#x1F4C5;</span> Seasons & Evo Ranks
+                                </button>
+                                <button class="mc-nav-btn mc-host-only" data-mc="programs" onclick="mcNav('programs')">
+                                    <span class="mc-icon">&#x1F4D0;</span> Programs
+                                </button>
                                 <button class="mc-nav-btn" data-mc="checkpoints" onclick="mcNav('checkpoints')">
                                     <span class="mc-icon">&#x1F3C1;</span> Checkpoints
                                 </button>
@@ -7377,9 +7395,6 @@
                                     <span class="mc-badge" id="mc-live-session-badge" style="display:none;background:rgba(239,68,68,0.2);color:#ef4444;">LIVE</span>
                                 </button>
                                 <div class="mc-nav-label mc-host-only">TOOLS</div>
-                                <button class="mc-nav-btn mc-host-only" data-mc="seasons" onclick="mcNav('seasons')">
-                                    <span class="mc-icon">&#x1F4C5;</span> Seasons & Evo Ranks
-                                </button>
                                 <button class="mc-nav-btn mc-host-only" data-mc="media" onclick="mcNav('media')">
                                     <span class="mc-icon">&#x1F3AC;</span> Media Embed
                                 </button>
@@ -8709,6 +8724,72 @@
                                 <div id="mc-calendar-list"></div>
                             </div>
 
+                            <!-- v1.47 (Ennis: "There should also be a Programs tab under
+                                 Seasons") — a top-level management surface for Programs,
+                                 parallel to Seasons/Checkpoints/Projects/Tasks. The v1.43
+                                 "Programs in this Season" widget nested inside a Season's
+                                 Advanced form still exists unchanged (a season-scoped quick
+                                 view) — this tab is the general one, listing every Program
+                                 across every Season, with its own Season picker so a
+                                 Program can be created/edited without first opening its
+                                 parent Season's form. Both read/write the same mcPrograms
+                                 array, so they always agree. -->
+                            <div class="mc-panel" id="mc-panel-programs">
+                                <h1 class="mc-page-title">Programs</h1>
+                                <p class="mc-page-desc">Amalgams of a Season — a run (e.g. a 10-week after-school program) that generates its own Checkpoints on a cadence.</p>
+                                <div style="display:flex;gap:10px;margin-bottom:20px;">
+                                    <button class="mc-btn mc-btn-green" onclick="mcShowProgramTabForm('')">+ New Program</button>
+                                </div>
+                                <div id="mc-program-tab-form" style="display:none;background:rgba(10,18,40,0.5);border:1px solid rgba(167,139,250,0.3);border-radius:12px;padding:20px;margin-bottom:20px;">
+                                    <div style="font-size:14px;font-weight:700;color:#c4b5fd;margin-bottom:16px;">PROGRAM FORM</div>
+                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Season *</label>
+                                            <select id="mc-program-tab-season" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                                <option value="">Select season...</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Program Name *</label>
+                                            <input type="text" id="mc-program-tab-name" placeholder="e.g. Fall After-School Cohort" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                        </div>
+                                    </div>
+                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Start Date</label>
+                                            <input type="date" id="mc-program-tab-start" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                        </div>
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Status</label>
+                                            <select id="mc-program-tab-status" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                                <option value="draft">draft</option>
+                                                <option value="active">active</option>
+                                                <option value="completed">completed</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div style="display:grid;grid-template-columns:1fr 1fr 2fr;gap:12px;margin-bottom:12px;">
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Duration (weeks)</label>
+                                            <input type="number" id="mc-program-tab-weeks" value="10" min="1" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                        </div>
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Checkpoint Cadence (weeks)</label>
+                                            <input type="number" id="mc-program-tab-cadence" value="2" min="1" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                        </div>
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Description</label>
+                                            <input type="text" id="mc-program-tab-desc" placeholder="Optional" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                        </div>
+                                    </div>
+                                    <div style="display:flex;gap:8px;">
+                                        <button class="mc-btn mc-btn-green" onclick="mcSaveProgramTabForm()">Save Program</button>
+                                        <button class="mc-btn" onclick="mcHideProgramTabForm()">Cancel</button>
+                                    </div>
+                                </div>
+                                <div id="mc-programs-tab-list"></div>
+                            </div>
+
                             <div class="mc-panel" id="mc-panel-checkpoints">
                                 <h1 class="mc-page-title">Checkpoints</h1>
                                 <p class="mc-page-desc">Manage rounds, milestones, and checkpoint schedules.</p>
@@ -9852,7 +9933,7 @@
                                                 <select id="mc-project-dc-channel-select" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(139,92,246,0.3);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
                                                     <option value="">— Auto (use this project's own channel) —</option>
                                                 </select>
-                                                <div style="font-size:9px;color:#8a93b8;margin-top:4px;">Notifications (task completion, deadlines, @tags) post to this channel — and to its connected Slack/Discord once webhooks are set.</div>
+                                                <div style="font-size:9px;color:#8a93b8;margin-top:4px;">Notifications (task completion, deadlines, @tags) post to this channel — and to its connected Slack/Discord once webhooks are set. Also fires automatic deadline reminders (3 days out, 1 day out, due today, and overdue) — like a calendar invite for this Project.</div>
                                             </div>
                                             <label style="display:flex;align-items:center;gap:8px;font-size:11px;color:#e0e6ff;cursor:pointer;margin-top:6px;">
                                                 <input type="checkbox" id="mc-project-xbot-enabled" checked> Enable X-Bot communication
@@ -23400,6 +23481,10 @@
             // per-player via cp.latenessTaxedAt, so re-running here is safe.
             try { if (typeof window.pflxCheckpointLatenessSweep === 'function') setTimeout(window.pflxCheckpointLatenessSweep, 500); } catch (e) {}
 
+            // v1.46 — same idea for the Project Discord/Slack reminder sweep.
+            // Host-gated + per-tier idempotent inside the function.
+            try { if (typeof window.pflxProjectReminderSweep === 'function') setTimeout(window.pflxProjectReminderSweep, 700); } catch (e) {}
+
             // Seed-on-empty — ONLY if this device has never been seeded before.
             // Once the seed has run we set pflx_mc_seeded so subsequent empty
             // states (e.g. host deleted everyone) STAY empty instead of
@@ -24930,7 +25015,8 @@
                     // host session left open catches a checkpoint the moment it
                     // crosses its endDate rather than only at next page load.
                     // Host-gated + per-player idempotent inside the function.
-                    _mcHealthIv = setInterval(function () { try { window.mcCloudPull(); } catch (e) {} try { if (typeof window.pflxCheckpointLatenessSweep === 'function') window.pflxCheckpointLatenessSweep(); } catch (e) {} }, 180000);
+                    // v1.46 — same tick also re-runs the Project reminder sweep.
+                    _mcHealthIv = setInterval(function () { try { window.mcCloudPull(); } catch (e) {} try { if (typeof window.pflxCheckpointLatenessSweep === 'function') window.pflxCheckpointLatenessSweep(); } catch (e) {} try { if (typeof window.pflxProjectReminderSweep === 'function') window.pflxProjectReminderSweep(); } catch (e) {} }, 180000);
                 }
                 return;
             }
@@ -26209,6 +26295,7 @@
             if (tab === 'badges') mcRenderBadges();
             // Task Management — individual native panels
             if (tab === 'calendar') mcRenderMasterCalendar();
+            if (tab === 'programs') mcRenderProgramsTab();
             if (tab === 'checkpoints') mcRenderCheckpoints();
             if (tab === 'progress') mcRenderProgress();
             if (tab === 'tasks') mcRenderTasks();
@@ -30765,38 +30852,26 @@
         // through the hierarchy.
         function mcJumpToItem(kind, id) {
             try {
-                // v1.45 — Program has no top-level list of its own (it lives
-                // nested inside its parent Season's Advanced form), so it
-                // needs bespoke navigation: open the owning Season's form,
-                // THEN highlight the program row inside it.
-                if (kind === 'program') {
-                    var pg = (typeof mcPrograms !== 'undefined' ? mcPrograms : []).find(function (p) { return p && p.id === id; });
-                    if (!pg) return;
-                    var sIdx = (typeof mcSeasons !== 'undefined' ? mcSeasons : []).findIndex(function (s) { return s && s.id === pg.seasonId; });
-                    if (typeof mcNav === 'function') mcNav('seasons');
-                    setTimeout(function () {
-                        try { if (sIdx >= 0 && typeof mcShowSeasonForm === 'function') mcShowSeasonForm(sIdx); } catch (e) {}
-                        setTimeout(function () {
-                            var el = document.querySelector('[data-mc-program-id="' + id + '"]');
-                            if (!el) return;
-                            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                            var prev = el.style.boxShadow;
-                            el.style.boxShadow = '0 0 0 3px rgba(167,139,250,0.7), 0 0 32px rgba(167,139,250,0.5)';
-                            setTimeout(function () { el.style.boxShadow = prev; }, 1600);
-                        }, 200);
-                    }, 220);
-                    return;
-                }
+                // v1.47 — Program now has its own top-level tab (mc-panel-programs,
+                // see "TOP-LEVEL PROGRAMS TAB" below), so it can use the same
+                // generic nav+highlight path as every other kind — no more
+                // opening the parent Season's form first (that bespoke v1.45
+                // path is gone). Scoped to #mc-panel-programs specifically since
+                // the v1.43 nested "Programs in this Season" widget also still
+                // renders rows with the same data-mc-program-id attribute —
+                // without the scope, a program that happens to also be showing
+                // in an open Season form could highlight the wrong (hidden) copy.
                 var view = kind === 'checkpoint' ? 'checkpoints'
                          : kind === 'project'    ? 'projects'
                          : kind === 'task'       ? 'tasks'
                          : kind === 'season'     ? 'seasons'
+                         : kind === 'program'    ? 'programs'
                          : null;
                 if (!view) return;
                 if (typeof mcNav === 'function') mcNav(view);
                 // Highlight the target card briefly.
                 setTimeout(function () {
-                    var sel = '[data-mc-' + kind + '-id="' + id + '"]';
+                    var sel = kind === 'program' ? '#mc-panel-programs [data-mc-program-id="' + id + '"]' : '[data-mc-' + kind + '-id="' + id + '"]';
                     var el = document.querySelector(sel);
                     if (!el) return;
                     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -31104,6 +31179,62 @@
             } catch (e) { console.warn('[lateness tax] sweep failed', e); }
         }
         window.pflxCheckpointLatenessSweep = pflxCheckpointLatenessSweep;
+
+        // ── PROJECT DISCORD/SLACK REMINDER SWEEP (v1.46, Ennis) ──────────────
+        // "Projects as duration/management-focused with Discord messaging
+        // (timely reports/reminders 'like a Google Calendar invite')." Fires
+        // through the EXISTING pflxEmitProjectEvent → DarkCampus feed bridge
+        // (feedType 'reminders' — already one of DarkCampus's anticipated
+        // feedOptions keys, see the "Project → DarkCampus Channel notification
+        // bridge" block above) rather than posting to Discord directly, so it
+        // automatically respects whatever channel a host has linked via
+        // dcChannelId AND whichever feed types that channel has toggled on —
+        // no new delivery mechanism, just a new automatic trigger for the one
+        // that already exists.
+        //
+        // Same idempotent-sweep shape as pflxCheckpointLatenessSweep just
+        // above: a fixed set of day-offset thresholds relative to a Project's
+        // startedAt/dueDate, each fired at most once ever (tracked in
+        // p.remindersSent, cloud-synced with the rest of the project record),
+        // host-gated so a player's own device never fires reminders for other
+        // people's projects, and safe to re-run any number of times.
+        var MC_PROJECT_REMINDER_TIERS = [
+            { key: 'start-1d', when: 'start', offsetDays: -1, icon: '📅', text: function (p) { return 'starts tomorrow (' + p.startedAt + ').'; } },
+            { key: 'start-0d', when: 'start', offsetDays: 0,  icon: '🚀', text: function (p) { return 'starts TODAY.'; } },
+            { key: 'due-3d',   when: 'due',   offsetDays: -3, icon: '⏰', text: function (p) { return 'is due in 3 days (' + (p.dueDate || p.endDate || p.deadline) + ').'; } },
+            { key: 'due-1d',   when: 'due',   offsetDays: -1, icon: '⏰', text: function (p) { return 'is due tomorrow (' + (p.dueDate || p.endDate || p.deadline) + ').'; } },
+            { key: 'due-0d',   when: 'due',   offsetDays: 0,  icon: '🚨', text: function (p) { return 'is due TODAY.'; } },
+            { key: 'overdue',  when: 'due',   offsetDays: 1,  icon: '⚠️', text: function (p) { return 'is now OVERDUE (was due ' + (p.dueDate || p.endDate || p.deadline) + ').'; } }
+        ];
+        function pflxProjectReminderSweep() {
+            try {
+                if (typeof mcIsHost !== 'function' || !mcIsHost()) return;
+                if (typeof mcProjects === 'undefined' || !Array.isArray(mcProjects) || !mcProjects.length) return;
+                var todayISO = new Date().toISOString().slice(0, 10);
+                var dirty = false;
+                mcProjects.forEach(function (p) {
+                    // Only Projects a host has explicitly opted into channel
+                    // notifications for (the same dcChannelEnabled toggle that
+                    // already gates task-completion/deadline posts).
+                    if (!p || !p.id || !p.dcChannelEnabled) return;
+                    if (p.status === 'completed') return;   // wrapped projects get no more reminders
+                    MC_PROJECT_REMINDER_TIERS.forEach(function (tier) {
+                        var anchor = tier.when === 'start' ? p.startedAt : (p.dueDate || p.endDate || p.deadline);
+                        if (!anchor) return;
+                        var fireDate = _mcAddDaysISO(anchor, tier.offsetDays);
+                        if (fireDate > todayISO) return;      // this threshold hasn't arrived yet
+                        p.remindersSent = p.remindersSent || {};
+                        if (p.remindersSent[tier.key]) return; // already sent — never repeat
+                        var msg = tier.icon + ' "' + (p.name || p.title || 'Project') + '" ' + tier.text(p);
+                        try { if (typeof pflxEmitProjectEvent === 'function') pflxEmitProjectEvent(p.id, 'reminders', msg); } catch (e) {}
+                        p.remindersSent[tier.key] = Date.now();
+                        dirty = true;
+                    });
+                });
+                if (dirty) { try { mcSaveData('projects'); } catch (e) {} }
+            } catch (e) { console.warn('[project reminders] sweep failed', e); }
+        }
+        window.pflxProjectReminderSweep = pflxProjectReminderSweep;
 
         // ── CHECKPOINT PROGRESSION GATE (July 15, Ennis) ──
         // Players may only complete tasks whose checkpoint is ACTIVE (or already
@@ -37857,6 +37988,7 @@
             mcSaveData('programs');
             mcSaveData('checkpoints');
             mcSeasonRenderPrograms();
+            try { mcRenderProgramsTab(); } catch (e) {}   // v1.47 — keep the top-level Programs tab in sync too
         };
         window.mcSeasonGenerateCheckpoints = function (id) {
             var pg = (mcPrograms || []).find(function (p) { return p && p.id === id; });
@@ -37890,7 +38022,126 @@
             mcSeasonRenderPrograms();
             try { mcSeasonRenderCheckpoints(); } catch (e) {}
             try { pflxRenderSeasonBar(); } catch (e) {}
+            // v1.47 — also refresh the top-level Programs tab if it's the one
+            // open (safe no-op otherwise; mcRenderProgramsTab bails out if its
+            // list element isn't in the DOM's active panel).
+            try { mcRenderProgramsTab(); } catch (e) {}
             try { window.pflxShowSaveToast && window.pflxShowSaveToast('Generated ' + made + ' checkpoint(s) for ' + pg.name); } catch (e) {}
+        };
+
+        // ── TOP-LEVEL PROGRAMS TAB (v1.47, Ennis: "There should also be a
+        // Programs tab under Seasons") ───────────────────────────────────
+        // The v1.43 "Programs in this Season" widget above stays exactly as
+        // it was — a quick view nested inside a Season's Advanced form,
+        // scoped to mcSeasonCurrentId(). This is the general management
+        // surface: every Program across every Season, in one flat list, with
+        // its own Season picker in the form (since there's no "current
+        // season" context here) so a Program can be created without first
+        // opening its parent Season. Both surfaces read/write the same
+        // mcPrograms array, so they can never drift out of sync — and
+        // GENERATE CHECKPOINTS / DELETE below reuse the exact same
+        // mcSeasonGenerateCheckpoints(id) / mcSeasonDeleteProgram(id)
+        // functions the nested widget uses (both already take a program id
+        // directly, no season-form dependency) rather than duplicating that
+        // logic here.
+        var mcProgramTabEditId = '';
+        function mcRenderProgramsTab() {
+            mcLoadData();
+            var list = document.getElementById('mc-programs-tab-list');
+            if (!list) return;
+            var progs = (typeof mcPrograms !== 'undefined' && Array.isArray(mcPrograms)) ? mcPrograms.slice() : [];
+            if (!progs.length) {
+                list.innerHTML = '<div class="mc-card" style="text-align:center;color:rgba(255,255,255,0.3);padding:40px;">No programs configured yet. Click <strong>+ New Program</strong> to start one — pick its Season, a start date, a duration, and a checkpoint cadence.</div>';
+                return;
+            }
+            // Group by Season (undated/orphaned programs — e.g. a season that
+            // was since deleted — land in a trailing "No Season" bucket) so a
+            // host managing several seasons at once can scan this like an
+            // outline rather than a flat, unordered pile.
+            var seasonsById = {}; (mcSeasons || []).forEach(function (s) { if (s && s.id) seasonsById[s.id] = s; });
+            var groups = {}, order = [];
+            progs.forEach(function (pg) {
+                var season = seasonsById[pg.seasonId];
+                var key = season ? season.id : '__none__';
+                if (!groups[key]) { groups[key] = { season: season, items: [] }; order.push(key); }
+                groups[key].items.push(pg);
+            });
+            list.innerHTML = order.map(function (key) {
+                var g = groups[key];
+                var seasonLabel = g.season ? escapeHtml(g.season.name || 'Season') : 'No Season';
+                var rows = g.items.map(function (pg) {
+                    var col = pg.status === 'active' ? '#4ade80' : (pg.status === 'completed' ? '#8a92b0' : '#c4b5fd');
+                    var cpCount = (mcCheckpoints || []).filter(function (c) { return c && c.programId === pg.id; }).length;
+                    var cadence = (pg.durationWeeks || 0) + 'wk program · ' + (pg.checkpointCadenceWeeks || 0) + 'wk cadence';
+                    return '<div class="mc-card" data-mc-program-id="' + escapeHtml(pg.id) + '" style="border-left:3px solid ' + col + ';display:flex;align-items:center;gap:12px;flex-wrap:wrap;">' +
+                        '<span style="flex:1;min-width:160px;font-size:14px;color:#f0f0ff;font-weight:800;">&#x1F4D0; ' + escapeHtml(pg.name || 'Program') + '</span>' +
+                        '<span class="mc-pill" style="background:rgba(' + (pg.status === 'active' ? '74,222,128' : pg.status === 'completed' ? '138,146,176' : '196,181,253') + ',0.12);color:' + col + ';">' + escapeHtml((pg.status || 'draft').toUpperCase()) + '</span>' +
+                        '<span style="font-size:11px;color:rgba(255,255,255,0.4);font-family:monospace;">' + escapeHtml(pg.startDate || 'no start date') + ' · ' + escapeHtml(cadence) + '</span>' +
+                        '<span style="font-size:11px;color:rgba(255,255,255,0.35);">' + cpCount + ' checkpoint(s) generated</span>' +
+                        '<div style="display:flex;gap:6px;">' +
+                            '<button class="mc-btn" style="padding:4px 12px;font-size:10px;background:rgba(74,222,128,0.1);border-color:rgba(74,222,128,0.3);color:#4ade80;" onclick="mcSeasonGenerateCheckpoints(\'' + escapeHtml(pg.id) + '\')">Generate Checkpoints</button>' +
+                            '<button class="mc-btn" style="padding:4px 12px;font-size:10px;" onclick="mcShowProgramTabForm(\'' + escapeHtml(pg.id) + '\')">Edit</button>' +
+                            '<button class="mc-btn mc-btn-red" style="padding:4px 12px;font-size:10px;" onclick="mcSeasonDeleteProgram(\'' + escapeHtml(pg.id) + '\')">Delete</button>' +
+                        '</div>' +
+                    '</div>';
+                }).join('');
+                return '<div style="font-size:11px;font-weight:700;color:rgba(167,139,250,0.7);letter-spacing:0.1em;margin:16px 0 8px;text-transform:uppercase;">&#x1F4C5; ' + seasonLabel + '</div>' +
+                    '<div style="display:flex;flex-direction:column;gap:8px;">' + rows + '</div>';
+            }).join('');
+        }
+        window.mcRenderProgramsTab = mcRenderProgramsTab;
+
+        window.mcShowProgramTabForm = function (id) {
+            mcProgramTabEditId = id || '';
+            var pg = id ? (mcPrograms || []).find(function (p) { return p && p.id === id; }) : null;
+            var ssel = document.getElementById('mc-program-tab-season');
+            if (ssel) {
+                ssel.innerHTML = '<option value="">Select season...</option>' + (mcSeasons || []).map(function (s) {
+                    return '<option value="' + escapeHtml(s.id) + '"' + (pg && pg.seasonId === s.id ? ' selected' : '') + '>' + escapeHtml(s.name) + '</option>';
+                }).join('');
+            }
+            var el;
+            el = document.getElementById('mc-program-tab-name');   if (el) el.value = pg ? (pg.name || '') : '';
+            el = document.getElementById('mc-program-tab-start');  if (el) el.value = pg ? (pg.startDate || '') : '';
+            el = document.getElementById('mc-program-tab-status'); if (el) el.value = pg ? (pg.status || 'draft') : 'draft';
+            el = document.getElementById('mc-program-tab-weeks');  if (el) el.value = pg ? (pg.durationWeeks || 10) : 10;
+            el = document.getElementById('mc-program-tab-cadence');if (el) el.value = pg ? (pg.checkpointCadenceWeeks || 2) : 2;
+            el = document.getElementById('mc-program-tab-desc');   if (el) el.value = pg ? (pg.description || '') : '';
+            var form = document.getElementById('mc-program-tab-form');
+            if (form) { form.style.display = 'block'; form.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+        };
+        window.mcHideProgramTabForm = function () {
+            mcProgramTabEditId = '';
+            var form = document.getElementById('mc-program-tab-form');
+            if (form) form.style.display = 'none';
+        };
+        window.mcSaveProgramTabForm = function () {
+            var sid = document.getElementById('mc-program-tab-season')?.value || '';
+            if (!sid) { alert('Please select a Season for this Program.'); return; }
+            var name = (document.getElementById('mc-program-tab-name')?.value || '').trim();
+            if (!name) { alert('Program name is required.'); return; }
+            var weeks = parseInt(document.getElementById('mc-program-tab-weeks')?.value || '10', 10) || 10;
+            var cadence = parseInt(document.getElementById('mc-program-tab-cadence')?.value || '2', 10) || 2;
+            if (typeof mcPrograms === 'undefined' || !Array.isArray(mcPrograms)) mcPrograms = [];
+            var existing = mcProgramTabEditId ? mcPrograms.find(function (p) { return p && p.id === mcProgramTabEditId; }) : null;
+            var obj = {
+                id: existing ? existing.id : ('pgm-' + Date.now()),
+                seasonId: sid,
+                name: name,
+                startDate: document.getElementById('mc-program-tab-start')?.value || '',
+                status: document.getElementById('mc-program-tab-status')?.value || 'draft',
+                durationWeeks: weeks,
+                checkpointCadenceWeeks: cadence,
+                description: document.getElementById('mc-program-tab-desc')?.value || '',
+                createdAt: existing ? (existing.createdAt || Date.now()) : Date.now(),
+                updatedAt: Date.now()
+            };
+            if (existing) { mcPrograms[mcPrograms.indexOf(existing)] = obj; } else { mcPrograms.push(obj); }
+            mcSaveData('programs');
+            mcHideProgramTabForm();
+            mcRenderProgramsTab();
+            try { mcSeasonRenderPrograms(); } catch (e) {}   // keep the nested season-form widget in sync too
+            try { window.pflxShowSaveToast && window.pflxShowSaveToast('Program saved · ' + name); } catch (e) {}
         };
 
         function mcSeasonPopulatePickers() {
