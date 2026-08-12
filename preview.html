@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 47;
+      window.PFLX_PATCH   = 48;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -21279,7 +21279,24 @@
                     var changed = false;
                     res.data.forEach(function (row) {
                         if (!row) return;
-                        if (row.key === 'submissions' && Array.isArray(row.data)) { _pflxCloudSubs = row.data; changed = true; }
+                        if (row.key === 'submissions' && Array.isArray(row.data)) {
+                            _pflxCloudSubs = row.data;
+                            changed = true;
+                            // Catch-up: a node submission whose live postMessage was
+                            // missed (host wasn't online) still gets pulled in here —
+                            // reconcile it into mcApprovals the same way so it isn't
+                            // silently stuck on the Home card's now-hidden coinsub path.
+                            try {
+                                var _anyNewNodeAppr = false;
+                                _pflxCloudSubs.forEach(function (s) {
+                                    if (_pflxIngestNodeSubmission(s)) _anyNewNodeAppr = true;
+                                });
+                                if (_anyNewNodeAppr) {
+                                    try { mcSaveData('approvals'); } catch (eSave) {}
+                                    try { if (typeof mcRenderApprovals === 'function') mcRenderApprovals(); } catch (eRen) {}
+                                }
+                            } catch (eNode) {}
+                        }
                         if (row.key === 'trades' && Array.isArray(row.data)) { _pflxCloudTrades = row.data; changed = true; }
                         if (row.key === 'pflx_mc_reward_requests' && Array.isArray(row.data)) {
                             // merge cloud into local by id — resolved status wins
@@ -21450,21 +21467,26 @@
                 }
             } catch (e) {}
 
-            // 3. X-Coin badge submissions + Core Pathways node submissions
-            //    (both live in the shared cloud 'submissions' queue; node
-            //    submissions are tagged with nodeId by pathway.html)
+            // 3. X-Coin badge submissions (both live in the shared cloud
+            //    'submissions' queue). Core Pathways node submissions
+            //    (tagged with nodeId by pathway.html) are deliberately
+            //    SKIPPED here — they're routed into the MC-tab Approvals
+            //    Queue instead (mcApprovals type 'node_submission'), same
+            //    queue Module completions use, so hosts see every node's
+            //    activity — module or not — in one place. See
+            //    _pflxIngestNodeSubmission.
             try {
                 (_pflxCloudSubs || []).forEach(function (s) {
                     if (!s || s.status !== 'pending') return;
-                    var isNode = !!s.nodeId;
+                    if (s.nodeId) return; // routed to mcApprovals instead — see above
                     items.push({
                         kind: 'coinsub',
                         id: s.id,
-                        nodeId: s.nodeId || null,
+                        nodeId: null,
                         cohort: _pflxPlayerCohortById(s.playerId),
                         submittedAt: s.submittedAt,
                         brand: s.brand || _pflxPlayerBrandById(s.playerId) || 'Player',
-                        title: (isNode ? '🛰 Pathways: ' : '🏅 Badge: ') + (s.coinType || 'Digital Badge'),
+                        title: '🏅 Badge: ' + (s.coinType || 'Digital Badge'),
                         sub: s.reason || '',
                         link: s.evidenceUrl || '',
                         file: ''
@@ -21754,6 +21776,70 @@
             return out;
         }
 
+        // ── Node submissions → Console's unified Approvals Queue ──
+        // A non-module node's "submission" (link/screenshot/html/description)
+        // used to only ever reach the Home Approvals Card via the shared
+        // X-Coin 'submissions' cloud row (see the coinsub push below). Per
+        // Ennis: any node's completion — module or not — should "use the
+        // same method as Mission Control" and land with the hosts, using the
+        // same automatic reward-through-the-node math Module completions
+        // already use. So a pending node-tagged submission is instead
+        // mirrored into mcApprovals as type 'node_submission' (see the
+        // pflx_node_submission listener + the cloud-feed pull below, which
+        // both call this so a submission is caught whether the host was
+        // online for the live postMessage or not), and hidden from the Home
+        // card entirely (see the isNode skip in the coinsub loop above).
+        // pathway.html snapshots node.xcReward/taggedBadges into `s.reward`
+        // at submit time (mirroring the Module Completion Record shape), so
+        // approval always pays exactly what the node was configured for —
+        // no separate lookup, no drift from MC's own (sometimes stale)
+        // cached pathway catalog.
+        function _pflxIngestNodeSubmission(s) {
+            try {
+                if (!s || !s.nodeId || s.status !== 'pending') return false;
+                if (!mcApprovals) mcApprovals = [];
+                var already = mcApprovals.some(function (a) { return a && a.type === 'node_submission' && a.subId === s.id; });
+                if (already) return false;
+                mcApprovals.push({
+                    id: 'appr-node-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+                    subId: s.id,
+                    type: 'node_submission',
+                    title: (s.nodeTitle || s.coinType || 'Node') + ' — ' + (s.brand || 'Player'),
+                    submittedBy: s.brand || 'Player',
+                    date: new Date().toISOString().split('T')[0],
+                    action: 'pending',
+                    nodeId: s.nodeId,
+                    playerId: s.playerId || '',
+                    submission: s.submission || { link: s.evidenceUrl || '', description: s.reason || '' },
+                    reward: s.reward || null,
+                    submittedAt: s.submittedAt || Date.now()
+                });
+                return true;
+            } catch (e) { return false; }
+        }
+        // Mirrors the resolved status back onto the shared cloud 'submissions'
+        // row (same write _pflxResolveCoinSub always did) so X-Coin's own
+        // admin view — and anything in pathway.html that reads that row —
+        // still see a node submission as resolved, even though approval now
+        // happens in the MC tab instead of via _pflxResolveCoinSub.
+        function _pflxMirrorNodeSubStatus(subId, status, note) {
+            try {
+                if (!subId) return;
+                var i = (_pflxCloudSubs || []).findIndex(function (s) { return s && s.id === subId; });
+                if (i < 0) return;
+                _pflxCloudSubs[i].status = status;
+                _pflxCloudSubs[i].reviewedAt = new Date().toISOString();
+                _pflxCloudSubs[i].feedback = status === 'approved' ? 'Approved by Host (Mission Control)' : (note || 'Rejected by Host (Mission Control)');
+                var sb = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (sb) sb.from('app_data').upsert(
+                    { key: 'submissions', data: _pflxCloudSubs, updated_at: new Date().toISOString() },
+                    { onConflict: 'key' }
+                ).then(function () {}, function (e) { console.warn('[approvals] node submission mirror save failed', e); });
+            } catch (e) {}
+        }
+        window._pflxIngestNodeSubmission = _pflxIngestNodeSubmission;
+        window._pflxMirrorNodeSubStatus = _pflxMirrorNodeSubStatus;
+
         function _pflxResolveCoinSub(id, status, note) {
             var i = (_pflxCloudSubs || []).findIndex(function (s) { return s && s.id === id; });
             if (i < 0) { if (typeof pflxToast === 'function') pflxToast('Submission not found — it may have been handled in X-Coin', 'info'); return; }
@@ -21847,14 +21933,19 @@
                 if (m && (m.type === 'pflx_reward_request_submitted' || m.type === 'pflx_player_update')) {
                     setTimeout(function () { try { renderApprovalsCard(); } catch (e) {} }, 50);
                 }
-                // Core Pathways node submission — instant card entry + toast
-                // (the cloud row write races this message; dedupe by id).
+                // Core Pathways node submission — instant Approvals Queue entry
+                // + toast (the cloud row write races this message; dedupe by
+                // subId inside _pflxIngestNodeSubmission). Lands in the MC-tab
+                // Approvals Queue (mcApprovals type 'node_submission'), not the
+                // Home card — see _pflxIngestNodeSubmission for why.
                 if (m && m.type === 'pflx_node_submission' && m.submission) {
                     try {
-                        var exists = (_pflxCloudSubs || []).some(function (s) { return s && s.id === m.submission.id; });
-                        if (!exists) _pflxCloudSubs.push(m.submission);
-                        if (typeof pflxToast === 'function') pflxToast('🛰 Pathways submission from @' + (m.submission.brand || 'Player'), 'info');
-                        renderApprovalsCard();
+                        var wasNew = _pflxIngestNodeSubmission(m.submission);
+                        if (wasNew) {
+                            try { mcSaveData('approvals'); } catch (eSave) {}
+                            try { if (typeof mcRenderApprovals === 'function') mcRenderApprovals(); } catch (eRen) {}
+                            if (typeof pflxToast === 'function') pflxToast('🛰 Pathways submission from @' + (m.submission.brand || 'Player'), 'info');
+                        }
                     } catch (e) {}
                 }
             } catch (e) {}
@@ -50465,6 +50556,15 @@
                 }
             });
 
+            // Add non-module node submissions (link/screenshot/html/description) —
+            // same queue as Module completions per Ennis: every node's activity
+            // lands with the hosts "the same method as Mission Control."
+            mcApprovals.filter(function(a) { return a.type === 'node_submission' && a.action === 'pending'; }).forEach(function(a) {
+                if (mcApprovalFilter === 'pending' || mcApprovalFilter === 'all') {
+                    items.push({ type: 'node_submission', id: a.id, title: a.title, submittedBy: a.submittedBy || '', date: a.date || '', status: 'pending', ref: a });
+                }
+            });
+
             // Add historical approvals
             if (mcApprovalFilter !== 'pending') {
                 mcApprovals.filter(function(a) { return mcApprovalFilter === 'approved' ? a.action === 'approved' : a.action === 'rejected'; }).forEach(function(a) {
@@ -50481,11 +50581,11 @@
 
             list.innerHTML = items.length === 0 ? '<div style="color:rgba(255,255,255,0.25);font-size:13px;">No items to show.</div>' :
                 items.map(function(it) {
-                    var typeIcon = (it.type === 'task' || it.type === 'tasksub') ? '&#x2705;' : it.type === 'arena_external' ? '&#x1F3AE;' : it.type === 'module_completion' ? '&#x1F393;' : '&#x1F4A1;';
+                    var typeIcon = (it.type === 'task' || it.type === 'tasksub') ? '&#x2705;' : it.type === 'arena_external' ? '&#x1F3AE;' : it.type === 'module_completion' ? '&#x1F393;' : it.type === 'node_submission' ? '&#x1F6F0;' : '&#x1F4A1;';
                     var sc = it.status === 'pending' ? '#f5c842' : it.status === 'approved' ? '#22c55e' : '#ef4444';
-                    var typeLabel = it.type === 'module_completion' ? 'module completion' : (it.type === 'tasksub' ? 'task submission' : it.type);
+                    var typeLabel = it.type === 'module_completion' ? 'module completion' : it.type === 'node_submission' ? 'node submission' : (it.type === 'tasksub' ? 'task submission' : it.type);
                     var detail = '';
-                    if (it.type === 'module_completion' && it.ref && it.ref.submission) {
+                    if ((it.type === 'module_completion' || it.type === 'node_submission') && it.ref && it.ref.submission) {
                         var sub = it.ref.submission, rw = it.ref.reward, bits = [];
                         if (sub.link) bits.push('<a href="' + escapeHtml(sub.link) + '" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:none;">&#x1F517; Submission link</a>');
                         if (sub.file) bits.push('<span style="color:#a78bfa;">&#x1F4CE; ' + escapeHtml(sub.file) + '</span>');
@@ -50517,6 +50617,7 @@
                 case 'pitch':  return _scopedApprovalCan('approve.node');
                 case 'arena_external': return _scopedApprovalCan('approve.reward');
                 case 'module_completion': return _scopedApprovalCan('approve.node', ref && ref.nodeId ? { nodeId: ref.nodeId } : null);
+                case 'node_submission': return _scopedApprovalCan('approve.node', ref && ref.nodeId ? { nodeId: ref.nodeId } : null);
                 default: return true;
             }
         }
@@ -50527,6 +50628,7 @@
                 if (type === 'pitch') return _scopedApprovalCan('approve.node');
                 if (type === 'arena_external') return _scopedApprovalCan('approve.reward');
                 if (type === 'module_completion') { var ma = mcApprovals.find(function (x) { return x && x.id === id; }); return _scopedApprovalCan('approve.node', ma && ma.nodeId ? { nodeId: ma.nodeId } : null); }
+                if (type === 'node_submission') { var na = mcApprovals.find(function (x) { return x && x.id === id; }); return _scopedApprovalCan('approve.node', na && na.nodeId ? { nodeId: na.nodeId } : null); }
             } catch (e) {}
             return true;
         }
@@ -50575,6 +50677,27 @@
                     // Notify Core Pathways → the Module shows Approved and the node marks complete.
                     try { mcBroadcastToApps('module_approval', { nodeId: ma.nodeId, moduleId: ma.moduleId, playerId: ma.playerId, approved: true, xcAwarded: (ma.reward && ma.reward.xc) || 0, badges: (ma.reward && ma.reward.badgeIds) || [] }); } catch (e) {}
                 }
+            } else if (type === 'node_submission') {
+                var na = mcApprovals.find(function(x) { return x.id === id; });
+                if (na) {
+                    na.action = 'approved';
+                    // Same automatic reward-through-the-node math as Module
+                    // completions above — pays whatever XC/badges the node
+                    // itself is configured for (snapshotted at submit time by
+                    // pathway.html into na.reward), not a badge-catalog amount.
+                    try {
+                        if (na.playerId && na.reward && window.PflxDataBus) {
+                            if (na.reward.xc) window.PflxDataBus.award(na.playerId, { xc: na.reward.xc, source: 'mc', reason: 'node:' + na.nodeId });
+                            (na.reward.badgeIds || []).forEach(function(bid) {
+                                window.PflxDataBus.award(na.playerId, { badge: _pflxResolveAwardBadge(bid), source: 'mc', reason: 'node:' + na.nodeId });
+                            });
+                        }
+                    } catch (eNode) { console.warn('[MC] node submission reward award failed', eNode); }
+                    // Mirror the resolved status onto the shared cloud 'submissions'
+                    // row so X-Coin's admin view (and anything else reading that
+                    // row) also sees this as approved.
+                    try { _pflxMirrorNodeSubStatus(na.subId, 'approved', ''); } catch (e) {}
+                }
             }
             mcSaveData('approvals');
             mcRenderApprovals();
@@ -50604,6 +50727,12 @@
                     mr.action = 'rejected';
                     // Notify Core Pathways → the node returns to in-progress so the player can revise.
                     try { mcBroadcastToApps('module_approval', { nodeId: mr.nodeId, moduleId: mr.moduleId, playerId: mr.playerId, approved: false, note: 'Returned for revision — review host feedback.' }); } catch (e) {}
+                }
+            } else if (type === 'node_submission') {
+                var nr = mcApprovals.find(function(x) { return x.id === id; });
+                if (nr) {
+                    nr.action = 'rejected';
+                    try { _pflxMirrorNodeSubStatus(nr.subId, 'rejected', ''); } catch (e) {}
                 }
             }
             mcSaveData('approvals');
