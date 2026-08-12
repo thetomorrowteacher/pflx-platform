@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 38;
+      window.PFLX_PATCH   = 39;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -4127,6 +4127,29 @@
            turns .mc-sidebar into an off-canvas drawer. */
         .mc-mobile-sidebar-toggle { display: none; }
         .mc-sidebar-backdrop { display: none; }
+        /* v1.38 DESKTOP/TABLET SIDEBAR COLLAPSE (Aug 12, Ennis) — a manual
+           toggle so the sidebar can be fully hidden at ANY width, not just
+           the <768px off-canvas drawer above. Collapsed = display:none, so
+           .mc-content (flex:1 on the same .mc-layout row) reclaims the
+           width automatically — no extra layout rule needed. Hidden again
+           under 768px so it doesn't double up with the phone drawer, which
+           already owns visibility there. */
+        .mc-sidebar-collapse-btn {
+            position: absolute; top: 14px; right: -14px; width: 28px; height: 28px;
+            border-radius: 50%; border: 1px solid rgba(0,212,255,0.35); background: #06090d;
+            color: var(--cyan); font-size: 14px; display: flex; align-items: center; justify-content: center;
+            cursor: pointer; z-index: 10; line-height: 1;
+        }
+        .mc-sidebar-expand-btn {
+            display: none; position: fixed; top: 14px; left: 14px; width: 38px; height: 38px;
+            border-radius: 10px; border: 1px solid rgba(0,212,255,0.25); background: rgba(6,9,13,0.92);
+            color: var(--cyan); font-size: 16px; z-index: 56; cursor: pointer; align-items: center; justify-content: center;
+        }
+        .mission-control-view.mc-sidebar-collapsed .mc-sidebar { display: none; }
+        .mission-control-view.mc-sidebar-collapsed .mc-sidebar-expand-btn { display: flex; }
+        @media (max-width: 768px) {
+            .mc-sidebar-collapse-btn, .mc-sidebar-expand-btn { display: none !important; }
+        }
         .mc-sidebar {
             width: 230px;
             min-width: 230px;
@@ -7263,9 +7286,13 @@
                          off-canvas .mc-sidebar drawer (phones only). -->
                     <button class="mc-mobile-sidebar-toggle" onclick="mcToggleMobileSidebar()" title="Menu" aria-label="Toggle Mission Control menu">&#9776;</button>
                     <div class="mc-sidebar-backdrop" onclick="mcToggleMobileSidebar(false)"></div>
+                    <!-- v1.38: desktop/tablet expand control — only visible
+                         while the sidebar is collapsed (see .mc-sidebar-collapsed). -->
+                    <button class="mc-sidebar-expand-btn" onclick="mcToggleDesktopSidebar(false)" title="Show sidebar" aria-label="Show Mission Control sidebar">&#9776;</button>
                     <div class="mc-layout">
                         <!-- LEFT SIDEBAR -->
                         <div class="mc-sidebar">
+                            <button class="mc-sidebar-collapse-btn" onclick="mcToggleDesktopSidebar(true)" title="Collapse sidebar" aria-label="Collapse Mission Control sidebar">&#8249;</button>
                             <div class="mc-sidebar-header">
                                 <img src="public/Mission Control Icon.png" alt="Mission Control">
                                 <h2>MISSION CONTROL</h2>
@@ -26081,6 +26108,24 @@
                 var open = (typeof forceOpen === 'boolean') ? forceOpen : !view.classList.contains('mc-sidebar-open');
                 view.classList.toggle('mc-sidebar-open', open);
             };
+            // v1.38 — separate desktop/tablet collapse, independent of the
+            // phone drawer above (different class, works at any width,
+            // hidden under 768px by CSS so the two never fight). Persists
+            // the host's choice so it survives a reload/nav change.
+            var MC_SIDEBAR_COLLAPSE_KEY = 'pflx_mc_sidebar_collapsed';
+            window.mcToggleDesktopSidebar = function (forceCollapsed) {
+                var view = document.querySelector('.mission-control-view');
+                if (!view) return;
+                var collapsed = (typeof forceCollapsed === 'boolean') ? forceCollapsed : !view.classList.contains('mc-sidebar-collapsed');
+                view.classList.toggle('mc-sidebar-collapsed', collapsed);
+                try { localStorage.setItem(MC_SIDEBAR_COLLAPSE_KEY, collapsed ? '1' : '0'); } catch (e) {}
+            };
+            try {
+                if (localStorage.getItem(MC_SIDEBAR_COLLAPSE_KEY) === '1') {
+                    var _mcInitView = document.querySelector('.mission-control-view');
+                    if (_mcInitView) _mcInitView.classList.add('mc-sidebar-collapsed');
+                }
+            } catch (e) {}
             // Auto-close the drawer once a sidebar nav button is tapped,
             // so picking a section doesn't leave the drawer covering it.
             document.addEventListener('click', function (ev) {
