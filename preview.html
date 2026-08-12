@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 40;
+      window.PFLX_PATCH   = 41;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -9005,6 +9005,14 @@
                                             </select>
                                         </div>
                                     </div>
+                                    <!-- v1.41 Topic — mirrors the Advanced Task form's Topic picker,
+                                         scoped to the Project selected above. -->
+                                    <div id="mc-qtask-topic-row" style="margin-bottom:12px;display:none;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Topic <span style="font-weight:400;text-transform:none;color:rgba(255,255,255,0.3);">(optional — groups tasks inside the Project view)</span></label>
+                                        <select id="mc-qtask-topic" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                            <option value="">No Topic</option>
+                                        </select>
+                                    </div>
                                     <div style="display:flex;gap:8px;justify-content:flex-end;">
                                         <button class="mc-btn" onclick="mcCancelQuickTaskForm()" style="padding:8px 16px;">Cancel</button>
                                         <button class="mc-btn mc-btn-green" onclick="mcSaveQuickTaskForm()" style="padding:8px 16px;">Save</button>
@@ -9127,8 +9135,18 @@
                                          that gap and keeps Quick/Advanced in sync. -->
                                     <div style="margin-bottom:12px;">
                                         <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Project <span style="font-weight:400;text-transform:none;color:rgba(255,255,255,0.3);">(optional — obeys the Checkpoint above)</span></label>
-                                        <select id="mc-task-project" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                        <select id="mc-task-project" onchange="mcTaskOnProjectChange()" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
                                             <option value="">None</option>
+                                        </select>
+                                    </div>
+                                    <!-- v1.41 Topic — Google-Classroom-style grouping label, scoped
+                                         to the selected Project's own topics[] list. Repopulates
+                                         whenever the Project selection changes (see
+                                         mcTaskOnProjectChange). Empty/hidden with no project picked. -->
+                                    <div id="mc-task-topic-row" style="margin-bottom:12px;display:none;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Topic <span style="font-weight:400;text-transform:none;color:rgba(255,255,255,0.3);">(optional — groups tasks inside the Project view)</span></label>
+                                        <select id="mc-task-topic" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                            <option value="">No Topic</option>
                                         </select>
                                     </div>
                                     <!-- Core Pathway node picker.
@@ -9587,6 +9605,19 @@
                                     <div style="margin-bottom:12px;">
                                         <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Description</label>
                                         <textarea id="mc-project-desc" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;min-height:60px;box-sizing:border-box;font-family:'Jura',sans-serif;" placeholder="Description..."></textarea>
+                                    </div>
+                                    <!-- v1.41 Topics — Google-Classroom-style labels scoped to this
+                                         Project. Purely organizational: a Task's Topic dropdown (in
+                                         the Task form) is populated from this list, and the Project's
+                                         task views group tasks under these headers. Renaming a Topic
+                                         here keeps every task tagged with it in sync (same id); deleting
+                                         one just un-groups its tasks back to "No Topic" — nothing is
+                                         deleted on the task side. Schema: project.topics = [{id,name}]. -->
+                                    <div style="margin-bottom:12px;padding:14px;background:rgba(10,18,40,0.35);border:1px solid rgba(255,255,255,0.06);border-radius:10px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;text-transform:uppercase;">Topics <span style="font-weight:400;text-transform:none;color:rgba(255,255,255,0.3);">(optional — group this Project's tasks, like Google Classroom topics)</span></label>
+                                        <div id="mc-project-topics-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;"></div>
+                                        <div id="mc-project-topics-empty" style="display:none;font-size:11px;color:rgba(255,255,255,0.25);margin-bottom:8px;">No topics yet — tasks will show ungrouped.</div>
+                                        <button type="button" class="mc-btn" style="padding:6px 12px;font-size:11px;" onclick="mcProjectAddTopicRow()">+ Add Topic</button>
                                     </div>
                                     <!-- Subtask checklist: host adds checklist items, each with label + optional URL.
                                          Player ticks them off on the card. Mirrors the Task subtask pattern.
@@ -27872,7 +27903,15 @@
                     return da - db;
                 });
                 html += '<div style="font-family:Orbitron,sans-serif;font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:0.12em;margin-bottom:10px;">📋 TASKS IN THIS PROJECT · ' + tasks.length + '</div>';
-                tasks.forEach(function (t) {
+                // v1.41 — group under the Project's Topics (Google-Classroom
+                // style), preserving the priority/urgency sort within each
+                // group. Projects with no topics render exactly as before.
+                var __ppTopicGroups = (typeof _mcGroupTasksByTopic === 'function') ? _mcGroupTasksByTopic(tasks, proj.topics) : [{ id: '', name: '', tasks: tasks }];
+                __ppTopicGroups.forEach(function (grp) {
+                    if (grp.name) {
+                        html += '<div style="font-size:10px;color:rgba(167,139,250,0.85);font-weight:800;letter-spacing:0.1em;text-transform:uppercase;margin:14px 0 6px 2px;">🏷 ' + escapeHtml(grp.name) + '</div>';
+                    }
+                    grp.tasks.forEach(function (t) {
                     // Per-player state (July 15): my checkmark, not the cohort's.
                     var __rowState = (typeof pflxTaskStateForPlayer === 'function') ? pflxTaskStateForPlayer(t, (window.activeSession || {}).id) : (t.status || 'open');
                     var isApproved = (__rowState === 'approved');
@@ -27904,6 +27943,7 @@
                             (assigneeChip || '') + dueChip + xcChip +
                         '</div>' +
                     '</div>';
+                    });
                 });
             }
 
@@ -30575,6 +30615,29 @@
             });
             return Object.keys(out).map(function (k) { return out[k]; });
         }
+        // v1.41 — Group a Project's tasks by its Topics list (Google
+        // Classroom-style). Groups come back in the order Topics were
+        // defined, each only included if it actually has tasks; anything
+        // left over (no topicId, or a topicId that no longer matches a
+        // live topic) lands in a trailing "No Topic" bucket. Projects with
+        // no topics at all return a single unnamed group (name:'') so
+        // callers can render the old flat list with zero header noise.
+        function _mcGroupTasksByTopic(tasks, topics) {
+            tasks = Array.isArray(tasks) ? tasks : [];
+            topics = Array.isArray(topics) ? topics : [];
+            if (!topics.length) return [{ id: '', name: '', tasks: tasks }];
+            var byId = {};
+            topics.forEach(function (t) { if (t && t.id) byId[t.id] = { id: t.id, name: t.name || 'Topic', tasks: [] }; });
+            var noTopic = { id: '', name: 'No Topic', tasks: [] };
+            tasks.forEach(function (t) {
+                var g = (t && t.topicId && byId[t.topicId]) ? byId[t.topicId] : noTopic;
+                g.tasks.push(t);
+            });
+            var groups = topics.map(function (t) { return byId[t.id]; }).filter(function (g) { return g && g.tasks.length > 0; });
+            if (noTopic.tasks.length) groups.push(noTopic);
+            return groups;
+        }
+        window._mcGroupTasksByTopic = _mcGroupTasksByTopic;
         function mcChildProjectsForCheckpoint(cp) {
             if (!cp) return [];
             var byExplicit = Array.isArray(cp.projectIds) ? cp.projectIds : [];
@@ -32482,6 +32545,7 @@
                 el = document.getElementById('mc-task-desc'); if (el) el.value = t.description || '';
                 el = document.getElementById('mc-task-checkpoint'); if (el) el.value = t.roundId || '';
                 el = document.getElementById('mc-task-project'); if (el) el.value = t.projectId || '';
+                _mcPopulateTaskTopicPicker('task', t.projectId || '', t.topicId || '');
                 el = document.getElementById('mc-task-xc'); if (el) el.value = t.xcReward || 50;
                 el = document.getElementById('mc-task-due'); if (el) el.value = t.dueDate || '';
                 el = document.getElementById('mc-task-mode'); if (el) el.value = t.completionMode || 'one-time';
@@ -32567,6 +32631,7 @@
                 el = document.getElementById('mc-task-category'); if (el) el.value = '';
                 el = document.getElementById('mc-task-checkpoint'); if (el) el.value = '';
                 el = document.getElementById('mc-task-project'); if (el) el.value = '';
+                _mcPopulateTaskTopicPicker('task', '', '');
                 el = document.getElementById('mc-task-xc'); if (el) el.value = 50;
                 el = document.getElementById('mc-task-due'); if (el) el.value = '';
                 el = document.getElementById('mc-task-mode'); if (el) el.value = 'one-time';
@@ -33678,6 +33743,72 @@
             return out;
         }
 
+        // ── Project Topics editor (v1.41) ──────────────────────────────────
+        // Simple named-row list, same interaction shape as the subtask editor
+        // above but without a completion/link column — a Topic is just a
+        // label a Task can be tagged with. Renders into #mc-project-topics-list.
+        function _mcRenderProjectTopicsEditor(topics) {
+            var host = document.getElementById('mc-project-topics-list');
+            var empty = document.getElementById('mc-project-topics-empty');
+            if (!host) return;
+            topics = topics || [];
+            if (topics.length === 0) {
+                host.innerHTML = '';
+                if (empty) empty.style.display = 'block';
+                return;
+            }
+            if (empty) empty.style.display = 'none';
+            host.innerHTML = topics.map(function (t) {
+                var tid = (t.id || ('topic-' + Date.now())).replace(/"/g, '');
+                return '<div class="mc-project-topic-row" data-tid="' + escapeHtml(tid) + '" style="display:flex;gap:6px;align-items:center;">' +
+                    '<input type="text" class="mc-project-topic-name" data-tid="' + escapeHtml(tid) + '" placeholder="Topic name (e.g. Week 1 — Research)" value="' + escapeHtml(t.name || '') + '" style="flex:1;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px 8px;border-radius:5px;font-size:12px;">' +
+                    '<button type="button" class="mc-btn" style="padding:6px 10px;font-size:11px;background:rgba(239,68,68,0.10);color:#ef4444;border:1px solid rgba(239,68,68,0.35);" onclick="mcProjectRemoveTopicRow(' + JSON.stringify(tid) + ')">✕</button>' +
+                '</div>';
+            }).join('');
+        }
+        function _mcReadProjectTopicsRows() {
+            var out = [];
+            document.querySelectorAll('#mc-project-topics-list .mc-project-topic-row').forEach(function (row) {
+                var tid = row.getAttribute('data-tid');
+                var nameEl = row.querySelector('.mc-project-topic-name');
+                var name = (nameEl ? nameEl.value : '').trim();
+                if (!name) return;
+                out.push({ id: tid, name: name });
+            });
+            return out;
+        }
+        window.mcProjectAddTopicRow = function () {
+            var cur = _mcReadProjectTopicsRows();
+            cur.push({ id: 'topic-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5), name: '' });
+            _mcRenderProjectTopicsEditor(cur);
+            var rows = document.querySelectorAll('#mc-project-topics-list .mc-project-topic-name');
+            if (rows.length) rows[rows.length - 1].focus();
+        };
+        window.mcProjectRemoveTopicRow = function (tid) {
+            var cur = _mcReadProjectTopicsRows().filter(function (t) { return t.id !== tid; });
+            _mcRenderProjectTopicsEditor(cur);
+        };
+
+        // ── Task-form Topic picker (v1.41) — populated from whichever
+        // Project is currently selected in the Task form. Shared by both
+        // Quick and Advanced Task forms via the `prefix` param
+        // ('qtask'/'task' → #mc-qtask-topic / #mc-task-topic).
+        function _mcPopulateTaskTopicPicker(prefix, projectId, selectedTopicId) {
+            var row = document.getElementById('mc-' + prefix + '-topic-row');
+            var sel = document.getElementById('mc-' + prefix + '-topic');
+            if (!sel) return;
+            var proj = projectId ? mcProjects.find(function (p) { return p && p.id === projectId; }) : null;
+            var topics = (proj && Array.isArray(proj.topics)) ? proj.topics : [];
+            sel.innerHTML = '<option value="">No Topic</option>' +
+                topics.map(function (t) { return '<option value="' + escapeHtml(t.id) + '">' + escapeHtml(t.name) + '</option>'; }).join('');
+            sel.value = (selectedTopicId && topics.some(function (t) { return t.id === selectedTopicId; })) ? selectedTopicId : '';
+            if (row) row.style.display = topics.length ? 'block' : 'none';
+        }
+        window.mcTaskOnProjectChange = function () {
+            var projSel = document.getElementById('mc-task-project');
+            _mcPopulateTaskTopicPicker('task', projSel ? projSel.value : '', '');
+        };
+
         // ── Quick Task Form (v1.34) ────────────────────────────────────────
         function _mcQTRenderSubtasks(subtasks) { _mcGenericRenderSubtaskRows('mc-qtask-subtasks-list', 'mc-qtask-subtasks-empty', subtasks, 'mcQTRemoveSubtaskRow'); }
         function _mcQTReadSubtasks() { return _mcGenericReadSubtaskRows('mc-qtask-subtasks-list'); }
@@ -33723,6 +33854,7 @@
             if (proj && proj.checkpointId) {
                 _mcQTPopulateHierarchyDropdowns(proj.checkpointId, projId);
             }
+            _mcPopulateTaskTopicPicker('qtask', projId, '');
         };
         // Changing the Checkpoint re-filters the Project list; if the
         // currently-picked project falls outside the new checkpoint it's
@@ -33775,6 +33907,7 @@
             mcQFineInit('qtask', t ? (t.fineTaxIds || []) : []);
             mcQLInit('qtask', t ? (t.links || []) : []);
             _mcQTPopulateHierarchyDropdowns(t ? (t.roundId || '') : '', t ? (t.projectId || '') : '');
+            _mcPopulateTaskTopicPicker('qtask', t ? (t.projectId || '') : '', t ? (t.topicId || '') : '');
             document.querySelectorAll('.mc-qtask-cohort-cb').forEach(function (cb) {
                 cb.checked = !!(t && Array.isArray(t.assignedTo) && t.assignedTo.indexOf(cb.value) >= 0);
             });
@@ -33832,6 +33965,7 @@
                 totalXc: existing ? (existing.totalXc || existing.xcReward || 0) : 0,
                 roundId: document.getElementById('mc-qtask-checkpoint')?.value || '',
                 projectId: document.getElementById('mc-qtask-project')?.value || '',
+                topicId: document.getElementById('mc-qtask-topic')?.value || '',
                 xcReward: existing ? (existing.xcReward || 50) : 50,
                 dueDate: existing ? (existing.dueDate || '') : '',
                 completionMode: existing ? (existing.completionMode || 'one-time') : 'one-time',
@@ -33986,6 +34120,10 @@
                 flpTracking: existing ? (existing.flpTracking || 'bypass') : 'bypass',
                 assignedPlayers: mcQPlayersRead('qproject'),
                 subtasks: subtaskRows,
+                // v1.41 — Topics only have an editor in the Advanced Project
+                // form; Quick Project just preserves whatever's already there
+                // so saving from Quick never wipes topics set in Advanced.
+                topics: existing ? (existing.topics || []) : [],
                 budget: existing ? (existing.budget || 0) : 0,
                 team: existing ? (existing.team || []) : [],
                 checkpointId: document.getElementById('mc-qproject-checkpoint')?.value || '',
@@ -34717,6 +34855,7 @@
                 // note above); keeps the project's own taskIds checkbox list
                 // in sync below so either direction of editing stays correct.
                 projectId: document.getElementById('mc-task-project')?.value || '',
+                topicId: document.getElementById('mc-task-topic')?.value || '',
                 xcReward: parseInt(document.getElementById('mc-task-xc')?.value || '50', 10),
                 dueDate: document.getElementById('mc-task-due')?.value || '',
                 completionMode: document.getElementById('mc-task-mode')?.value || 'one-time',
@@ -36032,21 +36171,32 @@
                 }
                 // Child tasks panel — quick list of every Task in this Project,
                 // clickable to jump. Shows the current status pill for each.
+                // v1.41 — grouped under the Project's Topics (if any are
+                // defined), Google-Classroom-style, so a Project with a lot
+                // of tasks reads as an organized outline instead of a flat
+                // dump. Projects with no topics render exactly as before.
                 var projChildTasks = mcChildTasksForProject(p);
                 var projTasksPanel = '';
                 if (projChildTasks.length > 0) {
+                    var __topicGroups = _mcGroupTasksByTopic(projChildTasks, p.topics);
+                    var __taskRowHtml = function (ct) {
+                        var ctStatusCol = ct.status === 'approved' ? '#22c55e' : ct.status === 'submitted' ? '#f5a500' : ct.status === 'open' ? '#00d4ff' : 'rgba(255,255,255,0.4)';
+                        return '<div ' + _mcJumpAttr('task', ct.id) + ' style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 8px;background:rgba(255,255,255,0.02);border-radius:6px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(122,169,255,0.08)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.02)\'">' +
+                            '<span style="font-size:11px;color:#e0e6ff;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(ct.title || 'Untitled') + '</span>' +
+                            _mcTaskCountsChip(ct) +
+                        '</div>';
+                    };
                     projTasksPanel = '<div style="margin-top:10px;padding:10px 12px;background:rgba(79,142,247,0.05);border:1px solid rgba(79,142,247,0.2);border-radius:8px;">' +
                         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
                             '<div style="font-family:Orbitron,sans-serif;font-size:10px;font-weight:800;color:#7aa9ff;letter-spacing:0.08em;">📋 TASKS IN THIS PROJECT</div>' +
                             '<div style="font-size:10px;color:rgba(122,169,255,0.6);font-family:monospace;">' + projChildTasks.length + '</div>' +
                         '</div>' +
                         '<div style="display:flex;flex-direction:column;gap:4px;">' +
-                        projChildTasks.map(function (ct) {
-                            var ctStatusCol = ct.status === 'approved' ? '#22c55e' : ct.status === 'submitted' ? '#f5a500' : ct.status === 'open' ? '#00d4ff' : 'rgba(255,255,255,0.4)';
-                            return '<div ' + _mcJumpAttr('task', ct.id) + ' style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 8px;background:rgba(255,255,255,0.02);border-radius:6px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(122,169,255,0.08)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.02)\'">' +
-                                '<span style="font-size:11px;color:#e0e6ff;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(ct.title || 'Untitled') + '</span>' +
-                                _mcTaskCountsChip(ct) +
-                            '</div>';
+                        __topicGroups.map(function (grp) {
+                            var header = grp.name
+                                ? '<div style="font-size:9px;color:rgba(167,139,250,0.85);font-weight:800;letter-spacing:0.08em;text-transform:uppercase;margin:6px 0 2px 2px;">🏷 ' + escapeHtml(grp.name) + '</div>'
+                                : '';
+                            return header + grp.tasks.map(__taskRowHtml).join('');
                         }).join('') +
                         '</div>' +
                     '</div>';
@@ -36487,6 +36637,8 @@
                 // Subtask checklist — restore prior items including completion state
                 // so the editor can preserve it on save.
                 _mcRenderProjectSubtaskEditorRows(Array.isArray(p.subtasks) ? p.subtasks : []);
+                // v1.41 — Topics editor: restore this project's saved topics.
+                _mcRenderProjectTopicsEditor(Array.isArray(p.topics) ? p.topics : []);
                 // FLP Tracking Mode — defaults to monitoring for legacy projects.
                 var ptMode = p.flpTracking || 'monitoring';
                 var ptRadio = document.querySelector('input[name="mc-project-tracking"][value="' + ptMode + '"]');
@@ -36567,6 +36719,8 @@
                 });
                 // Clear the subtask editor for new projects.
                 _mcRenderProjectSubtaskEditorRows([]);
+                // v1.41 — Clear the Topics editor for new projects.
+                _mcRenderProjectTopicsEditor([]);
                 var el;
                 el = document.getElementById('mc-project-status'); if (el) el.value = 'planning';
                 el = document.getElementById('mc-project-budget'); if (el) el.value = 0;
@@ -36748,6 +36902,10 @@
                     }
                     return rows;
                 })(),
+                // v1.41 — Topics (host-authored Google-Classroom-style labels).
+                // Tasks reference a topic by id via task.topicId; deleting a row
+                // here just un-groups those tasks, it doesn't touch them.
+                topics: _mcReadProjectTopicsRows(),
                 budget: parseInt(document.getElementById('mc-project-budget')?.value || '0', 10),
                 team: team,
                 checkpointId: document.getElementById('mc-project-checkpoint')?.value || '',
