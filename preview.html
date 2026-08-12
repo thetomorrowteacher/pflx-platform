@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 50;
+      window.PFLX_PATCH   = 51;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -4141,18 +4141,47 @@
             cursor: pointer; z-index: 10; line-height: 1;
         }
         .mc-sidebar-expand-btn {
-            display: none; position: fixed; top: 14px; left: 14px; width: 38px; height: 38px;
+            /* BUGFIX (Aug 12, Ennis) — this was `position:fixed; top:14px;
+               left:14px`, which is measured from the VIEWPORT, not from
+               .mission-control-view. The main app .toolbar sits at the top
+               of the viewport, is 64px tall, and has z-index:100 — well
+               above this button's old z-index:56 — so the expand button
+               was rendering directly underneath the toolbar the entire
+               time: technically "shown" (display:flex) but fully covered
+               and unclickable. Once a host collapsed the sidebar there was
+               no visible way to bring it back. Fix: position:absolute
+               instead, relative to .mission-control-view (already
+               position:relative) — the same pattern .app-refresh-btn and
+               .mc-sidebar-collapse-btn already use successfully — so the
+               button lives inside the content area, safely below the
+               toolbar, every time. */
+            display: none; position: absolute; top: 14px; left: 14px; width: 38px; height: 38px;
             border-radius: 10px; border: 1px solid rgba(0,212,255,0.25); background: rgba(6,9,13,0.92);
             color: var(--cyan); font-size: 16px; z-index: 56; cursor: pointer; align-items: center; justify-content: center;
         }
         .mission-control-view.mc-sidebar-collapsed .mc-sidebar { display: none; }
         .mission-control-view.mc-sidebar-collapsed .mc-sidebar-expand-btn { display: flex; }
+        /* v1.51 — desktop/tablet sidebar RESIZE handle, a thin drag strip
+           along the sidebar's right edge (mirrors the collapse button's
+           absolute-positioned-on-.mc-sidebar pattern). Only meaningful
+           while the sidebar is visible & not collapsed; hidden on phones
+           alongside the collapse/expand controls since the <768px view
+           uses the off-canvas drawer instead. */
+        .mc-sidebar-resize-handle {
+            position: absolute; top: 0; right: -3px; width: 6px; height: 100%;
+            cursor: col-resize; z-index: 5; background: transparent;
+            transition: background 0.15s ease;
+        }
+        .mc-sidebar-resize-handle:hover,
+        .mc-sidebar-resize-handle.mc-resizing { background: rgba(0,212,255,0.35); }
+        body.mc-sidebar-resizing { cursor: col-resize !important; user-select: none !important; }
         @media (max-width: 768px) {
-            .mc-sidebar-collapse-btn, .mc-sidebar-expand-btn { display: none !important; }
+            .mc-sidebar-collapse-btn, .mc-sidebar-expand-btn, .mc-sidebar-resize-handle { display: none !important; }
         }
         .mc-sidebar {
             width: 230px;
-            min-width: 230px;
+            min-width: 180px;
+            max-width: 440px;
             height: 100%;
             background: #06090d;
             border-right: 1px solid rgba(0,212,255,0.12);
@@ -7297,8 +7326,11 @@
                     <button class="mc-sidebar-expand-btn" onclick="mcToggleDesktopSidebar(false)" title="Show sidebar" aria-label="Show Mission Control sidebar">&#9776;</button>
                     <div class="mc-layout">
                         <!-- LEFT SIDEBAR -->
-                        <div class="mc-sidebar">
+                        <div class="mc-sidebar" id="mc-sidebar">
                             <button class="mc-sidebar-collapse-btn" onclick="mcToggleDesktopSidebar(true)" title="Collapse sidebar" aria-label="Collapse Mission Control sidebar">&#8249;</button>
+                            <!-- v1.51 — drag handle to resize the sidebar; see
+                                 mcInitSidebarResize() for the drag logic. -->
+                            <div class="mc-sidebar-resize-handle" id="mc-sidebar-resize-handle" title="Drag to resize"></div>
                             <div class="mc-sidebar-header">
                                 <img src="public/Mission Control Icon.png" alt="Mission Control">
                                 <h2>MISSION CONTROL</h2>
@@ -26470,6 +26502,58 @@
                     if (_mcInitView) _mcInitView.classList.add('mc-sidebar-collapsed');
                 }
             } catch (e) {}
+            // v1.51 — DESKTOP/TABLET SIDEBAR RESIZE (Aug 12, Ennis). Drag the
+            // handle on the sidebar's right edge to widen/narrow it (180-440px,
+            // matching the CSS min/max-width on .mc-sidebar). Persists like the
+            // collapse state so a host's preferred width survives a reload.
+            // Uses Pointer Events so mouse AND touch/pen drag the same handlers.
+            var MC_SIDEBAR_WIDTH_KEY = 'pflx_mc_sidebar_width';
+            var MC_SIDEBAR_MIN_W = 180, MC_SIDEBAR_MAX_W = 440;
+            window.mcInitSidebarResize = function () {
+                var sidebar = document.getElementById('mc-sidebar');
+                var handle = document.getElementById('mc-sidebar-resize-handle');
+                if (!sidebar || !handle || handle.dataset.mcResizeBound) return;
+                handle.dataset.mcResizeBound = '1';
+                // Restore a previously saved width.
+                try {
+                    var savedW = parseInt(localStorage.getItem(MC_SIDEBAR_WIDTH_KEY) || '', 10);
+                    if (savedW && savedW >= MC_SIDEBAR_MIN_W && savedW <= MC_SIDEBAR_MAX_W) {
+                        sidebar.style.width = savedW + 'px';
+                    }
+                } catch (e) {}
+                var dragging = false, startX = 0, startW = 0;
+                handle.addEventListener('pointerdown', function (ev) {
+                    dragging = true;
+                    startX = ev.clientX;
+                    startW = sidebar.getBoundingClientRect().width;
+                    handle.classList.add('mc-resizing');
+                    document.body.classList.add('mc-sidebar-resizing');
+                    try { handle.setPointerCapture(ev.pointerId); } catch (e) {}
+                    ev.preventDefault();
+                });
+                handle.addEventListener('pointermove', function (ev) {
+                    if (!dragging) return;
+                    var w = startW + (ev.clientX - startX);
+                    w = Math.max(MC_SIDEBAR_MIN_W, Math.min(MC_SIDEBAR_MAX_W, w));
+                    sidebar.style.width = w + 'px';
+                });
+                function endDrag(ev) {
+                    if (!dragging) return;
+                    dragging = false;
+                    handle.classList.remove('mc-resizing');
+                    document.body.classList.remove('mc-sidebar-resizing');
+                    try { localStorage.setItem(MC_SIDEBAR_WIDTH_KEY, Math.round(sidebar.getBoundingClientRect().width) + ''); } catch (e) {}
+                }
+                handle.addEventListener('pointerup', endDrag);
+                handle.addEventListener('pointercancel', endDrag);
+                // Double-click the handle to snap back to the default width —
+                // a quick escape hatch if a host drags it somewhere awkward.
+                handle.addEventListener('dblclick', function () {
+                    sidebar.style.width = '230px';
+                    try { localStorage.setItem(MC_SIDEBAR_WIDTH_KEY, '230'); } catch (e) {}
+                });
+            };
+            try { window.mcInitSidebarResize(); } catch (e) {}
             // Auto-close the drawer once a sidebar nav button is tapped,
             // so picking a section doesn't leave the drawer covering it.
             document.addEventListener('click', function (ev) {
