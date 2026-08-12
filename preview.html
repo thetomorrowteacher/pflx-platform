@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 52;
+      window.PFLX_PATCH   = 53;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -21112,32 +21112,56 @@
                 // Tile sizing: roomier padding, taller min-height, and a
                 // significantly larger icon so the launcher feels like
                 // the primary surface of Home Base instead of a chip row.
+                //
+                // BUGFIX (Aug 12, Ennis) — "hover appearing and resetting
+                // over and over": the hover lift (`transform:translateY(-2px)`)
+                // used to be applied directly to `tile`, the SAME element
+                // whose mouseenter/mouseleave drives the effect. A CSS
+                // transform moves an element's actual on-screen (hit-test)
+                // box, not just its paint — so the instant the tile lifted
+                // 2px, its bottom edge moved out from under a cursor
+                // resting near it, firing mouseleave; the tile then reset
+                // back down, the cursor was inside it again, firing
+                // mouseenter — an infinite boundary oscillation exactly
+                // where a host's mouse happened to be hovering. Fix: the
+                // lift transform now applies to a separate, non-hoverable
+                // `.pflx-app-hub-inner` wrapper (icon + label only) instead
+                // of `tile` itself. `tile` — the actual hit-tested,
+                // mouseenter/mouseleave-bound element — never moves, so its
+                // hover boundary is now completely stable. box-shadow and
+                // border-color stay on `tile` directly since neither of
+                // those affects hit-testing (a shadow/border color change
+                // doesn't move the element's box), so they're safe as-is.
                 tile.style.cssText =
-                    'position:relative;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:14px;' +
+                    'position:relative;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;' +
                     'padding:24px 16px 18px;border-radius:16px;cursor:pointer;text-align:center;min-height:200px;' +
                     'background:linear-gradient(160deg,rgba(255,255,255,0.03),rgba(0,0,0,0.25));' +
                     'border:1px solid ' + app.accent + '30;color:#e0e6ff;' +
-                    'transition:transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;';
+                    'transition:box-shadow 0.18s ease, border-color 0.18s ease;';
                 // Per-app icon scale — Battle Arena's PNG has whitespace
                 // around the logo so we transform-scale it up to look
                 // visually comparable to the other icons at the same
                 // bounding box. The wrapper keeps the layout box stable.
                 var _scale = app.iconScale || 1.0;
                 tile.innerHTML =
-                    '<div style="width:104px;height:104px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
-                        '<img src="' + app.icon + '" alt="' + escapeHtml(app.name) + '" style="width:104px;height:104px;object-fit:contain;transform:scale(' + _scale + ');filter:drop-shadow(0 4px 16px ' + app.accent + '66);">' +
+                    '<div class="pflx-app-hub-inner" style="display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:14px;transition:transform 0.18s ease;">' +
+                        '<div style="width:104px;height:104px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
+                            '<img src="' + app.icon + '" alt="' + escapeHtml(app.name) + '" style="width:104px;height:104px;object-fit:contain;transform:scale(' + _scale + ');filter:drop-shadow(0 4px 16px ' + app.accent + '66);">' +
+                        '</div>' +
+                        '<div style="font-family:\'Orbitron\',sans-serif;font-size:13px;font-weight:800;letter-spacing:0.12em;color:#e0e6ff;text-transform:uppercase;">' + escapeHtml(app.name) + '</div>' +
                     '</div>' +
-                    '<div style="font-family:\'Orbitron\',sans-serif;font-size:13px;font-weight:800;letter-spacing:0.12em;color:#e0e6ff;text-transform:uppercase;">' + escapeHtml(app.name) + '</div>' +
                     '<div class="pflx-app-hub-desc" style="position:absolute;left:10px;right:10px;bottom:10px;font-family:\'Jura\',sans-serif;font-size:11px;line-height:1.4;color:rgba(224,230,255,0.92);background:rgba(5,8,16,0.92);border:1px solid ' + app.accent + '55;border-radius:10px;padding:8px 10px;opacity:0;transform:translateY(4px);pointer-events:none;transition:opacity 0.15s ease, transform 0.15s ease;">' + escapeHtml(app.desc) + '</div>';
                 tile.onmouseenter = function () {
-                    tile.style.transform = 'translateY(-2px)';
+                    var inner = tile.querySelector('.pflx-app-hub-inner');
+                    if (inner) inner.style.transform = 'translateY(-2px)';
                     tile.style.boxShadow = '0 10px 28px ' + app.accent + '33';
                     tile.style.borderColor = app.accent + '88';
                     var d = tile.querySelector('.pflx-app-hub-desc');
                     if (d) { d.style.opacity = '1'; d.style.transform = 'translateY(0)'; }
                 };
                 tile.onmouseleave = function () {
-                    tile.style.transform = '';
+                    var inner = tile.querySelector('.pflx-app-hub-inner');
+                    if (inner) inner.style.transform = '';
                     tile.style.boxShadow = '';
                     tile.style.borderColor = app.accent + '30';
                     var d = tile.querySelector('.pflx-app-hub-desc');
