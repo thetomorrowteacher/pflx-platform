@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 54;
+      window.PFLX_PATCH   = 55;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -4135,7 +4135,23 @@
            under 768px so it doesn't double up with the phone drawer, which
            already owns visibility there. */
         .mc-sidebar-collapse-btn {
-            position: absolute; top: 14px; right: -14px; width: 28px; height: 28px;
+            /* BUGFIX (Aug 12, Ennis) — "the toggle is hiding". This used to
+               be `right: -14px`, deliberately straddling the sidebar's
+               right edge (half inside, half poking out over the content
+               area) for a chevron-in-a-circle look. But `.mc-sidebar`
+               itself has `overflow-x: hidden` (to keep its own nav content
+               from ever causing a horizontal scrollbar) — since this button
+               is a CHILD of .mc-sidebar, that same overflow clips off
+               whatever part of the button sticks outside the sidebar's own
+               box. The button was never actually hidden/removed, just
+               permanently clipped down to a sliver — this has been true
+               since the button was introduced (v1.38), not something the
+               resize-handle work in v1.51 changed; it just wasn't reported
+               until now. Fix: keep the button fully INSIDE the sidebar's
+               box (same corner-button pattern .app-refresh-btn already
+               uses successfully elsewhere) so overflow-x:hidden has
+               nothing of it left to clip. */
+            position: absolute; top: 14px; right: 10px; width: 28px; height: 28px;
             border-radius: 50%; border: 1px solid rgba(0,212,255,0.35); background: #06090d;
             color: var(--cyan); font-size: 14px; display: flex; align-items: center; justify-content: center;
             cursor: pointer; z-index: 10; line-height: 1;
@@ -4168,7 +4184,12 @@
            alongside the collapse/expand controls since the <768px view
            uses the off-canvas drawer instead. */
         .mc-sidebar-resize-handle {
-            position: absolute; top: 0; right: -3px; width: 6px; height: 100%;
+            /* v1.55 companion fix — same overflow-x:hidden clipping as the
+               collapse button above: this was `right:-3px` (half outside
+               the sidebar's box), so half the 6px grab strip was being
+               clipped off, leaving only a 3px sliver actually hoverable.
+               `right:0` keeps the full strip inside the clipped box. */
+            position: absolute; top: 0; right: 0; width: 6px; height: 100%;
             cursor: col-resize; z-index: 5; background: transparent;
             transition: background 0.15s ease;
         }
