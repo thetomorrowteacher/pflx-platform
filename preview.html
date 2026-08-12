@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 37;
+      window.PFLX_PATCH   = 38;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -21378,6 +21378,7 @@
                     return;
                 }
                 if (action === 'approve') pflxApproveSubmission(kind, id);
+                else if (typeof pflxShowDenyModal === 'function') pflxShowDenyModal([{ kind: kind, id: id }]);
                 else pflxDenySubmission(kind, id);
             } catch (e) { console.warn('[approvals] resolve failed', e); }
         };
@@ -21417,24 +21418,38 @@
                 : Object.keys(window._homeAppSel);
             if (!keys.length) { if (typeof pflxToast === 'function') pflxToast('Select at least one submission first', 'warn'); return; }
             if (!confirm((action === 'approve' ? 'Approve ' : 'Deny ') + keys.length + ' submission(s)?')) return;
-            var note = action === 'deny' ? (prompt('Optional note sent to every denied player:', '') || '') : '';
-            keys.forEach(function (k) {
-                var i = k.indexOf('|');
-                var kind = k.slice(0, i), id = k.slice(i + 1);
-                try {
-                    if (kind === 'arena') {
-                        if (action === 'approve') { if (typeof mcApproveItem === 'function') mcApproveItem('arena_external', id); }
-                        else { if (typeof mcRejectItem === 'function') mcRejectItem('arena_external', id); }
-                    } else if (action === 'approve') {
-                        pflxApproveSubmission(kind, id);
-                    } else {
-                        pflxDenySubmission(kind, id, note);
-                    }
-                } catch (e) { console.warn('[approvals] bulk item failed', kind, id, e); }
+            var parsed = keys.map(function (k) { var i = k.indexOf('|'); return { kind: k.slice(0, i), id: k.slice(i + 1) }; });
+            if (action === 'approve') {
+                parsed.forEach(function (it) {
+                    try {
+                        if (it.kind === 'arena') { if (typeof mcApproveItem === 'function') mcApproveItem('arena_external', it.id); }
+                        else pflxApproveSubmission(it.kind, it.id);
+                    } catch (e) { console.warn('[approvals] bulk item failed', it.kind, it.id, e); }
+                });
+                window._homeAppSel = {};
+                if (typeof pflxToast === 'function') pflxToast('✓ ' + parsed.length + ' submission(s) approved', 'success');
+                setTimeout(function () { try { renderApprovalsCard(); } catch (e) {} }, 700);
+                return;
+            }
+            // Deny — arena items reject immediately (no note UI there yet);
+            // everything else goes through ONE rich deny modal whose picks
+            // (comments/badge/tax/XC) apply to every selected submission.
+            var arenaItems = parsed.filter(function (it) { return it.kind === 'arena'; });
+            var otherItems = parsed.filter(function (it) { return it.kind !== 'arena'; });
+            arenaItems.forEach(function (it) {
+                try { if (typeof mcRejectItem === 'function') mcRejectItem('arena_external', it.id); } catch (e) { console.warn('[approvals] bulk arena deny failed', it.id, e); }
             });
             window._homeAppSel = {};
-            if (typeof pflxToast === 'function') pflxToast('✓ ' + keys.length + ' submission(s) ' + (action === 'approve' ? 'approved' : 'denied'), 'success');
-            setTimeout(function () { try { renderApprovalsCard(); } catch (e) {} }, 700);
+            function _finishBulkDeny() {
+                if (typeof pflxToast === 'function') pflxToast('✓ ' + parsed.length + ' submission(s) denied', 'success');
+                setTimeout(function () { try { renderApprovalsCard(); } catch (e) {} }, 700);
+            }
+            if (otherItems.length && typeof pflxShowDenyModal === 'function') {
+                pflxShowDenyModal(otherItems, _finishBulkDeny);
+            } else {
+                otherItems.forEach(function (it) { try { pflxDenySubmission(it.kind, it.id, ''); } catch (e) {} });
+                _finishBulkDeny();
+            }
         };
 
         window.pflxApproveSubmission = function (kind, id) {
@@ -62033,6 +62048,228 @@ RESPONSE RULES:
             });
         }
         window.pflxApplyModifierPicker = pflxApplyModifierPicker;
+
+        // ── Rich DENY modal (Aug 12, Ennis) ──────────────────────────────
+        //   Replaces the old prompt()-only deny flow with: a host-editable
+        //   saved-comment bank (multi-select, feeds the note the player
+        //   sees), quick Digital Badge selection (still awards the badge
+        //   despite the denial — same PflxDataBus.award path as a normal
+        //   approval, so it shows up in the player's Portfolio/X-Coin), a
+        //   PFLX Taxes picker (reuses the live X-Coin modifier catalog —
+        //   selecting a tax deducts XC immediately via pflxModifiers,
+        //   exactly like the existing auto "Incomplete Submission Tax"),
+        //   and a custom XC award (partial credit; preset chips + free
+        //   entry). `items` is [{kind,id}, ...] — one entry for a single
+        //   DENY click, several for a bulk "DENY SELECTED" — the same
+        //   picks apply to every item/player.
+        var DENY_COMMENT_BANK_KEY = 'pflx_deny_comment_bank';
+        var DENY_XC_PRESETS = [10, 25, 50, 100, 200, 500, 1000];
+
+        function _pflxDenyDefaultComments() {
+            return [
+                'Missing required elements — please review the task criteria and resubmit.',
+                'Link/file did not open — please re-check sharing permissions and resubmit.',
+                'Description is too short — add more detail on what you did.',
+                'Great effort, but this needs another pass before it meets the bar.',
+                'Please re-read the instructions — a few requirements were missed.'
+            ];
+        }
+        function _pflxLoadDenyCommentBank() {
+            try {
+                var raw = localStorage.getItem(DENY_COMMENT_BANK_KEY);
+                if (raw) { var arr = JSON.parse(raw); if (Array.isArray(arr)) return arr; }
+            } catch (e) {}
+            var seeded = _pflxDenyDefaultComments();
+            try { localStorage.setItem(DENY_COMMENT_BANK_KEY, JSON.stringify(seeded)); } catch (e) {}
+            return seeded;
+        }
+        function _pflxSaveDenyCommentBank(arr) {
+            try { localStorage.setItem(DENY_COMMENT_BANK_KEY, JSON.stringify(arr || [])); } catch (e) {}
+            // Best-effort cloud mirror so the bank travels with the host, not just this browser.
+            try {
+                var sb = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (sb) sb.from('app_data').upsert({ key: DENY_COMMENT_BANK_KEY, data: arr || [] }, { onConflict: 'key' }).then(function () {}, function () {});
+            } catch (e) {}
+        }
+
+        // Resolve the player id an approval item belongs to, mirroring the
+        // same lookups renderApprovalsCard() uses to build each item.
+        function _pflxDenyResolvePlayerId(kind, id) {
+            try {
+                if (kind === 'tasksub') {
+                    var parts = String(id || '').split('::');
+                    return parts[1] || '';
+                }
+                if (kind === 'task') {
+                    var t = (typeof mcTasks !== 'undefined' ? mcTasks : []).find(function (x) { return x && x.id === id; });
+                    return (t && t.submission && t.submission.submittedBy) || '';
+                }
+                if (kind === 'reward') {
+                    var q = (typeof _pflxLoadRewardRequests === 'function') ? _pflxLoadRewardRequests() : [];
+                    var r = q.find(function (x) { return x && x.id === id; });
+                    return (r && r.playerId) || '';
+                }
+                if (kind === 'coinsub') {
+                    var s = (typeof _pflxCloudSubs !== 'undefined' ? _pflxCloudSubs : []).find(function (x) { return x && x.id === id; });
+                    return (s && s.playerId) || '';
+                }
+            } catch (e) {}
+            return '';
+        }
+
+        function pflxShowDenyModal(items, onDone) {
+            items = (items || []).filter(function (it) { return it && it.kind && it.id; });
+            if (!items.length) return;
+            if (typeof openModal !== 'function') {
+                // Fallback if the modal host isn't available — old prompt-only behavior.
+                var fallbackNote = prompt('Optional: explain why this is being denied (the player will see it).', '') || '';
+                items.forEach(function (it) { try { pflxDenySubmission(it.kind, it.id, fallbackNote); } catch (e) {} });
+                if (typeof onDone === 'function') onDone();
+                return;
+            }
+            var bank = _pflxLoadDenyCommentBank();
+            var badges = (typeof mcGetAllBadges === 'function') ? mcGetAllBadges() : [];
+            var taxes = (window.pflxModifiers ? window.pflxModifiers.catalog() : []).filter(function (m) { return (m.type || 'tax') === 'tax'; });
+            var multi = items.length > 1;
+
+            var commentsHtml = bank.length
+                ? bank.map(function (c, i) {
+                    return '<label style="display:flex;align-items:flex-start;gap:8px;padding:6px 0;font-size:12px;color:#e0e6ff;cursor:pointer;">' +
+                        '<input type="checkbox" class="pflx-deny-comment-cb" data-idx="' + i + '" style="margin-top:3px;accent-color:#ef4444;cursor:pointer;">' +
+                        '<span style="flex:1;">' + escapeHtml(c) + '</span>' +
+                        '<span class="pflx-deny-comment-del" data-idx="' + i + '" title="Remove from bank" style="color:rgba(255,255,255,0.3);cursor:pointer;padding:0 4px;">✕</span>' +
+                        '</label>';
+                }).join('')
+                : '<div style="font-size:11px;color:rgba(255,255,255,0.35);">No saved comments yet — add one below.</div>';
+
+            var badgesHtml = badges.length
+                ? badges.map(function (b) {
+                    return '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;color:#e0e6ff;cursor:pointer;">' +
+                        '<input type="checkbox" class="pflx-deny-badge-cb" value="' + escapeHtml(b.id) + '" style="accent-color:#f5c842;cursor:pointer;">' +
+                        '<span>' + (b.icon || '🏅') + ' ' + escapeHtml(b.name) + '</span>' +
+                        '</label>';
+                }).join('')
+                : '<div style="font-size:11px;color:rgba(255,255,255,0.35);">No badges in the catalog yet.</div>';
+
+            var taxesHtml = taxes.length
+                ? taxes.map(function (raw) {
+                    var m = window.pflxModifiers.resolve(raw);
+                    var v = (typeof m.effectValue === 'number') ? m.effectValue : 0;
+                    return '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;color:#e0e6ff;cursor:pointer;">' +
+                        '<input type="checkbox" class="pflx-deny-tax-cb" value="' + escapeHtml(m.id) + '" style="accent-color:#ef4444;cursor:pointer;">' +
+                        '<span style="flex:1;">' + (m.icon || '⚠️') + ' ' + escapeHtml(m.name) + '</span>' +
+                        '<span style="font-family:\'Share Tech Mono\',monospace;color:#ef4444;">-' + v.toLocaleString() + ' XC</span>' +
+                        '</label>';
+                }).join('')
+                : '<div style="font-size:11px;color:rgba(255,255,255,0.35);">No PFLX Taxes defined in X-Coin yet.</div>';
+
+            var presetsHtml = DENY_XC_PRESETS.map(function (v) {
+                return '<button type="button" class="pflx-deny-xc-preset" data-v="' + v + '" style="padding:5px 10px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.35);color:#22c55e;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;">' + v + '</button>';
+            }).join('');
+
+            var html =
+                '<div style="font-family:Orbitron,sans-serif;font-size:14px;letter-spacing:2px;color:#ef4444;margin-bottom:4px;">DENY SUBMISSION' + (multi ? 'S' : '') + '</div>' +
+                '<div style="font-size:12px;color:#8a93b0;margin-bottom:12px;">' + (multi ? items.length + ' submissions selected. ' : '') + 'Everything below applies to ' + (multi ? 'every selected submission' : 'this submission') + '.</div>' +
+                '<div style="max-height:56vh;overflow-y:auto;padding-right:4px;">' +
+                    '<div style="font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:1.5px;color:#00d4ff;margin-bottom:6px;">SAVED COMMENTS <span style="color:rgba(255,255,255,0.35);">(pick any — the player sees them)</span></div>' +
+                    '<div id="pflx-deny-comment-list">' + commentsHtml + '</div>' +
+                    '<div style="display:flex;gap:6px;margin:8px 0 4px;">' +
+                        '<input id="pflx-deny-comment-new" type="text" placeholder="Add a new saved comment…" style="flex:1;padding:6px 8px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:#e0e6ff;font-size:12px;">' +
+                        '<button type="button" id="pflx-deny-comment-add" style="padding:6px 10px;background:rgba(0,212,255,0.12);border:1px solid rgba(0,212,255,0.4);color:#00d4ff;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;">+ SAVE</button>' +
+                    '</div>' +
+                    '<textarea id="pflx-deny-note" placeholder="Note sent to the player (auto-filled from picks above — edit freely)" style="width:100%;min-height:60px;margin-top:6px;padding:8px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:#e0e6ff;font-size:12px;font-family:inherit;resize:vertical;"></textarea>' +
+
+                    '<div style="font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:1.5px;color:#f5c842;margin:16px 0 6px;">DIGITAL BADGE <span style="color:rgba(255,255,255,0.35);">(awards despite the denial)</span></div>' +
+                    '<div>' + badgesHtml + '</div>' +
+
+                    '<div style="font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:1.5px;color:#ef4444;margin:16px 0 6px;">PFLX TAXES <span style="color:rgba(255,255,255,0.35);">(deducts XC immediately)</span></div>' +
+                    '<div>' + taxesHtml + '</div>' +
+
+                    '<div style="font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:1.5px;color:#22c55e;margin:16px 0 6px;">CUSTOM XC AWARD <span style="color:rgba(255,255,255,0.35);">(partial credit despite the denial)</span></div>' +
+                    '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">' + presetsHtml + '</div>' +
+                    '<input id="pflx-deny-xc-custom" type="number" min="0" step="1" placeholder="Custom XC amount" style="width:160px;padding:6px 8px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:#e0e6ff;font-size:12px;">' +
+                '</div>' +
+                '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
+                    '<button type="button" id="pflx-deny-cancel" style="padding:8px 16px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.7);border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">CANCEL</button>' +
+                    '<button type="button" id="pflx-deny-confirm" style="padding:8px 18px;background:linear-gradient(135deg,#ef4444,#b91c1c);color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:800;cursor:pointer;letter-spacing:0.05em;">✗ CONFIRM DENIAL</button>' +
+                '</div>';
+
+            openModal(html, function (cardEl, close) {
+                function syncNoteFromComments() {
+                    var picked = [];
+                    cardEl.querySelectorAll('.pflx-deny-comment-cb:checked').forEach(function (cb) {
+                        var idx = parseInt(cb.getAttribute('data-idx'), 10);
+                        if (bank[idx]) picked.push(bank[idx]);
+                    });
+                    var ta = cardEl.querySelector('#pflx-deny-note');
+                    if (ta) ta.value = picked.join('\n');
+                }
+                cardEl.querySelectorAll('.pflx-deny-comment-cb').forEach(function (cb) {
+                    cb.addEventListener('change', syncNoteFromComments);
+                });
+                cardEl.querySelectorAll('.pflx-deny-comment-del').forEach(function (del) {
+                    del.addEventListener('click', function () {
+                        var idx = parseInt(del.getAttribute('data-idx'), 10);
+                        bank.splice(idx, 1);
+                        _pflxSaveDenyCommentBank(bank);
+                        close();
+                        pflxShowDenyModal(items, onDone); // re-render with the updated bank
+                    });
+                });
+                var addBtn = cardEl.querySelector('#pflx-deny-comment-add');
+                if (addBtn) addBtn.addEventListener('click', function () {
+                    var inp = cardEl.querySelector('#pflx-deny-comment-new');
+                    var val = inp && inp.value.trim();
+                    if (!val) return;
+                    bank.push(val);
+                    _pflxSaveDenyCommentBank(bank);
+                    close();
+                    pflxShowDenyModal(items, onDone); // re-render with the new comment available
+                });
+                cardEl.querySelectorAll('.pflx-deny-xc-preset').forEach(function (b) {
+                    b.addEventListener('click', function () {
+                        var inp = cardEl.querySelector('#pflx-deny-xc-custom');
+                        if (inp) inp.value = b.getAttribute('data-v');
+                    });
+                });
+                var cancelBtn = cardEl.querySelector('#pflx-deny-cancel');
+                if (cancelBtn) cancelBtn.addEventListener('click', close);
+
+                var confirmBtn = cardEl.querySelector('#pflx-deny-confirm');
+                if (confirmBtn) confirmBtn.addEventListener('click', function () {
+                    var note = (cardEl.querySelector('#pflx-deny-note') || {}).value || '';
+                    var badgeIds = Array.prototype.map.call(cardEl.querySelectorAll('.pflx-deny-badge-cb:checked'), function (cb) { return cb.value; });
+                    var taxIds = Array.prototype.map.call(cardEl.querySelectorAll('.pflx-deny-tax-cb:checked'), function (cb) { return cb.value; });
+                    var xcCustom = parseInt((cardEl.querySelector('#pflx-deny-xc-custom') || {}).value, 10) || 0;
+
+                    items.forEach(function (it) {
+                        try { pflxDenySubmission(it.kind, it.id, note); } catch (e) { console.warn('[deny-modal] deny failed', it, e); }
+                        var pid = _pflxDenyResolvePlayerId(it.kind, it.id);
+                        if (!pid) return;
+                        badgeIds.forEach(function (bid) {
+                            try {
+                                if (window.PflxDataBus && typeof _pflxResolveAwardBadge === 'function') {
+                                    window.PflxDataBus.award(pid, { badge: _pflxResolveAwardBadge(bid), source: 'mc', reason: 'deny-partial-badge:' + it.kind });
+                                }
+                            } catch (e) { console.warn('[deny-modal] badge award failed', pid, bid, e); }
+                        });
+                        taxIds.forEach(function (tid) {
+                            try {
+                                if (window.pflxModifiers) window.pflxModifiers.applyToPlayer(tid, pid, { reason: 'Denial fine (host-selected)', source: 'deny-tax' });
+                            } catch (e) { console.warn('[deny-modal] tax apply failed', pid, tid, e); }
+                        });
+                        if (xcCustom > 0) {
+                            try {
+                                if (window.PflxDataBus) window.PflxDataBus.award(pid, { xc: xcCustom, source: 'mc', reason: 'deny-partial-credit:' + it.kind });
+                            } catch (e) { console.warn('[deny-modal] custom xc award failed', pid, e); }
+                        }
+                    });
+                    close();
+                    if (typeof onDone === 'function') onDone();
+                });
+            });
+        }
+        window.pflxShowDenyModal = pflxShowDenyModal;
 
         // ── Missed-deadline sweep → fires *_missed_deadline auto-modifiers ──
         //   Host-authoritative (only a host/master client runs it, so a fine
