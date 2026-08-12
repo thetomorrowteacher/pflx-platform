@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 43;
+      window.PFLX_PATCH   = 44;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -23374,6 +23374,12 @@
             // landed). Self-guarded — a no-op once it's actually checked.
             try { if (typeof window._mcBackfillMissingPlayerRows === 'function') setTimeout(window._mcBackfillMissingPlayerRows, 300); } catch (e) {}
 
+            // v1.44 — give the lateness tax sweep another pass now that
+            // mcCheckpoints/mcPlayers have (re)loaded. No-op on a player's
+            // own device (host-gated inside the function) and self-guarded
+            // per-player via cp.latenessTaxedAt, so re-running here is safe.
+            try { if (typeof window.pflxCheckpointLatenessSweep === 'function') setTimeout(window.pflxCheckpointLatenessSweep, 500); } catch (e) {}
+
             // Seed-on-empty — ONLY if this device has never been seeded before.
             // Once the seed has run we set pflx_mc_seeded so subsequent empty
             // states (e.g. host deleted everyone) STAY empty instead of
@@ -24900,7 +24906,11 @@
                     // 3 min (was 60s): every open console re-pulling all keys each
                     // minute was real load on an I/O-starved database. Realtime
                     // still delivers changes instantly; this is only the fallback.
-                    _mcHealthIv = setInterval(function () { try { window.mcCloudPull(); } catch (e) {} }, 180000);
+                    // v1.44 — same tick also re-runs the lateness tax sweep, so a
+                    // host session left open catches a checkpoint the moment it
+                    // crosses its endDate rather than only at next page load.
+                    // Host-gated + per-player idempotent inside the function.
+                    _mcHealthIv = setInterval(function () { try { window.mcCloudPull(); } catch (e) {} try { if (typeof window.pflxCheckpointLatenessSweep === 'function') window.pflxCheckpointLatenessSweep(); } catch (e) {} }, 180000);
                 }
                 return;
             }
@@ -30981,6 +30991,76 @@
             var submitted = tasks.filter(function (x) { return x.state === 'submitted'; }).length;
             return { total: tasks.length, approved: approved, submitted: submitted, pct: tasks.length ? Math.round(approved * 100 / tasks.length) : 0, tasks: tasks };
         }
+
+        // ── LATENESS TAX SWEEP (v1.44, Ennis) ──────────────────────────────
+        // "Checkpoint concludes on schedule + tax applied" (Ennis's own agreed
+        // architecture answer) — a Checkpoint's conclusion is NON-BLOCKING: it
+        // ends on its scheduled endDate regardless of completion, stays fully
+        // accessible either way, and any player who is short of 100% approved
+        // on their in-scope work (per the v1.42 date-scoping fix above) gets an
+        // automatic, one-time lateness tax at that moment. A player who later
+        // catches up still gets the completion reward via the existing
+        // _mcRollupAwards path — the tax and the reward are independent; being
+        // late doesn't block ever finishing, it just costs XC for missing the
+        // deadline, exactly as Ennis described: "the tax and late fines apply
+        // and the Checkpoint is indicated as not complete."
+        //
+        // Reuses window.pflxModifiers end-to-end rather than inventing a new
+        // penalty mechanism — this only FIRES the 'checkpoint_incomplete'
+        // trigger; whatever tax/fine modifier(s) a host has defined in X-Coin
+        // with autoApply + triggerEvent:'checkpoint_incomplete' decide the
+        // actual XC deduction (same event-driven pattern already used for
+        // 'checkpoint_completed' / 'task_approved'). If no such modifier
+        // exists yet, fireEvent is a safe no-op — the sweep still marks the
+        // player as processed so it doesn't re-evaluate them every load.
+        //
+        // Idempotency lives on the Checkpoint record itself (cp.latenessTaxedAt
+        // = { playerId: timestamp }), cloud-synced like completionAwards, so
+        // it converges correctly no matter which device/host session runs the
+        // sweep or how many times.
+        //
+        // HOST-ONLY: gated on mcIsHost() so a player's own device never fires
+        // XC deductions for other players — mirrors how the reward payout in
+        // _mcRollupAwards only ever runs from a host approval action.
+        function pflxCheckpointLatenessSweep() {
+            try {
+                if (typeof mcIsHost !== 'function' || !mcIsHost()) return;
+                if (typeof mcCheckpoints === 'undefined' || !Array.isArray(mcCheckpoints) || !mcCheckpoints.length) return;
+                var today = new Date().toISOString().slice(0, 10);
+                var dirty = false;
+                mcCheckpoints.forEach(function (cp) {
+                    if (!cp || !cp.id || !cp.endDate || cp.endDate >= today) return; // only checkpoints past their end date
+                    if (cp.status === 'inactive') return;                            // drafts never taxed
+                    var pool = (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) ? mcPlayers : [];
+                    pool.forEach(function (player) {
+                        if (!player || !player.id || player.role === 'admin') return;
+                        cp.latenessTaxedAt = cp.latenessTaxedAt || {};
+                        if (cp.latenessTaxedAt[player.id]) return;   // already processed for this player
+                        var pr;
+                        try { pr = pflxPlayerCheckpointProgress(cp, player); } catch (e) { return; }
+                        if (!pr || !pr.total) return;                // nothing assigned to this player — nothing to tax
+                        if (pr.approved < pr.total) {
+                            try {
+                                if (window.pflxModifiers && typeof window.pflxModifiers.fireEvent === 'function') {
+                                    var cohorts = (typeof pflxPlayerCohorts === 'function') ? pflxPlayerCohorts(player) : [];
+                                    window.pflxModifiers.fireEvent('checkpoint_incomplete', {
+                                        playerId: player.id, targetType: 'checkpoint', targetId: cp.id,
+                                        cohort: (cohorts && cohorts[0]) || player.cohort || ''
+                                    });
+                                }
+                            } catch (e) { console.warn('[lateness tax] fireEvent failed', e); }
+                        }
+                        // Mark processed either way (taxed or already complete) so
+                        // this checkpoint is never re-evaluated for this player.
+                        cp.latenessTaxedAt[player.id] = Date.now();
+                        dirty = true;
+                    });
+                });
+                if (dirty) { try { mcSaveData('checkpoints'); } catch (e) {} }
+            } catch (e) { console.warn('[lateness tax] sweep failed', e); }
+        }
+        window.pflxCheckpointLatenessSweep = pflxCheckpointLatenessSweep;
+
         // ── CHECKPOINT PROGRESSION GATE (July 15, Ennis) ──
         // Players may only complete tasks whose checkpoint is ACTIVE (or already
         // completed), OR — early-advance — when every earlier checkpoint is fully
