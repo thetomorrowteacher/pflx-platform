@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 41;
+      window.PFLX_PATCH   = 42;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -30885,6 +30885,19 @@
             var seen = {}, tasks = [];
             function push(t, viaProject) {
                 if (!t || !t.id || seen[t.id]) return;
+                // v1.42 — a task's OWN due date governs which Checkpoint it
+                // counts toward, not its parent Project's deadline. A task
+                // due AFTER this Checkpoint's end date belongs to a later
+                // Checkpoint (or is just open-ended) and must not block THIS
+                // Checkpoint's completion — but a task due on/before this
+                // Checkpoint's end date counts here even when its Project's
+                // own deadline runs later (Ennis, Aug 2026: "if the task
+                // within a Project has a sub deadline which is before the
+                // checkpoint then it will count towards the current
+                // checkpoint... the task remains during the current
+                // Checkpoint... then the tax and late fines apply and the
+                // Checkpoint is indicated as not complete").
+                if (t.dueDate && cp.endDate && t.dueDate > cp.endDate) return;
                 seen[t.id] = 1;
                 tasks.push({ id: t.id, title: t.title || t.name || 'Task', state: pflxTaskStateForPlayer(t, pid), project: viaProject || null });
             }
