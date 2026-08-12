@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 39;
+      window.PFLX_PATCH   = 40;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -23269,6 +23269,12 @@
                 mcAutomations = JSON.parse(localStorage.getItem('pflx_mc_automations') || '[]');
             } catch(e) { console.warn('[MC] Data load error', e); }
 
+            // v1.40 — mcPlayers just got (re)loaded here; give the missing-
+            // individual-row backfill another chance to run in case it fired
+            // too early at boot (before mcPlayers' own cloud pull had
+            // landed). Self-guarded — a no-op once it's actually checked.
+            try { if (typeof window._mcBackfillMissingPlayerRows === 'function') setTimeout(window._mcBackfillMissingPlayerRows, 300); } catch (e) {}
+
             // Seed-on-empty — ONLY if this device has never been seeded before.
             // Once the seed has run we set pflx_mc_seeded so subsequent empty
             // states (e.g. host deleted everyone) STAY empty instead of
@@ -30026,6 +30032,20 @@
                 };
                 mcApplyTierToRecord(newPlayer);
                 mcPlayers.push(newPlayer);
+                // v1.40 — also publish an individual identity row
+                // (pflx_player_<id>). That's the ONLY format the login
+                // screen, roster realtime sync, and the Quick Task/Project
+                // Cohorts+Players pickers read to discover a player — a
+                // player added here (rather than through the self-service
+                // claim flow) previously landed in mcPlayers/Player
+                // Management only, invisible everywhere else even while
+                // logged in (confirmed bug: "Vybe", Aug 2026).
+                try {
+                    if (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS) && !PLAYERS.some(function (x) { return x && x.id === newPlayer.id; })) {
+                        PLAYERS.push(newPlayer);
+                    }
+                    if (typeof window.pflxIdentityPersistNewPlayer === 'function') window.pflxIdentityPersistNewPlayer(newPlayer);
+                } catch (e) { console.warn('[player-mgmt] identity publish failed', e); }
             }
             mcSaveData('players');
             mcClosePlayerForm();
@@ -60076,6 +60096,70 @@ RESPONSE RULES:
                 return fetched;
             } catch (e) { console.warn('[identity] cloud fetch failed', e); return []; }
         };
+
+        // v1.40 — Pull the shared cohort-group registry from Supabase.
+        // Mirrors pflxIdentityFetchRosterFromCloud above but for the
+        // 'cohortGroups' row. The Cohorts checkbox in the Quick Task/Project
+        // forms (and Advanced forms) render straight from the in-memory
+        // mcCohortGroups array with no freshness check of their own, so a
+        // browser tab left open for a while shows a stale, shorter list
+        // whenever another host adds a cohort group elsewhere. Called at
+        // boot alongside the roster fetch, and again by the realtime
+        // subscriber below as a fallback if Realtime isn't enabled yet.
+        window.pflxFetchCohortGroupsFromCloud = async function () {
+            try {
+                var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (!client) return null;
+                var res = await client.from('app_data').select('data').eq('key', 'cohortGroups').maybeSingle();
+                if (!res || res.error || !res.data || !Array.isArray(res.data.data) || !res.data.data.length) return null;
+                if (typeof mcCohortGroups === 'undefined') return null;
+                var incoming = res.data.data;
+                var byId = {};
+                (mcCohortGroups || []).forEach(function (g) { if (g && g.id) byId[g.id] = g; });
+                incoming.forEach(function (g) { if (g && g.id) byId[g.id] = g; });
+                mcCohortGroups = Object.keys(byId).map(function (k) { return byId[k]; });
+                try { mcSaveData('cohortgroups'); } catch (e) {}
+                console.log('[identity] ✓ Pulled', mcCohortGroups.length, 'cohort groups from cloud');
+                try { window.dispatchEvent(new CustomEvent('pflx-cohorts-updated', { detail: { count: mcCohortGroups.length } })); } catch (e) {}
+                return mcCohortGroups;
+            } catch (e) { console.warn('[identity] cohort-group cloud fetch failed', e); return null; }
+        };
+
+        // v1.40 — One-time self-heal: promote any player who exists in
+        // Mission Control's bulk roster (mcPlayers / cloud key
+        // pflx_mc_players — what Player Management shows) but never got an
+        // individual pflx_player_<id> cloud row, which is the ONLY format
+        // the login screen / roster sync / realtime subscriber read for
+        // newly-added players. This happens when a player is added directly
+        // through Player Management rather than the self-service claim flow
+        // (fixed going forward in mcSavePlayerForm — see v1.40 notes). Safe
+        // to call repeatedly: it only acts on records still missing an
+        // individual row, and does nothing once mcPlayers has genuinely
+        // been checked with no gaps.
+        var _mcBackfillRan = false;
+        function _mcBackfillMissingPlayerRows() {
+            if (_mcBackfillRan) return;
+            try {
+                if (typeof PLAYERS === 'undefined' || !Array.isArray(PLAYERS)) return;
+                if (typeof mcPlayers === 'undefined' || !Array.isArray(mcPlayers) || !mcPlayers.length) return;
+                var missing = mcPlayers.filter(function (p) {
+                    return p && p.id && (p.role || 'player') === 'player' &&
+                        !PLAYERS.some(function (x) { return x && (x.id === p.id || (x.brand && p.brand && x.brand.toUpperCase() === p.brand.toUpperCase())); });
+                });
+                _mcBackfillRan = true;
+                if (!missing.length) return;
+                missing.forEach(function (p) {
+                    try {
+                        PLAYERS.push(p);
+                        if (typeof window.pflxIdentityPersistNewPlayer === 'function') window.pflxIdentityPersistNewPlayer(p);
+                    } catch (e) { console.warn('[identity] backfill failed for', p && p.brand, e); }
+                });
+                console.log('[identity] ✓ Backfilled', missing.length, 'player(s) missing an individual cloud row:', missing.map(function (p) { return p.brand; }).join(', '));
+                try { window.dispatchEvent(new CustomEvent('pflx-roster-updated', { detail: { count: missing.length } })); } catch (e) {}
+            } catch (e) { console.warn('[identity] backfill scan failed', e); }
+        }
+        window._mcBackfillMissingPlayerRows = _mcBackfillMissingPlayerRows;
+
         // ── Realtime roster subscriber ──
         // Listens for INSERT/UPDATE on the app_data table and, when the row
         // is a player row (key starts with 'pflx_player_'), merges the record
@@ -60097,7 +60181,27 @@ RESPONSE RULES:
                     }, function (payload) {
                         try {
                             var row = payload && (payload.new || payload.record);
-                            if (!row || !row.key || String(row.key).indexOf('pflx_player_') !== 0) return;
+                            if (!row || !row.key) return;
+                            // v1.40 — cohort-group registry changed elsewhere
+                            // (another host added/edited a group). Merge live
+                            // so an open Cohorts checkbox picker isn't stuck
+                            // showing a stale, shorter list.
+                            if (row.key === 'cohortGroups') {
+                                try {
+                                    var incomingGroups = row.data;
+                                    if (Array.isArray(incomingGroups) && incomingGroups.length && typeof mcCohortGroups !== 'undefined') {
+                                        var __byId = {};
+                                        (mcCohortGroups || []).forEach(function (g) { if (g && g.id) __byId[g.id] = g; });
+                                        incomingGroups.forEach(function (g) { if (g && g.id) __byId[g.id] = g; });
+                                        mcCohortGroups = Object.keys(__byId).map(function (k) { return __byId[k]; });
+                                        try { mcSaveData('cohortgroups'); } catch (e) {}
+                                        console.log('[roster] ← realtime cohort-group update:', mcCohortGroups.length, 'groups');
+                                        try { window.dispatchEvent(new CustomEvent('pflx-cohorts-updated', { detail: { count: mcCohortGroups.length } })); } catch (e) {}
+                                    }
+                                } catch (e) { console.warn('[roster] cohort-group realtime merge failed', e); }
+                                return;
+                            }
+                            if (String(row.key).indexOf('pflx_player_') !== 0) return;
                             var p = row.data;
                             if (!p || !p.id) return;
                             // Capture the PRE-update record so we can detect XC /
@@ -60254,7 +60358,12 @@ RESPONSE RULES:
         setTimeout(function () {
             try { window.pflxIdentityFetchRosterFromCloud(); } catch (e) {}
             try { pflxStartRosterSubscriber(); } catch (e) {}
+            try { window.pflxFetchCohortGroupsFromCloud(); } catch (e) {}
         }, 600);
+        // v1.40 — give the various boot fetches (players, mcPlayers mirror,
+        // cohort groups) a few seconds to land, then run the one-time
+        // missing-individual-row backfill described above.
+        setTimeout(function () { try { _mcBackfillMissingPlayerRows(); } catch (e) {} }, 4000);
 
         // When the cloud fetch lands, re-render any open Player Management
         // view so newly-discovered players appear without a manual reload.
@@ -60267,6 +60376,38 @@ RESPONSE RULES:
                     var n = ev.detail.count;
                     pflxToast('Roster synced — ' + n + ' player' + (n === 1 ? '' : 's') + ' from cloud', 'success');
                 }
+                // v1.40 — live-refresh any open Quick Task / Quick Project
+                // player pickers so a host mid-form sees a newly-synced
+                // player without closing and reopening the form.
+                try {
+                    if (typeof _mcQPlayersRenderList === 'function') {
+                        ['qtask', 'qproject'].forEach(function (s) { _mcQPlayersRenderList(s); });
+                    }
+                } catch (e) {}
+            } catch (e) {}
+        });
+
+        // v1.40 — cohort-group registry changed (realtime or boot/manual
+        // fetch). Re-render any open Quick Task / Quick Project Cohorts
+        // checkboxes (preserving whatever the host already has checked) and
+        // re-scope their player lists, plus the Cohort Groups admin panel
+        // if it's the active view.
+        window.addEventListener('pflx-cohorts-updated', function () {
+            try {
+                ['qtask', 'qproject'].forEach(function (scope) {
+                    var cohortDiv = document.getElementById('mc-' + scope + '-cohorts');
+                    if (!cohortDiv || typeof mcCohortGroups === 'undefined' || typeof escapeHtml !== 'function') return;
+                    var checkedIds = [];
+                    document.querySelectorAll('.mc-' + scope + '-cohort-cb:checked').forEach(function (cb) { checkedIds.push(cb.value); });
+                    cohortDiv.innerHTML = mcCohortGroups.length === 0 ? '<span style="font-size:11px;color:rgba(255,255,255,0.25);">No cohort groups defined</span>' :
+                        mcCohortGroups.map(function (g) {
+                            var checked = checkedIds.indexOf(g.id) !== -1 ? 'checked' : '';
+                            return '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;">' +
+                                '<input type="checkbox" class="mc-' + scope + '-cohort-cb" value="' + g.id + '" ' + checked + ' onchange="mcQPlayersOnCohortChange(\'' + scope + '\')"> ' + escapeHtml(g.name) + '</label>';
+                        }).join('');
+                    if (typeof _mcQPlayersRenderList === 'function') _mcQPlayersRenderList(scope);
+                });
+                if (typeof mcRenderCohortGroups === 'function' && document.getElementById('mc-cohortgroups-list')) mcRenderCohortGroups();
             } catch (e) {}
         });
 
