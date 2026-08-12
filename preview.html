@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 44;
+      window.PFLX_PATCH   = 45;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -7328,6 +7328,13 @@
                                   surfaced through Live Session below).
                                 -->
                                 <div class="mc-nav-label">TASK MANAGEMENT</div>
+                                <!-- v1.45 — cross-cutting timeline: every Season, Program,
+                                     Checkpoint, Project, and Task with a date, on one
+                                     month grid. Deliberately sits above Checkpoints since
+                                     it spans the whole hierarchy, not just one level. -->
+                                <button class="mc-nav-btn mc-host-only" data-mc="calendar" onclick="mcNav('calendar')">
+                                    <span class="mc-icon">&#x1F4C5;</span> Calendar
+                                </button>
                                 <button class="mc-nav-btn" data-mc="checkpoints" onclick="mcNav('checkpoints')">
                                     <span class="mc-icon">&#x1F3C1;</span> Checkpoints
                                 </button>
@@ -8689,6 +8696,19 @@
                                  mc-panel entries below, each with their own nav button. -->
 
                             <!-- ═══ CHECKPOINTS PANEL (LEGACY — unused, hidden) ═══ -->
+                            <!-- v1.45 — Master Calendar. Season → Program → Checkpoint →
+                                 Project → Task, all on one month grid. Ranges (Season/
+                                 Program/Checkpoint/Project) show a start marker and an
+                                 end marker; Tasks show a single due-date chip, colored
+                                 by priority (same convention as the Tasks tab's own
+                                 Calendar view). Legend chips double as filter toggles. -->
+                            <div class="mc-panel" id="mc-panel-calendar">
+                                <h1 class="mc-page-title">Calendar</h1>
+                                <p class="mc-page-desc">Every Season, Program, Checkpoint, Project, and Task with a date — one timeline.</p>
+                                <div id="mc-calendar-legend" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;"></div>
+                                <div id="mc-calendar-list"></div>
+                            </div>
+
                             <div class="mc-panel" id="mc-panel-checkpoints">
                                 <h1 class="mc-page-title">Checkpoints</h1>
                                 <p class="mc-page-desc">Manage rounds, milestones, and checkpoint schedules.</p>
@@ -26188,6 +26208,7 @@
             if (tab === 'players') mcRenderPlayers();
             if (tab === 'badges') mcRenderBadges();
             // Task Management — individual native panels
+            if (tab === 'calendar') mcRenderMasterCalendar();
             if (tab === 'checkpoints') mcRenderCheckpoints();
             if (tab === 'progress') mcRenderProgress();
             if (tab === 'tasks') mcRenderTasks();
@@ -30744,9 +30765,32 @@
         // through the hierarchy.
         function mcJumpToItem(kind, id) {
             try {
+                // v1.45 — Program has no top-level list of its own (it lives
+                // nested inside its parent Season's Advanced form), so it
+                // needs bespoke navigation: open the owning Season's form,
+                // THEN highlight the program row inside it.
+                if (kind === 'program') {
+                    var pg = (typeof mcPrograms !== 'undefined' ? mcPrograms : []).find(function (p) { return p && p.id === id; });
+                    if (!pg) return;
+                    var sIdx = (typeof mcSeasons !== 'undefined' ? mcSeasons : []).findIndex(function (s) { return s && s.id === pg.seasonId; });
+                    if (typeof mcNav === 'function') mcNav('seasons');
+                    setTimeout(function () {
+                        try { if (sIdx >= 0 && typeof mcShowSeasonForm === 'function') mcShowSeasonForm(sIdx); } catch (e) {}
+                        setTimeout(function () {
+                            var el = document.querySelector('[data-mc-program-id="' + id + '"]');
+                            if (!el) return;
+                            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            var prev = el.style.boxShadow;
+                            el.style.boxShadow = '0 0 0 3px rgba(167,139,250,0.7), 0 0 32px rgba(167,139,250,0.5)';
+                            setTimeout(function () { el.style.boxShadow = prev; }, 1600);
+                        }, 200);
+                    }, 220);
+                    return;
+                }
                 var view = kind === 'checkpoint' ? 'checkpoints'
                          : kind === 'project'    ? 'projects'
                          : kind === 'task'       ? 'tasks'
+                         : kind === 'season'     ? 'seasons'
                          : null;
                 if (!view) return;
                 if (typeof mcNav === 'function') mcNav(view);
@@ -31872,6 +31916,164 @@
             html += '</div>';
             list.innerHTML = html;
         }
+
+        // ── MASTER CALENDAR (v1.45, Ennis: "make sure this calendar works on
+        // every level: Seasons, Programs, Checkpoints, Projects, and Tasks") ──
+        // A cross-cutting month grid, separate from the Tasks tab's own
+        // single-level Calendar view above. Ranges (Season/Program/Checkpoint/
+        // Project) get a start marker (▶) on their first day and an end marker
+        // (◀) on their last — showing every day of a 10-week Program would
+        // flood the grid with 70 identical chips and tell a host nothing a
+        // start/end pair doesn't already say. Tasks are single-day (dueDate
+        // only) so they render as one plain chip, colored by priority — same
+        // convention as the existing Tasks-tab calendar. Reuses _mcAddDaysISO
+        // (defined with the Programs-in-Season code) to derive a Program's
+        // implied end date from startDate + durationWeeks, since Program has
+        // no endDate field of its own.
+        var _mcMasterCalMonth = (function () { var d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; })();
+        function _mcMasterCalMoveMonth(delta) {
+            _mcMasterCalMonth.m += delta;
+            while (_mcMasterCalMonth.m < 0)  { _mcMasterCalMonth.m += 12; _mcMasterCalMonth.y--; }
+            while (_mcMasterCalMonth.m > 11) { _mcMasterCalMonth.m -= 12; _mcMasterCalMonth.y++; }
+            mcRenderMasterCalendar();
+        }
+        window._mcMasterCalMoveMonth = _mcMasterCalMoveMonth;
+
+        var MC_CAL_TYPE_META = {
+            season:     { label: 'Seasons',     rgb: '79,142,247',  icon: '🌐' },
+            program:    { label: 'Programs',    rgb: '167,139,250', icon: '📐' },
+            checkpoint: { label: 'Checkpoints', rgb: '245,200,66',  icon: '🏁' },
+            project:    { label: 'Projects',    rgb: '236,72,153',  icon: '🎬' },
+            task:       { label: 'Tasks',       rgb: '122,169,255', icon: '📋' }
+        };
+        var mcCalFilters = (function () {
+            try {
+                var saved = JSON.parse(localStorage.getItem('pflx_mc_calendar_filters') || 'null');
+                if (saved && typeof saved === 'object') return saved;
+            } catch (e) {}
+            return { season: true, program: true, checkpoint: true, project: true, task: true };
+        })();
+        function mcToggleCalFilter(key) {
+            mcCalFilters[key] = !mcCalFilters[key];
+            try { localStorage.setItem('pflx_mc_calendar_filters', JSON.stringify(mcCalFilters)); } catch (e) {}
+            mcRenderMasterCalendar();
+        }
+        window.mcToggleCalFilter = mcToggleCalFilter;
+
+        function mcRenderCalendarLegend() {
+            var el = document.getElementById('mc-calendar-legend');
+            if (!el) return;
+            el.innerHTML = Object.keys(MC_CAL_TYPE_META).map(function (key) {
+                var meta = MC_CAL_TYPE_META[key];
+                var on = mcCalFilters[key] !== false;
+                return '<button type="button" onclick="mcToggleCalFilter(&quot;' + key + '&quot;)" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:20px;cursor:pointer;font-size:11px;font-weight:700;background:' + (on ? 'rgba(' + meta.rgb + ',0.16)' : 'rgba(255,255,255,0.03)') + ';border:1px solid ' + (on ? 'rgba(' + meta.rgb + ',0.45)' : 'rgba(255,255,255,0.08)') + ';color:' + (on ? 'rgba(' + meta.rgb + ',1)' : 'rgba(255,255,255,0.3)') + ';">' + meta.icon + ' ' + meta.label + (on ? '' : ' (hidden)') + '</button>';
+            }).join('');
+        }
+
+        function mcRenderMasterCalendar() {
+            mcLoadData();
+            mcRenderCalendarLegend();
+            var list = document.getElementById('mc-calendar-list');
+            if (!list) return;
+            var year = _mcMasterCalMonth.y, month = _mcMasterCalMonth.m;
+            var monthName = new Date(year, month, 1).toLocaleString('default', { month: 'long' });
+            var firstDay = new Date(year, month, 1).getDay();
+            var daysInMonth = new Date(year, month + 1, 0).getDate();
+            var todayDay = null;
+            var now = new Date();
+            if (now.getFullYear() === year && now.getMonth() === month) todayDay = now.getDate();
+
+            var buckets = {}, totalCount = 0;
+            function addToDay(dateStr, entry) {
+                if (!dateStr) return;
+                var d = new Date(dateStr + 'T00:00:00');
+                if (isNaN(d.getTime()) || d.getFullYear() !== year || d.getMonth() !== month) return;
+                var day = d.getDate();
+                if (!buckets[day]) buckets[day] = [];
+                buckets[day].push(entry);
+                totalCount++;
+            }
+
+            if (mcCalFilters.season !== false) {
+                (typeof mcSeasons !== 'undefined' ? mcSeasons : []).forEach(function (s) {
+                    if (!s || !s.id) return;
+                    var meta = MC_CAL_TYPE_META.season, label = s.name || 'Season';
+                    if (s.startDate) addToDay(s.startDate, { type: 'season', id: s.id, rgb: meta.rgb, label: label, edge: 'start' });
+                    if (s.endDate)   addToDay(s.endDate,   { type: 'season', id: s.id, rgb: meta.rgb, label: label, edge: 'end' });
+                });
+            }
+            if (mcCalFilters.program !== false) {
+                (typeof mcPrograms !== 'undefined' ? mcPrograms : []).forEach(function (pg) {
+                    if (!pg || !pg.id || !pg.startDate) return;
+                    var meta = MC_CAL_TYPE_META.program, label = pg.name || 'Program';
+                    addToDay(pg.startDate, { type: 'program', id: pg.id, rgb: meta.rgb, label: label, edge: 'start' });
+                    if (pg.durationWeeks) {
+                        var end = _mcAddDaysISO(pg.startDate, pg.durationWeeks * 7 - 1);
+                        addToDay(end, { type: 'program', id: pg.id, rgb: meta.rgb, label: label, edge: 'end' });
+                    }
+                });
+            }
+            if (mcCalFilters.checkpoint !== false) {
+                (typeof mcCheckpoints !== 'undefined' ? mcCheckpoints : []).forEach(function (cp) {
+                    if (!cp || !cp.id) return;
+                    var meta = MC_CAL_TYPE_META.checkpoint, label = cp.name || 'Checkpoint';
+                    if (cp.startDate) addToDay(cp.startDate, { type: 'checkpoint', id: cp.id, rgb: meta.rgb, label: label, edge: 'start' });
+                    if (cp.endDate)   addToDay(cp.endDate,   { type: 'checkpoint', id: cp.id, rgb: meta.rgb, label: label, edge: 'end' });
+                });
+            }
+            if (mcCalFilters.project !== false) {
+                (typeof mcProjects !== 'undefined' ? mcProjects : []).forEach(function (p) {
+                    if (!p || !p.id) return;
+                    var meta = MC_CAL_TYPE_META.project, label = p.name || p.title || 'Project';
+                    var due = p.dueDate || p.endDate || p.deadline;
+                    if (p.startedAt) addToDay(p.startedAt, { type: 'project', id: p.id, rgb: meta.rgb, label: label, edge: 'start' });
+                    if (due) addToDay(due, { type: 'project', id: p.id, rgb: meta.rgb, label: label, edge: p.startedAt ? 'end' : 'point' });
+                });
+            }
+            if (mcCalFilters.task !== false) {
+                (typeof mcTasks !== 'undefined' ? mcTasks : []).forEach(function (t) {
+                    if (!t || !t.id || !t.dueDate) return;
+                    var pRgb = (MC_PRIORITY_META[t.priority || 'normal'] || MC_PRIORITY_META.normal).rgb;
+                    addToDay(t.dueDate, { type: 'task', id: t.id, rgb: pRgb, label: t.title || 'Task', edge: 'point' });
+                });
+            }
+
+            var html = '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 4px 10px;">' +
+                '<div style="display:flex;gap:8px;align-items:center;">' +
+                    '<button onclick="_mcMasterCalMoveMonth(-1)" style="padding:6px 12px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;">← PREV</button>' +
+                    '<div style="font-family:Orbitron,sans-serif;font-size:16px;font-weight:800;color:#f0f0ff;letter-spacing:0.06em;">' + monthName.toUpperCase() + ' ' + year + '</div>' +
+                    '<button onclick="_mcMasterCalMoveMonth(1)" style="padding:6px 12px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;">NEXT →</button>' +
+                '</div>' +
+                '<div style="font-size:10px;color:rgba(255,255,255,0.4);font-family:monospace;">' + totalCount + ' scheduled item(s)</div>' +
+            '</div>';
+            html += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px;">';
+            ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(function (d) {
+                html += '<div style="text-align:center;padding:6px;font-family:Orbitron,sans-serif;font-size:10px;color:rgba(255,255,255,0.35);letter-spacing:0.12em;font-weight:700;">' + d + '</div>';
+            });
+            html += '</div>';
+            html += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;">';
+            for (var i = 0; i < firstDay; i++) html += '<div></div>';
+            for (var day = 1; day <= daysInMonth; day++) {
+                var dayItems = buckets[day] || [];
+                var isToday = day === todayDay;
+                var cellBorder = isToday ? '2px solid rgba(0,212,255,0.6)' : '1px solid rgba(255,255,255,0.06)';
+                var cellBg = isToday ? 'rgba(0,212,255,0.06)' : 'rgba(255,255,255,0.02)';
+                html += '<div style="min-height:100px;padding:8px;background:' + cellBg + ';border:' + cellBorder + ';border-radius:8px;display:flex;flex-direction:column;gap:4px;">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
+                        '<span style="font-size:12px;color:' + (isToday ? '#00d4ff' : 'rgba(255,255,255,0.6)') + ';font-weight:' + (isToday ? '800' : '600') + ';">' + day + '</span>' +
+                        (dayItems.length > 0 ? '<span style="font-size:9px;color:rgba(255,255,255,0.4);font-family:monospace;">' + dayItems.length + '</span>' : '') +
+                    '</div>';
+                dayItems.slice(0, 4).forEach(function (it) {
+                    var arrow = it.edge === 'start' ? '▶ ' : (it.edge === 'end' ? '◀ ' : '');
+                    html += '<div ' + _mcJumpAttr(it.type, it.id) + ' style="padding:3px 6px;background:rgba(' + it.rgb + ',0.14);border:1px solid rgba(' + it.rgb + ',0.3);border-radius:4px;font-size:10px;color:#f0f0ff;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(it.label) + '">' + arrow + escapeHtml(it.label) + '</div>';
+                });
+                if (dayItems.length > 4) html += '<div style="font-size:9px;color:rgba(255,255,255,0.4);text-align:center;padding-top:2px;">+ ' + (dayItems.length - 4) + ' more</div>';
+                html += '</div>';
+            }
+            html += '</div>';
+            list.innerHTML = html;
+        }
+        window.mcRenderMasterCalendar = mcRenderMasterCalendar;
 
         // ── Table view (dense sortable columns) ──
         var _mcTableSort = { field: 'priority', dir: 'desc' };
@@ -37296,7 +37498,7 @@
                     : s.status === 'completed' ? { bg:'rgba(79,142,247,0.1)', text:'#4f8ef7' }
                     : { bg:'rgba(255,255,255,0.05)', text:'rgba(255,255,255,0.4)' };
                 var bannerHtml = s.bannerImage ? '<div style="width:100%;height:100px;border-radius:8px 8px 0 0;overflow:hidden;margin:-16px -16px 12px -16px;width:calc(100% + 32px);"><img src="' + s.bannerImage + '" style="width:100%;height:100%;object-fit:cover;"></div>' : '';
-                return '<div class="mc-card" style="border-left:3px solid ' + sc.text + ';overflow:hidden;">' +
+                return '<div class="mc-card" data-mc-season-id="' + escapeHtml(s.id || '') + '" style="border-left:3px solid ' + sc.text + ';overflow:hidden;">' +
                     bannerHtml +
                     '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">' +
                     '<div style="flex:1;">' +
@@ -37565,7 +37767,7 @@
                 var col = pg.status === 'active' ? '#4ade80' : (pg.status === 'completed' ? '#8a92b0' : '#c4b5fd');
                 var cpCount = (mcCheckpoints || []).filter(function (c) { return c && c.programId === pg.id; }).length;
                 var cadence = (pg.durationWeeks || 0) + 'wk program · ' + (pg.checkpointCadenceWeeks || 0) + 'wk cadence';
-                return '<div style="display:flex;align-items:center;gap:10px;padding:6px 10px;background:rgba(10,18,40,0.6);border:1px solid rgba(167,139,250,0.18);border-radius:6px;flex-wrap:wrap;">' +
+                return '<div data-mc-program-id="' + escapeHtml(pg.id) + '" style="display:flex;align-items:center;gap:10px;padding:6px 10px;background:rgba(10,18,40,0.6);border:1px solid rgba(167,139,250,0.18);border-radius:6px;flex-wrap:wrap;">' +
                     '<span style="flex:1;min-width:140px;font-size:12px;color:#e0e6ff;font-weight:700;">&#x1F4D0; ' + escapeHtml(pg.name || 'Program') + '</span>' +
                     '<span style="font-size:10px;color:' + col + ';font-family:\'Share Tech Mono\',monospace;letter-spacing:0.06em;">' + escapeHtml((pg.status || '').toUpperCase()) + '</span>' +
                     '<span style="font-size:10px;color:rgba(255,255,255,0.3);font-family:\'Share Tech Mono\',monospace;">' + escapeHtml(pg.startDate || '') + ' · ' + escapeHtml(cadence) + '</span>' +
