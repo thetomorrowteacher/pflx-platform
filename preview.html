@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 58;
+      window.PFLX_PATCH   = 59;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -24528,9 +24528,28 @@
                 merged.totalXcoin = Math.max(aTot, bTot);
                 merged.xc = num(win.xc);
                 if ((merged.xc == null || merged.xc === 0) && Math.max(num(a.xc), num(b.xc)) > 0) merged.xc = Math.max(num(a.xc), num(b.xc));
-                // badges only grow — union the id list, max the counts
-                var bset = {}; [].concat(Array.isArray(a.badges) ? a.badges : [], Array.isArray(b.badges) ? b.badges : []).forEach(function (x) { if (x != null) bset[x] = 1; });
-                var badges = Object.keys(bset); if (badges.length) merged.badges = badges;
+                // badges only grow — union the list, max the counts.
+                // FIX (Aug 13, Ennis): badges can be plain id strings OR rich
+                // objects ({id,name,type,xc,awardedAt} — see Edit Player's
+                // AWARD BADGE flow and the X-Coin badge-award bridge). The old
+                // code used `bset[x] = 1` to dedupe, which for an object `x`
+                // coerces it to a STRING KEY via JS's implicit toString() —
+                // every distinct badge object collapses to the literal key
+                // "[object Object]", permanently destroying the real badge
+                // name/id the next time this player's roster merges. Keying
+                // by an explicit identity (id, then name, then a JSON
+                // fallback) and storing the ORIGINAL value — never the
+                // coerced key — keeps rich badge objects intact.
+                var bset = {};
+                [].concat(Array.isArray(a.badges) ? a.badges : [], Array.isArray(b.badges) ? b.badges : []).forEach(function (x) {
+                    if (x == null) return;
+                    var k = (x && typeof x === 'object') ? (x.id || x.name || JSON.stringify(x)) : x;
+                    if (k == null) return;
+                    // Prefer a rich object over a bare id string for the same key.
+                    if (bset[k] === undefined || (typeof bset[k] !== 'object' && typeof x === 'object')) bset[k] = x;
+                });
+                var badges = Object.keys(bset).map(function (k) { return bset[k]; });
+                if (badges.length) merged.badges = badges;
                 merged.digitalBadges = Math.max(num(a.digitalBadges), num(b.digitalBadges), badges.length);
                 var bc = {}; [a.badgeCounts || {}, b.badgeCounts || {}].forEach(function (o) { Object.keys(o).forEach(function (k) { bc[k] = Math.max(bc[k] || 0, num(o[k])); }); });
                 if (Object.keys(bc).length) merged.badgeCounts = bc;
@@ -31682,6 +31701,80 @@
         var mcCPEditIndex = -1;
         function mcCreateCheckpoint() { mcOpenCPFormSmart(-1); }
         function mcEditCheckpoint(index) { mcOpenCPFormSmart(index); }
+
+        // (Aug 13, Ennis) — build a minimally-complete Task object matching the
+        // full schema mcSaveTask() writes (see ~line 34761), so nothing that
+        // later reads a task (rollups, dashboards, submission flow) trips over
+        // a missing field on one of these auto-seeded defaults.
+        function _pflxMakeDefaultTask(cp, title, description, subtaskLabels) {
+            var now = new Date().toISOString().split('T')[0];
+            return {
+                id: 'task-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+                title: title,
+                description: description || '',
+                category: '', flpTracking: 'bypass',
+                subtasks: (subtaskLabels || []).map(function (label, i) {
+                    return { id: 'sub-' + Date.now() + '-' + i, label: label, link: '', completed: false };
+                }),
+                checklist: [], links: [], rewardBadges: [], fineTaxIds: [], totalXc: 0,
+                roundId: cp.id, projectId: '', topicId: '',
+                xcReward: 25, dueDate: '', completionMode: 'one-time', requirement: 'required',
+                assignedTo: 'all', assignedPlayers: [], link: '', status: 'open', priority: 'normal',
+                dependsOn: [], recurring: null, peerReviewCount: 0, selfEvalRequired: 'none',
+                postFeedbackUpload: false, createdBy: 'system-default', createdAt: now,
+                attachments: [], allowFileUpload: true, allowLinkSubmit: true, submitInstructions: '',
+                deadlinePenalty: null,
+                upgradeInteractions: { allowTimeExtend: false, allowMultiplier: false, allowShield: false },
+                timeframeInherit: 'Global', timeframeScope: 'Season', submissions: [],
+                pathwayId: '', pathwayNodeName: '', pathwayNodeId: '', nodeType: 'course',
+                coopMode: 'solo', maxPlayers: 4, sessionCode: '', dcChannelEnabled: false,
+                xbotEnabled: false, coopPlayers: [], tierVariants: undefined
+            };
+        }
+
+        // (Aug 13, Ennis) — every Checkpoint gets a standing "Update Your
+        // Portfolio" task by default (bio + other profile details, then
+        // publish) — Ennis: "Players should be subtasked to add their bio,
+        // and other details and then publish. This should be a task to
+        // update for every Checkpoint. Make this happen by default."
+        // Checkpoint Alpha additionally gets a one-time "Upload a Brand Logo
+        // Image" task, since that's the very first checkpoint a new player
+        // hits and a brand logo is needed for their profile avatar before
+        // anything else. Idempotent — matched by title on the checkpoint, so
+        // re-running the scaffold (or re-seeding an existing checkpoint)
+        // never creates duplicates.
+        function _pflxSeedDefaultCheckpointTasks(cp) {
+            if (!cp || !cp.id) return 0;
+            if (!Array.isArray(mcTasks)) mcTasks = [];
+            if (!Array.isArray(cp.taskIds)) cp.taskIds = [];
+            var existingTitles = {};
+            mcTasks.forEach(function (t) {
+                if (t && (t.roundId === cp.id || t.checkpointId === cp.id)) existingTitles[String(t.title || '').toLowerCase()] = true;
+            });
+            var added = 0;
+            var PORTFOLIO_TITLE = 'Update Your Portfolio';
+            if (!existingTitles[PORTFOLIO_TITLE.toLowerCase()]) {
+                var portfolioTask = _pflxMakeDefaultTask(cp, PORTFOLIO_TITLE,
+                    'Keep your PFLX portfolio current — add your bio and other profile details, then publish.',
+                    ['Add your bio', 'Add your other profile details', 'Publish your portfolio']);
+                mcTasks.push(portfolioTask);
+                cp.taskIds.push(portfolioTask.id);
+                added++;
+            }
+            if (String(cp.name || '').toLowerCase().indexOf('alpha') >= 0) {
+                var LOGO_TITLE = 'Upload a Brand Logo Image';
+                if (!existingTitles[LOGO_TITLE.toLowerCase()]) {
+                    var logoTask = _pflxMakeDefaultTask(cp, LOGO_TITLE,
+                        'Upload a brand logo image for your profile avatar.', []);
+                    mcTasks.push(logoTask);
+                    cp.taskIds.push(logoTask.id);
+                    added++;
+                }
+            }
+            return added;
+        }
+        window._pflxSeedDefaultCheckpointTasks = _pflxSeedDefaultCheckpointTasks;
+
         // Scaffold the 10-week program: add any of the 10 named checkpoints
         // (Alpha…Omega) that don't already exist, in order, as INACTIVE template
         // holders (hidden from players) the host fills in later. Skips ones that
@@ -31745,11 +31838,27 @@
                 var bo = (b && b.programOrder != null) ? b.programOrder : 999;
                 return ao - bo;
             });
+            // Default tasks — every program checkpoint (Alpha…Omega, existing
+            // AND newly-added above) gets the standing "Update Your
+            // Portfolio" task if it doesn't already have one; Alpha also gets
+            // the one-time brand logo task. Idempotent, so re-running the
+            // scaffold on an already-complete program just backfills any
+            // checkpoint that predates this default (e.g. Beta).
+            var tasksAdded = 0;
+            mcCheckpoints.forEach(function (c) {
+                var n = String((c && c.name) || '').toLowerCase();
+                if (order.some(function (g) { return n.indexOf(g.toLowerCase()) >= 0; })) {
+                    tasksAdded += _pflxSeedDefaultCheckpointTasks(c);
+                }
+            });
+            if (tasksAdded) { try { mcSaveData('tasks'); } catch (e) {} }
             try { mcSaveData('checkpoints'); } catch (e) {}
             try { mcRenderCheckpoints(); } catch (e) {}
             try { mcLoadData(); } catch (e) {}
             if (typeof pflxToast === 'function') {
-                pflxToast(added ? ('Added ' + added + ' inactive checkpoint' + (added > 1 ? 's' : '') + ' — Alpha…Omega, in order.') : 'All 10 program checkpoints exist — re-sorted in order.', 'success');
+                var msg = added ? ('Added ' + added + ' inactive checkpoint' + (added > 1 ? 's' : '') + ' — Alpha…Omega, in order.') : 'All 10 program checkpoints exist — re-sorted in order.';
+                if (tasksAdded) msg += ' Seeded ' + tasksAdded + ' default task' + (tasksAdded > 1 ? 's' : '') + '.';
+                pflxToast(msg, 'success');
             }
         }
         window.pflxScaffoldProgram = pflxScaffoldProgram;
@@ -65029,7 +65138,11 @@ RESPONSE RULES:
                 return badges.map(pmBadgeNormalize).map(function (b, i) {
                     var safeName = (b.name || 'Badge').replace(/"/g, '&quot;').replace(/</g, '&lt;');
                     var xcChip = (b.xc || 0) > 0 ? '<span style="color:#facc15;font-family:Share Tech Mono,monospace;font-size:10px;margin-left:6px;">+' + b.xc + ' XC</span>' : '';
+                    var badgeVisual = b.image
+                        ? '<div style="width:28px;height:28px;border-radius:7px;overflow:hidden;flex-shrink:0;background:rgba(167,139,250,0.1);border:1px solid rgba(167,139,250,0.2);"><img src="' + b.image.replace(/"/g, '&quot;') + '" style="width:100%;height:100%;object-fit:cover;"></div>'
+                        : '<div style="width:28px;height:28px;border-radius:7px;flex-shrink:0;background:rgba(167,139,250,0.1);border:1px solid rgba(167,139,250,0.2);display:flex;align-items:center;justify-content:center;font-size:14px;">' + (b.icon || '🎖') + '</div>';
                     return '<div data-badge-row="' + i + '" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(10,18,40,0.6);border:1px solid rgba(167,139,250,0.18);border-radius:8px;">' +
+                        badgeVisual +
                         '<div style="flex:1;min-width:0;">' +
                             '<div style="color:#e0e6ff;font-family:Rajdhani,sans-serif;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + safeName + xcChip + '</div>' +
                             '<div style="color:#6a7290;font-size:10px;font-family:Share Tech Mono,monospace;">' + (b.type || 'Signature') + '</div>' +
@@ -65439,23 +65552,46 @@ RESPONSE RULES:
         // rewardBadges). This turns either into a consistent display object —
         // used only for rendering, never written back over the original data.
         function pmBadgeIdToName(idStr) {
-            return ((idStr || 'Badge') + '')
+            var s = (idStr || 'Badge') + '';
+            // Defensive guard (Aug 13, Ennis): a handful of players' stored
+            // badge lists already contained the literal string "[object
+            // Object]" — the fossil of an older bug that stringified a whole
+            // badge object into an array slot (see _mcMergePlayers fix, same
+            // patch). That underlying data has been cleaned in Supabase, but
+            // if any stale/offline client re-pushes it before picking up this
+            // fix, show something legible instead of re-displaying the raw
+            // artifact.
+            if (/^\[object \w+\]$/i.test(s.trim())) return 'Unknown Badge';
+            return s
                 .replace(/^badge-/, '')
                 .replace(/-/g, ' ')
                 .replace(/\b\w/g, function (c) { return c.toUpperCase(); }) || 'Badge';
         }
         function pmBadgeNormalize(b) {
+            // (Aug 13, Ennis) — resolve against the live badge catalog so the
+            // artwork X-Coin's Digital Badge Management uploaded (or the
+            // catalog's default emoji icon) can be shown here — badge entries
+            // pushed by the "AWARD BADGE" form / merge sync never carried an
+            // image of their own, so this modal previously showed no visual
+            // at all for every badge, uploaded artwork or not.
+            var catalogMatch = null;
+            try { catalogMatch = (typeof mcFindBadge === 'function') ? mcFindBadge(b) : null; } catch (e) {}
             if (b && typeof b === 'object') {
                 return {
                     id: b.id || ('badge-' + Math.random().toString(36).slice(2, 8)),
                     name: b.name || pmBadgeIdToName(b.id || ''),
                     type: b.type || 'Signature',
                     xc: b.xc || 0,
-                    awardedAt: b.awardedAt || null
+                    awardedAt: b.awardedAt || null,
+                    image: b.image || (catalogMatch && catalogMatch.image) || '',
+                    icon: (catalogMatch && catalogMatch.icon) || '🎖'
                 };
             }
             var idStr = (b || '') + '';
-            return { id: idStr, name: pmBadgeIdToName(idStr), type: 'Signature', xc: 0, awardedAt: null };
+            return {
+                id: idStr, name: pmBadgeIdToName(idStr), type: 'Signature', xc: 0, awardedAt: null,
+                image: (catalogMatch && catalogMatch.image) || '', icon: (catalogMatch && catalogMatch.icon) || '🎖'
+            };
         }
 
         // ── XC stepper field (Aug 9 fix) ──
