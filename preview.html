@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 57;
+      window.PFLX_PATCH   = 58;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -37895,6 +37895,34 @@
         // ── Seasons ─────────────────────────────────────────────────
         var mcSeasonEditIndex = -1;
 
+        // v1.58 — "Seasons view should show all Programs and Program
+        // progression bar." Renders every Program under this Season (via
+        // Program.seasonId) as a compact name + status + task-completion
+        // progress bar row, reusing _pflxProgramRollup so the percentage
+        // shown here always matches the Programs tab's own Tasks bar for
+        // the same program — one source of truth for "how far along".
+        function _mcSeasonProgramsSummaryHtml(season) {
+            if (!season || !season.id) return '';
+            var progs = (typeof mcPrograms !== 'undefined' && Array.isArray(mcPrograms)) ? mcPrograms.filter(function (p) { return p && p.seasonId === season.id; }) : [];
+            if (!progs.length) return '';
+            var rows = progs.map(function (pg) {
+                var col = pg.status === 'active' ? '#4ade80' : (pg.status === 'completed' ? '#8a92b0' : '#c4b5fd');
+                var roll = (typeof _pflxProgramRollup === 'function') ? _pflxProgramRollup(pg) : { taskPct: 0, taskDone: 0, taskTotal: 0 };
+                var barCol = roll.taskPct === 100 ? '#22c55e' : roll.taskPct >= 66 ? '#4ade80' : roll.taskPct >= 33 ? '#f5c842' : roll.taskPct > 0 ? '#ff9f40' : 'rgba(255,255,255,0.15)';
+                return '<div style="display:flex;align-items:center;gap:10px;padding:6px 0;">' +
+                    '<span style="flex:1;min-width:100px;font-size:12px;color:#e0e6ff;font-weight:700;">&#x1F4D0; ' + escapeHtml(pg.name || 'Program') + '</span>' +
+                    '<span class="mc-pill" style="background:rgba(' + (pg.status === 'active' ? '74,222,128' : pg.status === 'completed' ? '138,146,176' : '196,181,253') + ',0.12);color:' + col + ';font-size:9px;padding:2px 8px;">' + escapeHtml((pg.status || 'draft').toUpperCase()) + '</span>' +
+                    '<div style="flex:1;min-width:80px;max-width:160px;">' + ((typeof _mcProgressBarHtml === 'function') ? _mcProgressBarHtml(roll.taskPct, { height: 6 }) : '') + '</div>' +
+                    '<span style="font-size:10px;color:' + barCol + ';font-family:monospace;font-weight:700;white-space:nowrap;">' + roll.taskDone + '/' + roll.taskTotal + ' (' + roll.taskPct + '%)</span>' +
+                    '</div>';
+            }).join('');
+            return '<div style="margin:4px 0 10px;padding:10px 12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:10px;">' +
+                '<div style="font-size:10px;font-weight:800;color:rgba(167,139,250,0.7);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:4px;">&#x1F4D0; Programs (' + progs.length + ')</div>' +
+                rows +
+                '</div>';
+        }
+        window._mcSeasonProgramsSummaryHtml = _mcSeasonProgramsSummaryHtml;
+
         function mcRenderSeasons() {
             mcLoadData();
             var list = document.getElementById('mc-seasons-list');
@@ -37920,6 +37948,7 @@
                     '</div>' +
                     '<span class="mc-pill" style="background:' + sc.bg + ';color:' + sc.text + ';">' + (s.status || 'inactive') + '</span>' +
                     '</div>' +
+                    _mcSeasonProgramsSummaryHtml(s) +
                     '<div style="display:flex;gap:8px;">' +
                     '<button class="mc-btn" style="padding:4px 12px;font-size:10px;" onclick="mcShowSeasonForm(' + i + ')">Edit</button>' +
                     '<button class="mc-btn" style="padding:4px 10px;font-size:11px;background:rgba(167,139,250,0.1);color:#a78bfa;border:1px solid rgba(167,139,250,0.3);border-radius:7px;cursor:pointer;font-weight:700;" title="Duplicate" onclick="mcDuplicateItem(&quot;season&quot;,' + i + ')">⧉</button>' +
@@ -38293,6 +38322,59 @@
         }
         window._pflxProgramCohortNames = _pflxProgramCohortNames;
 
+        // v1.58 — Program completion rollup: Checkpoints/Projects/Tasks
+        // completed vs. total for one Program, used by both the Programs
+        // tab card and the Seasons list's "Program progression" bar so the
+        // two views always agree on the same numbers. Walks the same
+        // Checkpoint -> Project -> Task hierarchy already used by the scope
+        // picker (~line 30300) rather than a new convention: a Program's
+        // Checkpoints are matched by cp.programId; each Checkpoint's
+        // Projects by cp.projectIds / p.checkpointId / p.roundId; each
+        // Project's Tasks by p.taskIds / t.projectId; and Tasks parented
+        // directly to a Checkpoint (no Project) by cp.taskIds / t.roundId /
+        // t.checkpointId. A Task is "done" when approved (the same
+        // definition the MC dashboard header stat already uses); a Project
+        // or Checkpoint is "done" when status === 'completed'.
+        function _pflxProgramRollup(program) {
+            var out = { cpTotal: 0, cpDone: 0, projTotal: 0, projDone: 0, taskTotal: 0, taskDone: 0, taskPct: 0 };
+            if (!program || !program.id) return out;
+            var cps = (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) ? mcCheckpoints : [];
+            var pjs = (typeof mcProjects !== 'undefined' && Array.isArray(mcProjects)) ? mcProjects : [];
+            var tks = (typeof mcTasks !== 'undefined' && Array.isArray(mcTasks)) ? mcTasks : [];
+            var claimedTasks = {};
+            cps.filter(function (cp) { return cp && cp.programId === program.id; }).forEach(function (cp) {
+                out.cpTotal++;
+                if (cp.status === 'completed') out.cpDone++;
+                var cpProjects = pjs.filter(function (p) {
+                    return p && ((Array.isArray(cp.projectIds) && cp.projectIds.indexOf(p.id) !== -1) ||
+                                 String(p.checkpointId || '') === String(cp.id) || String(p.roundId || '') === String(cp.id));
+                });
+                cpProjects.forEach(function (p) {
+                    out.projTotal++;
+                    if (p.status === 'completed') out.projDone++;
+                    tks.filter(function (t) {
+                        return t && !claimedTasks[t.id] && ((Array.isArray(p.taskIds) && p.taskIds.indexOf(t.id) !== -1) || String(t.projectId || '') === String(p.id));
+                    }).forEach(function (t) {
+                        claimedTasks[t.id] = 1;
+                        out.taskTotal++;
+                        if (t.status === 'approved') out.taskDone++;
+                    });
+                });
+                tks.filter(function (t) {
+                    if (!t || claimedTasks[t.id]) return false;
+                    return (Array.isArray(cp.taskIds) && cp.taskIds.indexOf(t.id) !== -1) ||
+                           String(t.roundId || '') === String(cp.id) || String(t.checkpointId || '') === String(cp.id);
+                }).forEach(function (t) {
+                    claimedTasks[t.id] = 1;
+                    out.taskTotal++;
+                    if (t.status === 'approved') out.taskDone++;
+                });
+            });
+            out.taskPct = out.taskTotal > 0 ? Math.round((out.taskDone / out.taskTotal) * 100) : 0;
+            return out;
+        }
+        window._pflxProgramRollup = _pflxProgramRollup;
+
         window.mcSeasonGenerateCheckpoints = function (id) {
             var pg = (mcPrograms || []).find(function (p) { return p && p.id === id; });
             if (!pg) return;
@@ -38423,7 +38505,24 @@
                 var seasonLabel = g.season ? escapeHtml(g.season.name || 'Season') : 'No Season';
                 var rows = g.items.map(function (pg) {
                     var col = pg.status === 'active' ? '#4ade80' : (pg.status === 'completed' ? '#8a92b0' : '#c4b5fd');
-                    var cpCount = (mcCheckpoints || []).filter(function (c) { return c && c.programId === pg.id; }).length;
+                    var roll = _pflxProgramRollup(pg);
+
+                    // v1.58 — Checkpoints/Projects completed indicators +
+                    // a single aggregate Tasks progress bar (never an
+                    // individual task list — that's the whole point: a host
+                    // scanning the Programs tab wants "how far along is
+                    // this" at a glance, not a per-task drill-down, which
+                    // already exists on the Checkpoint/Project detail views).
+                    var taskBarCol = roll.taskPct === 100 ? '#22c55e' : roll.taskPct >= 66 ? '#4ade80' : roll.taskPct >= 33 ? '#f5c842' : roll.taskPct > 0 ? '#ff9f40' : 'rgba(255,255,255,0.15)';
+                    var taskProgressHtml = roll.taskTotal > 0
+                        ? '<div style="margin-top:10px;">' +
+                            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
+                                '<span style="font-size:10px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.06em;">&#x1F4CB; Tasks</span>' +
+                                '<span style="font-size:10px;color:' + taskBarCol + ';font-family:monospace;font-weight:700;">' + roll.taskDone + ' / ' + roll.taskTotal + ' (' + roll.taskPct + '%)</span>' +
+                            '</div>' +
+                            _mcProgressBarHtml(roll.taskPct, { height: 6 }) +
+                          '</div>'
+                        : '';
 
                     // v1.57 — richer program card: 16:9 banner up top (same
                     // aspect-ratio convention as Project/Checkpoint cards,
@@ -38469,8 +38568,12 @@
                         '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:rgba(255,255,255,0.45);font-family:monospace;">' +
                             '<span>&#x1F4C5; ' + escapeHtml(pg.startDate || 'no start date') + '</span>' +
                             '<span>&#x23F1; ' + (pg.durationWeeks || 0) + 'wk program · ' + (pg.checkpointCadenceWeeks || 0) + 'wk cadence</span>' +
-                            '<span>&#x2705; ' + cpCount + ' checkpoint(s) generated</span>' +
                         '</div>' +
+                        '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:11px;">' +
+                            '<span style="color:' + (roll.cpTotal > 0 && roll.cpDone === roll.cpTotal ? '#22c55e' : 'rgba(255,255,255,0.45)') + ';">&#x2705; Checkpoints: ' + roll.cpDone + ' / ' + roll.cpTotal + ' completed</span>' +
+                            '<span style="color:' + (roll.projTotal > 0 && roll.projDone === roll.projTotal ? '#22c55e' : 'rgba(255,255,255,0.45)') + ';">&#x1F4E6; Projects: ' + roll.projDone + ' / ' + roll.projTotal + ' completed</span>' +
+                        '</div>' +
+                        taskProgressHtml +
                         '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;">' +
                             '<span style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.06em;">&#x1F465; ' + cohortScope + '</span>' +
                             (badgeChips ? '<span style="width:1px;height:12px;background:rgba(255,255,255,0.1);"></span>' + badgeChips : '') +
