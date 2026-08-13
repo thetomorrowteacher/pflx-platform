@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 56;
+      window.PFLX_PATCH   = 57;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -38424,13 +38424,59 @@
                 var rows = g.items.map(function (pg) {
                     var col = pg.status === 'active' ? '#4ade80' : (pg.status === 'completed' ? '#8a92b0' : '#c4b5fd');
                     var cpCount = (mcCheckpoints || []).filter(function (c) { return c && c.programId === pg.id; }).length;
-                    var cadence = (pg.durationWeeks || 0) + 'wk program · ' + (pg.checkpointCadenceWeeks || 0) + 'wk cadence';
-                    return '<div class="mc-card" data-mc-program-id="' + escapeHtml(pg.id) + '" style="border-left:3px solid ' + col + ';display:flex;align-items:center;gap:12px;flex-wrap:wrap;">' +
-                        '<span style="flex:1;min-width:160px;font-size:14px;color:#f0f0ff;font-weight:800;">&#x1F4D0; ' + escapeHtml(pg.name || 'Program') + '</span>' +
-                        '<span class="mc-pill" style="background:rgba(' + (pg.status === 'active' ? '74,222,128' : pg.status === 'completed' ? '138,146,176' : '196,181,253') + ',0.12);color:' + col + ';">' + escapeHtml((pg.status || 'draft').toUpperCase()) + '</span>' +
-                        '<span style="font-size:11px;color:rgba(255,255,255,0.4);font-family:monospace;">' + escapeHtml(pg.startDate || 'no start date') + ' · ' + escapeHtml(cadence) + '</span>' +
-                        '<span style="font-size:11px;color:rgba(255,255,255,0.35);">' + cpCount + ' checkpoint(s) generated</span>' +
-                        '<div style="display:flex;gap:6px;">' +
+
+                    // v1.57 — richer program card: 16:9 banner up top (same
+                    // aspect-ratio convention as Project/Checkpoint cards,
+                    // falling back to a soft gradient + icon when no
+                    // bannerImage is set, so the grid stays visually
+                    // consistent whether or not a host uploaded one) plus a
+                    // fuller info body below — cohort scope, reward badges,
+                    // and a description preview — instead of the old
+                    // single skinny text-only row.
+                    var bannerHeader = pg.bannerImage
+                        ? '<div style="width:calc(100% + 44px);aspect-ratio:16/9;background:rgba(6,10,20,0.6);overflow:hidden;margin:-22px -22px 16px -22px;border-radius:16px 16px 0 0;">' +
+                            '<img src="' + escapeHtml(pg.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;display:block;" />' +
+                          '</div>'
+                        : '<div style="width:calc(100% + 44px);aspect-ratio:16/9;background:linear-gradient(135deg, rgba(167,139,250,0.14), rgba(0,212,255,0.10));display:flex;align-items:center;justify-content:center;margin:-22px -22px 16px -22px;border-radius:16px 16px 0 0;">' +
+                            '<div style="font-size:42px;opacity:0.5;">&#x1F4D0;</div>' +
+                          '</div>';
+
+                    var cohortNames = _pflxProgramCohortNames(pg);
+                    var cohortScope = cohortNames.length
+                        ? cohortNames.map(function (n) { return escapeHtml(n); }).join(', ')
+                        : 'All Cohorts';
+
+                    var allBadges = mcGetAllBadges();
+                    var badgeChips = (Array.isArray(pg.rewardBadges) ? pg.rewardBadges : []).map(function (bid) {
+                        var b = allBadges.find(function (x) { return x && x.id === bid; });
+                        if (!b) return '';
+                        return '<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(245,200,66,0.1);border:1px solid rgba(245,200,66,0.3);color:#f5c842;border-radius:10px;padding:3px 9px;font-size:10px;font-weight:700;white-space:nowrap;">' + (b.icon || '&#x1F396;') + ' ' + escapeHtml(b.name) + '</span>';
+                    }).filter(Boolean).join('');
+
+                    var descHtml = '';
+                    if (pg.description) {
+                        var descText = String(pg.description);
+                        var descShort = descText.length > 160 ? (descText.slice(0, 160).trim() + '…') : descText;
+                        descHtml = '<div style="font-size:12px;color:rgba(224,230,255,0.65);line-height:1.5;margin-top:10px;">' + escapeHtml(descShort) + '</div>';
+                    }
+
+                    return '<div class="mc-card" data-mc-program-id="' + escapeHtml(pg.id) + '" style="border-left:3px solid ' + col + ';">' +
+                        bannerHeader +
+                        '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
+                            '<span style="flex:1;min-width:160px;font-size:15px;color:#f0f0ff;font-weight:800;">&#x1F4D0; ' + escapeHtml(pg.name || 'Program') + '</span>' +
+                            '<span class="mc-pill" style="background:rgba(' + (pg.status === 'active' ? '74,222,128' : pg.status === 'completed' ? '138,146,176' : '196,181,253') + ',0.12);color:' + col + ';">' + escapeHtml((pg.status || 'draft').toUpperCase()) + '</span>' +
+                        '</div>' +
+                        '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:rgba(255,255,255,0.45);font-family:monospace;">' +
+                            '<span>&#x1F4C5; ' + escapeHtml(pg.startDate || 'no start date') + '</span>' +
+                            '<span>&#x23F1; ' + (pg.durationWeeks || 0) + 'wk program · ' + (pg.checkpointCadenceWeeks || 0) + 'wk cadence</span>' +
+                            '<span>&#x2705; ' + cpCount + ' checkpoint(s) generated</span>' +
+                        '</div>' +
+                        '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;">' +
+                            '<span style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.06em;">&#x1F465; ' + cohortScope + '</span>' +
+                            (badgeChips ? '<span style="width:1px;height:12px;background:rgba(255,255,255,0.1);"></span>' + badgeChips : '') +
+                        '</div>' +
+                        descHtml +
+                        '<div style="display:flex;gap:6px;margin-top:16px;">' +
                             '<button class="mc-btn" style="padding:4px 12px;font-size:10px;background:rgba(74,222,128,0.1);border-color:rgba(74,222,128,0.3);color:#4ade80;" onclick="mcSeasonGenerateCheckpoints(\'' + escapeHtml(pg.id) + '\')">Generate Checkpoints</button>' +
                             '<button class="mc-btn" style="padding:4px 12px;font-size:10px;" onclick="mcShowProgramTabForm(\'' + escapeHtml(pg.id) + '\')">Edit</button>' +
                             '<button class="mc-btn mc-btn-red" style="padding:4px 12px;font-size:10px;" onclick="mcSeasonDeleteProgram(\'' + escapeHtml(pg.id) + '\')">Delete</button>' +
