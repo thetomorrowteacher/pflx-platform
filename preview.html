@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 64;
+      window.PFLX_PATCH   = 65;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -63574,6 +63574,38 @@ RESPONSE RULES:
                 return p ? Object.assign({}, p) : null;
             }
 
+            // v1.65 — Inline player-resolution fallback for award()/applyUpdate().
+            // ROOT CAUSE this closes: a player added directly through Player
+            // Management lands in the bulk MC roster (mcPlayers / cloud key
+            // pflx_mc_players) immediately, but only gets an individual
+            // pflx_player_<id> cloud row — the ONLY shape PLAYERS is hydrated
+            // from — via a one-shot setTimeout backfill 4s after page load
+            // (_mcBackfillMissingPlayerRows, above). If a host approves that
+            // player's task or a Battle Arena win reports their result before
+            // that timer fires, or before mcPlayers' own cloud fetch resolves,
+            // award()/applyUpdate() would look them up in PLAYERS, miss, and
+            // silently no-op forever in that browser tab — the UI marks the
+            // task/match as approved/won while XC never lands. Resolving here,
+            // synchronously, at the moment of the award/update itself, closes
+            // that race entirely instead of depending on timing.
+            function _pflxResolvePlayerForAward(playerId) {
+                if (typeof PLAYERS === 'undefined' || !Array.isArray(PLAYERS)) return null;
+                var p = PLAYERS.find(function (x) { return x && x.id === playerId; });
+                if (p) return p;
+                try {
+                    if (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) {
+                        var mp = mcPlayers.find(function (x) { return x && x.id === playerId; });
+                        if (mp) {
+                            PLAYERS.push(mp);
+                            try { if (typeof window.pflxIdentityPersistNewPlayer === 'function') window.pflxIdentityPersistNewPlayer(mp); } catch (e) {}
+                            console.log('[PflxDataBus] resolved player via mcPlayers fallback (was missing from PLAYERS):', mp.brand || playerId);
+                            return mp;
+                        }
+                    }
+                } catch (e) {}
+                return null;
+            }
+
             function getAllPlayers(filter) {
                 if (typeof PLAYERS === 'undefined') return [];
                 var arr = PLAYERS.slice();
@@ -63600,7 +63632,7 @@ RESPONSE RULES:
 
             function applyUpdate(playerId, changes, source) {
                 if (!playerId || !changes || typeof PLAYERS === 'undefined') return null;
-                var p = PLAYERS.find(function (x) { return x && x.id === playerId; });
+                var p = _pflxResolvePlayerForAward(playerId);
                 if (!p) {
                     console.warn('[PflxDataBus] update ignored — unknown player', playerId);
                     return null;
@@ -63713,8 +63745,23 @@ RESPONSE RULES:
             //   })
             function award(playerId, awardObj) {
                 if (!playerId || !awardObj) return null;
-                var p = (typeof PLAYERS !== 'undefined') ? PLAYERS.find(function (x) { return x && x.id === playerId; }) : null;
-                if (!p) { console.warn('[PflxDataBus.award] unknown player', playerId); return null; }
+                var p = _pflxResolvePlayerForAward(playerId);
+                if (!p) {
+                    // v1.65 — was a silent console.warn + null return, which let
+                    // callers (task approval, arena win handlers) mark their own
+                    // status as done with the XC/badge grant simply never applied
+                    // and no visible sign anything went wrong. Now surfaces a
+                    // host-visible toast so a failed award is caught immediately
+                    // instead of days later via a tester bug report.
+                    console.warn('[PflxDataBus.award] unknown player — award NOT applied', playerId, awardObj);
+                    try {
+                        if (typeof pflxToast === 'function') {
+                            pflxToast('Reward could not be applied — player record not found (nothing was credited). Please retry from Player Management.', 'warn');
+                        }
+                    } catch (e) {}
+                    try { broadcastAll({ type: 'pflx_award_failed', playerId: playerId, awardObj: awardObj }); } catch (e) {}
+                    return null;
+                }
                 var changes = {};
                 var deltaXC = typeof awardObj.xc === 'number' ? awardObj.xc : 0;
                 // Active XC multiplier (from xc_multiply modifier upgrades) applies
