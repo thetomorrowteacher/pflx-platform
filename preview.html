@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 63;
+      window.PFLX_PATCH   = 64;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -66933,16 +66933,43 @@ RESPONSE RULES:
             _pcThreads.forEach(function (t) {
                 if (!Array.isArray(t.participants) || t.participants.indexOf(me.id) === -1) return;
                 if (_pcInboundChannels[t.id]) return;
-                var ch = _pcCallSignalingChannel(t.id);
-                if (!ch) return;
-                ch.on('broadcast', { event: 'invite' }, function (payload) {
-                    var msg = payload && payload.payload;
-                    if (!msg || msg.from === me.id) return;
-                    if (_pcCall) return; // busy
-                    _pcCallIncomingInvite(t.id, msg);
-                }).subscribe();
-                _pcInboundChannels[t.id] = ch;
+                _pcCallAttachInboundOne(t.id, me);
             });
+        }
+        // Aug 14 fix (Abeal, FeedForward 8/11 + 8/12 — "the calling
+        // notification did not appear always, kept bugging out, and the only
+        // way to join was by pressing the call button in chat"): this
+        // passive per-thread channel used to subscribe() with no status
+        // callback at all — the same shape presence's _prBoot channel used to
+        // have before it got the CHANNEL_ERROR/TIMED_OUT/CLOSED → rebuild
+        // handling below (see _prBoot). Without it, any realtime hiccup
+        // (network blip, backgrounded tab, idle timeout) silently killed the
+        // channel; the "if already attached, skip" guard in
+        // _pcCallAttachInbound() then meant it was never retried — that
+        // thread stopped ringing for the rest of the session, and the only
+        // way back in was clicking the call button directly (which opens a
+        // fresh channel of its own). Split into its own function so a dead
+        // channel can remove itself and re-attach.
+        function _pcCallAttachInboundOne(threadId, me) {
+            var ch = _pcCallSignalingChannel(threadId);
+            if (!ch) return;
+            ch.on('broadcast', { event: 'invite' }, function (payload) {
+                var msg = payload && payload.payload;
+                if (!msg || msg.from === me.id) return;
+                if (_pcCall) return; // busy
+                _pcCallIncomingInvite(threadId, msg);
+            }).subscribe(function (status) {
+                if (status !== 'CHANNEL_ERROR' && status !== 'TIMED_OUT' && status !== 'CLOSED') return;
+                if (_pcInboundChannels[threadId] === ch) delete _pcInboundChannels[threadId];
+                try {
+                    var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                    if (client && client.removeChannel) client.removeChannel(ch);
+                } catch (e) {}
+                setTimeout(function () {
+                    if (!_pcInboundChannels[threadId]) _pcCallAttachInboundOne(threadId, me);
+                }, 4000);
+            });
+            _pcInboundChannels[threadId] = ch;
         }
         function _pcCallIncomingInvite(threadId, msg) {
             var t = _pcThreads.find(function (x) { return x.id === threadId; });
@@ -67009,12 +67036,23 @@ RESPONSE RULES:
                     _pcCallRemovePeer(peerId, true);
                 }
             };
-            // Attach my local tracks to this peer connection.
+            // Attach my local tracks to this peer connection. Remember the
+            // video sender explicitly (Aug 14) — _pcCallReplaceEveryVideoSender
+            // used to re-find it each time via `pc.getSenders().find(s =>
+            // s.track && s.track.kind === 'video')`, which breaks the moment
+            // a sender's track is ever set to null (turning the camera fully
+            // off, below): a sender with track:null no longer matches that
+            // lookup, so the NEXT replaceTrack() call (turning it back on)
+            // silently found nothing and the peer never got video back.
+            var videoSender = null;
             if (_pcCall && _pcCall.localStream) {
-                _pcCall.localStream.getTracks().forEach(function (track) { pc.addTrack(track, _pcCall.localStream); });
+                _pcCall.localStream.getTracks().forEach(function (track) {
+                    var s = pc.addTrack(track, _pcCall.localStream);
+                    if (track.kind === 'video') videoSender = s;
+                });
             }
             if (_pcCall.ringTimer) { clearTimeout(_pcCall.ringTimer); _pcCall.ringTimer = null; }
-            _pcCall.peers[peerId] = { pc: pc, name: peerName || peerId, remoteStream: null };
+            _pcCall.peers[peerId] = { pc: pc, name: peerName || peerId, remoteStream: null, videoSender: videoSender };
             return pc;
         }
         function _pcCallRemovePeer(peerId, silent) {
@@ -67221,23 +67259,63 @@ RESPONSE RULES:
             var btn = document.getElementById('pflx-chat-call-mute');
             if (btn) btn.textContent = enabled ? '🎙 Mute' : '🔇 Unmute';
         };
-        window.pflxChatCallToggleCam = function () {
+        // Shared by the camera toggle and the screen-share toggle: swap the
+        // outgoing video track on every live peer connection. Uses the
+        // videoSender cached on each peer by _pcCallBuildPeer (falls back to
+        // the old track-based lookup for safety) — see the Aug 14 comment
+        // there for why a track-based lookup alone isn't reliable once a
+        // sender's track has ever been nulled out.
+        function _pcCallReplaceEveryVideoSender(track) {
             if (!_pcCall) return;
-            var enabled = !_pcCall.camEnabled;
-            _pcCall.localStream.getVideoTracks().forEach(function (t) { t.enabled = enabled; });
-            _pcCall.camEnabled = enabled;
+            Object.keys(_pcCall.peers).forEach(function (pid) {
+                var p = _pcCall.peers[pid];
+                var vsender = p.videoSender || p.pc.getSenders().find(function (s) { return s.track && s.track.kind === 'video'; });
+                if (!vsender) return;
+                p.videoSender = vsender;
+                vsender.replaceTrack(track).catch(function (err) { console.warn('[call] replaceTrack', err); });
+            });
+        }
+        // Aug 14 fix (Abeal, FeedForward 8/11 — "the camera function was
+        // bugged, it showed it was off but i could see that my camera was
+        // on"): the old toggle only flipped MediaStreamTrack.enabled, which
+        // mutes the track's OUTPUT but does not release the device — most
+        // browsers keep the camera actively capturing (and its hardware
+        // indicator light lit) the whole time, so the UI said "Cam Off"
+        // while the physical camera plainly wasn't. Turning the camera off
+        // now fully STOPS the video track (releasing the device — the light
+        // goes out) and sends `null` to every peer so remote viewers also
+        // see it stop; turning it back on re-acquires a fresh track via
+        // getUserMedia, same as the screen-share toggle already does when
+        // restoring the camera.
+        window.pflxChatCallToggleCam = async function () {
+            if (!_pcCall) return;
             var btn = document.getElementById('pflx-chat-call-cam');
-            if (btn) btn.textContent = enabled ? '📷 Camera' : '🚫 Cam Off';
+            if (_pcCall.camEnabled) {
+                _pcCall.localStream.getVideoTracks().forEach(function (t) {
+                    try { t.stop(); } catch (e) {}
+                    _pcCall.localStream.removeTrack(t);
+                });
+                _pcCallReplaceEveryVideoSender(null);
+                _pcCall.camEnabled = false;
+                if (btn) btn.textContent = '🚫 Cam Off';
+                _pcCallRenderTiles();
+            } else {
+                try {
+                    var cam = await navigator.mediaDevices.getUserMedia({ video: true });
+                    var newTrack = cam.getVideoTracks()[0];
+                    _pcCall.localStream.addTrack(newTrack);
+                    _pcCallReplaceEveryVideoSender(newTrack);
+                    _pcCall.camEnabled = true;
+                    if (btn) btn.textContent = '📷 Camera';
+                    _pcCallRenderTiles();
+                } catch (e) {
+                    console.warn('[call] re-enable camera failed', e);
+                    pflxToast('Could not turn the camera back on: ' + (e.message || e.name || 'error'), 'warn');
+                }
+            }
         };
         window.pflxChatCallToggleScreen = async function () {
             if (!_pcCall) return;
-            var senderLists = Object.keys(_pcCall.peers).map(function (pid) { return _pcCall.peers[pid].pc.getSenders(); });
-            function replaceEveryVideoSender(track) {
-                senderLists.forEach(function (sList) {
-                    var vsender = sList.find(function (s) { return s.track && s.track.kind === 'video'; });
-                    if (vsender) vsender.replaceTrack(track).catch(function (err) { console.warn('[call] replaceTrack', err); });
-                });
-            }
             if (_pcCall.mode !== 'screen') {
                 try {
                     var scr = await navigator.mediaDevices.getDisplayMedia({ video: true });
@@ -67245,23 +67323,37 @@ RESPONSE RULES:
                     // Remember current camera video track so we can restore it later.
                     var curVidTrack = _pcCall.localStream.getVideoTracks()[0];
                     _pcCall.previousVideoTrack = curVidTrack;
-                    replaceEveryVideoSender(newTrack);
+                    _pcCallReplaceEveryVideoSender(newTrack);
                     // Swap it in the local stream + preview.
                     if (curVidTrack) _pcCall.localStream.removeTrack(curVidTrack);
                     _pcCall.localStream.addTrack(newTrack);
                     _pcCallRenderTiles();
                     _pcCall.mode = 'screen';
                     newTrack.onended = function () { pflxChatCallToggleScreen(); };
-                } catch (e) { console.warn('[call] screen failed', e); }
+                } catch (e) {
+                    // Aug 14 fix (Abeal, FeedForward 8/11 — "the share screen
+                    // function was not working"): this failed silently
+                    // (console.warn only) — clicking the button and having
+                    // nothing happen, with no explanation, reads exactly like
+                    // "not working." Now it tells the player why (most likely
+                    // cause: they dismissed the browser's screen-picker, or
+                    // the browser/OS denied screen-capture permission).
+                    console.warn('[call] screen failed', e);
+                    pflxToast('Could not start screen share: ' + (e.message || e.name || 'error'), 'warn');
+                }
             } else {
                 var back = _pcCall.previousVideoTrack;
                 if (!back || back.readyState === 'ended') {
                     try {
                         var cam = await navigator.mediaDevices.getUserMedia({ video: true });
                         back = cam.getVideoTracks()[0];
-                    } catch (e) { console.warn('[call] restore cam failed', e); return; }
+                    } catch (e) {
+                        console.warn('[call] restore cam failed', e);
+                        pflxToast('Could not switch back to your camera: ' + (e.message || e.name || 'error'), 'warn');
+                        return;
+                    }
                 }
-                replaceEveryVideoSender(back);
+                _pcCallReplaceEveryVideoSender(back);
                 var scrTrack = _pcCall.localStream.getVideoTracks()[0];
                 if (scrTrack) { _pcCall.localStream.removeTrack(scrTrack); scrTrack.stop(); }
                 _pcCall.localStream.addTrack(back);
