@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 61;
+      window.PFLX_PATCH   = 62;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -24545,16 +24545,44 @@
                 // by an explicit identity (id, then name, then a JSON
                 // fallback) and storing the ORIGINAL value — never the
                 // coerced key — keeps rich badge objects intact.
+                // FIX 2 (Aug 14, from the FeedForward XC_CREDIT/COURSE_REWARD
+                // investigation): the Aug 13 fix above stops NEW corruption
+                // from being CREATED, but a badge array already holding the
+                // literal "[object Object]" string (planted by the pre-Aug-13
+                // bug, still cached on any device that hasn't synced since)
+                // sailed straight through untouched — as a bare string it
+                // just got unioned back in like any other id. The Aug 13
+                // Supabase cleanup (v1.59) only ran once; every stale client
+                // that merged afterward silently reintroduced it. Confirmed
+                // live in Supabase the day after that "fix" shipped: 23
+                // players — including several NOT in the original 24 —
+                // carrying the literal string again. Now dropped at the
+                // source, using the same `/^\[object \w+\]$/i` pattern
+                // `pmBadgeIdToName` already treats as corrupted, so no stale
+                // client can ever reintroduce it through a merge again.
                 var bset = {};
                 [].concat(Array.isArray(a.badges) ? a.badges : [], Array.isArray(b.badges) ? b.badges : []).forEach(function (x) {
                     if (x == null) return;
+                    if (typeof x === 'string' && /^\[object \w+\]$/i.test(x.trim())) return;
                     var k = (x && typeof x === 'object') ? (x.id || x.name || JSON.stringify(x)) : x;
                     if (k == null) return;
                     // Prefer a rich object over a bare id string for the same key.
                     if (bset[k] === undefined || (typeof bset[k] !== 'object' && typeof x === 'object')) bset[k] = x;
                 });
                 var badges = Object.keys(bset).map(function (k) { return bset[k]; });
-                if (badges.length) merged.badges = badges;
+                // Assign whenever EITHER side actually had a badges array —
+                // not just when the union is non-empty. Guarding on
+                // `badges.length` alone left a stale corrupted-literal-only
+                // array in place (the `Object.assign({}, lose, win)` above
+                // already copied the winner's raw `badges` field, corrupted
+                // literal and all, before this union ever ran) — a player
+                // whose ONLY "badge" was the "[object Object]" artifact would
+                // have it correctly stripped out of `badges` here, but the
+                // old truthy-length check then skipped overwriting `merged`,
+                // so the stale corrupted array survived anyway. Found by the
+                // Aug 14 unit test below, not observed live — fixed before
+                // shipping the strip.
+                if (badges.length || Array.isArray(a.badges) || Array.isArray(b.badges)) merged.badges = badges;
                 merged.digitalBadges = Math.max(num(a.digitalBadges), num(b.digitalBadges), badges.length);
                 var bc = {}; [a.badgeCounts || {}, b.badgeCounts || {}].forEach(function (o) { Object.keys(o).forEach(function (k) { bc[k] = Math.max(bc[k] || 0, num(o[k])); }); });
                 if (Object.keys(bc).length) merged.badgeCounts = bc;
