@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 60;
+      window.PFLX_PATCH   = 61;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -8867,6 +8867,7 @@
                                         <button class="mc-btn" onclick="mcHideProgramTabForm()">Cancel</button>
                                     </div>
                                 </div>
+                                <div id="mc-programs-tab-sizer"></div>
                                 <div id="mc-programs-tab-list"></div>
                             </div>
 
@@ -9092,7 +9093,8 @@
                                     </div>
                                 </div>
 
-                                <div id="mc-checkpoints-list" style="display:flex;flex-direction:column;gap:14px;"></div>
+                                <div id="mc-checkpoints-sizer"></div>
+                                <div id="mc-checkpoints-list" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(var(--pflx-card-min, 560px), 1fr));gap:24px;"></div>
                             </div>
 
                             <!-- ═══ TASKS PANEL ═══ -->
@@ -9686,6 +9688,7 @@
                                     </div>
                                 </div>
 
+                                <div id="mc-tasks-sizer"></div>
                                 <div id="mc-tasks-list" style="display:flex;flex-direction:column;gap:12px;"></div>
                             </div>
 
@@ -10037,6 +10040,7 @@
                                     </div>
                                 </div>
 
+                                <div id="mc-projects-sizer"></div>
                                 <div id="mc-projects-list" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;"></div>
                             </div>
 
@@ -10287,7 +10291,8 @@
                                     </div>
                                 </div>
 
-                                <div id="mc-seasons-list" style="display:flex;flex-direction:column;gap:14px;"></div>
+                                <div id="mc-seasons-sizer"></div>
+                                <div id="mc-seasons-list" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(var(--pflx-card-min, 900px), 1fr));gap:14px;"></div>
                             </div>
 
                             <!-- ═══ MEDIA EMBED PANEL ═══ -->
@@ -30897,11 +30902,85 @@
         }
         window.mcGoogleAttach = mcGoogleAttach; window.mcGoogleRemove = mcGoogleRemove; window.mcGoogleAttachmentsHtml = mcGoogleAttachmentsHtml;
 
+        // ── Mission Control card-size sliders (Aug 13, Ennis) ──
+        // A host-only, per-browser display preference (localStorage, not
+        // synced — this is how the host likes to VIEW their own board, not
+        // shared program data) that controls how large/dense each of the
+        // five card surfaces renders: Seasons, Programs, Checkpoints,
+        // Projects, Tasks. Each tab's card grid uses
+        // `minmax(var(--pflx-card-min), 1fr)`, so dragging the slider only
+        // has to change ONE CSS custom property on the list container —
+        // every grid inside it (Projects/Tasks render several separate
+        // FLP-bucket grids each) picks it up automatically, and dragging
+        // never re-renders the card list (which would destroy the slider's
+        // own DOM node mid-drag and break the gesture). The live value is
+        // pushed on every 'input' tick via pflxLiveResizeCards (cheap — one
+        // style write); the chosen size is only written to localStorage on
+        // 'change' (drag release) via pflxSetCardSize.
+        var PFLX_CARD_SIZE_DEFAULTS = { seasons: 900, programs: 520, checkpoints: 560, projects: 380, tasks: 900 };
+        var PFLX_CARD_SIZE_RANGE    = { seasons: [420, 1400], programs: [320, 900], checkpoints: [380, 900], projects: [260, 640], tasks: [420, 1400] };
+        var PFLX_CARD_SIZE_LIST_ID  = { seasons: 'mc-seasons-list', programs: 'mc-programs-tab-list', checkpoints: 'mc-checkpoints-list', projects: 'mc-projects-list', tasks: 'mc-tasks-list' };
+        function pflxCardSizes() {
+            try { return Object.assign({}, PFLX_CARD_SIZE_DEFAULTS, JSON.parse(localStorage.getItem('pflx_mc_card_sizes') || '{}')); }
+            catch (e) { return Object.assign({}, PFLX_CARD_SIZE_DEFAULTS); }
+        }
+        function pflxCardSize(key) {
+            var v = pflxCardSizes()[key];
+            return (typeof v === 'number' && isFinite(v) && v > 0) ? v : PFLX_CARD_SIZE_DEFAULTS[key];
+        }
+        // Drag-time — instant, no re-render. Updates the grid CSS var on the
+        // list container plus the adjacent "NNNpx" readout.
+        function pflxLiveResizeCards(key, px) {
+            px = Math.round(Number(px)) || PFLX_CARD_SIZE_DEFAULTS[key];
+            var el = document.getElementById(PFLX_CARD_SIZE_LIST_ID[key]);
+            if (el) el.style.setProperty('--pflx-card-min', px + 'px');
+            var lbl = document.getElementById('pflx-card-size-label-' + key);
+            if (lbl) lbl.textContent = px + 'px';
+        }
+        window.pflxLiveResizeCards = pflxLiveResizeCards;
+        // Release-time — persist the chosen size so it sticks across visits
+        // and tab switches. Does NOT re-render (the drag ticks already left
+        // the DOM showing the right size).
+        function pflxSetCardSize(key, px) {
+            var sizes = pflxCardSizes();
+            sizes[key] = Math.round(Number(px)) || PFLX_CARD_SIZE_DEFAULTS[key];
+            try { localStorage.setItem('pflx_mc_card_sizes', JSON.stringify(sizes)); } catch (e) {}
+        }
+        window.pflxSetCardSize = pflxSetCardSize;
+        // Applies the persisted size to a tab's list container — call once
+        // near the top of each mcRender* function, before building cards.
+        function pflxApplyCardSize(key) {
+            var el = document.getElementById(PFLX_CARD_SIZE_LIST_ID[key]);
+            if (el) el.style.setProperty('--pflx-card-min', pflxCardSize(key) + 'px');
+        }
+        window.pflxApplyCardSize = pflxApplyCardSize;
+        // Slider control markup — dropped into a small sizer div that sits
+        // just above each tab's card list (see the static HTML containers,
+        // id="mc-<tab>-sizer"). Rebuilt on every render of that tab, but
+        // that's fine — drag ticks never trigger a render (see above), so
+        // the slider element is never swapped out from under an active drag.
+        function pflxCardSizeSliderHtml(key, label) {
+            var range = PFLX_CARD_SIZE_RANGE[key] || [300, 900];
+            var val = pflxCardSize(key);
+            return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;padding:8px 14px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:10px;">' +
+                '<span style="font-size:10px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.08em;font-family:Orbitron,sans-serif;white-space:nowrap;">&#x1F5B0; Card Size</span>' +
+                '<input type="range" min="' + range[0] + '" max="' + range[1] + '" step="20" value="' + val + '" ' +
+                    'oninput="pflxLiveResizeCards(\'' + key + '\', this.value)" ' +
+                    'onchange="pflxSetCardSize(\'' + key + '\', this.value)" ' +
+                    'style="flex:1;max-width:220px;accent-color:#00d4ff;cursor:pointer;" ' +
+                    'title="Drag to resize ' + escapeHtml(label) + ' cards">' +
+                '<span id="pflx-card-size-label-' + key + '" style="font-size:10px;color:rgba(255,255,255,0.35);font-family:monospace;min-width:38px;text-align:right;">' + val + 'px</span>' +
+            '</div>';
+        }
+        window.pflxCardSizeSliderHtml = pflxCardSizeSliderHtml;
+
         // ── Checkpoints ─────────────────────────────────────────────
         function mcRenderCheckpoints() {
             mcLoadData();
             const list = document.getElementById('mc-checkpoints-list');
             if (!list) return;
+            pflxApplyCardSize('checkpoints');
+            try { var __sizer = document.getElementById('mc-checkpoints-sizer'); if (__sizer) __sizer.innerHTML = pflxCardSizeSliderHtml('checkpoints', 'Checkpoint'); } catch (e) {}
 
             if (mcCheckpoints.length === 0) {
                 list.innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.3);padding:40px;">No checkpoints yet. Click <strong>+ New Checkpoint</strong> to create one.</div>';
@@ -31081,8 +31160,10 @@
             }).join('');
             list.style.display = 'grid';
             // Wider columns than Projects so Checkpoint cards read as the
-            // higher tier. On desktop this is 1-2 per row.
-            list.style.gridTemplateColumns = 'repeat(auto-fill, minmax(560px, 1fr))';
+            // higher tier. Card Size slider (Aug 13) controls --pflx-card-min
+            // on the container; 560px is only the fallback for a first-ever
+            // render before pflxApplyCardSize has run.
+            list.style.gridTemplateColumns = 'repeat(auto-fill, minmax(var(--pflx-card-min, 560px), 1fr))';
             list.style.gap = '24px';
         }
 
@@ -32701,6 +32782,8 @@
             mcLoadData();
             var list = document.getElementById('mc-tasks-list');
             if (!list) return;
+            pflxApplyCardSize('tasks');
+            try { var __sizer = document.getElementById('mc-tasks-sizer'); if (__sizer) __sizer.innerHTML = pflxCardSizeSliderHtml('tasks', 'Task'); } catch (e) {}
             var search = (document.getElementById('mc-task-search')?.value || '').toLowerCase();
             var _filtered = mcTasks.filter(function(t) {
                 if (mcTaskFilter !== 'all' && t.status !== mcTaskFilter) return false;
@@ -33052,8 +33135,10 @@
                         '</div>' +
                         '<div style="flex:1;font-size:11px;color:rgba(255,255,255,0.4);line-height:1.4;">' + escapeHtml(meta.desc) + '</div>' +
                     '</div>' +
-                    // Row list, not a grid — each Task is a full-width row.
-                    '<div style="display:flex;flex-direction:column;margin-bottom:24px;">' +
+                    // Card grid, sized by the host's Task-card slider — was a
+                    // fixed-width flex row list; now uses --pflx-card-min so
+                    // it participates in the Mission Control resize feature.
+                    '<div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(var(--pflx-card-min, 900px), 1fr));gap:16px;margin-bottom:24px;">' +
                         arr.join('') +
                     '</div>';
             });
@@ -37040,6 +37125,8 @@
             }
             var list = document.getElementById('mc-projects-list');
             if (!list) return;
+            pflxApplyCardSize('projects');
+            try { var __sizer = document.getElementById('mc-projects-sizer'); if (__sizer) __sizer.innerHTML = pflxCardSizeSliderHtml('projects', 'Project'); } catch (e) {}
 
             if (mcProjects.length === 0) {
                 list.innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.3);padding:40px;">No projects yet. Click <strong>+ New Project</strong> to create one.</div>';
@@ -37343,7 +37430,7 @@
                         '</div>' +
                         '<div style="flex:1;font-size:11px;color:rgba(255,255,255,0.4);line-height:1.4;">' + escapeHtml(meta.desc) + '</div>' +
                     '</div>' +
-                    '<div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(380px, 1fr));gap:20px;margin-bottom:24px;">' +
+                    '<div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(var(--pflx-card-min, 380px), 1fr));gap:20px;margin-bottom:24px;">' +
                         arr.join('') +
                     '</div>';
             });
@@ -38059,6 +38146,8 @@
             mcLoadData();
             var list = document.getElementById('mc-seasons-list');
             if (!list) return;
+            pflxApplyCardSize('seasons');
+            try { var __sizer = document.getElementById('mc-seasons-sizer'); if (__sizer) __sizer.innerHTML = pflxCardSizeSliderHtml('seasons', 'Season'); } catch (e) {}
 
             if (mcSeasons.length === 0) {
                 list.innerHTML = '<div class="mc-card" style="text-align:center;color:rgba(255,255,255,0.3);padding:40px;">No seasons configured. Seasons control leaderboard resets, reward cycles, and progression arcs.</div>';
@@ -38615,6 +38704,8 @@
             mcLoadData();
             var list = document.getElementById('mc-programs-tab-list');
             if (!list) return;
+            pflxApplyCardSize('programs');
+            try { var __sizer = document.getElementById('mc-programs-tab-sizer'); if (__sizer) __sizer.innerHTML = pflxCardSizeSliderHtml('programs', 'Program'); } catch (e) {}
             var progs = (typeof mcPrograms !== 'undefined' && Array.isArray(mcPrograms)) ? mcPrograms.slice() : [];
             if (!progs.length) {
                 list.innerHTML = '<div class="mc-card" style="text-align:center;color:rgba(255,255,255,0.3);padding:40px;">No programs configured yet. Click <strong>+ New Program</strong> to start one — pick its Season, a start date, a duration, and a checkpoint cadence.</div>';
@@ -38719,7 +38810,7 @@
                     '</div>';
                 }).join('');
                 return '<div style="font-size:11px;font-weight:700;color:rgba(167,139,250,0.7);letter-spacing:0.1em;margin:16px 0 8px;text-transform:uppercase;">&#x1F4C5; ' + seasonLabel + '</div>' +
-                    '<div style="display:flex;flex-direction:column;gap:8px;">' + rows + '</div>';
+                    '<div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(var(--pflx-card-min, 520px), 1fr));gap:14px;">' + rows + '</div>';
             }).join('');
         }
         window.mcRenderProgramsTab = mcRenderProgramsTab;
