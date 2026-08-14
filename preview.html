@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 59;
+      window.PFLX_PATCH   = 60;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -27403,10 +27403,24 @@
                 if (checkpoints[i].status === 'active' || checkpoints[i].status === 'current') { activeCp = checkpoints[i]; break; }
             }
 
-            // Task counts — treat status='approved' as done since that's what
-            // mcApproveTask sets when the host approves a submission.
-            var myTasks = tasks.filter(function(t) { return !(t.completed || t.status === 'approved'); });
-            var completedTasks = tasks.filter(function(t) { return t.completed || t.status === 'approved'; });
+            // Task counts — PER-PLAYER (Aug 13, Ennis-approved FeedForward
+            // sweep fix). A cohort task's top-level t.status only flips to
+            // 'approved' once EVERY assigned player is approved (mcApproveTask
+            // + _mcTaskHostComplete) — reading t.status directly here made
+            // Home Base permanently show a player's own approved work as
+            // "not done" until every one of their cohort-mates finished too.
+            // ppRenderMyTasks (the Tasks page) and ppRenderCheckpointDetail
+            // (July 23 fix) already use the correct per-player check via
+            // pflxTaskStateForPlayer — this was the one Home-page surface
+            // still reading the raw cohort-wide field. This single divergence
+            // was the most-reported bug in the Aug 13 FeedForward triage
+            // (~30 of 86 submissions describing Home disagreeing with the
+            // Tasks/Checkpoint pages — e.g. Kabir, Feba, Alivia, Ayrene,
+            // Abeal, Hannah, Kaitlin, Eva, Essence, Aadhya, Kaavya).
+            var __homePid = s.id || null;
+            function __homeTaskDone(t) { return (typeof pflxTaskStateForPlayer === 'function') ? (pflxTaskStateForPlayer(t, __homePid) === 'approved') : (t.completed || t.status === 'approved'); }
+            var myTasks = tasks.filter(function(t) { return !__homeTaskDone(t); });
+            var completedTasks = tasks.filter(__homeTaskDone);
             var taskPct = tasks.length ? Math.round((completedTasks.length / tasks.length) * 100) : 0;
 
             // Available jobs (already filtered to active player above)
@@ -27480,8 +27494,11 @@
 
                 // Tasks under this checkpoint that haven't been finished. Used
                 // both for the count and to assemble the Next Up strip.
+                // Per-player check (Aug 13 fix, same root cause as the task
+                // counts above) — a cohort task the player already got
+                // approved on must not keep showing up in their own Next Up.
                 var cpTasks = tasks.filter(function (t) {
-                    return ppItemInCheckpoint(t, activeCp.id) && !(t.completed || t.status === 'approved');
+                    return ppItemInCheckpoint(t, activeCp.id) && !__homeTaskDone(t);
                 });
 
                 // FLP-priority sort: tasks furthest along the lifecycle surface
@@ -27618,7 +27635,13 @@
                 '<div><div style="font-family:\'Orbitron\',sans-serif;font-size:12px;font-weight:700;color:#f5c842;letter-spacing:1px;">CHECKPOINTS</div>' +
                 '<div style="font-size:11px;color:rgba(255,255,255,0.4);">' + cpCount + ' available</div></div></div>';
             if (activeCp) {
-                var cpPct = activeCp.progress || 0;
+                // cp.progress is never actually written anywhere in the
+                // codebase (verified Aug 13) — this card always rendered a
+                // flat 0% regardless of real progress. Compute the player's
+                // own progress the same way the Checkpoint Detail page does.
+                var __homeCpProg = null;
+                try { __homeCpProg = (typeof pflxPlayerCheckpointProgress === 'function') ? pflxPlayerCheckpointProgress(activeCp, { id: s.id, cohort: s.cohort, cohorts: s.cohorts }) : null; } catch (e) {}
+                var cpPct = __homeCpProg ? __homeCpProg.pct : (activeCp.progress || 0);
                 html += '<div style="font-size:12px;color:#8a92b0;margin-bottom:8px;">Active: ' + escapeHtml(activeCp.name || 'Checkpoint') + '</div>' + ppProgressBar(cpPct, '#f5c842');
             } else {
                 html += '<div style="font-size:12px;color:#8a92b0;">View milestones and progress.</div>';
