@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 62;
+      window.PFLX_PATCH   = 63;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -15311,15 +15311,34 @@
         function buildAppURL(appKey, subPath) {
             if (!activeSession) return (APP_BASE_URLS[appKey] || '#') + (subPath || '');
             const base = APP_BASE_URLS[appKey] + (subPath || '');
-            // Resolve the player's tier (URL → localStorage → 'novice') and
-            // the comma-separated list of apps the player is allowed into.
-            // Sub-apps read these from the SSO URL to (a) render with the
-            // right tier-aware content and (b) self-block if a host toggled
-            // access off after they signed in.
+            // Resolve the player's tier (activeSession → localStorage →
+            // 'novice') and the comma-separated list of apps the player is
+            // allowed into. Sub-apps read these from the SSO URL to (a)
+            // render with the right tier-aware content and (b) self-block
+            // if a host toggled access off after they signed in.
+            // FIX (Aug 14, DIFFICULTY_LOCK) — this used to read ONLY
+            // localStorage, which nothing on this origin ever wrote to
+            // (the tier pick happens inside the Pathways iframe, a
+            // DIFFERENT origin with its own separate localStorage; the
+            // only bridge back was a postMessage that, until today, never
+            // updated anything this function actually reads). The result:
+            // every SSO URL rebuild — a fresh login, a tab revisit, any
+            // full iframe reload — baked in tier=novice regardless of what
+            // the player had picked, "opening" Core Pathways back at
+            // Novice every time. activeSession.tier is now kept current by
+            // both login (copied from the player record) and the
+            // pflx_tier_change listener (updated live on every pick), so
+            // it's checked first; localStorage stays as a same-origin
+            // fallback for the rare path that updates it without a full
+            // activeSession round-trip.
             var tier = 'novice';
             try {
-                var stored = localStorage.getItem('pflx_player_tier');
-                if (stored === 'starter' || stored === 'novice' || stored === 'pro') tier = stored;
+                if (activeSession.tier === 'starter' || activeSession.tier === 'novice' || activeSession.tier === 'pro') {
+                    tier = activeSession.tier;
+                } else {
+                    var stored = localStorage.getItem('pflx_player_tier');
+                    if (stored === 'starter' || stored === 'novice' || stored === 'pro') tier = stored;
+                }
             } catch (e) {}
             var allowedApps = [];
             try {
@@ -20523,7 +20542,14 @@
                 digitalBadges:  player ? (player.digitalBadges || 0) : 0,
                 badgeCounts:    player ? (player.badgeCounts || null) : null,
                 badges:         player && Array.isArray(player.badges) ? player.badges : [],
-                rankOverride:   player ? (player.rankOverride || null) : null
+                rankOverride:   player ? (player.rankOverride || null) : null,
+                // Aug 14 (DIFFICULTY_LOCK fix, from the FeedForward triage) —
+                // the player's saved Starter/Novice/Pro tier was never copied
+                // onto the session, so every downstream reader that trusted
+                // activeSession.tier (or fell back to it) saw undefined and
+                // defaulted to 'novice' — see buildAppURL() / _ppPlayerTier()
+                // below for the actual bug this caused.
+                tier:           player ? (player.tier || 'novice') : 'novice'
             };
             // v1.12 — carry host tier + control scope onto the session so
             // pflxCan()/inScope() can enforce it. Copied only when present so a
@@ -25490,6 +25516,24 @@
                         tp.tier = msg.to;
                         try { mcSaveData('players'); } catch (e) {}
                         try { if (typeof mcRenderPlayers === 'function') mcRenderPlayers(); } catch (e) {}
+                        // Aug 14 (DIFFICULTY_LOCK fix) — this was the ONLY
+                        // place a tier pick from Pathways ever reached the
+                        // Platform, and it only ever wrote to the player
+                        // RECORD (tp.tier, cloud-persisted). It never wrote
+                        // to activeSession or this origin's own localStorage
+                        // — the two things buildAppURL() and _ppPlayerTier()
+                        // actually read. So the very next time the Pathways
+                        // iframe URL got rebuilt (new tab, refresh, revisit),
+                        // it was built from a tier that had never moved off
+                        // its default, silently overriding whatever the
+                        // player had just picked inside pathway.html itself.
+                        // Close the loop on both reads.
+                        try {
+                            if (window.activeSession && window.activeSession.id === msg.playerId) {
+                                window.activeSession.tier = msg.to;
+                            }
+                        } catch (e) {}
+                        try { localStorage.setItem('pflx_player_tier', msg.to); } catch (e) {}
                     }
                 }
 
@@ -27798,16 +27842,26 @@
 
         // ── CHECKPOINTS LIST ──
         // ── Tier variant resolution ──────────────────────────────────────
-        // Resolve the active player's tier (URL → localStorage → 'novice')
-        // and merge any cp.tierVariants[<tier>] onto the base checkpoint
-        // record so downstream renders see the right endDate / xc / etc.
-        // Variants are non-destructive: missing keys fall through to the
-        // base values. Used by ppGetCheckpoints and the home hero.
+        // Resolve the active player's tier (URL → activeSession →
+        // localStorage → 'novice') and merge any cp.tierVariants[<tier>]
+        // onto the base checkpoint record so downstream renders see the
+        // right endDate / xc / etc. Variants are non-destructive: missing
+        // keys fall through to the base values. Used by ppGetCheckpoints
+        // and the home hero.
+        // FIX (Aug 14, DIFFICULTY_LOCK) — activeSession.tier added ahead of
+        // the localStorage fallback, same root cause and fix as
+        // buildAppURL() above: localStorage on this origin was never kept
+        // current, so this always fell through to 'novice' in practice.
         function _ppPlayerTier() {
             try {
                 var qp = new URLSearchParams(window.location.search);
                 var fromQp = qp.get('tier');
                 if (fromQp === 'starter' || fromQp === 'novice' || fromQp === 'pro') return fromQp;
+            } catch (e) {}
+            try {
+                if (window.activeSession && (activeSession.tier === 'starter' || activeSession.tier === 'novice' || activeSession.tier === 'pro')) {
+                    return activeSession.tier;
+                }
             } catch (e) {}
             try {
                 var stored = localStorage.getItem('pflx_player_tier');
@@ -61463,6 +61517,7 @@ RESPONSE RULES:
                 level:          p.level || 1,
                 studioId:       p.studioId || '',
                 pathway:        p.pathway || '',
+                tier:           p.tier || 'novice',
                 __pflxMimic:    true,
                 __pflxMimicOf:  p.id || null
             };
