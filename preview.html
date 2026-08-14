@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 65;
+      window.PFLX_PATCH   = 66;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -66019,6 +66019,18 @@ RESPONSE RULES:
                 <button id="pflx-chat-call-mute" onclick="pflxChatCallToggleMute()" style="background:rgba(255,255,255,0.08);color:#f0f0ff;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;">🎙 Mute</button>
                 <button id="pflx-chat-call-cam" onclick="pflxChatCallToggleCam()" style="background:rgba(255,255,255,0.08);color:#f0f0ff;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;">📷 Camera</button>
                 <button id="pflx-chat-call-share" onclick="pflxChatCallToggleScreen()" style="background:rgba(139,92,246,0.14);color:#c4b5fd;border:1px solid rgba(139,92,246,0.4);border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;">🖥 Share</button>
+                <!-- Aug 15 (Ennis — "allow quick emoji reactions"): a tiny picker anchored above the button; toggled/sent via pflxChatCallToggleReactPicker/pflxChatCallSendReaction. -->
+                <div style="position:relative;display:inline-block;">
+                    <button id="pflx-chat-call-react" onclick="pflxChatCallToggleReactPicker()" style="background:rgba(255,255,255,0.08);color:#f0f0ff;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;">😀 React</button>
+                    <div id="pflx-chat-call-react-picker" style="display:none;position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);background:rgba(10,14,28,0.98);border:1px solid rgba(255,255,255,0.15);border-radius:10px;padding:6px 8px;white-space:nowrap;gap:2px;align-items:center;z-index:20;">
+                        <button onclick="pflxChatCallSendReaction('👍')" style="background:none;border:none;font-size:18px;cursor:pointer;padding:2px 5px;">👍</button>
+                        <button onclick="pflxChatCallSendReaction('❤️')" style="background:none;border:none;font-size:18px;cursor:pointer;padding:2px 5px;">❤️</button>
+                        <button onclick="pflxChatCallSendReaction('😂')" style="background:none;border:none;font-size:18px;cursor:pointer;padding:2px 5px;">😂</button>
+                        <button onclick="pflxChatCallSendReaction('🎉')" style="background:none;border:none;font-size:18px;cursor:pointer;padding:2px 5px;">🎉</button>
+                        <button onclick="pflxChatCallSendReaction('👏')" style="background:none;border:none;font-size:18px;cursor:pointer;padding:2px 5px;">👏</button>
+                        <button onclick="pflxChatCallSendReaction('🔥')" style="background:none;border:none;font-size:18px;cursor:pointer;padding:2px 5px;">🔥</button>
+                    </div>
+                </div>
                 <button onclick="pflxChatCallHangup()" style="background:rgba(239,68,68,0.2);color:#fca5a5;border:1px solid rgba(239,68,68,0.5);border-radius:8px;padding:6px 14px;font-size:11px;font-weight:800;cursor:pointer;letter-spacing:0.06em;">✕ END</button>
             </div>
         </div>
@@ -66902,6 +66914,115 @@ RESPONSE RULES:
         //  Mesh scales to ~4-6 participants. Beyond that, an SFU is needed.
         // ══════════════════════════════════════════════════════════════
         var _pcCall = null; // { threadId, mode, localStream, channel, startedAt, timerId, micEnabled, camEnabled, previousVideoTrack, peers: { peerId: { pc, name, remoteStream } } }
+        // Aug 15 (Ennis — "avatars should light up when speaking", "allow
+        // quick emoji reactions", "make sure the calls are stable"): shared
+        // state for the call-UX additions below. Kept as plain module state
+        // (not on _pcCall) since the audio meters / rAF loop need to be torn
+        // down independently of _pcCall being nulled out mid-hangup.
+        var _pcAudioCtx = null;
+        var _pcSpeakingMeters = {};   // tileId -> { analyser, data, stream, level }
+        var _pcSpeakingRafId = null;
+        (function _pcInjectCallStyles() {
+            if (document.getElementById('pc-call-style')) return;
+            var s = document.createElement('style');
+            s.id = 'pc-call-style';
+            s.textContent =
+                '@keyframes pcReactFloat { 0% { opacity:0; transform:translate(-50%,0) scale(0.6); } 15% { opacity:1; transform:translate(-50%,-10px) scale(1); } 100% { opacity:0; transform:translate(-50%,-70px) scale(1.15); } }' +
+                '@keyframes pcSpeakingPulse { 0%,100% { box-shadow:0 0 0 0 rgba(34,197,94,0.55); } 50% { box-shadow:0 0 0 5px rgba(34,197,94,0.05); } }' +
+                '.pc-speaking { border-color: rgba(34,197,94,0.9) !important; animation: pcSpeakingPulse 1.1s ease-in-out infinite; }';
+            document.head.appendChild(s);
+        })();
+        // Pure — how a raw per-frame audio level combines with the previous
+        // smoothed level to decide the displayed speaking state. Fast attack
+        // (jumps toward a loud frame immediately), slow decay (lingers
+        // briefly after the speaker pauses) so the glow doesn't flicker in
+        // the short gaps between words/syllables. Extracted as its own
+        // function so it's unit-testable without a real AudioContext.
+        function _pcSpeakingSmooth(raw, prevLevel) {
+            raw = typeof raw === 'number' && !isNaN(raw) ? raw : 0;
+            prevLevel = typeof prevLevel === 'number' && !isNaN(prevLevel) ? prevLevel : 0;
+            var next = raw > prevLevel ? raw : prevLevel * 0.82;
+            return Math.max(0, Math.min(1, next));
+        }
+        function _pcSpeakingIsActive(level) { return level > 0.06; }
+        function _pcCallEnsureMeter(id, stream) {
+            if (!stream || !stream.getAudioTracks || stream.getAudioTracks().length === 0) {
+                delete _pcSpeakingMeters[id];
+                return;
+            }
+            var existing = _pcSpeakingMeters[id];
+            if (existing && existing.stream === stream) return; // already wired to this exact stream
+            try {
+                if (!_pcAudioCtx) _pcAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                if (_pcAudioCtx.state === 'suspended') _pcAudioCtx.resume().catch(function () {});
+                var source = _pcAudioCtx.createMediaStreamSource(stream);
+                var analyser = _pcAudioCtx.createAnalyser();
+                analyser.fftSize = 512;
+                analyser.smoothingTimeConstant = 0.4;
+                source.connect(analyser);
+                _pcSpeakingMeters[id] = { analyser: analyser, data: new Uint8Array(analyser.frequencyBinCount), stream: stream, level: 0 };
+            } catch (e) {
+                // Audio meters are a progressive enhancement — never let a
+                // failure here (unsupported browser, closed AudioContext, a
+                // stream with no live audio yet) affect the call itself.
+                console.warn('[call] speaking meter unavailable', e);
+            }
+        }
+        function _pcCallSpeakingLoop() {
+            if (!_pcCall) { _pcSpeakingRafId = null; return; }
+            var grid = document.getElementById('pflx-chat-call-tiles');
+            Object.keys(_pcSpeakingMeters).forEach(function (id) {
+                var m = _pcSpeakingMeters[id];
+                m.analyser.getByteTimeDomainData(m.data);
+                var sum = 0;
+                for (var i = 0; i < m.data.length; i++) { var d = (m.data[i] - 128) / 128; sum += d * d; }
+                var raw = Math.sqrt(sum / m.data.length); // RMS: ~0 silence .. ~0.3+ speech
+                m.level = _pcSpeakingSmooth(raw * 3, m.level); // scaled so normal speech comfortably crosses the threshold
+                if (grid) {
+                    var wrap = grid.querySelector('[data-tid="' + id.replace(/"/g, '\\"') + '"]');
+                    if (wrap) {
+                        var speaking = _pcSpeakingIsActive(m.level);
+                        if (wrap.classList.contains('pc-speaking') !== speaking) wrap.classList.toggle('pc-speaking', speaking);
+                    }
+                }
+            });
+            _pcSpeakingRafId = requestAnimationFrame(_pcCallSpeakingLoop);
+        }
+        function _pcCallStartSpeakingLoop() {
+            if (_pcSpeakingRafId) return; // already running
+            _pcSpeakingRafId = requestAnimationFrame(_pcCallSpeakingLoop);
+        }
+        function _pcCallStopSpeakingMeters() {
+            if (_pcSpeakingRafId) { cancelAnimationFrame(_pcSpeakingRafId); _pcSpeakingRafId = null; }
+            _pcSpeakingMeters = {};
+            try { if (_pcAudioCtx) _pcAudioCtx.close(); } catch (e) {}
+            _pcAudioCtx = null;
+        }
+        // ── Emoji reactions ──
+        function _pcCallShowReaction(id, emoji) {
+            var grid = document.getElementById('pflx-chat-call-tiles');
+            if (!grid) return;
+            var wrap = grid.querySelector('[data-tid="' + String(id).replace(/"/g, '\\"') + '"]');
+            if (!wrap) return;
+            var el = document.createElement('div');
+            el.textContent = emoji;
+            el.style.cssText = 'position:absolute;left:50%;bottom:32%;transform:translateX(-50%);font-size:28px;line-height:1;pointer-events:none;animation:pcReactFloat 1.6s ease-out forwards;z-index:5;';
+            wrap.appendChild(el);
+            setTimeout(function () { try { el.remove(); } catch (e) {} }, 1700);
+        }
+        window.pflxChatCallToggleReactPicker = function () {
+            var el = document.getElementById('pflx-chat-call-react-picker');
+            if (!el) return;
+            el.style.display = (el.style.display === 'flex') ? 'none' : 'flex';
+        };
+        window.pflxChatCallSendReaction = function (emoji) {
+            if (!_pcCall) return;
+            var me = _pcMe();
+            _pcCallShowReaction('__me__', emoji);
+            try { _pcCall.channel && _pcCall.channel.send({ type: 'broadcast', event: 'reaction', payload: { from: me.id, emoji: emoji } }); } catch (e) {}
+            var picker = document.getElementById('pflx-chat-call-react-picker');
+            if (picker) picker.style.display = 'none';
+        };
         var _pcInboundChannels = {}; // threadId → channel (listens for invites when not in a call)
         function _pcCallRtcConfig() {
             return {
@@ -67061,7 +67182,7 @@ RESPONSE RULES:
             }
             return stream;
         }
-        function _pcCallBuildPeer(peerId, peerName) {
+        function _pcCallBuildPeer(peerId, peerName, peerAvatar) {
             var pc = new RTCPeerConnection(_pcCallRtcConfig());
             var me = _pcMe();
             pc.onicecandidate = function (ev) {
@@ -67078,6 +67199,26 @@ RESPONSE RULES:
                 if (!_pcCall) return;
                 var st = pc.connectionState;
                 if (st === 'connected') _pcCallTimerStart();
+                // Aug 15 (Ennis — "make sure the calls are stable"): a
+                // 'disconnected' state is very often a transient network
+                // blip (WiFi handoff, brief packet loss) and recovers on its
+                // own within a few seconds — the old code only reacted to
+                // 'failed'/'closed', so a peer sitting in 'disconnected'
+                // dropped media silently with no recovery attempt and no
+                // indication anything was wrong until it eventually (or
+                // never) progressed to 'failed'. Give it a grace window and
+                // try an ICE restart before treating the peer as gone.
+                if (st === 'disconnected') {
+                    var peerName = (_pcCall.peers[peerId] && _pcCall.peers[peerId].name) || 'A peer';
+                    pflxToast(peerName + '’s connection looks unstable — trying to recover…', 'info');
+                    setTimeout(function () {
+                        if (!_pcCall || !_pcCall.peers[peerId]) return;
+                        var p2 = _pcCall.peers[peerId];
+                        if (p2.pc.connectionState === 'disconnected') {
+                            try { if (typeof p2.pc.restartIce === 'function') p2.pc.restartIce(); } catch (e) { console.warn('[call] restartIce failed', e); }
+                        }
+                    }, 3000);
+                }
                 if (st === 'failed' || st === 'closed') {
                     // Peer dropped — remove tile, keep the call alive if others remain.
                     _pcCallRemovePeer(peerId, true);
@@ -67099,7 +67240,14 @@ RESPONSE RULES:
                 });
             }
             if (_pcCall.ringTimer) { clearTimeout(_pcCall.ringTimer); _pcCall.ringTimer = null; }
-            _pcCall.peers[peerId] = { pc: pc, name: peerName || peerId, remoteStream: null, videoSender: videoSender };
+            // Aug 15 (Ennis — "allow camera off and use player avatars"):
+            // avatar carried over from the join/offer signaling payload so
+            // this tile has something to show once camEnabled flips false.
+            // camEnabled defaults true — a peer whose camera was already off
+            // before I connected corrects itself the moment their own
+            // cam-state broadcast arrives (also re-sent proactively right
+            // after this peer connection is built, see below).
+            _pcCall.peers[peerId] = { pc: pc, name: peerName || peerId, remoteStream: null, videoSender: videoSender, avatar: peerAvatar || '', camEnabled: true };
             return pc;
         }
         function _pcCallRemovePeer(peerId, silent) {
@@ -67121,10 +67269,10 @@ RESPONSE RULES:
             var me = _pcMe();
             var tiles = [];
             // Always include local tile first.
-            tiles.push({ id: '__me__', name: me.name + ' (you)', stream: _pcCall.localStream, mine: true });
+            tiles.push({ id: '__me__', name: me.name + ' (you)', stream: _pcCall.localStream, mine: true, avatar: me.image || '', camEnabled: !!_pcCall.camEnabled });
             Object.keys(_pcCall.peers).forEach(function (pid) {
                 var p = _pcCall.peers[pid];
-                tiles.push({ id: pid, name: p.name, stream: p.remoteStream, mine: false });
+                tiles.push({ id: pid, name: p.name, stream: p.remoteStream, mine: false, avatar: p.avatar || '', camEnabled: p.camEnabled !== false });
             });
             var n = tiles.length;
             var cols = n <= 1 ? 1 : (n <= 4 ? 2 : (n <= 9 ? 3 : 4));
@@ -67136,18 +67284,37 @@ RESPONSE RULES:
             var desiredIds = tiles.map(function (t) { return t.id; }).join(',');
             if (currentIds !== desiredIds) {
                 grid.innerHTML = tiles.map(function (t) {
+                    var initial = (t.name || '?').trim().charAt(0).toUpperCase() || '?';
                     return '<div data-tid="' + escapeHtml(t.id) + '" style="position:relative;background:#000;border-radius:10px;overflow:hidden;border:1px solid ' + (t.mine ? 'rgba(0,212,255,0.6)' : 'rgba(255,255,255,0.08)') + ';min-width:0;min-height:0;">' +
                         '<video autoplay playsinline' + (t.mine ? ' muted' : '') + ' style="width:100%;height:100%;object-fit:cover;background:#000;"></video>' +
+                        // Aug 15 (Ennis — "allow camera off and use player
+                        // avatars"): shown/hidden per-tile below, independent
+                        // of the id-diff rebuild, so a camera toggle mid-call
+                        // updates instantly without tearing down the <video>.
+                        '<div class="pc-cam-off-avatar" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:linear-gradient(135deg,#141428,#1c1c38);">' +
+                            (t.avatar ? '<img src="' + escapeHtml(t.avatar) + '" style="width:64px;height:64px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.15);">'
+                                      : '<div style="width:64px;height:64px;border-radius:50%;background:rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800;color:#f0f0ff;">' + escapeHtml(initial) + '</div>') +
+                        '</div>' +
                         '<div style="position:absolute;bottom:6px;left:6px;padding:3px 8px;background:rgba(0,0,0,0.6);border-radius:6px;font-size:10px;color:#f0f0ff;font-weight:700;max-width:calc(100% - 12px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(t.name) + '</div>' +
                     '</div>';
                 }).join('');
             }
-            // Wire srcObject per-tile (idempotent — only sets when it changes).
+            // Wire srcObject + camera-off avatar overlay per-tile (idempotent).
             tiles.forEach(function (t) {
                 var wrap = grid.querySelector('[data-tid="' + t.id.replace(/"/g, '\\"') + '"]');
                 if (!wrap) return;
                 var vid = wrap.querySelector('video');
                 if (vid && vid.srcObject !== t.stream) vid.srcObject = t.stream;
+                var overlay = wrap.querySelector('.pc-cam-off-avatar');
+                if (overlay) {
+                    var camOff = !t.camEnabled;
+                    overlay.style.display = camOff ? 'flex' : 'none';
+                    if (vid) vid.style.visibility = camOff ? 'hidden' : 'visible';
+                }
+                // Aug 15 — keep each tile's speaking-detection meter wired to
+                // whatever stream it's currently showing (a no-op once the
+                // right stream is already attached — see _pcCallEnsureMeter).
+                _pcCallEnsureMeter(t.id, t.stream);
             });
         }
         // ── Signaling wiring, shared by initiator + joiner ──
@@ -67160,23 +67327,29 @@ RESPONSE RULES:
                 // an offer to them (joiner-initiates rule inverted: the earlier
                 // participants initiate to the newer joiner).
                 if (_pcCall.peers[m.from]) return; // already have a PC to them
-                var pc = _pcCallBuildPeer(m.from, m.name);
+                var pc = _pcCallBuildPeer(m.from, m.name, m.avatar);
                 pc.createOffer().then(function (offer) {
                     return pc.setLocalDescription(offer).then(function () { return offer; });
                 }).then(function (offer) {
-                    ch.send({ type: 'broadcast', event: 'offer', payload: { from: me.id, fromName: me.name, to: m.from, sdp: offer, mode: _pcCall.mode } });
+                    ch.send({ type: 'broadcast', event: 'offer', payload: { from: me.id, fromName: me.name, fromAvatar: me.image || '', to: m.from, sdp: offer, mode: _pcCall.mode } });
                 }).catch(function (err) { console.error('[call] createOffer', err); });
                 _pcCallRenderTiles();
+                // Aug 15 — tell the new joiner my current camera state right
+                // away, so if my camera was already off before they connected
+                // their tile for me shows the avatar immediately instead of
+                // waiting on a toggle that may never happen this call.
+                try { ch.send({ type: 'broadcast', event: 'cam-state', payload: { from: me.id, enabled: !!_pcCall.camEnabled } }); } catch (e) {}
             });
             ch.on('broadcast', { event: 'offer' }, function (payload) {
                 var m = payload && payload.payload;
                 if (!m || m.from === me.id || m.to !== me.id || !_pcCall) return;
-                var pc = _pcCall.peers[m.from] ? _pcCall.peers[m.from].pc : _pcCallBuildPeer(m.from, m.fromName);
+                var pc = _pcCall.peers[m.from] ? _pcCall.peers[m.from].pc : _pcCallBuildPeer(m.from, m.fromName, m.fromAvatar);
                 pc.setRemoteDescription(new RTCSessionDescription(m.sdp))
                     .then(function () { return pc.createAnswer(); })
                     .then(function (answer) { return pc.setLocalDescription(answer).then(function () { return answer; }); })
                     .then(function (answer) {
                         ch.send({ type: 'broadcast', event: 'answer', payload: { from: me.id, to: m.from, sdp: answer } });
+                        try { ch.send({ type: 'broadcast', event: 'cam-state', payload: { from: me.id, enabled: !!_pcCall.camEnabled } }); } catch (e) {}
                     })
                     .catch(function (err) { console.error('[call] handle offer', err); });
                 _pcCallRenderTiles();
@@ -67186,6 +67359,24 @@ RESPONSE RULES:
                 if (!m || m.from === me.id || m.to !== me.id || !_pcCall || !_pcCall.peers[m.from]) return;
                 _pcCall.peers[m.from].pc.setRemoteDescription(new RTCSessionDescription(m.sdp)).catch(function (err) { console.error('[call] setRemoteDescription answer', err); });
                 _pcCall.wasEverConnected = true;
+            });
+            // Aug 15 (Ennis — "allow camera off and use player avatars"):
+            // camEnabled isn't derivable from the WebRTC track alone (a
+            // replaceTrack(null) doesn't reliably fire a track-ended event on
+            // the receiving end across browsers), so it's signaled explicitly
+            // whenever a participant's own camera toggles — see
+            // pflxChatCallToggleCam below.
+            ch.on('broadcast', { event: 'cam-state' }, function (payload) {
+                var m = payload && payload.payload;
+                if (!m || m.from === me.id || !_pcCall || !_pcCall.peers[m.from]) return;
+                _pcCall.peers[m.from].camEnabled = !!m.enabled;
+                _pcCallRenderTiles();
+            });
+            // Aug 15 (Ennis — "allow quick emoji reactions").
+            ch.on('broadcast', { event: 'reaction' }, function (payload) {
+                var m = payload && payload.payload;
+                if (!m || m.from === me.id || !_pcCall) return;
+                _pcCallShowReaction(m.from, m.emoji || '👍');
             });
             ch.on('broadcast', { event: 'ice' }, function (payload) {
                 var m = payload && payload.payload;
@@ -67224,9 +67415,10 @@ RESPONSE RULES:
                 _pcCallWireChannel(ch, mode);
                 await _pcCallSubscribe(ch);
                 // Broadcast the invite to everyone in the thread…
-                ch.send({ type: 'broadcast', event: 'invite', payload: { from: me.id, name: me.name, mode: mode } });
+                ch.send({ type: 'broadcast', event: 'invite', payload: { from: me.id, name: me.name, avatar: me.image || '', mode: mode } });
                 // …and my own `join` so anyone already in the call adds me.
-                ch.send({ type: 'broadcast', event: 'join', payload: { from: me.id, name: me.name, mode: mode } });
+                ch.send({ type: 'broadcast', event: 'join', payload: { from: me.id, name: me.name, avatar: me.image || '', mode: mode } });
+                _pcCallStartSpeakingLoop();
                 _pcCallSetStatus(t.type === 'group' ? 'Waiting for others to join…' : 'Ringing…');
                 // Ring feedback — if nobody joins within 45s, tell the caller
                 // instead of leaving "Ringing…" forever. The system message in
@@ -67270,7 +67462,8 @@ RESPONSE RULES:
             _pcCall = { threadId: threadId, mode: 'video', localStream: stream, channel: ch, camEnabled: true, micEnabled: true, peers: {}, wasEverConnected: false, ringTimer: null };
             _pcCallWireChannel(ch, mode);
             await _pcCallSubscribe(ch);
-            ch.send({ type: 'broadcast', event: 'join', payload: { from: me.id, name: me.name, mode: mode } });
+            ch.send({ type: 'broadcast', event: 'join', payload: { from: me.id, name: me.name, avatar: me.image || '', mode: mode } });
+            _pcCallStartSpeakingLoop();
             _pcCallRenderTiles();
             _pcCallSetStatus('Connecting…');
         }
@@ -67290,6 +67483,8 @@ RESPONSE RULES:
             } catch (e) {}
             if (_pcCall.ringTimer) { clearTimeout(_pcCall.ringTimer); _pcCall.ringTimer = null; }
             _pcCallTimerStop();
+            _pcCallStopSpeakingMeters();
+            var picker = document.getElementById('pflx-chat-call-react-picker'); if (picker) picker.style.display = 'none';
             var grid = document.getElementById('pflx-chat-call-tiles'); if (grid) grid.innerHTML = '';
             _pcCall = null;
             _pcCallShowOverlay(false);
