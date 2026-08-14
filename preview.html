@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 66;
+      window.PFLX_PATCH   = 67;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -17942,13 +17942,30 @@
             document.getElementById('hmc-detail-reset-pin-btn').onclick = () => hmcResetPin(id);
         }
 
+        // Aug 15 (Ennis — "quick XC Digital Badge tools for live stream
+        // functions"): these one-tap host actions used to mutate `player.xc`
+        // directly on the in-memory PLAYERS array with NO save call at all —
+        // the edit only reached the cloud if the host separately remembered
+        // to click "💾 Save All Settings" afterward. Close the tab (or the
+        // browser crashes, or the host just moves on) before that click and
+        // the award silently never happened, with no error and no sign
+        // anything was wrong — a quieter cousin of the XC_CREDIT bug fixed
+        // in v1.65. Also, `PLAYERS.find` alone misses a player who only
+        // exists in the MC bulk roster (the same split-brain v1.65 fixed for
+        // task/arena awards) — direct mutation here had no fallback at all,
+        // just a bare `if (!player) return;`. Routed through
+        // `PflxDataBus.award()`/`.update()` instead: same resolver fallback,
+        // and every call persists immediately (debounced ~1.2s to Supabase)
+        // via `broadcastPlayerChange()` → `persistPlayers()` — no separate
+        // save step required.
         function hmcAwardXC(id) {
-            const player = PLAYERS.find(p => p.id === id);
+            const player = window.PflxDataBus ? window.PflxDataBus.get(id) : PLAYERS.find(p => p.id === id);
             if (!player) return;
             const amount = prompt(`Award XC to ${player.brand || player.name}:`, '100');
             if (!amount || isNaN(amount)) return;
             const xc = parseInt(amount);
-            player.xc = (player.xc || 0) + xc;
+            const updated = window.PflxDataBus.award(id, { xc: xc, source: 'hmc_quick_award', reason: 'Host Mission Control quick award' });
+            if (!updated) return; // award() already toasts the failure reason
             hmcXCAwardedSession += xc;
             hmcAddBroadcast(`💰 +${xc} XC awarded to ${player.brand || player.name}`);
             hmcRenderPlayers();
@@ -17957,12 +17974,13 @@
         }
 
         function hmcDeductXC(id) {
-            const player = PLAYERS.find(p => p.id === id);
+            const player = window.PflxDataBus ? window.PflxDataBus.get(id) : PLAYERS.find(p => p.id === id);
             if (!player) return;
             const amount = prompt(`Deduct XC from ${player.brand || player.name}:`, '50');
             if (!amount || isNaN(amount)) return;
             const xc = parseInt(amount);
-            player.xc = Math.max(0, (player.xc || 0) - xc);
+            const updated = window.PflxDataBus.award(id, { xc: -xc, source: 'hmc_quick_award', reason: 'Host Mission Control quick deduction' });
+            if (!updated) return;
             hmcAddBroadcast(`📉 -${xc} XC deducted from ${player.brand || player.name}`);
             hmcRenderPlayers();
             hmcShowPlayerDetail(id);
@@ -17970,12 +17988,13 @@
         }
 
         function hmcPromotePlayer(id) {
-            const player = PLAYERS.find(p => p.id === id);
+            const player = window.PflxDataBus ? window.PflxDataBus.get(id) : PLAYERS.find(p => p.id === id);
             if (!player) return;
             const rank = getRankForXC(player.xc || 0);
             const nextRank = getNextRank(rank);
             if (!nextRank) { alert('Player is already at max rank!'); return; }
-            player.xc = nextRank.xcUnlock;
+            const updated = window.PflxDataBus.update(id, { xc: nextRank.xcUnlock }, 'hmc_promote');
+            if (!updated) { pflxToast('Could not promote — player record not found.', 'warn'); return; }
             hmcAddBroadcast(`⬆ ${player.brand || player.name} promoted to ${nextRank.icon} ${nextRank.name}`);
             hmcRenderPlayers();
             hmcShowPlayerDetail(id);
@@ -18004,9 +18023,10 @@
             if (!amount || isNaN(amount)) return;
             const xc = parseInt(amount);
             const players = PLAYERS.filter(p => p.role === 'player');
-            players.forEach(p => p.xc = (p.xc || 0) + xc);
-            hmcXCAwardedSession += xc * players.length;
-            hmcAddBroadcast(`💰 Bulk award: +${xc} XC to ${players.length} players`);
+            let ok = 0;
+            players.forEach(p => { if (window.PflxDataBus.award(p.id, { xc: xc, source: 'hmc_quick_award', reason: 'Host Mission Control bulk award' })) ok++; });
+            hmcXCAwardedSession += xc * ok;
+            hmcAddBroadcast(`💰 Bulk award: +${xc} XC to ${ok} player(s)` + (ok < players.length ? ` (${players.length - ok} failed — see toasts)` : ''));
             hmcRenderPlayers();
             updateToolbarStatus();
         }
