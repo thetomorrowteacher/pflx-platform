@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 68;
+      window.PFLX_PATCH   = 69;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -62430,14 +62430,33 @@ RESPONSE RULES:
                             // the active session is the player who just received
                             // them. The host's award lands here as a realtime
                             // update from the cloud row written on their browser.
+                            // Aug 15 (Ennis-reported: NeuroFlux/Essence Johnson's
+                            // login screen refreshing on a loop) — this handler
+                            // matched by exact id ONLY, unlike every other merge
+                            // path in the file (pflxIdentityFetchRosterFromCloud,
+                            // _mcMergePlayers callers) which all fall back to a
+                            // brand match. Two individual pflx_player_<id> cloud
+                            // rows for the SAME brand (one from the pre-entered
+                            // seed id, one from a later self-claim that minted
+                            // its own new id — confirmed live in Supabase: two
+                            // NEUROFLUX rows, ids ...-25 and ...-m7xam) meant a
+                            // realtime event for the row NOT already resolved in
+                            // PLAYERS got PUSHED as a brand-new second entry
+                            // instead of merging into the existing one. From then
+                            // on PLAYERS held two NeuroFlux records and every
+                            // subsequent realtime tick for either row could flip
+                            // BRANDS['NEUROFLUX'] and re-render the roster/login
+                            // views again — the visible "refreshing over and
+                            // over". Falling back to a brand match here (same as
+                            // every sibling merge path) keeps it to one record.
                             var prevRecord = null;
                             if (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) {
-                                var _prev = PLAYERS.find(function (x) { return x && x.id === p.id; });
+                                var _prev = PLAYERS.find(function (x) { return x && (x.id === p.id || (x.brand && p.brand && x.brand.toUpperCase() === p.brand.toUpperCase())); });
                                 if (_prev) prevRecord = Object.assign({}, _prev);
                             }
                             // Merge into PLAYERS — last-write-wins on updatedAt.
                             if (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) {
-                                var existing = PLAYERS.find(function (x) { return x && x.id === p.id; });
+                                var existing = PLAYERS.find(function (x) { return x && (x.id === p.id || (x.brand && p.brand && x.brand.toUpperCase() === p.brand.toUpperCase())); });
                                 if (existing) {
                                     if (window.pflxRecordIsNewer(p, existing)) Object.assign(existing, p);
                                 } else {
@@ -62447,11 +62466,12 @@ RESPONSE RULES:
                                     if (!existing || window.pflxRecordIsNewer(p, existing)) BRANDS[p.brand] = p.pin;
                                 }
                             }
-                            // Sync to localStorage
+                            // Sync to localStorage — same brand-fallback match so the
+                            // cached roster doesn't accumulate the same duplicate.
                             try {
                                 var saved = JSON.parse(localStorage.getItem(PLAYERS_KEY) || '[]');
                                 if (!Array.isArray(saved)) saved = [];
-                                var i = saved.findIndex(function (s) { return s && s.id === p.id; });
+                                var i = saved.findIndex(function (s) { return s && (s.id === p.id || (s.brand && p.brand && s.brand.toUpperCase() === p.brand.toUpperCase())); });
                                 if (i >= 0) {
                                     if (window.pflxRecordIsNewer(p, saved[i])) saved[i] = Object.assign({}, saved[i], p);
                                 } else {
