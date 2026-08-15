@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 67;
+      window.PFLX_PATCH   = 68;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -10857,7 +10857,7 @@
                                                     </optgroup>
                                                     <optgroup label="Interactive">
                                                         <option value="discussion">&#x1F4AC; Open Discussion</option>
-                                                        <option value="whiteboard">&#x1F3A8; Collaborative Whiteboard</option>
+                                                        <option value="whiteboard">&#x1F3A8; Drawing (doodle wall)</option>
                                                         <option value="grouping">&#x1F465; Auto-Grouping</option>
                                                         <option value="partnership">&#x1F91D; Partnership Pairing</option>
                                                     </optgroup>
@@ -11014,6 +11014,7 @@
                                     <div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.06);">
                                         <div style="font-size:10px;color:rgba(255,255,255,0.4);font-weight:700;letter-spacing:0.1em;margin-bottom:6px;">HOST CONTROLS</div>
                                         <div id="mc-session-host-controls"></div>
+                                        <div id="mc-session-picker-result"></div>
                                     </div>
 
                                     <!-- Live Slide Content Area -->
@@ -43807,7 +43808,7 @@
             quiz:           { label: 'Quiz',         icon: '&#x1F3AF;', showOptions: true,  showGrouping: false, showTask: false },
             openresponse:  { label: 'Open Response', icon: '&#x270D;',  showOptions: false, showGrouping: false, showTask: false },
             discussion:    { label: 'Discussion',    icon: '&#x1F4AC;', showOptions: false, showGrouping: false, showTask: false },
-            whiteboard:    { label: 'Whiteboard',    icon: '&#x1F3A8;', showOptions: false, showGrouping: false, showTask: false },
+            whiteboard:    { label: 'Drawing',       icon: '&#x1F3A8;', showOptions: false, showGrouping: false, showTask: false },
             grouping:      { label: 'Auto-Group',    icon: '&#x1F465;', showOptions: false, showGrouping: true,  showTask: false },
             partnership:   { label: 'Partnership',   icon: '&#x1F91D;', showOptions: false, showGrouping: true,  showTask: false },
             timer:         { label: 'Timer',         icon: '&#x23F1;',  showOptions: false, showGrouping: false, showTask: false },
@@ -44129,6 +44130,7 @@
                 mcUpdateLiveSlide(index);
                 mcRenderLiveHostControls(index);
                 mcRenderLiveParticipants(index);
+                mcRenderSessionPickerResult(index);
             }
 
             if (typeof mcBroadcastToApps === 'function') {
@@ -44188,6 +44190,9 @@
                 '<button class="mc-btn ' + (hc.slideFrozen ? 'mc-btn-green' : '') + '" style="font-size:10px;padding:4px 10px;" onclick="mcSessionToggleFreeze(' + index + ')">' + (hc.slideFrozen ? '&#x1F525; Unfreeze Slide' : '&#x2744; Freeze Slide') + '</button>' +
                 '<button class="mc-btn" style="font-size:10px;padding:4px 10px;" onclick="mcSessionRevealAnswer(' + index + ')">&#x1F50D; Reveal</button>' +
                 '<button class="mc-btn" style="font-size:10px;padding:4px 10px;color:#f5c842;border-color:rgba(245,200,66,0.3);" onclick="mcSessionRunGrouping(' + index + ')">&#x1F465; Run Grouping</button>' +
+                '<button class="mc-btn" style="font-size:10px;padding:4px 10px;color:#22c55e;border-color:rgba(34,197,94,0.3);" onclick="mcSessionRandomPicker(' + index + ')">&#x1F3AF; Random Pick</button>' +
+                '<button class="mc-btn" style="font-size:10px;padding:4px 10px;color:#a78bfa;border-color:rgba(167,139,250,0.3);" onclick="mcSessionGroupPicker(' + index + ')">&#x1F9E9; Group Picker</button>' +
+                '<button class="mc-btn" style="font-size:10px;padding:4px 10px;color:var(--cyan);border-color:rgba(0,212,255,0.3);" onclick="mcToggleNoiseMeter()">&#x1F50A; Noise Meter</button>' +
                 '<button class="mc-btn" style="font-size:10px;padding:4px 10px;color:#a78bfa;border-color:rgba(167,139,250,0.3);" onclick="mcSessionBroadcastToDC(' + index + ')">&#x1F4E2; Re-Broadcast DC</button>' +
                 '<select id="mc-session-jump-slide" onchange="mcSessionJumpToSlide(' + index + ', this.value)" style="font-size:10px;padding:4px 8px;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.1);color:#e0e6ff;border-radius:4px;">' +
                 '<option value="">Jump to slide&#x2026;</option>' +
@@ -44284,6 +44289,179 @@
                 }).join('') +
                 '</div>';
         }
+
+        // ----- Standalone ClassDojo-style live-session tools (not tied to a slide) -----
+
+        function mcSessionRandomPicker(index) {
+            if (!mcSessions[index]) return;
+            var sess = mcSessions[index];
+            var parts = sess.liveParticipants || [];
+            if (parts.length === 0) { alert('No participants have joined this session yet.'); return; }
+
+            // Avoid picking the same person twice in a row when there's more than one option.
+            var pool = parts;
+            if (parts.length > 1 && sess.lastRandomPickId) {
+                var filtered = parts.filter(function(p) { return (p.id || p) !== sess.lastRandomPickId; });
+                if (filtered.length > 0) pool = filtered;
+            }
+            var pick = pool[Math.floor(Math.random() * pool.length)];
+            var pid = pick.id || pick;
+            var pname = pick.name || pid;
+            sess.lastRandomPickId = pid;
+            sess.lastRandomPickName = pname;
+            sess.lastRandomPickAt = new Date().toISOString();
+            mcSaveData('sessions');
+            mcRenderSessionPickerResult(index);
+            if (typeof mcBroadcastToApps === 'function') mcBroadcastToApps('pflx_session_random_pick', { sessionId: sess.id, playerId: pid, playerName: pname });
+            pflxPlaySfx('click');
+        }
+
+        function mcSessionGroupPicker(index) {
+            if (!mcSessions[index]) return;
+            var sess = mcSessions[index];
+            var parts = sess.liveParticipants || [];
+            if (parts.length < 2) { alert('Need at least 2 participants in the session to group.'); return; }
+
+            var sizeInput = prompt('Group size (players per group):', '3');
+            if (sizeInput === null) return;
+            var size = Math.max(2, parseInt(sizeInput, 10) || 3);
+            var strategyInput = prompt('Strategy: random, skill-matched, cohort-same, or cohort-mixed', 'random');
+            if (strategyInput === null) return;
+            var strategy = (strategyInput || 'random').trim().toLowerCase();
+            if (['random', 'skill-matched', 'cohort-same', 'cohort-mixed'].indexOf(strategy) === -1) strategy = 'random';
+
+            // Look up full player records for grouping data (same resolution as mcSessionRunGrouping).
+            var full = parts.map(function(p) {
+                var id = p.id || p;
+                var rec = (typeof mcPlayers !== 'undefined') ? (mcPlayers.find(function(pl) { return pl.id === id; })) : null;
+                return rec || { id: id, name: p.name || id, cohort: p.cohort, pathway: p.pathway, xc: p.xc || 0 };
+            });
+            var groups = mcGenerateGroups(full, size, strategy);
+            sess.lastGroupPick = {
+                groups: groups.map(function(g) { return g.map(function(p) { return { id: p.id, name: p.name }; }); }),
+                size: size,
+                strategy: strategy,
+                at: new Date().toISOString()
+            };
+            mcSaveData('sessions');
+            mcRenderSessionPickerResult(index);
+            if (typeof mcBroadcastToApps === 'function') mcBroadcastToApps('pflx_session_group_pick', { sessionId: sess.id, groups: sess.lastGroupPick.groups, strategy: strategy, size: size });
+            pflxPlaySfx('click');
+        }
+
+        function mcRenderSessionPickerResult(index) {
+            var panel = document.getElementById('mc-session-picker-result');
+            if (!panel || !mcSessions[index]) return;
+            var sess = mcSessions[index];
+            var html = '';
+
+            if (sess.lastRandomPickId) {
+                var parts = sess.liveParticipants || [];
+                var p = parts.find(function(x) { return (x.id || x) === sess.lastRandomPickId; });
+                var displayName = p ? p.name : (sess.lastRandomPickName || sess.lastRandomPickId);
+                html += '<div style="margin-top:8px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.3);border-radius:10px;padding:10px 14px;display:flex;align-items:center;gap:8px;">' +
+                    '<span style="font-size:18px;">&#x1F3AF;</span><span style="font-size:13px;color:#22c55e;font-weight:700;">Picked: ' + escapeHtml(displayName) + '</span></div>';
+            }
+
+            if (sess.lastGroupPick && sess.lastGroupPick.groups && sess.lastGroupPick.groups.length) {
+                html += '<div style="margin-top:8px;font-size:11px;color:rgba(255,255,255,0.4);">Groups (' + escapeHtml(sess.lastGroupPick.strategy) + ', size ' + sess.lastGroupPick.size + '):</div>' +
+                    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-top:4px;">' +
+                    sess.lastGroupPick.groups.map(function(g, gi) {
+                        return '<div style="background:rgba(167,139,250,0.05);border:1px solid rgba(167,139,250,0.2);border-radius:8px;padding:8px;">' +
+                            '<div style="font-size:10px;color:#a78bfa;font-weight:700;margin-bottom:4px;">&#x1F9E9; Group ' + (gi + 1) + '</div>' +
+                            g.map(function(gp) { return '<div style="font-size:11px;color:#e0e6ff;">&bull; ' + escapeHtml(gp.name) + '</div>'; }).join('') +
+                            '</div>';
+                    }).join('') +
+                    '</div>';
+            }
+
+            panel.innerHTML = html;
+        }
+
+        // ----- Noise Meter (host-side ambient-mic level, ClassDojo-style) -----
+        var mcNoiseMeterState = { active: false, ctx: null, stream: null, raf: null };
+
+        function mcToggleNoiseMeter() {
+            if (mcNoiseMeterState.active) { mcStopNoiseMeter(); return; }
+            mcStartNoiseMeter();
+        }
+
+        function mcStartNoiseMeter() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert('Microphone access is not supported in this browser.');
+                return;
+            }
+            navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
+                mcNoiseMeterState.stream = stream;
+                var AudioCtx = window.AudioContext || window.webkitAudioContext;
+                var ctx = new AudioCtx();
+                mcNoiseMeterState.ctx = ctx;
+                var src = ctx.createMediaStreamSource(stream);
+                var analyser = ctx.createAnalyser();
+                analyser.fftSize = 512;
+                src.connect(analyser);
+                var data = new Uint8Array(analyser.frequencyBinCount);
+                mcNoiseMeterState.active = true;
+                mcShowNoiseMeterUI();
+                var smooth = 0;
+                function tick() {
+                    if (!mcNoiseMeterState.active) return;
+                    analyser.getByteFrequencyData(data);
+                    var sum = 0;
+                    for (var i = 0; i < data.length; i++) sum += data[i];
+                    var level = sum / data.length;
+                    smooth = smooth * 0.8 + level * 0.2;
+                    mcUpdateNoiseMeterUI(Math.max(0, Math.min(100, Math.round((smooth / 130) * 100))));
+                    mcNoiseMeterState.raf = requestAnimationFrame(tick);
+                }
+                tick();
+            }).catch(function(err) {
+                alert('Could not access the microphone: ' + (err && err.message ? err.message : err));
+            });
+        }
+
+        function mcStopNoiseMeter() {
+            mcNoiseMeterState.active = false;
+            if (mcNoiseMeterState.raf) cancelAnimationFrame(mcNoiseMeterState.raf);
+            if (mcNoiseMeterState.stream) { try { mcNoiseMeterState.stream.getTracks().forEach(function(t) { t.stop(); }); } catch (e) {} }
+            if (mcNoiseMeterState.ctx) { try { mcNoiseMeterState.ctx.close(); } catch (e) {} }
+            mcNoiseMeterState.stream = null;
+            mcNoiseMeterState.ctx = null;
+            var el = document.getElementById('mc-noise-meter-overlay');
+            if (el) el.remove();
+        }
+
+        function mcShowNoiseMeterUI() {
+            var existing = document.getElementById('mc-noise-meter-overlay');
+            if (existing) existing.remove();
+            var el = document.createElement('div');
+            el.id = 'mc-noise-meter-overlay';
+            el.style.cssText = 'position:fixed;bottom:20px;right:20px;background:rgba(10,18,40,0.95);border:1px solid rgba(0,212,255,0.3);border-radius:14px;padding:14px 18px;z-index:9999;font-family:\'Jura\',sans-serif;width:200px;box-shadow:0 10px 40px rgba(0,0,0,0.4);';
+            el.innerHTML =
+                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+                '<span style="font-size:11px;font-weight:900;color:var(--cyan);letter-spacing:0.08em;">&#x1F50A; NOISE METER</span>' +
+                '<button onclick="mcStopNoiseMeter()" style="background:none;border:none;color:rgba(255,255,255,0.4);cursor:pointer;font-size:14px;">&#x2715;</button>' +
+                '</div>' +
+                '<div style="height:14px;background:rgba(255,255,255,0.06);border-radius:7px;overflow:hidden;"><div id="mc-noise-meter-bar" style="height:100%;width:0%;background:#22c55e;transition:width 0.15s,background 0.3s;"></div></div>' +
+                '<div id="mc-noise-meter-label" style="text-align:center;font-size:11px;margin-top:6px;color:rgba(255,255,255,0.5);">Listening&hellip;</div>';
+            document.body.appendChild(el);
+        }
+
+        function mcUpdateNoiseMeterUI(level) {
+            var bar = document.getElementById('mc-noise-meter-bar');
+            var label = document.getElementById('mc-noise-meter-label');
+            if (!bar) return;
+            bar.style.width = level + '%';
+            var color = level < 35 ? '#22c55e' : (level < 65 ? '#f5c842' : '#ef4444');
+            bar.style.background = color;
+            if (label) label.innerHTML = level < 35 ? 'Quiet &#x1F642;' : (level < 65 ? 'Getting loud&hellip;' : 'TOO LOUD! &#x1F6A8;');
+        }
+
+        window.mcSessionRandomPicker = mcSessionRandomPicker;
+        window.mcSessionGroupPicker = mcSessionGroupPicker;
+        window.mcRenderSessionPickerResult = mcRenderSessionPickerResult;
+        window.mcToggleNoiseMeter = mcToggleNoiseMeter;
+        window.mcStopNoiseMeter = mcStopNoiseMeter;
 
         // ----- Auto-grouping algorithm -----
         function mcGenerateGroups(participants, size, strategy) {
@@ -44382,6 +44560,8 @@
             sess.status = 'completed';
             mcSaveData('sessions');
 
+            if (typeof mcStopNoiseMeter === 'function') mcStopNoiseMeter();
+
             var livePanel = document.getElementById('mc-session-live-panel');
             if (livePanel) livePanel.style.display = 'none';
 
@@ -44479,7 +44659,21 @@
             }
 
             if (slide.type === 'whiteboard') {
-                body += '<div style="margin-top:8px;background:rgba(0,212,255,0.04);border:1px solid rgba(0,212,255,0.2);border-radius:10px;padding:14px;font-size:13px;color:rgba(255,255,255,0.7);text-align:center;">&#x1F3A8; Collaborative whiteboard &mdash; all participants can draw in real time.</div>';
+                var drawResponses = Object.keys(responses).filter(function(pid) { return responses[pid] && responses[pid].drawing; });
+                if (drawResponses.length === 0) {
+                    body += '<div style="margin-top:8px;background:rgba(0,212,255,0.04);border:1px dashed rgba(0,212,255,0.25);border-radius:10px;padding:14px;font-size:13px;color:rgba(255,255,255,0.6);text-align:center;">&#x1F3A8; Doodle wall &mdash; waiting for participants to submit a drawing&hellip;</div>';
+                } else {
+                    body += '<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;">&#x1F3A8; ' + drawResponses.length + ' doodle(s) submitted</div>' +
+                        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;">' +
+                        drawResponses.map(function(pid) {
+                            var r = responses[pid];
+                            return '<div style="background:#fff;border-radius:8px;padding:4px;border:1px solid rgba(255,255,255,0.1);">' +
+                                '<img src="' + r.drawing + '" style="width:100%;border-radius:4px;display:block;" alt="doodle">' +
+                                '<div style="font-size:10px;color:#333;text-align:center;padding:3px 0 1px;font-weight:700;">' + escapeHtml(r.playerName || pid) + '</div>' +
+                                '</div>';
+                        }).join('') +
+                        '</div>';
+                }
             }
 
             if (slide.type === 'grouping' || slide.type === 'partnership') {
@@ -47434,7 +47628,44 @@
                 }
             }
 
-            body.innerHTML = badges + display + interactive;
+            if (slide.type === 'whiteboard') {
+                if (canRespond) {
+                    interactive = '<div style="margin-top:16px;padding:12px;background:rgba(0,212,255,0.03);border:1px dashed rgba(0,212,255,0.25);border-radius:10px;text-align:center;">' +
+                        '<div style="font-size:11px;color:var(--cyan);font-weight:700;margin-bottom:8px;">&#x1F3A8; DRAW SOMETHING</div>' +
+                        '<canvas id="pflx-doodle-canvas" width="320" height="200" style="background:#fff;border-radius:8px;border:1px solid rgba(0,212,255,0.3);cursor:crosshair;touch-action:none;max-width:100%;"></canvas>' +
+                        '<div style="display:flex;gap:6px;justify-content:center;margin-top:8px;flex-wrap:wrap;">' +
+                        ['#111111', '#ef4444', '#22c55e', '#00d4ff', '#f5c842', '#a78bfa'].map(function(c) {
+                            return '<button onclick="pflxDoodleSetColor(\'' + c + '\')" style="width:22px;height:22px;border-radius:50%;background:' + c + ';border:2px solid rgba(255,255,255,0.3);cursor:pointer;padding:0;"></button>';
+                        }).join('') +
+                        '</div>' +
+                        '<div style="display:flex;gap:8px;justify-content:center;margin-top:8px;">' +
+                        '<button onclick="pflxDoodleClear()" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.4);color:#ef4444;padding:6px 14px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:11px;font-weight:700;">Clear</button>' +
+                        '<button onclick="pflxDoodleSubmit(\'' + sess.id + '\', \'' + slide.id + '\')" style="background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.4);color:#22c55e;padding:6px 16px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:11px;font-weight:700;">Submit Doodle</button>' +
+                        '</div></div>';
+                } else if (alreadyResponded) {
+                    interactive = '<div style="margin-top:16px;padding:12px;background:rgba(34,197,94,0.05);border:1px solid rgba(34,197,94,0.25);border-radius:10px;font-size:13px;color:#22c55e;text-align:center;">&#x2714; Doodle submitted. Waiting for next activity&hellip;</div>';
+                }
+            }
+
+            // The overlay body is fully re-rendered on a 2s poll (see pflxLiveSessionPoll), which would
+            // otherwise wipe an in-progress drawing on every tick. Split into a "display" region (always
+            // safe to refresh - tallies, doodle wall, etc.) and an "interactive" region that's only
+            // rebuilt when its shape actually changes (slide changed, or the respond/already-responded
+            // state flipped) so a live canvas mid-stroke survives the next poll tick.
+            if (!document.getElementById('pflx-live-session-display') || !document.getElementById('pflx-live-session-interactive')) {
+                body.innerHTML = '<div id="pflx-live-session-badges"></div><div id="pflx-live-session-display"></div><div id="pflx-live-session-interactive"></div>';
+            }
+            var badgesEl = document.getElementById('pflx-live-session-badges');
+            var displayEl = document.getElementById('pflx-live-session-display');
+            var interactiveEl = document.getElementById('pflx-live-session-interactive');
+            if (badgesEl) badgesEl.innerHTML = badges;
+            if (displayEl) displayEl.innerHTML = display;
+            var interactiveKey = slide.id + ':' + (canRespond ? '1' : '0') + ':' + (alreadyResponded ? '1' : '0');
+            if (interactiveEl && interactiveEl.dataset.key !== interactiveKey) {
+                interactiveEl.innerHTML = interactive;
+                interactiveEl.dataset.key = interactiveKey;
+                if (slide.type === 'whiteboard' && canRespond && typeof pflxDoodleInit === 'function') pflxDoodleInit();
+            }
 
             // Leaderboard/footer: show participants + my XC earned
             if (footer) {
@@ -47442,6 +47673,83 @@
                 footer.innerHTML = '<span>&#x1F7E2; ' + parts.length + ' live &middot; You are <b style="color:var(--cyan);">' + escapeHtml(player.name) + '</b></span>';
             }
         }
+
+        // ----- Discrete-submission drawing widget for the 'whiteboard' slide type -----
+        // Snapshots (not continuous strokes) are submitted via pflxSubmitSessionResponse,
+        // the same pattern openresponse text uses - safe against the 2s overlay poll.
+        window._pflxDoodleState = { color: '#111111', drawing: false, lastX: 0, lastY: 0 };
+
+        function pflxDoodleGetCanvas() { return document.getElementById('pflx-doodle-canvas'); }
+
+        function pflxDoodleInit() {
+            var c = pflxDoodleGetCanvas();
+            if (!c || c.dataset.wired === '1') return;
+            c.dataset.wired = '1';
+            var ctx = c.getContext('2d');
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, c.width, c.height);
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            ctx.lineWidth = 4;
+            var st = window._pflxDoodleState;
+
+            function posFromEvent(e) {
+                var rect = c.getBoundingClientRect();
+                var cx = e.touches ? e.touches[0].clientX : e.clientX;
+                var cy = e.touches ? e.touches[0].clientY : e.clientY;
+                return { x: (cx - rect.left) * (c.width / rect.width), y: (cy - rect.top) * (c.height / rect.height) };
+            }
+            function start(e) {
+                e.preventDefault();
+                st.drawing = true;
+                var p = posFromEvent(e);
+                st.lastX = p.x; st.lastY = p.y;
+            }
+            function move(e) {
+                if (!st.drawing) return;
+                e.preventDefault();
+                var p = posFromEvent(e);
+                ctx.strokeStyle = st.color;
+                ctx.beginPath();
+                ctx.moveTo(st.lastX, st.lastY);
+                ctx.lineTo(p.x, p.y);
+                ctx.stroke();
+                st.lastX = p.x; st.lastY = p.y;
+            }
+            function end() { st.drawing = false; }
+
+            c.addEventListener('mousedown', start);
+            c.addEventListener('mousemove', move);
+            c.addEventListener('touchstart', start, { passive: false });
+            c.addEventListener('touchmove', move, { passive: false });
+            c.addEventListener('touchend', end);
+            if (!window._pflxDoodleMouseUpWired) {
+                window._pflxDoodleMouseUpWired = true;
+                window.addEventListener('mouseup', function() { window._pflxDoodleState.drawing = false; });
+            }
+        }
+
+        function pflxDoodleSetColor(color) { window._pflxDoodleState.color = color; }
+
+        function pflxDoodleClear() {
+            var c = pflxDoodleGetCanvas();
+            if (!c) return;
+            var ctx = c.getContext('2d');
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, c.width, c.height);
+        }
+
+        function pflxDoodleSubmit(sessionId, slideId) {
+            var c = pflxDoodleGetCanvas();
+            if (!c) return;
+            var dataUrl = c.toDataURL('image/png');
+            pflxSubmitSessionResponse(sessionId, slideId, { drawing: dataUrl });
+        }
+
+        window.pflxDoodleSetColor = pflxDoodleSetColor;
+        window.pflxDoodleClear = pflxDoodleClear;
+        window.pflxDoodleSubmit = pflxDoodleSubmit;
+        window.pflxDoodleInit = pflxDoodleInit;
 
         function pflxPromptJoinSession() {
             var code = prompt('Enter session code:');
