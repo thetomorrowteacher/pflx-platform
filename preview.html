@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 69;
+      window.PFLX_PATCH   = 70;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -62296,17 +62296,49 @@ RESPONSE RULES:
                 }
                 // Sync back to localStorage so subsequent reads (Player Mgmt,
                 // hydratePlayers on next boot) see the full union.
+                //
+                // v1.70 — this boot-time pull runs on the LOGIN screen,
+                // before anyone has signed in, and was JSON.stringify-ing
+                // + localStorage-writing every player's FULL record —
+                // including any embedded base64 `image` field — on every
+                // single page load. Confirmed live in Supabase: 12 of 156
+                // roster rows carry an embedded photo, one (NeuroFlux)
+                // alone over 1MB of base64 text; ~2.4MB of image data
+                // total. That's a multi-MB string re-built and written to
+                // localStorage synchronously on the main thread on EVERY
+                // boot of the exact screen where the "flashes white and
+                // reloads, over and over" report came from — a real,
+                // recurring memory/CPU cost and a plausible contributor to
+                // a low-memory-device tab crash → auto-reload → crash
+                // loop. The login screen never renders these photos (it
+                // only needs id/brand/name/pin for the brand datalist), so
+                // the cache never needed them. Strip `image` from what's
+                // cached — both for records touched this pass AND for any
+                // already-bloated entries left over from before this fix
+                // shipped, so an affected device's cache shrinks on its
+                // very next boot. The in-memory PLAYERS merge above is
+                // untouched — photos still load and render normally
+                // everywhere else in the app.
                 try {
                     var saved = [];
                     try { saved = JSON.parse(localStorage.getItem(PLAYERS_KEY) || '[]'); } catch (e) {}
                     if (!Array.isArray(saved)) saved = [];
+                    var _pflxStripHeavyForCache = function (rec) {
+                        if (!rec || !rec.image) return rec;
+                        if (String(rec.image).length <= 2000) return rec;
+                        var out = Object.assign({}, rec);
+                        delete out.image;
+                        return out;
+                    };
+                    saved = saved.map(_pflxStripHeavyForCache);
                     fetched.forEach(function (p) {
                         if (!p || !p.id) return;
+                        var lean = _pflxStripHeavyForCache(p);
                         var i = saved.findIndex(function (s) { return s && s.id === p.id; });
                         if (i >= 0) {
-                            if (window.pflxRecordIsNewer(p, saved[i])) saved[i] = Object.assign({}, saved[i], p);
+                            if (window.pflxRecordIsNewer(p, saved[i])) saved[i] = Object.assign({}, saved[i], lean);
                         } else {
-                            saved.push(p);
+                            saved.push(lean);
                         }
                     });
                     localStorage.setItem(PLAYERS_KEY, JSON.stringify(saved));
