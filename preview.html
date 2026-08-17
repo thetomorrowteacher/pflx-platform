@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 79;
+      window.PFLX_PATCH   = 81;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -23559,7 +23559,8 @@
                     category: b.category || '',
                     color: b.color || '#4f8ef7',
                     icon: b.icon || '🎖',
-                    image: ''
+                    image: '',
+                    description: b.description || ''
                 };
             });
             var dynamic = (typeof mcBadges !== 'undefined' && Array.isArray(mcBadges) ? mcBadges : []).map(function(b) {
@@ -23575,7 +23576,16 @@
                     icon: b.icon || '🎖',
                     // X-Coin's Digital Badge Management stores an artwork image —
                     // carry it (various field names) so grants + portfolio show it.
-                    image: b.image || b.img || b.imageUrl || b.imageURL || b.photo || b.artwork || ''
+                    image: b.image || b.img || b.imageUrl || b.imageURL || b.photo || b.artwork || '',
+                    // v1.80 (Ennis: "its saying no description when there are
+                    // descriptions") — mcGetAllBadges() rebuilds a fresh badge
+                    // object from every mcBadges entry for id/tier/category
+                    // normalization, but never copied `description` through,
+                    // so every consumer of this function (mcFindBadge, and
+                    // the v1.79 badge-detail popup built on top of it) saw an
+                    // empty description regardless of what's actually stored
+                    // in Supabase's pflx_mc_badges catalog. Carry it through.
+                    description: b.description || ''
                 };
             });
             // Dedupe — dynamic (X-Coin) wins over hardcoded for same name
@@ -23634,7 +23644,17 @@
                 name: name,
                 category: _pflxBadgeCategoryKey((cat && (cat.category || cat.tier)) || raw.category || raw.tier),
                 xcValue: (cat && cat.xc) || raw.xcValue || raw.xc || 0,
-                image: (cat && cat.image) || raw.image || ''
+                image: (cat && cat.image) || raw.image || '',
+                // v1.81 (Ennis: "changed the grant number to 5... should
+                // show 5 endorsements") — award()'s badge branch reads
+                // `b.count` to know how many endorsements a single grant
+                // represents. This resolver sits between every incoming
+                // badge award (task/checkpoint/project/node/xcoin
+                // pflx_player_award message) and award() itself — if it
+                // didn't carry `count` through, X-Coin's grant-amount fix
+                // would have no effect (the field would be silently
+                // dropped right here, before award() ever saw it).
+                count: (typeof raw.count === 'number' && raw.count > 0) ? raw.count : 1
             };
         }
         window._pflxResolveAwardBadge = _pflxResolveAwardBadge;
@@ -56624,7 +56644,18 @@ RESPONSE RULES:
                 if (!earnedRefs.length) { var _u = JSON.parse(localStorage.getItem('pflx_user') || '{}'); if (Array.isArray(_u.badges)) earnedRefs = _u.badges; }
                 if (!earnedRefs.length && activeSession && Array.isArray(activeSession.digitalBadges)) earnedRefs = activeSession.digitalBadges; // legacy array shape
             } catch (e) {}
-            var earned = earnedRefs.map(function (r) { return (typeof mcFindBadge === 'function') ? mcFindBadge(r) : (r && typeof r === 'object' ? r : null); }).filter(Boolean);
+            // v1.81 — a badges[] ref carrying its own `endorsements` count
+            // (multi-grants of the same badge, e.g. "Video Editor x5") gets
+            // resolved against the catalog as usual, but the count itself
+            // lives only on the player's stored ref, not the catalog entry
+            // — so it has to be merged onto the resolved object here or the
+            // tile/popup would have no way to see it.
+            var earned = earnedRefs.map(function (r) {
+                var found = (typeof mcFindBadge === 'function') ? mcFindBadge(r) : (r && typeof r === 'object' ? r : null);
+                if (!found) return null;
+                var endorsements = (r && typeof r === 'object' && typeof r.endorsements === 'number') ? r.endorsements : 1;
+                return endorsements > 1 ? Object.assign({}, found, { endorsements: endorsements }) : found;
+            }).filter(Boolean);
 
             if (totalBadges === 0 && earned.length === 0) {
                 container.innerHTML = '<p style="color:rgba(255,255,255,0.3);font-size:13px;text-align:center;padding:30px 0;">No badges earned yet. Complete tasks in X-Coin to build your badge portfolio.</p>';
@@ -56673,7 +56704,17 @@ RESPONSE RULES:
                     // duplicated into a data attribute.
                     var tierKey = (typeof _pflxBadgeCategoryKey === 'function') ? _pflxBadgeCategoryKey(bg.category || bg.tier || bg.type) : 'primary';
                     var tierLabel = (typeof pflxBadgeTierLabel === 'function') ? pflxBadgeTierLabel(tierKey) : 'Primary';
-                    html += '<div onclick="pflxShowBadgeDetail(this)" data-badge-name="' + escapeHtml(bg.name || 'Badge') + '" data-badge-desc="' + escapeHtml(bg.description || '') + '" data-badge-xc="' + (Number(bg.xc) || 0) + '" data-badge-type="' + escapeHtml(tierLabel) + '" data-badge-category="' + escapeHtml(bg.category || '') + '" style="cursor:pointer;text-align:center;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:14px;padding:12px 8px;transition:border-color .15s;" onmouseover="this.style.borderColor=\'rgba(0,240,255,0.35)\'" onmouseout="this.style.borderColor=\'rgba(255,255,255,0.07)\'">' + art +
+                    // v1.81 (Ennis: "changed the grant number to 5... there
+                    // should be a number indicator by the badge") — a badge
+                    // granted more than once carries its own endorsement
+                    // count (see award()); show it as a small "×N" pill on
+                    // the artwork, same as the type/category, sourced from
+                    // a data-* attribute rather than a separate registry.
+                    var endorsements = Number(bg.endorsements) || 1;
+                    var artWrapped = '<div style="position:relative;display:inline-block;">' + art +
+                        (endorsements > 1 ? '<div style="position:absolute;top:-6px;right:-6px;background:#f5c842;color:#1a1a1a;font-size:10px;font-weight:900;border-radius:10px;padding:1px 6px;border:2px solid #0a0a12;">×' + endorsements + '</div>' : '') +
+                        '</div>';
+                    html += '<div onclick="pflxShowBadgeDetail(this)" data-badge-name="' + escapeHtml(bg.name || 'Badge') + '" data-badge-desc="' + escapeHtml(bg.description || '') + '" data-badge-xc="' + (Number(bg.xc) || 0) + '" data-badge-type="' + escapeHtml(tierLabel) + '" data-badge-category="' + escapeHtml(bg.category || '') + '" data-badge-endorsements="' + endorsements + '" style="cursor:pointer;text-align:center;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:14px;padding:12px 8px;transition:border-color .15s;" onmouseover="this.style.borderColor=\'rgba(0,240,255,0.35)\'" onmouseout="this.style.borderColor=\'rgba(255,255,255,0.07)\'">' + artWrapped +
                         '<div style="font-size:11px;font-weight:700;color:#e0e6ff;margin-top:8px;line-height:1.25;">' + escapeHtml(bg.name || 'Badge') + '</div>' +
                         '<div style="font-size:9px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:rgba(255,255,255,0.35);margin-top:3px;">' + escapeHtml(tierLabel) + '</div>' +
                         (bg.xc ? '<div style="font-size:10px;color:#f5c842;margin-top:2px;">+' + bg.xc + ' XC</div>' : '') + '</div>';
@@ -56968,6 +57009,22 @@ RESPONSE RULES:
             var xc = Number(el.getAttribute('data-badge-xc') || 0);
             var type = el.getAttribute('data-badge-type') || '';
             var category = el.getAttribute('data-badge-category') || '';
+            // v1.81 (Ennis: "grant number... should show 5 endorsements...
+            // when clicked on it should show 5 endorsements") — tiles carry
+            // the resolved endorsement count as data-badge-endorsements;
+            // only show it when the badge was actually granted more than
+            // once, so the overwhelming common case (single-grant badges)
+            // shows no endorsement line at all.
+            var endorsements = Number(el.getAttribute('data-badge-endorsements') || 1);
+            // v1.80 (Ennis: "redundant showing badge type twice") — `type`
+            // is always the short tier label (Signature/Primary/...) and
+            // `category` is the badge's raw source category name, which
+            // for several tiers (e.g. X-Coin's own "Signature Badges
+            // (Skill Mastery)") already contains that same word — showing
+            // both produced "SIGNATURE · SIGNATURE BADGES (SKILL MASTERY)".
+            // Only show category alongside type when it adds information
+            // type doesn't already convey.
+            if (category && type && category.toLowerCase().indexOf(type.toLowerCase()) !== -1) category = '';
             var imgEl = el.querySelector('img');
             var iconEl = !imgEl ? el.querySelector('div') : null;
             var artHtml = imgEl
@@ -56983,6 +57040,7 @@ RESPONSE RULES:
                     '<h3 style="margin:0 0 6px;font-size:18px;font-weight:900;color:#f0f0ff;">' + escapeHtml(name) + '</h3>' +
                     (type ? '<div style="display:inline-block;font-size:10px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#00f0ff;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);border-radius:20px;padding:3px 12px;margin-bottom:10px;">' + escapeHtml(type) + (category ? ' · ' + escapeHtml(category) : '') + '</div>' : '') +
                     (desc ? '<p style="font-size:13px;color:rgba(255,255,255,0.65);line-height:1.5;margin:10px 0 14px;">' + escapeHtml(desc) + '</p>' : '<p style="font-size:12px;color:rgba(255,255,255,0.3);margin:10px 0 14px;">No description available.</p>') +
+                    (endorsements > 1 ? '<div style="display:inline-block;font-size:13px;font-weight:700;color:#f5c842;background:rgba(245,200,66,0.1);border:1px solid rgba(245,200,66,0.3);border-radius:20px;padding:6px 16px;margin-bottom:10px;">' + endorsements + ' Endorsements</div><br>' : '') +
                     (xc ? '<div style="display:inline-block;font-size:13px;font-weight:700;color:#f5c842;background:rgba(245,200,66,0.1);border:1px solid rgba(245,200,66,0.3);border-radius:20px;padding:6px 16px;">+' + xc + ' XC</div>' : '') +
                 '</div>';
             document.body.appendChild(overlay);
@@ -57003,8 +57061,17 @@ RESPONSE RULES:
             ];
             var totalBadges = (bc.primary || 0) + (bc.premium || 0) + (bc.executive || 0) + (bc.signature || 0);
             var earnedRefs = (player && Array.isArray(player.badges)) ? player.badges : [];
+            // v1.81 — carry a badge ref's own `endorsements` count (multi
+            // grants of the same badge, e.g. "Video Editor x5") through to
+            // the resolved catalog object — see the matching comment in
+            // portfolioRenderBadges above.
             var earned = earnedRefs.map(function (r) {
-                try { return (typeof mcFindBadge === 'function') ? mcFindBadge(r) : (r && typeof r === 'object' ? r : null); } catch (e) { return null; }
+                try {
+                    var found = (typeof mcFindBadge === 'function') ? mcFindBadge(r) : (r && typeof r === 'object' ? r : null);
+                    if (!found) return null;
+                    var endorsements = (r && typeof r === 'object' && typeof r.endorsements === 'number') ? r.endorsements : 1;
+                    return endorsements > 1 ? Object.assign({}, found, { endorsements: endorsements }) : found;
+                } catch (e) { return null; }
             }).filter(Boolean);
 
             // v1.76 (Ennis: "on Vybe's it doesn't show the badges") — root
@@ -57094,7 +57161,17 @@ RESPONSE RULES:
                     // duplicated into a data attribute.
                     var tierKey = (typeof _pflxBadgeCategoryKey === 'function') ? _pflxBadgeCategoryKey(bg.category || bg.tier || bg.type) : 'primary';
                     var tierLabel = (typeof pflxBadgeTierLabel === 'function') ? pflxBadgeTierLabel(tierKey) : 'Primary';
-                    html += '<div onclick="pflxShowBadgeDetail(this)" data-badge-name="' + escapeHtml(bg.name || 'Badge') + '" data-badge-desc="' + escapeHtml(bg.description || '') + '" data-badge-xc="' + (Number(bg.xc) || 0) + '" data-badge-type="' + escapeHtml(tierLabel) + '" data-badge-category="' + escapeHtml(bg.category || '') + '" style="cursor:pointer;text-align:center;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:14px;padding:12px 8px;transition:border-color .15s;" onmouseover="this.style.borderColor=\'rgba(0,240,255,0.35)\'" onmouseout="this.style.borderColor=\'rgba(255,255,255,0.07)\'">' + art +
+                    // v1.81 (Ennis: "changed the grant number to 5... there
+                    // should be a number indicator by the badge") — a badge
+                    // granted more than once carries its own endorsement
+                    // count (see award()); show it as a small "×N" pill on
+                    // the artwork, same as the type/category, sourced from
+                    // a data-* attribute rather than a separate registry.
+                    var endorsements = Number(bg.endorsements) || 1;
+                    var artWrapped = '<div style="position:relative;display:inline-block;">' + art +
+                        (endorsements > 1 ? '<div style="position:absolute;top:-6px;right:-6px;background:#f5c842;color:#1a1a1a;font-size:10px;font-weight:900;border-radius:10px;padding:1px 6px;border:2px solid #0a0a12;">×' + endorsements + '</div>' : '') +
+                        '</div>';
+                    html += '<div onclick="pflxShowBadgeDetail(this)" data-badge-name="' + escapeHtml(bg.name || 'Badge') + '" data-badge-desc="' + escapeHtml(bg.description || '') + '" data-badge-xc="' + (Number(bg.xc) || 0) + '" data-badge-type="' + escapeHtml(tierLabel) + '" data-badge-category="' + escapeHtml(bg.category || '') + '" data-badge-endorsements="' + endorsements + '" style="cursor:pointer;text-align:center;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:14px;padding:12px 8px;transition:border-color .15s;" onmouseover="this.style.borderColor=\'rgba(0,240,255,0.35)\'" onmouseout="this.style.borderColor=\'rgba(255,255,255,0.07)\'">' + artWrapped +
                         '<div style="font-size:11px;font-weight:700;color:#e0e6ff;margin-top:8px;line-height:1.25;">' + escapeHtml(bg.name || 'Badge') + '</div>' +
                         '<div style="font-size:9px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:rgba(255,255,255,0.35);margin-top:3px;">' + escapeHtml(tierLabel) + '</div>' +
                         (bg.xc ? '<div style="font-size:10px;color:#f5c842;margin-top:2px;">+' + bg.xc + ' XC</div>' : '') + '</div>';
@@ -65567,14 +65644,48 @@ RESPONSE RULES:
                 if (awardObj.badge && awardObj.badge.id) {
                     var b = awardObj.badge;
                     var existing = Array.isArray(p.badges) ? p.badges.slice() : [];
-                    if (existing.indexOf(b.id) < 0) existing.push(b.id);
+                    // v1.81 (Ennis: "I added Video Editor badge to Neuroflux
+                    // and changed the grant number to 5. The Video Editor
+                    // badge should show 5 endorsements") — X-Coin's Grant
+                    // modal has always had an "Amount" field, but the
+                    // Console previously had no concept of "grant this ONE
+                    // badge N times" — the field was only ever wired to a
+                    // bare digitalBadges bump (see the matching X-Coin fix
+                    // in handleGrantCoin), which is exactly why granting
+                    // Video Editor x5 corrupted Neuroflux's record with 5
+                    // fake "Professional Endorsement Badge #N" placeholders
+                    // instead of one real badge showing "5 endorsements".
+                    // `b.count` (optional, defaults to 1) now carries that
+                    // intent end-to-end: a NEW badge id is pushed once,
+                    // tagged with its endorsement count only when >1 (kept
+                    // as a bare string id for count:1, preserving every
+                    // existing single-endorsement badge's storage shape);
+                    // re-granting an ALREADY-EARNED badge id adds to its
+                    // running endorsement count instead of being a silent
+                    // no-op dedupe (the old behavior) or a duplicate entry.
+                    var grantCount = Math.max(1, Number(b.count) || 1);
+                    var existingIdx = -1;
+                    for (var _ei = 0; _ei < existing.length; _ei++) {
+                        var _er = existing[_ei];
+                        if ((_er && typeof _er === 'object' ? _er.id : _er) === b.id) { existingIdx = _ei; break; }
+                    }
+                    if (existingIdx < 0) {
+                        existing.push(grantCount > 1 ? { id: b.id, endorsements: grantCount } : b.id);
+                        if (b.category) {
+                            var bc = Object.assign({}, p.badgeCounts || {});
+                            bc[b.category] = (bc[b.category] || 0) + 1;
+                            changes.badgeCounts = bc;
+                        }
+                    } else {
+                        var _prevEntry = existing[existingIdx];
+                        var _prevCount = (_prevEntry && typeof _prevEntry === 'object' && typeof _prevEntry.endorsements === 'number') ? _prevEntry.endorsements : 1;
+                        existing[existingIdx] = { id: b.id, endorsements: _prevCount + grantCount };
+                        // Already-counted distinct badge type — badgeCounts
+                        // (which tracks distinct TYPES, not endorsements)
+                        // is deliberately left untouched here.
+                    }
                     changes.badges = existing;
                     changes.digitalBadges = existing.length;
-                    if (b.category) {
-                        var bc = Object.assign({}, p.badgeCounts || {});
-                        bc[b.category] = (bc[b.category] || 0) + 1;
-                        changes.badgeCounts = bc;
-                    }
                     // Badge may also carry XC value
                     if (typeof b.xcValue === 'number' && b.xcValue > 0) {
                         changes.xc = Math.max(0, (changes.xc !== undefined ? changes.xc : (p.xc || 0)) + b.xcValue);
