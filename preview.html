@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 81;
+      window.PFLX_PATCH   = 82;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -57392,7 +57392,7 @@ RESPONSE RULES:
                             p.image = dataUrl;
                             // Persist (localStorage + debounced Supabase upsert) and
                             // broadcast so every surface re-renders with the new image.
-                            try { if (typeof persistPlayers === 'function') persistPlayers(); } catch (e) {}
+                            try { if (typeof persistPlayers === 'function') persistPlayers([p.id]); } catch (e) {}
                             try { if (typeof broadcastPlayerChange === 'function') broadcastPlayerChange(p); } catch (e) {}
                         }
                     }
@@ -65022,7 +65022,7 @@ RESPONSE RULES:
                 if (res && res.error) console.warn('[player-mgmt] cloud persist error:', res.error.message);
             }, function (err) { console.warn('[player-mgmt] cloud persist threw', err); });
         }
-        function persistPlayers() {
+        function persistPlayers(onlyIds) {
             try {
                 if (typeof PLAYERS === 'undefined') return;
                 var saved = PLAYERS.filter(function (p) {
@@ -65040,11 +65040,31 @@ RESPONSE RULES:
                 // hydratePlayers treats localStorage as the source of
                 // truth and clears the hardcoded mock list on every load.
                 try { localStorage.setItem('pflx_players_authoritative_v1', '1'); } catch (e) {}
-                // Enqueue for cloud persist — debounced so a bulk edit doesn't
-                // hammer Supabase with one upsert per character typed.
-                saved.forEach(function (p) { if (p && p.id) _pflxCloudPersistQueue[p.id] = p; });
-                if (_pflxCloudPersistTimer) clearTimeout(_pflxCloudPersistTimer);
-                _pflxCloudPersistTimer = setTimeout(_pflxFlushCloudPersist, 1200);
+                // v1.82 (Aug 17) — scope the cloud fan-out to only the player(s)
+                // the caller says actually changed, when it tells us. Before
+                // this fix EVERY call — including logActivity(), which fires on
+                // nearly every action in the app — re-enqueued the ENTIRE
+                // in-memory roster for cloud persist. Any host whose PLAYERS
+                // snapshot was even slightly stale (hadn't refetched since a
+                // different tab/sub-app updated a different player) would
+                // silently overwrite that other player's real cloud data the
+                // next time anything happened at all in its own tab. Confirmed
+                // via Supabase: 135 of 156 pflx_player_<id> rows were
+                // mass-overwritten in one batch at the same millisecond,
+                // reverting/corrupting XC + badge counts for many players
+                // (including a just-repaired NEUROFLUX, and zeroing Trinity's
+                // bulk-roster mirror). Callers that legitimately touch many
+                // players at once (bulk import) still pass their own id list;
+                // omitting onlyIds falls back to the old whole-roster behavior
+                // for any caller not yet updated.
+                var scoped = Array.isArray(onlyIds);
+                var idSet = scoped ? new Set(onlyIds.filter(Boolean)) : null;
+                var toQueue = scoped ? saved.filter(function (p) { return p && idSet.has(p.id); }) : saved;
+                toQueue.forEach(function (p) { if (p && p.id) _pflxCloudPersistQueue[p.id] = p; });
+                if (toQueue.length) {
+                    if (_pflxCloudPersistTimer) clearTimeout(_pflxCloudPersistTimer);
+                    _pflxCloudPersistTimer = setTimeout(_pflxFlushCloudPersist, 1200);
+                }
             } catch (e) { console.warn('[player-mgmt] persist failed', e); }
         }
         window.pflxPersistPlayers = persistPlayers;
@@ -65077,8 +65097,11 @@ RESPONSE RULES:
                     }
                 }
                 if (playerBrand && typeof BRANDS !== 'undefined') { try { delete BRANDS[playerBrand]; } catch (e) {} }
-                // Reuse persistPlayers so the save + sentinel happen.
-                try { if (typeof persistPlayers === 'function') persistPlayers(); } catch (e) {}
+                // Reuse persistPlayers so the save + sentinel happen. Scoped
+                // to [] — the deleted player(s) are already gone from
+                // PLAYERS, and step 4 below deletes their per-id row(s)
+                // directly, so there's nothing that needs a cloud enqueue.
+                try { if (typeof persistPlayers === 'function') persistPlayers([]); } catch (e) {}
             } catch (e) {}
             // 1) Remove from mcPlayers in-memory.
             if (Array.isArray(window.mcPlayers)) {
@@ -65150,7 +65173,7 @@ RESPONSE RULES:
             // Stamp the write time so cross-device merges keep this edit
             // (last-write-wins) instead of letting a stale cloud row win.
             try { player.updatedAt = Date.now(); } catch (e) {}
-            persistPlayers();
+            persistPlayers([player.id]);
             // Mirror the canonical record into mcPlayers (MC roster + cloud
             // 'users' row) so ACCESS LEVEL / studio / role edits propagate to
             // every sub-app immediately, not just the per-player rows.
@@ -66564,7 +66587,7 @@ RESPONSE RULES:
                     list.push(ev);
                     if (list.length > 20) list = list.slice(-20);
                     p.pendingXcoinEvents = list;
-                    if (typeof persistPlayers === 'function') persistPlayers();
+                    if (typeof persistPlayers === 'function') persistPlayers([p.id]);
                 } catch (e) {}
             }
 
@@ -66574,7 +66597,7 @@ RESPONSE RULES:
                     var p = PLAYERS.find(function (x) { return x && x.id === playerId; });
                     if (p && p.pendingXcoinEvents && p.pendingXcoinEvents.length) {
                         p.pendingXcoinEvents = [];
-                        if (typeof persistPlayers === 'function') persistPlayers();
+                        if (typeof persistPlayers === 'function') persistPlayers([playerId]);
                     }
                 } catch (e) {}
             }
@@ -66668,7 +66691,7 @@ RESPONSE RULES:
                 p.activity = p.activity || [];
                 p.activity.push({ ts: Date.now(), type: type, payload: payload || {} });
                 if (p.activity.length > 200) p.activity = p.activity.slice(-200);
-                persistPlayers();
+                persistPlayers([playerId]);
             } catch (e) {}
         }
         window.pflxLogActivity = logActivity;
@@ -67214,7 +67237,11 @@ RESPONSE RULES:
                             if (typeof window.pflxIdentityPersistNewPlayer === 'function') window.pflxIdentityPersistNewPlayer(newP);
                             added++;
                         });
-                        persistPlayers();
+                        // Each new player was already individually cloud-persisted
+                        // above via pflxIdentityPersistNewPlayer(newP) — pass []
+                        // so this call only refreshes localStorage and doesn't
+                        // also re-upload every pre-existing untouched player.
+                        persistPlayers([]);
                         // July 15 (Ennis): filters/search persist through add/edit/delete.
                         if (typeof hmcRenderPlayers === 'function') hmcRenderPlayers();
                         if (typeof populateBrandSelect === 'function') populateBrandSelect();
@@ -67446,7 +67473,12 @@ RESPONSE RULES:
                         var i = PLAYERS.indexOf(p);
                         if (i >= 0) PLAYERS.splice(i, 1);
                         if (p.brand) delete BRANDS[p.brand];
-                        persistPlayers();
+                        // Deleted player is already gone from PLAYERS, so
+                        // there's no "changed player" to enqueue for cloud —
+                        // pflxDeletePlayerFully() below deletes their per-id
+                        // row directly. Pass [] so this doesn't fall back to
+                        // re-uploading every other untouched player.
+                        persistPlayers([]);
                         // ── Mirror the delete into mcPlayers + every cloud key
                         // that downstream apps read from. Without this, X-Coin
                         // and Mission Control kept showing the deleted player
