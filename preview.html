@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 72;
+      window.PFLX_PATCH   = 73;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -61470,6 +61470,17 @@ RESPONSE RULES:
                 }
                 // Persist to cloud
                 window.pflxCloudSave('active_role', { role: role }, null);
+                // v1.73 — the rank-gated app-access pass (locks/unlocks nav
+                // apps by the CURRENT session's rank) used to be wired only
+                // through an earlier wrapper of pflxSetRole that this later,
+                // full reassignment silently replaced — so nav lock state
+                // never refreshed on a role switch, including entering/
+                // exiting Mimic. A mimicking host would see the HOST's app
+                // unlocks, not the mimicked player's, which was part of
+                // Ennis's "doesn't look exactly how theirs looks" report.
+                // Call it directly here instead of relying on that fragile
+                // wrap chain.
+                try { if (typeof window.pflxApplyAppGating === 'function') setTimeout(window.pflxApplyAppGating, 200); } catch (e) {}
             };
 
             window.pflxToggleRole = function() {
@@ -62745,10 +62756,20 @@ RESPONSE RULES:
         var STASH_KEY = 'pflx_mimic_stash_v1';
         var ACTIVE_KEY = 'pflx_mimic_active_v1';
 
-        function isAdmin() {
+        // v1.73 (Ennis) — "from Master Host controls only." The old check let
+        // ANY host role (admin/host/teacher/instructor) mimic, which is every
+        // tier below Master too. Use the real TIERED HOST ACCESS engine
+        // (window.pflxHostTier) so this tracks the same tier resolution as
+        // everywhere else in the Console instead of a private, looser copy of
+        // the rule. Falls back to the old loose check only if the tier engine
+        // somehow hasn't loaded yet (should never happen in production).
+        function isMasterHost() {
             try {
+                if (typeof window.pflxHostTier === 'function') {
+                    return window.pflxHostTier(window.activeSession) === 'master';
+                }
                 var r = (window.activeSession && window.activeSession.role || '').toLowerCase();
-                return r === 'admin' || r === 'host' || r === 'teacher' || r === 'instructor';
+                return r === 'admin';
             } catch (e) { return false; }
         }
 
@@ -62764,27 +62785,75 @@ RESPONSE RULES:
             } catch (e) { return null; }
         }
 
+        // v1.73 (Ennis) — "exactly how theirs looks in all aspects." This used
+        // to set only a handful of fields, so anything the real login session
+        // (loginUser(), below the Console's own login screen) carries but this
+        // didn't — cohorts[], slogan, interests[], a real badges[] array,
+        // rankOverride, resolved rank/rankIcon/rankName/rankLevel, and
+        // onboardingComplete/onboarded — silently fell back to defaults while
+        // mimicking, which is exactly the "doesn't look like theirs" gap Ennis
+        // reported. Mirrors loginUser's activeSession construction field-for-
+        // field (same source array — mcPlayers — so every field loginUser
+        // reads is present on `p` here too), including the same rank-resolve
+        // pass so getPlayerLevel()/app-gating see the mimicked player's real
+        // rank, not the host's.
         function buildPlayerSession(p) {
-            return {
+            var s = {
                 id:             p.id || null,
                 brand:          p.brand || p.name || 'PLAYER',
                 name:           p.name || p.brand || 'Player',
                 email:          p.email || '',
                 pin:            p.pin || '',
                 role:           p.role || 'Student',
-                cohort:         p.cohort || 'PlayerPool',
-                xc:             p.xc || 0,
-                totalXcoin:     p.totalXcoin || p.xc || 0,
+                cohort:         Array.isArray(p.cohorts) ? p.cohorts.join(', ') : (p.cohort || 'PlayerPool'),
+                cohorts:        Array.isArray(p.cohorts) ? p.cohorts : (p.cohort ? [p.cohort] : ['PlayerPool']),
+                xc:             (p.xc != null ? p.xc : p.xcoin) || 0,
+                totalXcoin:     p.totalXcoin || (p.xc != null ? p.xc : p.xcoin) || 0,
+                image:          p.image || '',
+                slogan:         p.slogan || '',
+                interests:      p.interests || [],
+                level:          p.level || 1,
                 digitalBadges:  p.digitalBadges || 0,
                 badgeCounts:    p.badgeCounts || null,
-                image:          p.image || '',
-                level:          p.level || 1,
+                badges:         Array.isArray(p.badges) ? p.badges : [],
+                rankOverride:   p.rankOverride || null,
                 studioId:       p.studioId || '',
                 pathway:        p.pathway || '',
+                diagnosticResult: p.diagnosticResult || null,
                 tier:           p.tier || 'novice',
+                onboardingComplete: p.onboardingComplete !== false,
+                onboarded:      p.onboarded !== false,
                 __pflxMimic:    true,
                 __pflxMimicOf:  p.id || null
             };
+            // Carry host tier + control scope when present, for full fidelity
+            // with loginUser — harmless no-op for an ordinary player record,
+            // matters if Mimic is ever pointed at a host account.
+            try {
+                if (p.hostTier) s.hostTier = p.hostTier;
+                if (Array.isArray(p.managedScope)) s.managedScope = p.managedScope;
+                if (Array.isArray(p.managedCohorts)) s.managedCohorts = p.managedCohorts;
+                if (Array.isArray(p.managedNodes)) s.managedNodes = p.managedNodes;
+                if (p.managedProjectId) s.managedProjectId = p.managedProjectId;
+            } catch (e) {}
+            // Resolve rank exactly like loginUser does, so the toolbar,
+            // dashboard, and rank-gated app-access all read the mimicked
+            // player's real rank instead of falling back to "no rank."
+            try {
+                var _r = null;
+                if (s.rankOverride && typeof mcPflxRanks !== 'undefined' && Array.isArray(mcPflxRanks)) {
+                    _r = mcPflxRanks.find(function (r) { return r.id === s.rankOverride; });
+                }
+                if (!_r && typeof getRankForXC === 'function') _r = getRankForXC(s.xc || 0);
+                if (_r) {
+                    s.rank = _r.id || null;
+                    s.rankIcon = _r.icon || '';
+                    s.rankName = _r.name || '';
+                    s.rankLevel = _r.level || 1;
+                    s.level = _r.level || s.level || 1;
+                }
+            } catch (e) {}
+            return s;
         }
 
         function broadcastIdentity() {
@@ -62847,7 +62916,7 @@ RESPONSE RULES:
         }
 
         window.pflxMimicEnter = function (playerId) {
-            if (!isAdmin() && !pflxMimicIsActive()) { console.warn('[mimic] only host/admin can enter mimic mode'); return false; }
+            if (!isMasterHost() && !pflxMimicIsActive()) { console.warn('[mimic] only Master Host can enter mimic mode'); return false; }
             if (pflxMimicIsActive()) { pflxMimicExit({ silent: true }); }
             var player = findPlayer(playerId);
             if (!player) { console.warn('[mimic] player not found:', playerId); return false; }
@@ -62868,12 +62937,22 @@ RESPONSE RULES:
             else { window.pflxRole = 'player'; document.body.classList.add('pflx-as-player'); }
 
             try {
+                // v1.73 — carry the same expanded field set buildPlayerSession
+                // now resolves, so sub-apps reading pflx_user (X-Coin, Core
+                // Pathways, etc. via the identity bridge) see the mimicked
+                // player's real profile too, not just the Console's own UI.
                 localStorage.setItem('pflx_user', JSON.stringify({
                     id: newSession.id, brandName: newSession.brand, name: newSession.name,
-                    role: newSession.role, cohort: newSession.cohort,
+                    role: newSession.role, cohort: newSession.cohort, cohorts: newSession.cohorts,
                     xcoin: newSession.xc, totalXcoin: newSession.totalXcoin,
-                    digitalBadges: newSession.digitalBadges, image: newSession.image,
-                    level: newSession.level, __pflxMimic: true
+                    digitalBadges: newSession.digitalBadges, badgeCounts: newSession.badgeCounts,
+                    badges: newSession.badges, image: newSession.image, slogan: newSession.slogan,
+                    interests: newSession.interests, rankOverride: newSession.rankOverride,
+                    rank: newSession.rank, level: newSession.level,
+                    studioId: newSession.studioId, pathway: newSession.pathway,
+                    diagnosticResult: newSession.diagnosticResult,
+                    onboardingComplete: newSession.onboardingComplete, onboarded: newSession.onboarded,
+                    __pflxMimic: true
                 }));
             } catch (e) {}
 
@@ -62917,13 +62996,19 @@ RESPONSE RULES:
 
             try {
                 if (window.activeSession) {
+                    var __restored = window.activeSession;
                     localStorage.setItem('pflx_user', JSON.stringify({
-                        id: window.activeSession.id, brandName: window.activeSession.brand,
-                        name: window.activeSession.name, role: window.activeSession.role,
-                        cohort: window.activeSession.cohort, xcoin: window.activeSession.xc,
-                        totalXcoin: window.activeSession.totalXcoin,
-                        digitalBadges: window.activeSession.digitalBadges,
-                        image: window.activeSession.image, level: window.activeSession.level
+                        id: __restored.id, brandName: __restored.brand,
+                        name: __restored.name, role: __restored.role,
+                        cohort: __restored.cohort, cohorts: __restored.cohorts,
+                        xcoin: __restored.xc, totalXcoin: __restored.totalXcoin,
+                        digitalBadges: __restored.digitalBadges, badgeCounts: __restored.badgeCounts,
+                        badges: __restored.badges, image: __restored.image, slogan: __restored.slogan,
+                        interests: __restored.interests, rankOverride: __restored.rankOverride,
+                        rank: __restored.rank, level: __restored.level,
+                        studioId: __restored.studioId, pathway: __restored.pathway,
+                        diagnosticResult: __restored.diagnosticResult,
+                        onboardingComplete: __restored.onboardingComplete, onboarded: __restored.onboarded
                     }));
                 }
             } catch (e) {}
@@ -63004,7 +63089,7 @@ RESPONSE RULES:
                     tries++;
                     if (typeof mcPlayers !== 'undefined' && window.activeSession) {
                         clearInterval(iv);
-                        if (isAdmin()) pflxMimicEnter(info.playerId);
+                        if (isMasterHost()) pflxMimicEnter(info.playerId);
                         else { try { sessionStorage.removeItem(ACTIVE_KEY); } catch (e) {} }
                     } else if (tries > 80) { clearInterval(iv); }
                 }, 250);
