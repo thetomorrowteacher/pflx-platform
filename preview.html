@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 78;
+      window.PFLX_PATCH   = 79;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -23610,6 +23610,15 @@
             return 'primary';
         }
         window._pflxBadgeCategoryKey = _pflxBadgeCategoryKey;
+
+        // v1.79 — short, human-facing label for a badge's tier key (used on
+        // the earned-badge tiles and in the click-through detail popup;
+        // Ennis: "Also show badge type: Primary, Exclusive, etc").
+        function pflxBadgeTierLabel(key) {
+            var labels = { primary: 'Primary', premium: 'Premium', executive: 'Executive', signature: 'Signature' };
+            return labels[key] || 'Primary';
+        }
+        window.pflxBadgeTierLabel = pflxBadgeTierLabel;
 
         // Resolve any badge reference (id / name / partial object) against the
         // LIVE badge catalog into the shape PflxDataBus.award needs so the badge
@@ -56653,8 +56662,20 @@ RESPONSE RULES:
                     var art = hasImg
                         ? '<img src="' + escapeHtml(bg.image) + '" alt="" style="width:60px;height:60px;border-radius:12px;object-fit:cover;border:1px solid rgba(255,255,255,0.12);">'
                         : '<div style="width:60px;height:60px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:30px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);">' + (bg.icon || '🎖') + '</div>';
-                    html += '<div style="text-align:center;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:14px;padding:12px 8px;">' + art +
+                    // v1.79 (Ennis: "I want to be able to click on the badges
+                    // and a popup comes up with the image and description" /
+                    // "Also show badge type: Primary, Exclusive, etc") — the
+                    // badge's own data travels on the tile via data-*
+                    // attributes (never a separate JS registry, so a
+                    // re-render can't leave a stale click handler behind);
+                    // the artwork itself is read back off this same
+                    // element's own <img>/icon child on click rather than
+                    // duplicated into a data attribute.
+                    var tierKey = (typeof _pflxBadgeCategoryKey === 'function') ? _pflxBadgeCategoryKey(bg.category || bg.tier || bg.type) : 'primary';
+                    var tierLabel = (typeof pflxBadgeTierLabel === 'function') ? pflxBadgeTierLabel(tierKey) : 'Primary';
+                    html += '<div onclick="pflxShowBadgeDetail(this)" data-badge-name="' + escapeHtml(bg.name || 'Badge') + '" data-badge-desc="' + escapeHtml(bg.description || '') + '" data-badge-xc="' + (Number(bg.xc) || 0) + '" data-badge-type="' + escapeHtml(tierLabel) + '" data-badge-category="' + escapeHtml(bg.category || '') + '" style="cursor:pointer;text-align:center;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:14px;padding:12px 8px;transition:border-color .15s;" onmouseover="this.style.borderColor=\'rgba(0,240,255,0.35)\'" onmouseout="this.style.borderColor=\'rgba(255,255,255,0.07)\'">' + art +
                         '<div style="font-size:11px;font-weight:700;color:#e0e6ff;margin-top:8px;line-height:1.25;">' + escapeHtml(bg.name || 'Badge') + '</div>' +
+                        '<div style="font-size:9px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:rgba(255,255,255,0.35);margin-top:3px;">' + escapeHtml(tierLabel) + '</div>' +
                         (bg.xc ? '<div style="font-size:10px;color:#f5c842;margin-top:2px;">+' + bg.xc + ' XC</div>' : '') + '</div>';
                 });
                 html += '</div></div>';
@@ -56922,6 +56943,52 @@ RESPONSE RULES:
             }).join('');
         }
 
+        // v1.79 (Ennis: "I want to be able to click on the badges and a
+        // popup comes up with the image and description") — shared detail
+        // popup for a single earned-badge tile, used by both
+        // portfolioRenderBadges() (own portfolio) and pflxPlayerBadgesHtml()
+        // (viewing any other player). Follows the same dynamically-built
+        // overlay pattern as pflxOpenPlayerPortfolio/pflxClosePortfolioModal
+        // above — a module-level element reference so a second badge click
+        // (or the portfolio modal itself closing) can't leave two overlays
+        // stacked. Reads everything off the clicked tile's own data-*
+        // attributes and its already-rendered <img>/icon child — no
+        // separate registry to go stale if the grid re-renders.
+        var _pflxBadgeDetailModalEl = null;
+        function pflxCloseBadgeDetailModal() {
+            if (_pflxBadgeDetailModalEl && _pflxBadgeDetailModalEl.parentNode) _pflxBadgeDetailModalEl.parentNode.removeChild(_pflxBadgeDetailModalEl);
+            _pflxBadgeDetailModalEl = null;
+        }
+        window.pflxCloseBadgeDetailModal = pflxCloseBadgeDetailModal;
+        window.pflxShowBadgeDetail = function (el) {
+            if (!el) return;
+            pflxCloseBadgeDetailModal();
+            var name = el.getAttribute('data-badge-name') || 'Badge';
+            var desc = el.getAttribute('data-badge-desc') || '';
+            var xc = Number(el.getAttribute('data-badge-xc') || 0);
+            var type = el.getAttribute('data-badge-type') || '';
+            var category = el.getAttribute('data-badge-category') || '';
+            var imgEl = el.querySelector('img');
+            var iconEl = !imgEl ? el.querySelector('div') : null;
+            var artHtml = imgEl
+                ? '<img src="' + imgEl.src + '" alt="" style="width:140px;height:140px;border-radius:20px;object-fit:cover;border:1px solid rgba(255,255,255,0.15);">'
+                : '<div style="width:140px;height:140px;border-radius:20px;display:flex;align-items:center;justify-content:center;font-size:64px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);">' + (iconEl ? iconEl.textContent : '🎖') + '</div>';
+            var overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.78);display:flex;align-items:center;justify-content:center;z-index:10001;backdrop-filter:blur(6px);';
+            overlay.onclick = function (e) { if (e.target === overlay) pflxCloseBadgeDetailModal(); };
+            overlay.innerHTML =
+                '<div style="background:#0a0a12;border:1px solid rgba(0,240,255,0.2);border-radius:20px;max-width:380px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.6);padding:32px 26px;text-align:center;position:relative;">' +
+                    '<button onclick="pflxCloseBadgeDetailModal()" style="position:absolute;top:14px;right:16px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.2);color:#fff;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:14px;">✕</button>' +
+                    '<div style="display:flex;justify-content:center;margin-bottom:18px;">' + artHtml + '</div>' +
+                    '<h3 style="margin:0 0 6px;font-size:18px;font-weight:900;color:#f0f0ff;">' + escapeHtml(name) + '</h3>' +
+                    (type ? '<div style="display:inline-block;font-size:10px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#00f0ff;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);border-radius:20px;padding:3px 12px;margin-bottom:10px;">' + escapeHtml(type) + (category ? ' · ' + escapeHtml(category) : '') + '</div>' : '') +
+                    (desc ? '<p style="font-size:13px;color:rgba(255,255,255,0.65);line-height:1.5;margin:10px 0 14px;">' + escapeHtml(desc) + '</p>' : '<p style="font-size:12px;color:rgba(255,255,255,0.3);margin:10px 0 14px;">No description available.</p>') +
+                    (xc ? '<div style="display:inline-block;font-size:13px;font-weight:700;color:#f5c842;background:rgba(245,200,66,0.1);border:1px solid rgba(245,200,66,0.3);border-radius:20px;padding:6px 16px;">+' + xc + ' XC</div>' : '') +
+                '</div>';
+            document.body.appendChild(overlay);
+            _pflxBadgeDetailModalEl = overlay;
+        };
+
         // Badge portfolio for an arbitrary player — visual twin of
         // portfolioRenderBadges() but sourced from the player record's own
         // badgeCounts/badges fields (already per-player on PLAYERS, unlike
@@ -57016,8 +57083,20 @@ RESPONSE RULES:
                     var art = hasImg
                         ? '<img src="' + escapeHtml(bg.image) + '" alt="" style="width:60px;height:60px;border-radius:12px;object-fit:cover;border:1px solid rgba(255,255,255,0.12);">'
                         : '<div style="width:60px;height:60px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:30px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);">' + (bg.icon || '🎖') + '</div>';
-                    html += '<div style="text-align:center;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:14px;padding:12px 8px;">' + art +
+                    // v1.79 (Ennis: "I want to be able to click on the badges
+                    // and a popup comes up with the image and description" /
+                    // "Also show badge type: Primary, Exclusive, etc") — the
+                    // badge's own data travels on the tile via data-*
+                    // attributes (never a separate JS registry, so a
+                    // re-render can't leave a stale click handler behind);
+                    // the artwork itself is read back off this same
+                    // element's own <img>/icon child on click rather than
+                    // duplicated into a data attribute.
+                    var tierKey = (typeof _pflxBadgeCategoryKey === 'function') ? _pflxBadgeCategoryKey(bg.category || bg.tier || bg.type) : 'primary';
+                    var tierLabel = (typeof pflxBadgeTierLabel === 'function') ? pflxBadgeTierLabel(tierKey) : 'Primary';
+                    html += '<div onclick="pflxShowBadgeDetail(this)" data-badge-name="' + escapeHtml(bg.name || 'Badge') + '" data-badge-desc="' + escapeHtml(bg.description || '') + '" data-badge-xc="' + (Number(bg.xc) || 0) + '" data-badge-type="' + escapeHtml(tierLabel) + '" data-badge-category="' + escapeHtml(bg.category || '') + '" style="cursor:pointer;text-align:center;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:14px;padding:12px 8px;transition:border-color .15s;" onmouseover="this.style.borderColor=\'rgba(0,240,255,0.35)\'" onmouseout="this.style.borderColor=\'rgba(255,255,255,0.07)\'">' + art +
                         '<div style="font-size:11px;font-weight:700;color:#e0e6ff;margin-top:8px;line-height:1.25;">' + escapeHtml(bg.name || 'Badge') + '</div>' +
+                        '<div style="font-size:9px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:rgba(255,255,255,0.35);margin-top:3px;">' + escapeHtml(tierLabel) + '</div>' +
                         (bg.xc ? '<div style="font-size:10px;color:#f5c842;margin-top:2px;">+' + bg.xc + ' XC</div>' : '') + '</div>';
                 });
                 html += '</div></div>';
