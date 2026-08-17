@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 74;
+      window.PFLX_PATCH   = 75;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -56763,58 +56763,213 @@ RESPONSE RULES:
                 return;
             }
             var data = pflxSanitizePortfolioForViewing(result.data);
-            overlay.innerHTML = pflxRenderPortfolioModalHtml(player, data);
+            overlay.innerHTML =
+                '<button onclick="pflxClosePortfolioModal()" style="position:fixed;top:22px;right:26px;background:rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.25);color:#fff;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:16px;z-index:2;">✕</button>' +
+                '<div style="background:#0a0a12;border:1px solid rgba(0,240,255,0.2);border-radius:20px;max-width:960px;width:94%;max-height:92vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.6);padding:32px 28px 40px;">' +
+                    pflxRenderPortfolioFullHtml(player, data) +
+                '</div>';
         };
 
-        function pflxRenderPortfolioModalHtml(player, data) {
+        // v1.75 (Ennis: "It gave a miniature view of the portfolio... I want
+        // it to show the full portfolio much like I show here from
+        // TheTomorrowTeacher.") — this used to render a small avatar/XC/
+        // badges/projects card (pflxRenderPortfolioModalHtml, now replaced).
+        // This renders the SAME sections the owner's own "MY PORTFOLIO" page
+        // shows (portfolioRender() et al, ~line 56173) — banner, header,
+        // bio, 5-tile stat grid, Projects & Links, Completed Tasks, Badge
+        // Portfolio — but read-only, and sourced from the TARGET player
+        // (`player`/`data` params) instead of `activeSession`, since that
+        // whole pipeline is intentionally hardwired to "my own portfolio"
+        // and safest left untouched. Deliberately no EDIT/PREVIEW/PUBLISH
+        // controls — this is always someone else's portfolio, even when a
+        // host views a player's.
+        function pflxRenderPortfolioFullHtml(player, data) {
             var displayName = (data.hideRealName === false && player.name) ? player.name : player.brand;
             var avatar = player.image || '';
-            var badgeCount = 0;
-            try {
-                var bc = player.badgeCounts || player.digitalBadges;
-                if (Array.isArray(bc)) badgeCount = bc.length;
-                else if (bc && typeof bc === 'object') badgeCount = Object.keys(bc).reduce(function (sum, k) { return sum + (Number(bc[k]) || 0); }, 0);
-                else if (typeof bc === 'number') badgeCount = bc;
-            } catch (e) {}
+            var bc = player.badgeCounts || {};
+            var totalBadges = (bc.primary || 0) + (bc.premium || 0) + (bc.executive || 0) + (bc.signature || 0);
+            var badgeCount = totalBadges || player.digitalBadges || 0;
             var xc = Number(player.xc || player.totalXcoin || 0);
+            var totalXcoin = Number(player.totalXcoin || player.xc || 0);
+            var rank = (typeof getRankForXC === 'function') ? getRankForXC(totalXcoin) : { name: 'Player', icon: '', level: 1 };
+            var cohort = (Array.isArray(player.cohorts) ? player.cohorts.join(', ') : player.cohort) || 'PlayerPool';
+            var taskStats = pflxPlayerTaskStats(player);
+            var projects = Array.isArray(data.projects) ? data.projects : [];
 
             var bannerHtml = data.banner
-                ? '<div style="width:100%;height:140px;border-radius:16px 16px 0 0;overflow:hidden;background:#0a0a12;"><img src="' + escapeHtml(data.banner) + '" style="width:100%;height:100%;object-fit:cover;"></div>'
-                : '<div style="width:100%;height:80px;border-radius:16px 16px 0 0;background:linear-gradient(90deg,rgba(0,240,255,0.12),rgba(139,92,246,0.12));"></div>';
+                ? '<img src="' + escapeHtml(data.banner) + '" style="width:100%;height:220px;object-fit:cover;display:block;">'
+                : '';
+
+            var metaTags = [];
+            metaTags.push('<span style="background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.25);padding:5px 14px;border-radius:20px;font-size:12px;font-weight:700;color:#22c55e;">' + (rank.icon || '&#x2B50;') + ' ' + escapeHtml(rank.name) + '</span>');
+            metaTags.push('<span style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);padding:5px 14px;border-radius:20px;font-size:12px;font-weight:700;color:rgba(255,255,255,0.5);">' + escapeHtml(cohort) + '</span>');
+            metaTags.push('<span style="background:rgba(79,142,247,0.1);border:1px solid rgba(79,142,247,0.2);padding:5px 14px;border-radius:20px;font-size:12px;font-weight:700;color:#4f8ef7;">&#x26A1; ' + xc.toLocaleString() + ' XC</span>');
+            if (player.pathway) metaTags.push('<span style="background:rgba(167,139,250,0.1);border:1px solid rgba(167,139,250,0.2);padding:5px 14px;border-radius:20px;font-size:12px;font-weight:700;color:#a78bfa;">&#x1F4CD; ' + escapeHtml(player.pathway) + '</span>');
+            if (player.studioId) metaTags.push('<span style="background:rgba(245,200,66,0.1);border:1px solid rgba(245,200,66,0.2);padding:5px 14px;border-radius:20px;font-size:12px;font-weight:700;color:#f5c842;">&#x1F3E2; Studio Member</span>');
+
+            var statItems = [
+                { label: 'DIGITAL BADGES', value: badgeCount, color: '#f5c842', icon: '&#x1F3C5;' },
+                { label: 'LIFETIME XC', value: totalXcoin.toLocaleString(), color: '#4f8ef7', icon: '&#x26A1;' },
+                { label: 'EVO RANK', value: escapeHtml(rank.name || 'Player'), color: '#22c55e', icon: rank.icon || '&#x2B50;' },
+                { label: 'PROJECTS', value: projects.length, color: '#a78bfa', icon: '&#x1F4BC;' },
+                { label: 'TASKS DONE', value: taskStats.completed, color: '#0ea5e9', icon: '&#x2705;' },
+            ];
+            var statsHtml = statItems.map(function (s) {
+                return '<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:18px;text-align:center;">' +
+                    '<div style="font-size:16px;margin-bottom:6px;">' + s.icon + '</div>' +
+                    '<div style="font-size:22px;font-weight:900;color:' + s.color + ';font-family:monospace;">' + s.value + '</div>' +
+                    '<div style="font-size:9px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.1em;margin-top:6px;">' + s.label + '</div>' +
+                '</div>';
+            }).join('');
 
             var projectsHtml;
-            if (data.projects.length) {
-                projectsHtml = '<div style="margin-top:18px;"><div style="font-size:11px;letter-spacing:0.1em;color:rgba(255,255,255,0.45);text-transform:uppercase;margin-bottom:10px;">Projects</div>';
-                data.projects.forEach(function (p) {
-                    projectsHtml += '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:14px;margin-bottom:10px;">';
-                    projectsHtml += (typeof portfolioRenderProjectMedia === 'function') ? portfolioRenderProjectMedia(p) : '';
-                    projectsHtml += '<div style="color:#e0e6ff;font-weight:700;font-size:13px;">' + escapeHtml(p.title || 'Untitled') + '</div>';
-                    if (p.description) projectsHtml += '<div style="color:rgba(255,255,255,0.5);font-size:12px;margin-top:4px;line-height:1.4;">' + escapeHtml(p.description) + '</div>';
-                    projectsHtml += '</div>';
-                });
-                projectsHtml += '</div>';
+            if (projects.length) {
+                projectsHtml = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">' + projects.map(function (p) {
+                    return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:16px;padding:20px;">' +
+                        ((typeof portfolioRenderProjectMedia === 'function') ? portfolioRenderProjectMedia(p) : '') +
+                        '<h4 style="margin:0 0 6px;font-size:16px;font-weight:800;color:#f0f0ff;">' + escapeHtml(p.title || 'Untitled') + '</h4>' +
+                        '<p style="margin:0 0 12px;font-size:12px;color:rgba(255,255,255,0.5);line-height:1.5;">' + ((typeof pflxLinkify === 'function') ? pflxLinkify(p.description || '') : escapeHtml(p.description || '')) + '</p>' +
+                        (p.url ? '<a href="' + escapeHtml(p.url) + '" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--cyan);text-decoration:none;padding:5px 12px;border-radius:8px;background:rgba(0,240,255,0.06);border:1px solid rgba(0,240,255,0.15);">' + escapeHtml(p.linkLabel || 'View Project') + '</a>' : '') +
+                        (p.tags ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">' + String(p.tags).split(',').map(function (t) { return '<span style="padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700;background:rgba(139,92,246,0.1);border:1px solid rgba(139,92,246,0.2);color:#a78bfa;">' + escapeHtml(t.trim()) + '</span>'; }).join('') + '</div>' : '') +
+                    '</div>';
+                }).join('') + '</div>';
             } else {
-                projectsHtml = '<div style="margin-top:18px;color:rgba(255,255,255,0.3);font-size:12px;font-style:italic;">No projects added to this portfolio yet.</div>';
+                projectsHtml = '<div style="text-align:center;padding:40px 20px;color:rgba(255,255,255,0.25);font-size:13px;font-family:\'Jura\',sans-serif;">No projects added to this portfolio yet.</div>';
             }
 
             return '' +
-                '<div style="background:#12121c;border:1px solid rgba(0,240,255,0.2);border-radius:16px;max-width:520px;width:92%;max-height:86vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.5);position:relative;">' +
-                    '<button onclick="pflxClosePortfolioModal()" style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.2);color:#fff;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:14px;z-index:2;">✕</button>' +
-                    bannerHtml +
-                    '<div style="padding:20px 24px 26px;">' +
-                        '<div style="display:flex;align-items:center;gap:12px;margin-top:-38px;">' +
-                            (avatar ? '<img src="' + escapeHtml(avatar) + '" style="width:64px;height:64px;border-radius:16px;object-fit:cover;border:3px solid #12121c;">' : '<div style="width:64px;height:64px;border-radius:16px;background:rgba(0,240,255,0.15);border:3px solid #12121c;display:flex;align-items:center;justify-content:center;font-size:24px;color:#00f0ff;">' + escapeHtml((displayName || '?').charAt(0).toUpperCase()) + '</div>') +
-                            '<div style="padding-top:22px;"><div style="color:#fff;font-weight:800;font-size:17px;font-family:\'Orbitron\',sans-serif;">' + escapeHtml(displayName || 'Player') + '</div>' +
-                            (data.tagline ? '<div style="color:rgba(255,255,255,0.5);font-size:12px;margin-top:2px;">' + escapeHtml(data.tagline) + '</div>' : '') + '</div>' +
-                        '</div>' +
-                        '<div style="display:flex;gap:14px;margin-top:16px;">' +
-                            '<div style="background:rgba(245,200,66,0.08);border:1px solid rgba(245,200,66,0.25);border-radius:10px;padding:8px 14px;color:#f5c842;font-size:12px;font-weight:700;">' + xc + ' XC</div>' +
-                            '<div style="background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.25);border-radius:10px;padding:8px 14px;color:#a78bfa;font-size:12px;font-weight:700;">' + badgeCount + ' Badges</div>' +
-                        '</div>' +
-                        (data.bio ? '<div style="color:rgba(255,255,255,0.7);font-size:13px;line-height:1.5;margin-top:16px;">' + escapeHtml(data.bio) + '</div>' : '') +
-                        projectsHtml +
+                '<div style="width:100%;border-radius:20px;overflow:hidden;border:1px solid rgba(255,255,255,0.06);background:linear-gradient(135deg, rgba(79,142,247,0.15), rgba(139,92,246,0.15));margin-bottom:16px;">' + bannerHtml + '</div>' +
+                '<div style="display:flex;align-items:center;gap:24px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:20px;padding:28px;margin-bottom:24px;position:relative;overflow:hidden;flex-wrap:wrap;">' +
+                    '<div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--cyan),#8b5cf6,transparent);"></div>' +
+                    (avatar ? '<img src="' + escapeHtml(avatar) + '" style="width:100px;height:100px;border-radius:22px;object-fit:cover;border:3px solid rgba(255,255,255,0.1);flex-shrink:0;">' : '<div style="width:100px;height:100px;border-radius:22px;background:linear-gradient(135deg,#4f8ef7,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:900;color:#fff;flex-shrink:0;">' + escapeHtml((displayName || '?').charAt(0).toUpperCase()) + '</div>') +
+                    '<div style="flex:1;min-width:200px;">' +
+                        '<h2 style="margin:0 0 4px;font-size:26px;font-weight:900;color:#f0f0ff;">' + escapeHtml(displayName || 'Player') + '</h2>' +
+                        '<div style="margin:0 0 10px;font-size:13px;color:#a78bfa;font-style:italic;font-family:\'Jura\',sans-serif;">' + escapeHtml(data.tagline || 'PFLX Identity') + '</div>' +
+                        '<div style="display:flex;gap:10px;flex-wrap:wrap;">' + metaTags.join('') + '</div>' +
                     '</div>' +
+                '</div>' +
+                (data.bio ? (
+                '<div style="margin-bottom:24px;background:rgba(167,139,250,0.05);border:1px solid rgba(167,139,250,0.15);border-radius:16px;padding:22px 24px;">' +
+                    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;"><span style="font-size:16px;">&#x270D;</span><h3 style="margin:0;font-size:14px;font-weight:800;color:#a78bfa;letter-spacing:0.08em;font-family:\'Orbitron\',sans-serif;">BRAND BIO</h3></div>' +
+                    '<div style="font-size:14px;color:rgba(255,255,255,0.7);line-height:1.7;white-space:pre-wrap;">' + escapeHtml(data.bio) + '</div>' +
+                '</div>') : '') +
+                '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));gap:12px;margin-bottom:24px;">' + statsHtml + '</div>' +
+                '<div style="margin-bottom:32px;">' +
+                    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;"><span style="font-size:16px;">&#x1F4BC;</span><h3 style="margin:0;font-size:14px;font-weight:800;color:var(--cyan);letter-spacing:0.08em;font-family:\'Orbitron\',sans-serif;">PROJECTS & LINKS</h3></div>' +
+                    projectsHtml +
+                '</div>' +
+                '<div style="margin-bottom:32px;">' +
+                    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;"><span style="font-size:16px;">&#x2705;</span><h3 style="margin:0;font-size:14px;font-weight:800;color:#22c55e;letter-spacing:0.08em;font-family:\'Orbitron\',sans-serif;">COMPLETED TASKS</h3></div>' +
+                    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">' + pflxPlayerCompletedTasksHtml(player) + '</div>' +
+                '</div>' +
+                '<div>' +
+                    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;"><span style="font-size:16px;">&#x1F3C5;</span><h3 style="margin:0;font-size:14px;font-weight:800;color:#f5c842;letter-spacing:0.08em;font-family:\'Orbitron\',sans-serif;">BADGE PORTFOLIO</h3></div>' +
+                    pflxPlayerBadgesHtml(player) +
                 '</div>';
+        }
+
+        // Completed-task count for an ARBITRARY player (not just the current
+        // session) — sourced from the global mcTasks roster + the existing
+        // pflxTaskStateForPlayer resolver, which already handles per-player
+        // submission matching correctly. Never throws; degrades to 0.
+        function pflxPlayerTaskStats(player) {
+            var completed = 0;
+            try {
+                if (player && player.id && typeof mcTasks !== 'undefined' && Array.isArray(mcTasks) && typeof pflxTaskStateForPlayer === 'function') {
+                    completed = mcTasks.filter(function (t) {
+                        try { return pflxTaskStateForPlayer(t, player.id) === 'approved'; } catch (e) { return false; }
+                    }).length;
+                }
+            } catch (e) {}
+            return { completed: completed };
+        }
+
+        // Completed-tasks cards for an arbitrary player — visual twin of
+        // portfolioRenderTasks() but sourced from mcTasks by player id
+        // instead of the activeSession-scoped pflx_completed_tasks_<brand>
+        // localStorage key (which only ever holds the CURRENT user's data).
+        function pflxPlayerCompletedTasksHtml(player) {
+            var tasks = [];
+            try {
+                if (player && player.id && typeof mcTasks !== 'undefined' && Array.isArray(mcTasks) && typeof pflxTaskStateForPlayer === 'function') {
+                    tasks = mcTasks.filter(function (t) {
+                        try { return pflxTaskStateForPlayer(t, player.id) === 'approved'; } catch (e) { return false; }
+                    });
+                }
+            } catch (e) {}
+            if (!tasks.length) {
+                return '<div style="grid-column:1/-1;text-align:center;padding:30px 20px;color:rgba(255,255,255,0.25);font-size:13px;font-family:\'Jura\',sans-serif;">No completed tasks yet.</div>';
+            }
+            return tasks.slice(0, 12).map(function (t) {
+                var reward = t.xcReward ? '<span style="color:#4f8ef7;font-weight:700;font-size:11px;">+' + t.xcReward + ' XC</span>' : '';
+                var category = t.category ? '<span style="padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;background:rgba(0,240,255,0.08);border:1px solid rgba(0,240,255,0.15);color:var(--cyan);">' + escapeHtml(t.category) + '</span>' : '';
+                return '' +
+                    '<div style="background:rgba(34,197,94,0.04);border:1px solid rgba(34,197,94,0.12);border-radius:14px;padding:16px;">' +
+                        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
+                            '<span style="color:#22c55e;font-size:14px;">&#x2705;</span>' +
+                            '<h4 style="margin:0;font-size:13px;font-weight:800;color:#e0e6ff;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(t.title || 'Task') + '</h4>' +
+                        '</div>' +
+                        (t.description ? '<p style="margin:0 0 8px;font-size:11px;color:rgba(255,255,255,0.4);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">' + ((typeof pflxLinkify === 'function') ? pflxLinkify(t.description) : escapeHtml(t.description)) + '</p>' : '') +
+                        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' + category + reward + '</div>' +
+                    '</div>';
+            }).join('');
+        }
+
+        // Badge portfolio for an arbitrary player — visual twin of
+        // portfolioRenderBadges() but sourced from the player record's own
+        // badgeCounts/badges fields (already per-player on PLAYERS, unlike
+        // the activeSession/pflx_user reads the owner-only version uses).
+        function pflxPlayerBadgesHtml(player) {
+            var bc = (player && player.badgeCounts) || { primary: 0, premium: 0, executive: 0, signature: 0 };
+            var categories = [
+                { key: 'primary',   label: 'Professional Endorsements', desc: 'Behavior-based badges recognizing communication, collaboration, and mindset', icon: '&#x1F7E6;', color: '#4f8ef7', rgb: '79,142,247' },
+                { key: 'premium',   label: 'Exceptional Achievements',  desc: 'Achievement badges for outstanding performance and milestones',             icon: '&#x1F7EA;', color: '#a78bfa', rgb: '167,139,250' },
+                { key: 'executive', label: 'Job Experience & Roles',    desc: 'Executive badges earned through real job roles and responsibilities',       icon: '&#x1F7E8;', color: '#f5c842', rgb: '245,200,66' },
+                { key: 'signature', label: 'Official Certifications',   desc: 'Signature badges proving mastery-level skill certification',                icon: '&#x1F7E5;', color: '#ef4444', rgb: '239,68,68' },
+            ];
+            var totalBadges = (bc.primary || 0) + (bc.premium || 0) + (bc.executive || 0) + (bc.signature || 0);
+            var earnedRefs = (player && Array.isArray(player.badges)) ? player.badges : [];
+            var earned = earnedRefs.map(function (r) {
+                try { return (typeof mcFindBadge === 'function') ? mcFindBadge(r) : (r && typeof r === 'object' ? r : null); } catch (e) { return null; }
+            }).filter(Boolean);
+
+            if (totalBadges === 0 && earned.length === 0) {
+                return '<p style="color:rgba(255,255,255,0.3);font-size:13px;text-align:center;padding:30px 0;">No badges earned yet.</p>';
+            }
+
+            var html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">';
+            categories.forEach(function (cat) {
+                var count = bc[cat.key] || 0;
+                if (!count) return;
+                html += '<div style="background:rgba(' + cat.rgb + ',0.05);border:1px solid rgba(' + cat.rgb + ',0.2);border-radius:16px;padding:20px;position:relative;overflow:hidden;">' +
+                    '<div style="position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,rgba(' + cat.rgb + ',0.6),transparent);"></div>' +
+                    '<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">' +
+                        '<span style="font-size:22px;">' + cat.icon + '</span>' +
+                        '<div><h4 style="margin:0;font-size:15px;font-weight:900;color:#f0f0ff;">' + cat.label + '</h4>' +
+                        '<p style="margin:2px 0 0;font-size:11px;color:rgba(255,255,255,0.4);">' + cat.desc + '</p></div>' +
+                    '</div>' +
+                    '<div style="display:flex;align-items:baseline;gap:8px;">' +
+                        '<span style="font-size:32px;font-weight:900;color:' + cat.color + ';font-family:monospace;">' + count + '</span>' +
+                        '<span style="font-size:12px;font-weight:700;color:rgba(255,255,255,0.35);">badge' + (count !== 1 ? 's' : '') + ' earned</span>' +
+                    '</div></div>';
+            });
+            html += '</div>';
+
+            if (earned.length) {
+                html += '<div style="margin-top:20px;"><div style="font-size:11px;letter-spacing:0.1em;color:rgba(255,255,255,0.45);text-transform:uppercase;margin-bottom:12px;">🏅 Earned Badges (' + earned.length + ')</div>';
+                html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px;">';
+                earned.forEach(function (bg) {
+                    var hasImg = bg.image && /^(https?:|data:)/i.test(String(bg.image));
+                    var art = hasImg
+                        ? '<img src="' + escapeHtml(bg.image) + '" alt="" style="width:60px;height:60px;border-radius:12px;object-fit:cover;border:1px solid rgba(255,255,255,0.12);">'
+                        : '<div style="width:60px;height:60px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:30px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);">' + (bg.icon || '🎖') + '</div>';
+                    html += '<div style="text-align:center;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:14px;padding:12px 8px;">' + art +
+                        '<div style="font-size:11px;font-weight:700;color:#e0e6ff;margin-top:8px;line-height:1.25;">' + escapeHtml(bg.name || 'Badge') + '</div>' +
+                        (bg.xc ? '<div style="font-size:10px;color:#f5c842;margin-top:2px;">+' + bg.xc + ' XC</div>' : '') + '</div>';
+                });
+                html += '</div></div>';
+            }
+            return html;
         }
 
         // Reusable clickable-brand-name span for any render site in the app.
