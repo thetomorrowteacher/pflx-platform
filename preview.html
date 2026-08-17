@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 70;
+      window.PFLX_PATCH   = 71;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -7400,10 +7400,14 @@
                                      and Programs is promoted to its own top-level tab
                                      (was previously only reachable nested inside a
                                      Season's Advanced form — see mc-panel-programs). -->
-                                <button class="mc-nav-btn mc-host-only" data-mc="seasons" onclick="mcNav('seasons')">
+                                <!-- v1.71 (Ennis): players now see Seasons + Programs too —
+                                     they just can't enter a Program until their cohort is
+                                     attached or an Apply-to-Join application is approved
+                                     (see pflxPlayerCanEnterItem / ppRenderPrograms). -->
+                                <button class="mc-nav-btn" data-mc="seasons" onclick="mcNav('seasons')">
                                     <span class="mc-icon">&#x1F4C5;</span> Seasons
                                 </button>
-                                <button class="mc-nav-btn mc-host-only" data-mc="programs" onclick="mcNav('programs')">
+                                <button class="mc-nav-btn" data-mc="programs" onclick="mcNav('programs')">
                                     <span class="mc-icon">&#x1F4D0;</span> Programs
                                 </button>
                                 <button class="mc-nav-btn" data-mc="checkpoints" onclick="mcNav('checkpoints')">
@@ -8819,10 +8823,19 @@
                                             <input type="text" id="mc-program-tab-name" placeholder="e.g. Fall After-School Cohort" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
                                         </div>
                                     </div>
-                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;">
                                         <div>
                                             <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Start Date</label>
                                             <input type="date" id="mc-program-tab-start" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                        </div>
+                                        <div>
+                                            <!-- v1.71 (Ennis) — End Date drives the completion-approval
+                                                 sweep: mcCheckCompletionApprovals() flags a player for
+                                                 review once this date passes AND all their required
+                                                 tasks in the Program are approved. Optional — leave blank
+                                                 for a Program with no hard end. -->
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">End Date</label>
+                                            <input type="date" id="mc-program-tab-end" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
                                         </div>
                                         <div>
                                             <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Status</label>
@@ -8839,8 +8852,13 @@
                                             <input type="number" id="mc-program-tab-weeks" value="10" min="1" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
                                         </div>
                                         <div>
-                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Checkpoint Cadence (weeks)</label>
-                                            <input type="number" id="mc-program-tab-cadence" value="2" min="1" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                            <!-- v1.71 (Ennis) — cadence is now OPTIONAL. Leave blank to
+                                                 skip auto-generation entirely and attach existing
+                                                 Checkpoints below instead — each keeps its own dates/
+                                                 cadence. mcSeasonGenerateCheckpoints() only runs off this
+                                                 field when the host clicks "Generate Checkpoints". -->
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Checkpoint Cadence (weeks, optional)</label>
+                                            <input type="number" id="mc-program-tab-cadence" placeholder="Optional — leave blank to use each checkpoint's own schedule" min="1" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
                                         </div>
                                         <div>
                                             <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Description</label>
@@ -8850,6 +8868,16 @@
                                     <div style="margin-bottom:12px;">
                                         <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Digital Badges</label>
                                         <div id="mc-program-badges" style="display:flex;flex-direction:column;gap:6px;max-height:120px;overflow-y:auto;"></div>
+                                    </div>
+                                    <!-- v1.71 (Ennis) — attach EXISTING checkpoints to this Program
+                                         directly (in addition to / instead of cadence-generated ones).
+                                         Writes the reverse pointer (checkpoint.programId) on save — the
+                                         same field mcSeasonGenerateCheckpoints and the player Program
+                                         view already read, so there's one source of truth either way a
+                                         checkpoint got attached. -->
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Attach Existing Checkpoints</label>
+                                        <div id="mc-program-checkpoints-list" style="display:flex;flex-direction:column;gap:6px;max-height:160px;overflow-y:auto;background:rgba(10,18,40,0.4);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:8px;"></div>
                                     </div>
                                     <!-- Cohort Scoping (multi-select) — cascades down to every Checkpoint
                                          this Program generates/owns, so the Program rosters only these
@@ -8861,6 +8889,31 @@
                                             <input type="checkbox" id="mc-program-all-cohorts" checked onchange="var d=document.getElementById('mc-program-cohorts-list');if(d)d.style.display=this.checked?'none':'flex';"> All Cohorts
                                         </label>
                                         <div id="mc-program-cohorts-list" style="display:none;flex-wrap:wrap;gap:6px;"></div>
+                                    </div>
+                                    <!-- v1.71 (Ennis) — bypass the completion-approval gate for this
+                                         Program: completions finalize automatically instead of queuing
+                                         for host review. See mcCheckCompletionApprovals(). -->
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;">
+                                            <input type="checkbox" id="mc-program-tab-skip-completion-approval"> Skip completion approval — auto-approve players who finish on time
+                                        </label>
+                                    </div>
+                                    <!-- v1.71 (Ennis) — "Apply to Join": when on, players outside the
+                                         attached cohort(s) can still SEE this Program (visibility is
+                                         universal now, see pflxPlayerCanSeeCatalogItem) but can only
+                                         ENTER it by applying and getting host-approved. Price is a
+                                         manual/placeholder payment step for now — no real processor is
+                                         wired up yet (Ennis: build the field/flow now, real Stripe
+                                         checkout later) — the host marks an approved application "Paid"
+                                         by hand once payment is collected off-platform. -->
+                                    <div style="margin-bottom:12px;background:rgba(139,92,246,0.05);border:1px solid rgba(139,92,246,0.15);border-radius:10px;padding:10px 12px;">
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;margin-bottom:8px;">
+                                            <input type="checkbox" id="mc-program-tab-apply-enabled" onchange="var d=document.getElementById('mc-program-tab-price-row');if(d)d.style.display=this.checked?'flex':'none';"> Require Apply to Join
+                                        </label>
+                                        <div id="mc-program-tab-price-row" style="display:none;align-items:center;gap:8px;">
+                                            <label style="font-size:11px;color:rgba(255,255,255,0.4);text-transform:uppercase;">Price (USD, 0 = free)</label>
+                                            <input type="number" id="mc-program-tab-price" min="0" step="1" value="0" style="width:90px;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:6px;font-size:12px;">
+                                        </div>
                                     </div>
                                     <div style="display:flex;gap:8px;">
                                         <button class="mc-btn mc-btn-green" onclick="mcSaveProgramTabForm()">Save Program</button>
@@ -9011,6 +9064,15 @@
                                             <label style="display:block;font-size:11px;color:rgba(139,92,246,0.7);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">🖥 Embed (shows instead of the banner)</label>
                                             <input type="url" id="mc-cp-embed" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(139,92,246,0.25);color:#e0e6ff;padding:10px;border-radius:8px;font-size:13px;box-sizing:border-box;" placeholder="YouTube, Google Slides, Canva, or any embed URL — leave blank to use the banner image">
                                         </div>
+                                    </div>
+                                    <!-- v1.71 (Ennis) — bypass the completion-approval gate for this
+                                         Checkpoint: a player who finishes all required work by End Date
+                                         finalizes automatically instead of queuing for host review. See
+                                         mcCheckCompletionApprovals(). -->
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;">
+                                            <input type="checkbox" id="mc-cp-skip-completion-approval"> Skip completion approval — auto-approve players who finish on time
+                                        </label>
                                     </div>
                                     <!-- Tier Variants — per-tier deadline + XC overrides.
                                          Schema: cp.tierVariants = { starter:{endDate,xc}, novice:{...}, pro:{...} }.
@@ -9962,6 +10024,28 @@
                                             <input type="checkbox" id="mc-project-all-cohorts" checked onchange="var d=document.getElementById('mc-project-cohorts-list');if(d)d.style.display=this.checked?'none':'flex';if(typeof mcRenderProjectAssignedPlayers==='function')mcRenderProjectAssignedPlayers();"> All Cohorts
                                         </label>
                                         <div id="mc-project-cohorts-list" style="display:none;flex-wrap:wrap;gap:6px;"></div>
+                                    </div>
+                                    <!-- v1.71 (Ennis) — "Apply to Join", same convention as the Program
+                                         form (see mc-program-tab-apply-enabled above): visibility for
+                                         this Project is universal to every player now; this only gates
+                                         ENTRY. Price is a manual-payment placeholder for now. -->
+                                    <div style="margin-bottom:12px;background:rgba(139,92,246,0.05);border:1px solid rgba(139,92,246,0.15);border-radius:10px;padding:10px 12px;">
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;margin-bottom:8px;">
+                                            <input type="checkbox" id="mc-project-apply-enabled" onchange="var d=document.getElementById('mc-project-price-row');if(d)d.style.display=this.checked?'flex':'none';"> Require Apply to Join
+                                        </label>
+                                        <div id="mc-project-price-row" style="display:none;align-items:center;gap:8px;">
+                                            <label style="font-size:11px;color:rgba(255,255,255,0.4);text-transform:uppercase;">Price (USD, 0 = free)</label>
+                                            <input type="number" id="mc-project-price" min="0" step="1" value="0" style="width:90px;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:6px;font-size:12px;">
+                                        </div>
+                                    </div>
+                                    <!-- v1.71 (Ennis) — bypass the completion-approval gate for this
+                                         Project: a player who finishes all required tasks by the
+                                         deadline finalizes automatically instead of queuing for host
+                                         review. See mcCheckCompletionApprovals(). -->
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;">
+                                            <input type="checkbox" id="mc-project-skip-completion-approval"> Skip completion approval — auto-approve players who finish on time
+                                        </label>
                                     </div>
                                     <!-- Player Scoping (July 12) — pick specific players inside the
                                          selected cohorts, or leave empty for ALL. Child tasks inherit
@@ -15209,6 +15293,18 @@
             var k = String(brand || '').toUpperCase().trim();
             if (!k) return null;
             return _pflxRosterFind(function (p) { return String(p.brand || '').toUpperCase().trim() === k; });
+        }
+        function findPlayerById(id) {
+            if (!id) return null;
+            return _pflxRosterFind(function (p) { return p.id === id; });
+        }
+        // v1.71 — every "click a brand name → view their portfolio" call site
+        // has either an id or a brand string on hand, never guaranteed both.
+        // This tries id first (unambiguous), falls back to brand (case-
+        // insensitive, as findPlayerByBrand already does).
+        function pflxResolvePlayer(idOrBrand) {
+            if (!idOrBrand) return null;
+            return findPlayerById(idOrBrand) || findPlayerByBrand(idOrBrand);
         }
         // Never decide "this player doesn't exist" against a roster that hasn't
         // loaded yet — a fresh browser deciding before the boot pull landed was
@@ -22333,13 +22429,17 @@
             const container = document.querySelector('.projects-grid') || document.createElement('div');
             container.className = 'projects-grid';
             container.innerHTML = '';
+            try { if (typeof pflxApplyCardSize === 'function') pflxApplyCardSize('pp-projects'); } catch (e) {}
 
-            // Pull projects assigned to the active player from MC.
+            // v1.71 — UNIVERSAL VISIBILITY (per Ennis): every player sees
+            // every project now, not just cohort-assigned ones. Whether they
+            // can actually OPEN it is a separate question — see
+            // pflxPlayerCanEnterItem below (cohort match still grants direct
+            // entry; Apply-to-Join is the alternate path in for everyone
+            // else when the host has turned it on).
             var projects = [];
             try {
-                if (typeof mcProjects !== 'undefined' && Array.isArray(mcProjects) && typeof ppItemAssignedToActivePlayer === 'function') {
-                    projects = mcProjects.filter(function (p) { return p && ppItemAssignedToActivePlayer(p); });
-                }
+                if (typeof mcProjects !== 'undefined' && Array.isArray(mcProjects)) projects = mcProjects.slice();
             } catch (e) {}
 
             if (projects.length === 0) {
@@ -22353,22 +22453,54 @@
             projects.forEach(function (proj) {
                 var card = document.createElement('div');
                 card.className = 'project-card';
-                card.style.cursor = 'pointer';
                 var name = proj.name || proj.title || 'Project';
                 var desc = proj.description || proj.tagline || '';
+                var canEnter = (typeof pflxPlayerCanEnterItem === 'function') ? pflxPlayerCanEnterItem(proj, 'project') : true;
+                var appState = (typeof pflxPlayerApplicationState === 'function') ? pflxPlayerApplicationState(proj, 'project') : 'none';
+                var lockHtml = '';
+                if (!canEnter) {
+                    card.style.opacity = '0.75';
+                    if (!proj.applyEnabled) {
+                        lockHtml = '<div style="margin-top:6px;font-size:10px;font-weight:800;color:#ef4444;">&#x1F512; COHORT REQUIRED</div>';
+                    } else if (appState === 'pending') {
+                        lockHtml = '<div style="margin-top:6px;font-size:10px;font-weight:800;color:#f5c842;">&#x23F3; APPLICATION PENDING</div>';
+                    } else if (appState === 'approved-unpaid') {
+                        lockHtml = '<div style="margin-top:6px;font-size:10px;font-weight:800;color:#22d3ee;">&#x1F4B3; APPROVED — PAYMENT DUE ($' + (Number(proj.price) || 0) + ')</div>';
+                    } else {
+                        var btnLabel = proj.price > 0 ? ('Apply to Join — $' + proj.price) : 'Apply to Join — Free';
+                        lockHtml = '<button class="pp-apply-btn" style="margin-top:8px;font-size:10px;font-weight:800;padding:6px 10px;border-radius:6px;border:1px solid var(--cyan);background:rgba(34,211,238,0.08);color:var(--cyan);cursor:pointer;" data-proj-apply="' + escapeHtml(String(proj.id)) + '">' + escapeHtml(btnLabel) + '</button>';
+                    }
+                }
+                card.style.cursor = canEnter ? 'pointer' : 'default';
                 card.innerHTML =
                     '<div style="font-size: 32px; margin-bottom: 10px;">📦</div>' +
                     '<div class="project-name">' + escapeHtml(name) + '</div>' +
-                    (desc ? '<div style="font-size: 11px; color: #8a92b0; margin-top: 5px;">' + escapeHtml(String(desc).substring(0, 80)) + '</div>' : '');
-                card.onclick = function () {
-                    // Drill into the MC project-detail view. navigateTo is
-                    // the real router; switchToView was a phantom reference
-                    // that silently no-op'd and made the click feel broken.
-                    try {
-                        if (typeof navigateTo === 'function') navigateTo('mission-control');
-                        if (typeof ppNav === 'function') ppNav('project-detail', { id: proj.id });
-                    } catch (e) {}
-                };
+                    (desc ? '<div style="font-size: 11px; color: #8a92b0; margin-top: 5px;">' + escapeHtml(String(desc).substring(0, 80)) + '</div>' : '') +
+                    lockHtml;
+                if (canEnter) {
+                    card.onclick = function () {
+                        // Drill into the MC project-detail view. navigateTo is
+                        // the real router; switchToView was a phantom reference
+                        // that silently no-op'd and made the click feel broken.
+                        try {
+                            if (typeof navigateTo === 'function') navigateTo('mission-control');
+                            if (typeof ppNav === 'function') ppNav('project-detail', { id: proj.id });
+                        } catch (e) {}
+                    };
+                } else {
+                    var applyBtn = card.querySelector('[data-proj-apply]');
+                    if (applyBtn) {
+                        applyBtn.onclick = function (ev) {
+                            ev.stopPropagation();
+                            if (typeof mcApplyToProgramOrProject === 'function') mcApplyToProgramOrProject('project', proj.id);
+                            if (typeof renderProjects === 'function') {
+                                var refreshed = renderProjects();
+                                var host = document.querySelector('.projects-grid');
+                                if (host && refreshed && host !== refreshed) host.replaceWith(refreshed);
+                            }
+                        };
+                    }
+                }
                 container.appendChild(card);
             });
 
@@ -23298,6 +23430,12 @@
             }
         } catch (e) {}
         let mcPitches = [];
+        // v1.71 — Apply-to-Join applications for Programs/Projects. Shape:
+        // { id, type:'program'|'project', itemId, itemName, playerId,
+        //   playerBrand, status:'pending'|'approved'|'rejected',
+        //   price, paymentStatus:'not_required'|'awaiting_payment'|'marked_paid',
+        //   appliedAt, decidedAt, decidedBy, hostNote }
+        let mcApplications = [];
         let mcStudios = [];
         let mcCohortGroups = [];
         let mcApprovals = [];
@@ -23725,6 +23863,7 @@
                 mcBadges = mcNormalizeBadges(JSON.parse(localStorage.getItem('pflx_mc_badges') || '[]'));
                 mcJobs = JSON.parse(localStorage.getItem('pflx_mc_jobs') || '[]');
                 mcPitches = JSON.parse(localStorage.getItem('pflx_mc_pitches') || '[]');
+                mcApplications = JSON.parse(localStorage.getItem('pflx_mc_applications') || '[]');
                 mcStudios = JSON.parse(localStorage.getItem('pflx_mc_studios') || '[]');
                 mcCohortGroups = JSON.parse(localStorage.getItem('pflx_mc_cohortgroups') || '[]');
                 mcApprovals = JSON.parse(localStorage.getItem('pflx_mc_approvals') || '[]');
@@ -24014,6 +24153,7 @@
             if (type === 'badges' || type === 'all') _mcSetItemSafe('pflx_mc_badges', mcBadges);
             if (type === 'jobs' || type === 'all') _mcSetItemSafe('pflx_mc_jobs', mcJobs);
             if (type === 'pitches' || type === 'all') _mcSetItemSafe('pflx_mc_pitches', mcPitches);
+            if (type === 'applications' || type === 'all') _mcSetItemSafe('pflx_mc_applications', mcApplications);
             if (type === 'studios' || type === 'all') _mcSetItemSafe('pflx_mc_studios', mcStudios);
             if (type === 'cohortgroups' || type === 'all') _mcSetItemSafe('pflx_mc_cohortgroups', mcCohortGroups);
             if (type === 'approvals' || type === 'all') _mcSetItemSafe('pflx_mc_approvals', mcApprovals);
@@ -24215,7 +24355,7 @@
         //  on the X-Coin iframe being loaded to reach the cloud.
         // ═══════════════════════════════════════════════════════════════════
         var MC_CLOUD_TYPES = ['players','checkpoints','tasks','projects','seasons','programs',
-            'announcements','badges','jobs','pitches','studios','cohortgroups',
+            'announcements','badges','jobs','pitches','applications','studios','cohortgroups',
             'modifiers','gameconfig','onboarding','pflxranks','sessions','templates','sprints','automations'];
 
         // ── Core Pathway node catalog ──
@@ -24415,6 +24555,7 @@
                 case 'badges': return mcBadges;
                 case 'jobs': return mcJobs;
                 case 'pitches': return mcPitches;
+                case 'applications': return mcApplications;
                 case 'studios': return mcStudios;
                 case 'cohortgroups': return mcCohortGroups;
                 case 'modifiers': return mcModifiers;
@@ -24701,6 +24842,7 @@
                 case 'badges': mcBadges = mcNormalizeBadges(items); break;
                 case 'jobs': mcJobs = items; break;
                 case 'pitches': mcPitches = items; break;
+                case 'applications': mcApplications = items; break;
                 case 'studios': mcStudios = items; break;
                 case 'cohortgroups': mcCohortGroups = items; break;
                 case 'modifiers': mcModifiers = items; break;
@@ -25344,7 +25486,7 @@
                     // crosses its endDate rather than only at next page load.
                     // Host-gated + per-player idempotent inside the function.
                     // v1.46 — same tick also re-runs the Project reminder sweep.
-                    _mcHealthIv = setInterval(function () { try { window.mcCloudPull(); } catch (e) {} try { if (typeof window.pflxCheckpointLatenessSweep === 'function') window.pflxCheckpointLatenessSweep(); } catch (e) {} try { if (typeof window.pflxProjectReminderSweep === 'function') window.pflxProjectReminderSweep(); } catch (e) {} }, 180000);
+                    _mcHealthIv = setInterval(function () { try { window.mcCloudPull(); } catch (e) {} try { if (typeof window.pflxCheckpointLatenessSweep === 'function') window.pflxCheckpointLatenessSweep(); } catch (e) {} try { if (typeof window.pflxProjectReminderSweep === 'function') window.pflxProjectReminderSweep(); } catch (e) {} try { if (typeof window.mcCheckCompletionApprovals === 'function') window.mcCheckCompletionApprovals(); } catch (e) {} }, 180000);
                 }
                 return;
             }
@@ -26608,7 +26750,10 @@
                 var playerRoutes = {
                     'dashboard': 'home', 'checkpoints': 'checkpoints', 'tasks': 'tasks',
                     'jobboard': 'jobs', 'projects': 'checkpoints', 'pitches': 'home',
-                    'studios': 'season', 'sessions': 'home', 'media': 'home', 'announcements': 'home'
+                    'studios': 'season', 'sessions': 'home', 'media': 'home', 'announcements': 'home',
+                    // v1.71 — Season/Program tabs now visible to every player
+                    // (see the nav buttons below, which lost mc-host-only).
+                    'seasons': 'season', 'programs': 'programs'
                 };
                 if (playerRoutes[tab] !== undefined) {
                     // Highlight sidebar button
@@ -26879,6 +27024,8 @@
             if (!container) return;
             switch (playerPortalView) {
                 case 'season': ppRenderSeason(container); break;
+                case 'programs': ppRenderPrograms(container); break;
+                case 'program-detail': ppRenderProgramDetail(container); break;
                 case 'checkpoints': ppRenderCheckpoints(container); break;
                 case 'checkpoint-detail': ppRenderCheckpointDetail(container); break;
                 case 'project-detail':    ppRenderProjectDetail(container); break;
@@ -27293,6 +27440,58 @@
             var cohorts = Array.isArray(s.cohorts) ? s.cohorts : (s.cohort ? [s.cohort] : []);
             return pflxPlayerCanSeeItem(item, pid, cohorts);
         }
+
+        // ── v1.71 — Apply-to-Join entry gate ────────────────────────────
+        // SEE vs ENTER are now different questions for Programs/Projects.
+        // Every player can SEE every Program/Project (universal visibility,
+        // per Ennis). Whether they can ENTER it is this function:
+        //   1. Host tiers always enter.
+        //   2. A cohort match ALWAYS grants direct entry, regardless of
+        //      applyEnabled — this is how the Season-Pass example works:
+        //      attach the seasonpass cohort and access follows immediately,
+        //      apply/pay is bypassed entirely for cohort members.
+        //   3. Players with no cohort match need an approved application
+        //      (mcApplyToProgramOrProject → host approves), and if the item
+        //      is priced, that application must also be marked paid.
+        function _pflxLatestApplication(itemId, type, pid) {
+            var apps = mcApplications.filter(function (a) { return a && a.type === type && a.itemId === itemId && a.playerId === pid; });
+            return apps.length ? apps[apps.length - 1] : null; // last push = most recent
+        }
+        function pflxPlayerCanEnterItem(item, type) {
+            if (!item) return false;
+            var s = window.activeSession || {};
+            try {
+                if ((typeof window.pflxIsHostRole === 'function' && window.pflxIsHostRole(s.role)) ||
+                    (typeof window.pflxHostTier === 'function' && !!window.pflxHostTier(s))) return true;
+            } catch (e) {}
+            try {
+                if (typeof ppItemAssignedToActivePlayer === 'function' && ppItemAssignedToActivePlayer(item)) return true;
+            } catch (e) {}
+            if (!item.applyEnabled) return false;
+            var pid = s.id || s.playerId || '';
+            if (!pid) return false;
+            var app = _pflxLatestApplication(item.id, type, pid);
+            if (!app || app.status !== 'approved') return false;
+            if (app.price > 0 && app.paymentStatus !== 'marked_paid') return false;
+            return true;
+        }
+        window.pflxPlayerCanEnterItem = pflxPlayerCanEnterItem;
+
+        // Player-facing application status for a given item's card:
+        // 'none' | 'pending' | 'approved-unpaid' | 'entered' | 'rejected'
+        function pflxPlayerApplicationState(item, type) {
+            var s = window.activeSession || {};
+            var pid = s.id || s.playerId || '';
+            if (!item || !pid) return 'none';
+            var app = _pflxLatestApplication(item.id, type, pid);
+            if (!app) return 'none';
+            if (app.status === 'pending') return 'pending';
+            if (app.status === 'rejected') return 'rejected';
+            if (app.status === 'approved') return (app.price > 0 && app.paymentStatus !== 'marked_paid') ? 'approved-unpaid' : 'entered';
+            return 'none';
+        }
+        window.pflxPlayerApplicationState = pflxPlayerApplicationState;
+
         // ── Individual-player assignment inside a cohort ──
         // A task can be scoped to specific players inside its cohort. Everyone
         // in the cohort sees the task (visibility unchanged); only the assigned
@@ -27861,6 +28060,112 @@
             el.innerHTML = html;
         }
 
+        // ── v1.71 — PROGRAMS LIST (player-facing) ──────────────────────
+        // Universal visibility, per Ennis: every player sees every Program.
+        // Whether they can OPEN it follows pflxPlayerCanEnterItem — cohort
+        // match grants direct entry; otherwise Apply-to-Join (when the host
+        // turned it on) is the alternate path in.
+        function ppRenderPrograms(el) {
+            var programs = (typeof mcPrograms !== 'undefined' && Array.isArray(mcPrograms)) ? mcPrograms.slice() : [];
+            var html = ppBreadcrumb([{ label: 'Home', view: 'home' }, { label: 'Programs', view: 'programs' }]);
+
+            if (!programs.length) {
+                html += '<div class="mc-card" style="text-align:center;padding:40px;">' +
+                    '<div style="font-size:48px;margin-bottom:12px;">📐</div>' +
+                    '<div style="font-family:\'Orbitron\',sans-serif;font-size:14px;color:rgba(255,255,255,0.4);letter-spacing:2px;">NO PROGRAMS YET</div>' +
+                    '<div style="font-size:12px;color:rgba(255,255,255,0.25);margin-top:8px;">Your host hasn\'t created any Programs yet.</div></div>';
+                el.innerHTML = html;
+                return;
+            }
+
+            programs.forEach(function (pg) {
+                var canEnter = (typeof pflxPlayerCanEnterItem === 'function') ? pflxPlayerCanEnterItem(pg, 'program') : true;
+                var appState = (typeof pflxPlayerApplicationState === 'function') ? pflxPlayerApplicationState(pg, 'program') : 'none';
+                var cpCount = (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) ? mcCheckpoints.filter(function (c) { return c && c.programId === pg.id; }).length : 0;
+                var accent = canEnter ? '0,212,255' : '245,200,66';
+                html += '<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(' + accent + ',0.2);border-radius:14px;padding:16px;margin-bottom:10px;' + (canEnter ? 'cursor:pointer;' : '') + '"' +
+                    (canEnter ? ' onclick="ppNav(\'program-detail\',{id:\'' + escapeHtml(String(pg.id || '')) + '\'})"' : '') + '>' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+                    '<div><div style="font-size:14px;font-weight:700;color:#e0e6ff;">📐 ' + escapeHtml(pg.name || 'Program') + '</div>' +
+                    (pg.description ? '<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:4px;">' + escapeHtml(String(pg.description).substring(0, 100)) + '</div>' : '') +
+                    '<div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:6px;">' + cpCount + ' checkpoint' + (cpCount === 1 ? '' : 's') + '</div></div>';
+                if (canEnter) {
+                    html += '<span style="font-size:10px;font-weight:800;color:#22c55e;letter-spacing:0.08em;">&#x2713; OPEN</span>';
+                } else if (!pg.applyEnabled) {
+                    html += '<span style="font-size:10px;font-weight:800;color:#ef4444;letter-spacing:0.08em;">&#x1F512; COHORT REQUIRED</span>';
+                } else if (appState === 'pending') {
+                    html += '<span style="font-size:10px;font-weight:800;color:#f5c842;letter-spacing:0.08em;">&#x23F3; PENDING</span>';
+                } else if (appState === 'approved-unpaid') {
+                    html += '<span style="font-size:10px;font-weight:800;color:#22d3ee;letter-spacing:0.08em;">&#x1F4B3; PAY $' + (Number(pg.price) || 0) + '</span>';
+                }
+                html += '</div>';
+                if (!canEnter && pg.applyEnabled && appState !== 'pending' && appState !== 'approved-unpaid') {
+                    var label = pg.price > 0 ? ('Apply to Join — $' + pg.price) : 'Apply to Join — Free';
+                    html += '<button class="mc-btn" style="margin-top:10px;font-size:10px;padding:6px 12px;" onclick="event.stopPropagation();mcApplyToProgramOrProject(\'program\',\'' + escapeHtml(String(pg.id || '')) + '\');ppRenderPrograms(document.getElementById(\'mc-dash-player-content\'));">' + escapeHtml(label) + '</button>';
+                }
+                html += '</div>';
+            });
+
+            el.innerHTML = html;
+        }
+        window.ppRenderPrograms = ppRenderPrograms;
+
+        // ── v1.71 — PROGRAM DETAIL (player-facing) ──────────────────────
+        // Entered players see the Program's checkpoints (cp.programId ===
+        // program.id — the same back-link the host-side generator writes).
+        // A direct-link attempt by a player who hasn't entered gets bounced
+        // to a locked/apply screen instead of the checkpoint list.
+        function ppRenderProgramDetail(el) {
+            var data = window._ppDetailData || {};
+            var programs = (typeof mcPrograms !== 'undefined' && Array.isArray(mcPrograms)) ? mcPrograms : [];
+            var pg = programs.find(function (p) { return p && p.id === data.id; }) || programs[0] || { name: 'Program', id: '' };
+
+            var html = ppBreadcrumb([
+                { label: 'Home', view: 'home' },
+                { label: 'Programs', view: 'programs' },
+                { label: pg.name || 'Detail', view: 'program-detail' }
+            ]);
+
+            var canEnter = (typeof pflxPlayerCanEnterItem === 'function') ? pflxPlayerCanEnterItem(pg, 'program') : true;
+            if (!canEnter) {
+                var appState = (typeof pflxPlayerApplicationState === 'function') ? pflxPlayerApplicationState(pg, 'program') : 'none';
+                html += '<div class="mc-card" style="text-align:center;padding:40px;">' +
+                    '<div style="font-size:48px;margin-bottom:12px;">🔒</div>' +
+                    '<div style="font-family:\'Orbitron\',sans-serif;font-size:14px;color:rgba(255,255,255,0.4);letter-spacing:2px;">' + (appState === 'pending' ? 'APPLICATION PENDING' : appState === 'approved-unpaid' ? 'PAYMENT DUE' : 'APPLY TO JOIN') + '</div>' +
+                    '<div style="font-size:12px;color:rgba(255,255,255,0.25);margin-top:8px;">' +
+                    (appState === 'pending' ? 'A host is reviewing your application.' :
+                     appState === 'approved-unpaid' ? ('Approved — pay $' + (Number(pg.price) || 0) + ' to enter.') :
+                     pg.applyEnabled ? 'This Program requires an application to join.' : 'This Program is only open to its assigned cohort.') + '</div>' +
+                    (pg.applyEnabled && appState === 'none' ? '<button class="mc-btn mc-btn-green" style="margin-top:16px;" onclick="mcApplyToProgramOrProject(\'program\',\'' + escapeHtml(String(pg.id || '')) + '\');ppNav(\'program-detail\',{id:\'' + escapeHtml(String(pg.id || '')) + '\'});">' + (pg.price > 0 ? 'Apply to Join — $' + pg.price : 'Apply to Join — Free') + '</button>' : '') +
+                    '</div>';
+                el.innerHTML = html;
+                return;
+            }
+
+            html += '<div style="background:linear-gradient(135deg,rgba(0,240,255,0.08),rgba(139,92,246,0.08));border:1px solid rgba(0,240,255,0.2);border-radius:16px;padding:24px;margin-bottom:20px;">' +
+                '<div style="font-family:\'Orbitron\',sans-serif;font-size:18px;font-weight:700;color:var(--cyan);letter-spacing:2px;margin-bottom:6px;">' + escapeHtml(pg.name || 'Program') + '</div>' +
+                (pg.description ? '<div style="font-size:13px;color:#a0a8c4;line-height:1.6;">' + escapeHtml(pg.description) + '</div>' : '') + '</div>';
+
+            var cps = (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) ? mcCheckpoints.filter(function (c) { return c && c.programId === pg.id && c.status !== 'inactive'; }) : [];
+            if (cps.length) {
+                html += '<div style="font-family:\'Orbitron\',sans-serif;font-size:11px;color:rgba(255,255,255,0.4);letter-spacing:1.5px;margin-bottom:12px;">CHECKPOINTS IN THIS PROGRAM</div>';
+                cps.forEach(function (cp) {
+                    var pct = cp.progress || 0;
+                    var statusColor = cp.status === 'active' || cp.status === 'current' ? '#22c55e' : cp.status === 'completed' ? 'var(--cyan)' : 'rgba(255,255,255,0.3)';
+                    html += '<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:14px;margin-bottom:8px;cursor:pointer;" onclick="ppNav(\'checkpoint-detail\',{id:\'' + (cp.id || '') + '\'})">' +
+                        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+                        '<span style="font-size:14px;font-weight:700;color:#e0e6ff;">' + escapeHtml(cp.name || 'Checkpoint') + '</span>' +
+                        '<span style="font-size:10px;font-weight:700;color:' + statusColor + ';letter-spacing:1px;">' + (cp.status || 'upcoming').toUpperCase() + '</span></div>' +
+                        ppProgressBar(pct, statusColor) + '</div>';
+                });
+            } else {
+                html += '<div style="text-align:center;padding:30px;color:rgba(255,255,255,0.25);font-size:13px;">No checkpoints generated for this Program yet.</div>';
+            }
+
+            el.innerHTML = html;
+        }
+        window.ppRenderProgramDetail = ppRenderProgramDetail;
+
         // ── CHECKPOINTS LIST ──
         // ── Tier variant resolution ──────────────────────────────────────
         // Resolve the active player's tier (URL → activeSession →
@@ -28174,8 +28479,13 @@
             var allTasks = ppGetTasks().filter(function(t) {
                 return ppItemInCheckpoint(t, cp.id) && ppItemAssignedToActivePlayer(t);
             });
+            // v1.71 — UNIVERSAL VISIBILITY (per Ennis): every player sees
+            // every project in this checkpoint now. Whether they can open it
+            // is decided per-card below via pflxPlayerCanEnterItem — cohort
+            // match still grants direct entry; Apply-to-Join projects show a
+            // lock/apply state instead of their task breakdown.
             var projects = ppGetProjects().filter(function(p) {
-                return ppItemInCheckpoint(p, cp.id) && ppItemAssignedToActivePlayer(p);
+                return ppItemInCheckpoint(p, cp.id);
             });
             var standaloneTasks = allTasks.filter(function(t) { return !t.projectId; });
 
@@ -28207,6 +28517,20 @@
             if (projects.length) {
                 html += '<div style="font-family:\'Orbitron\',sans-serif;font-size:11px;color:rgba(255,255,255,0.4);letter-spacing:1.5px;margin-bottom:10px;">📁 PROJECTS</div>';
                 projects.forEach(function(proj) {
+                    var projCanEnter = (typeof pflxPlayerCanEnterItem === 'function') ? pflxPlayerCanEnterItem(proj, 'project') : true;
+                    if (!projCanEnter) {
+                        var projAppState = (typeof pflxPlayerApplicationState === 'function') ? pflxPlayerApplicationState(proj, 'project') : 'none';
+                        var lockLabel = !proj.applyEnabled ? '&#x1F512; COHORT REQUIRED' :
+                            projAppState === 'pending' ? '&#x23F3; APPLICATION PENDING' :
+                            projAppState === 'approved-unpaid' ? '&#x1F4B3; PAY $' + (Number(proj.price) || 0) : '&#x1F513; APPLY TO JOIN';
+                        html += '<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(245,200,66,0.2);border-left:3px solid #f5c842;border-radius:12px;padding:16px;margin-bottom:10px;opacity:0.85;">' +
+                            '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+                            '<span style="font-size:14px;font-weight:700;color:#e0e6ff;">📁 ' + escapeHtml(proj.name || proj.title || 'Project') + '</span>' +
+                            '<span style="font-size:10px;font-weight:800;color:#f5c842;">' + lockLabel + '</span></div>' +
+                            (proj.applyEnabled && projAppState === 'none' ? '<button class="mc-btn" style="margin-top:10px;font-size:10px;padding:6px 12px;" onclick="mcApplyToProgramOrProject(\'project\',\'' + escapeHtml(String(proj.id || '')) + '\');ppNav(\'checkpoint-detail\',{id:\'' + (cp.id || '') + '\'});">' + (proj.price > 0 ? 'Apply to Join — $' + proj.price : 'Apply to Join — Free') + '</button>' : '') +
+                            '</div>';
+                        return;
+                    }
                     var projTasks = allTasks.filter(function(t) { return t.projectId === proj.id; });
                     var projDone = projTasks.filter(function(t) { return _rowState(t) === 'approved'; }).length;
                     var projPct = projTasks.length ? Math.round((projDone / projTasks.length) * 100) : 0;
@@ -28372,6 +28696,26 @@
                     { label: 'Home', view: 'home' },
                     { label: 'Project', view: 'project-detail' }
                 ]) + '<div class="mc-card" style="text-align:center;padding:30px;color:rgba(255,255,255,0.4);">Project not found.</div>';
+                return;
+            }
+            // v1.71 — entry guard: a deep-link (or a stale card) can land a
+            // player on a project they can see but haven't entered. Bounce
+            // to a locked/apply screen instead of the full detail.
+            var __projCanEnter = (typeof pflxPlayerCanEnterItem === 'function') ? pflxPlayerCanEnterItem(proj, 'project') : true;
+            if (!__projCanEnter) {
+                var __projAppState = (typeof pflxPlayerApplicationState === 'function') ? pflxPlayerApplicationState(proj, 'project') : 'none';
+                el.innerHTML = ppBreadcrumb([
+                    { label: 'Home', view: 'home' },
+                    { label: proj.name || proj.title || 'Project', view: 'project-detail' }
+                ]) + '<div class="mc-card" style="text-align:center;padding:40px;">' +
+                    '<div style="font-size:48px;margin-bottom:12px;">🔒</div>' +
+                    '<div style="font-family:\'Orbitron\',sans-serif;font-size:14px;color:rgba(255,255,255,0.4);letter-spacing:2px;">' + (__projAppState === 'pending' ? 'APPLICATION PENDING' : __projAppState === 'approved-unpaid' ? 'PAYMENT DUE' : 'APPLY TO JOIN') + '</div>' +
+                    '<div style="font-size:12px;color:rgba(255,255,255,0.25);margin-top:8px;">' +
+                    (__projAppState === 'pending' ? 'A host is reviewing your application.' :
+                     __projAppState === 'approved-unpaid' ? ('Approved — pay $' + (Number(proj.price) || 0) + ' to enter.') :
+                     proj.applyEnabled ? 'This Project requires an application to join.' : 'This Project is only open to its assigned cohort.') + '</div>' +
+                    (proj.applyEnabled && __projAppState === 'none' ? '<button class="mc-btn mc-btn-green" style="margin-top:16px;" onclick="mcApplyToProgramOrProject(\'project\',\'' + escapeHtml(String(proj.id || '')) + '\');ppNav(\'project-detail\',{id:\'' + escapeHtml(String(proj.id || '')) + '\'});">' + (proj.price > 0 ? 'Apply to Join — $' + proj.price : 'Apply to Join — Free') + '</button>' : '') +
+                    '</div>';
                 return;
             }
             var cps = ppGetCheckpoints();
@@ -31743,6 +32087,118 @@
         }
         window.pflxProjectReminderSweep = pflxProjectReminderSweep;
 
+        // ── COMPLETION-APPROVAL SWEEP (v1.71, Ennis) ──────────────────────
+        // "What happens when the program ends? ... If a player has completed
+        // all tasks within the Program by the deadline then they should pop
+        // up for approval. I should also be able to bypass that as well.
+        // This should be the same for Checkpoints and Projects." Same
+        // idempotent-sweep shape as the lateness tax sweep above: each
+        // item's own *completionApprovalAt map remembers who's already been
+        // evaluated so re-running the sweep never re-queues a player twice.
+        // skipCompletionApproval (per-item host toggle, in each form) passes
+        // the player straight through as pre-'approved' instead of queuing —
+        // that's the bypass. Queued entries land in mcApprovals as
+        // type:'completion' and ride the same unified Approvals card as
+        // everything else (see mcRenderApprovals / mcApproveItem /
+        // mcRejectItem 'completion' cases below), with a portfolio-view link
+        // per applicant just like Apply-to-Join.
+        function _pflxPushCompletionApproval(kind, item, player, autoApprove) {
+            var recId = 'completion-' + kind + '-' + item.id + '-' + player.id;
+            if (mcApprovals.some(function (a) { return a && a.id === recId; })) return; // already queued/decided
+            var refTitle = item.name || item.title || (kind.charAt(0).toUpperCase() + kind.slice(1));
+            mcApprovals.push({
+                type: 'completion', subtype: kind, id: recId, refId: item.id,
+                title: refTitle + ' — completed',
+                submittedBy: player.brand || player.name || player.id,
+                playerId: player.id,
+                date: new Date().toISOString().split('T')[0],
+                action: autoApprove ? 'approved' : 'pending'
+            });
+        }
+        // Per-player completion for a Project — mirrors pflxProjectCompletion's
+        // two modes (per-assignee "units of work" vs. everyone-mode shared task).
+        function _pflxPlayerCompletedProject(proj, playerId) {
+            var comp;
+            try { comp = pflxProjectCompletion(proj); } catch (e) { return false; }
+            if (!comp || !comp.total) return false;
+            var mine = comp.tasks.filter(function (t) { return t.playerId === playerId; });
+            if (mine.length) return mine.every(function (t) { return t.done; });
+            var everyone = comp.tasks.filter(function (t) { return !t.playerId; });
+            if (everyone.length) return everyone.every(function (t) { return t.done; });
+            return false;
+        }
+        function mcCheckCompletionApprovals() {
+            try {
+                if (typeof mcIsHost !== 'function' || !mcIsHost()) return;
+                var today = new Date().toISOString().slice(0, 10);
+                var pool = (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) ? mcPlayers : [];
+                var dirtyCp = false, dirtyProj = false, dirtyPg = false, dirtyApprovals = false;
+
+                // ── Checkpoints — own endDate is the deadline. ──
+                (typeof mcCheckpoints !== 'undefined' ? mcCheckpoints : []).forEach(function (cp) {
+                    if (!cp || !cp.id || !cp.endDate || cp.endDate >= today || cp.status === 'inactive') return;
+                    pool.forEach(function (player) {
+                        if (!player || !player.id || player.role === 'admin') return;
+                        cp.completionApprovalAt = cp.completionApprovalAt || {};
+                        if (cp.completionApprovalAt[player.id]) return;
+                        var pr;
+                        try { pr = pflxPlayerCheckpointProgress(cp, player); } catch (e) { return; }
+                        if (!pr || !pr.total || pr.approved < pr.total) return; // nothing assigned, or not fully done
+                        _pflxPushCompletionApproval('checkpoint', cp, player, !!cp.skipCompletionApproval);
+                        cp.completionApprovalAt[player.id] = Date.now();
+                        dirtyCp = true; dirtyApprovals = true;
+                    });
+                });
+
+                // ── Projects — dueDate/endDate/deadline (same field priority
+                //    the reminder sweep and urgency chip already use). ──
+                (typeof mcProjects !== 'undefined' ? mcProjects : []).forEach(function (proj) {
+                    var deadline = proj && (proj.dueDate || proj.endDate || proj.deadline);
+                    if (!proj || !proj.id || !deadline || deadline >= today) return;
+                    pool.forEach(function (player) {
+                        if (!player || !player.id || player.role === 'admin') return;
+                        proj.completionApprovalAt = proj.completionApprovalAt || {};
+                        if (proj.completionApprovalAt[player.id]) return;
+                        if (!_pflxPlayerCompletedProject(proj, player.id)) return;
+                        _pflxPushCompletionApproval('project', proj, player, !!proj.skipCompletionApproval);
+                        proj.completionApprovalAt[player.id] = Date.now();
+                        dirtyProj = true; dirtyApprovals = true;
+                    });
+                });
+
+                // ── Programs — aggregate across every Checkpoint attached via
+                //    cp.programId (cadence-generated or manually attached —
+                //    same reverse pointer either way). ──
+                (typeof mcPrograms !== 'undefined' ? mcPrograms : []).forEach(function (pg) {
+                    if (!pg || !pg.id || !pg.endDate || pg.endDate >= today) return;
+                    var cps = (typeof mcCheckpoints !== 'undefined' ? mcCheckpoints : []).filter(function (c) { return c && c.programId === pg.id; });
+                    if (!cps.length) return;
+                    pool.forEach(function (player) {
+                        if (!player || !player.id || player.role === 'admin') return;
+                        pg.completionApprovalAt = pg.completionApprovalAt || {};
+                        if (pg.completionApprovalAt[player.id]) return;
+                        var totalAll = 0, approvedAll = 0, sawAny = false;
+                        cps.forEach(function (cp) {
+                            var pr;
+                            try { pr = pflxPlayerCheckpointProgress(cp, player); } catch (e) { return; }
+                            if (!pr || !pr.total) return;
+                            sawAny = true; totalAll += pr.total; approvedAll += pr.approved;
+                        });
+                        if (!sawAny || approvedAll < totalAll) return; // nothing assigned, or not fully done
+                        _pflxPushCompletionApproval('program', pg, player, !!pg.skipCompletionApproval);
+                        pg.completionApprovalAt[player.id] = Date.now();
+                        dirtyPg = true; dirtyApprovals = true;
+                    });
+                });
+
+                if (dirtyCp) { try { mcSaveData('checkpoints'); } catch (e) {} }
+                if (dirtyProj) { try { mcSaveData('projects'); } catch (e) {} }
+                if (dirtyPg) { try { mcSaveData('programs'); } catch (e) {} }
+                if (dirtyApprovals) { try { mcSaveData('approvals'); } catch (e) {} }
+            } catch (e) { console.warn('[completion approval sweep] failed', e); }
+        }
+        window.mcCheckCompletionApprovals = mcCheckCompletionApprovals;
+
         // ── CHECKPOINT PROGRESSION GATE (July 15, Ennis) ──
         // Players may only complete tasks whose checkpoint is ACTIVE (or already
         // completed), OR — early-advance — when every earlier checkpoint is fully
@@ -32086,6 +32542,7 @@
             { var _ceEl = document.getElementById('mc-cp-embed'); if (_ceEl) _ceEl.value = cp ? (cp.embedUrl || '') : ''; }
             if (cp) { cp.updatedAt = cp.updatedAt || Date.now(); }
             document.getElementById('mc-cp-xc').value = cp ? (cp.xcReward || 0) : 0;
+            { var _cpSkipEl = document.getElementById('mc-cp-skip-completion-approval'); if (_cpSkipEl) _cpSkipEl.checked = !!(cp && cp.skipCompletionApproval); }
 
             // Tier variants — repopulate from cp.tierVariants. Open the
             // disclosure block automatically when any variant is set so the
@@ -32386,6 +32843,11 @@
                 programId: document.getElementById('mc-cp-program')?.value || '',
                 link: document.getElementById('mc-cp-link')?.value || '',
                 embedUrl: (document.getElementById('mc-cp-embed')?.value || '').trim(),
+                skipCompletionApproval: !!document.getElementById('mc-cp-skip-completion-approval')?.checked,
+                // Preserve the sweep's dedupe marker across edits — re-saving
+                // a Checkpoint's form must never re-queue players who were
+                // already evaluated (see mcCheckCompletionApprovals).
+                completionApprovalAt: mcCPEditIndex >= 0 ? (mcCheckpoints[mcCPEditIndex].completionApprovalAt || {}) : {},
                 assignedTo: assignedTo,
                 bannerImage: bannerImage,
                 taskIds: taskIds,
@@ -37794,6 +38256,11 @@
                 el = document.getElementById('mc-project-skill-level'); if (el) el.value = p.skillLevel || 'beginner';
                 el = document.getElementById('mc-project-objectives'); if (el) el.value = p.learningObjectives || '';
                 el = document.getElementById('mc-project-deliverables'); if (el) el.value = p.deliverables || '';
+                el = document.getElementById('mc-project-apply-enabled'); if (el) el.checked = !!p.applyEnabled;
+                el = document.getElementById('mc-project-price'); if (el) el.value = p.price || 0;
+                var __projPriceRow = document.getElementById('mc-project-price-row');
+                if (__projPriceRow) __projPriceRow.style.display = p.applyEnabled ? 'flex' : 'none';
+                el = document.getElementById('mc-project-skip-completion-approval'); if (el) el.checked = !!p.skipCompletionApproval;
                 // Node type & Co-op fields
                 el = document.getElementById('mc-project-node-type'); if (el) el.value = p.nodeType || 'course';
                 el = document.getElementById('mc-project-coop-mode'); if (el) el.value = p.coopMode || 'solo';
@@ -38032,6 +38499,20 @@
                 fineTaxIds: mcProjectEditIndex >= 0 ? (mcProjects[mcProjectEditIndex].fineTaxIds || []) : [],
                 links: mcProjectEditIndex >= 0 ? (mcProjects[mcProjectEditIndex].links || []) : [],
                 cohortIds: cohortIds,
+                // v1.71 — "Apply to Join". applyEnabled gates ENTRY only —
+                // Projects are visible to every player now regardless of
+                // cohort (see pflxPlayerCanSeeCatalogItem); approval pushes
+                // the applicant's id into assignedPlayers above, same as a
+                // host manually checking them in the player-scoping list.
+                // `price` is a manual-payment placeholder (no real processor
+                // wired up yet — Ennis's call, build the data/flow now, real
+                // Stripe/Apple Pay/Google Pay checkout later).
+                applyEnabled: !!document.getElementById('mc-project-apply-enabled')?.checked,
+                price: Math.max(0, Number(document.getElementById('mc-project-price')?.value) || 0),
+                skipCompletionApproval: !!document.getElementById('mc-project-skip-completion-approval')?.checked,
+                // Preserve the sweep's dedupe marker across edits (see the
+                // Checkpoint save function for why).
+                completionApprovalAt: mcProjectEditIndex >= 0 ? (mcProjects[mcProjectEditIndex].completionApprovalAt || {}) : {},
                 timeframeInherit: document.getElementById('mc-project-timeframe-inherit')?.value || 'global',
                 timeframeScope: document.getElementById('mc-project-timeframe-scope')?.value || 'checkpoint',
                 pathway: document.getElementById('mc-project-pathway')?.value || '',
@@ -38930,10 +39411,35 @@
             var el;
             el = document.getElementById('mc-program-tab-name');   if (el) el.value = pg ? (pg.name || '') : '';
             el = document.getElementById('mc-program-tab-start');  if (el) el.value = pg ? (pg.startDate || '') : '';
+            el = document.getElementById('mc-program-tab-end');    if (el) el.value = pg ? (pg.endDate || '') : '';
             el = document.getElementById('mc-program-tab-status'); if (el) el.value = pg ? (pg.status || 'draft') : 'draft';
             el = document.getElementById('mc-program-tab-weeks');  if (el) el.value = pg ? (pg.durationWeeks || 10) : 10;
-            el = document.getElementById('mc-program-tab-cadence');if (el) el.value = pg ? (pg.checkpointCadenceWeeks || 2) : 2;
+            // Cadence is optional now — blank when unset instead of forcing 2.
+            el = document.getElementById('mc-program-tab-cadence');if (el) el.value = pg && pg.checkpointCadenceWeeks ? pg.checkpointCadenceWeeks : '';
             el = document.getElementById('mc-program-tab-desc');   if (el) el.value = pg ? (pg.description || '') : '';
+            el = document.getElementById('mc-program-tab-apply-enabled'); if (el) el.checked = !!(pg && pg.applyEnabled);
+            el = document.getElementById('mc-program-tab-price');  if (el) el.value = pg ? (pg.price || 0) : 0;
+            var priceRow = document.getElementById('mc-program-tab-price-row');
+            if (priceRow) priceRow.style.display = (pg && pg.applyEnabled) ? 'flex' : 'none';
+            el = document.getElementById('mc-program-tab-skip-completion-approval'); if (el) el.checked = !!(pg && pg.skipCompletionApproval);
+
+            // Populate "attach existing checkpoints" — every checkpoint whose
+            // programId already matches this Program (or has no Program yet)
+            // shows here so the host can wire it in from the Program side.
+            var cpListDiv = document.getElementById('mc-program-checkpoints-list');
+            if (cpListDiv) {
+                var allCps = (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) ? mcCheckpoints : [];
+                var eligibleCps = allCps.filter(function (c) { return c && (!c.programId || (pg && c.programId === pg.id)); });
+                cpListDiv.innerHTML = eligibleCps.length === 0 ? '<span style="font-size:11px;color:rgba(255,255,255,0.25);">No checkpoints available — create one in the Checkpoints tab.</span>' :
+                    eligibleCps.map(function (c) {
+                        var checked = pg && c.programId === pg.id;
+                        return '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;padding:3px 0;">' +
+                            '<input type="checkbox" class="mc-program-checkpoint-cb" value="' + escapeHtml(c.id) + '"' + (checked ? ' checked' : '') + '> ' +
+                            '<span style="flex:1;">' + escapeHtml(c.name || 'Checkpoint') + '</span>' +
+                            (c.status ? '<span style="font-size:10px;color:rgba(255,255,255,0.35);">' + escapeHtml(c.status) + '</span>' : '') +
+                            '</label>';
+                    }).join('');
+            }
 
             // Populate badge checkboxes — unified catalog
             var badgesDiv = document.getElementById('mc-program-badges');
@@ -39002,7 +39508,11 @@
             var name = (document.getElementById('mc-program-tab-name')?.value || '').trim();
             if (!name) { alert('Program name is required.'); return; }
             var weeks = parseInt(document.getElementById('mc-program-tab-weeks')?.value || '10', 10) || 10;
-            var cadence = parseInt(document.getElementById('mc-program-tab-cadence')?.value || '2', 10) || 2;
+            // v1.71 — cadence is optional: blank means "no auto-generation,
+            // this Program relies on manually-attached checkpoints (each
+            // keeping its own dates/cadence)" rather than defaulting to 2.
+            var cadenceRaw = document.getElementById('mc-program-tab-cadence')?.value || '';
+            var cadence = cadenceRaw.trim() === '' ? 0 : (parseInt(cadenceRaw, 10) || 0);
             if (typeof mcPrograms === 'undefined' || !Array.isArray(mcPrograms)) mcPrograms = [];
             var existing = mcProgramTabEditId ? mcPrograms.find(function (p) { return p && p.id === mcProgramTabEditId; }) : null;
 
@@ -39020,12 +39530,34 @@
                 seasonId: sid,
                 name: name,
                 startDate: document.getElementById('mc-program-tab-start')?.value || '',
+                // v1.71 (Ennis) — End Date. Optional; when set, drives the
+                // completion-approval sweep (mcCheckCompletionApprovals) that
+                // flags each enrolled/cohort player for host review once the
+                // date passes AND their required Program tasks are approved.
+                endDate: document.getElementById('mc-program-tab-end')?.value || '',
                 status: document.getElementById('mc-program-tab-status')?.value || 'draft',
                 durationWeeks: weeks,
                 checkpointCadenceWeeks: cadence,
+                // v1.71 (Ennis) — host bypass for the completion-approval gate.
+                // When true, a player who finishes on time is enrolled/marked
+                // complete automatically instead of queuing in Approvals.
+                skipCompletionApproval: !!document.getElementById('mc-program-tab-skip-completion-approval')?.checked,
                 description: document.getElementById('mc-program-tab-desc')?.value || '',
                 rewardBadges: rewardBadges,
                 cohortIds: cohortIds,
+                // v1.71 — "Apply to Join". applyEnabled gates ENTRY (not
+                // visibility — Programs are visible to every player now, see
+                // pflxPlayerCanSeeCatalogItem); enrolledPlayers is Program's
+                // analog of Project's assignedPlayers, populated only via an
+                // approved (and paid, if priced) application — see
+                // mcApproveItem's 'application' case below. Preserved across
+                // edits so re-saving a Program's form never un-enrolls anyone.
+                applyEnabled: !!document.getElementById('mc-program-tab-apply-enabled')?.checked,
+                price: Math.max(0, Number(document.getElementById('mc-program-tab-price')?.value) || 0),
+                enrolledPlayers: existing && Array.isArray(existing.enrolledPlayers) ? existing.enrolledPlayers.slice() : [],
+                // Preserve the sweep's dedupe marker across edits (see the
+                // Checkpoint save function for why).
+                completionApprovalAt: existing && existing.completionApprovalAt ? Object.assign({}, existing.completionApprovalAt) : {},
                 // BANNER PRESERVE — same convention as Project/Checkpoint: empty
                 // means "form opened before banner data loaded" and PRESERVES the
                 // existing banner; only the ✕ Remove sentinel ('__REMOVED__') clears it.
@@ -39058,6 +39590,30 @@
                     if (_cpsTouched) mcSaveData('checkpoints');
                 }
             } catch (eCascade) { console.warn('[program cohort cascade]', eCascade); }
+
+            // ── v1.71 (Ennis) — attach/detach checkpoints selected in the
+            // "Attach Existing Checkpoints" list. Single source of truth is
+            // the reverse pointer (checkpoint.programId), same field
+            // mcSeasonGenerateCheckpoints writes — a checkpoint attached from
+            // either direction (its own Program dropdown, or this list) ends
+            // up identical. Only checkpoints that were shown as ELIGIBLE
+            // (unattached, or already attached to this Program) are ever
+            // touched, so we never steal a checkpoint from another Program.
+            try {
+                if (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) {
+                    var selectedCpIds = [];
+                    document.querySelectorAll('.mc-program-checkpoint-cb:checked').forEach(function (cb) { selectedCpIds.push(cb.value); });
+                    var __cpsTouched2 = false;
+                    mcCheckpoints.forEach(function (c) {
+                        if (!c) return;
+                        var wasOwnedByThis = c.programId === obj.id;
+                        var nowSelected = selectedCpIds.indexOf(c.id) !== -1;
+                        if (nowSelected && c.programId !== obj.id) { c.programId = obj.id; __cpsTouched2 = true; }
+                        else if (!nowSelected && wasOwnedByThis) { c.programId = ''; __cpsTouched2 = true; }
+                    });
+                    if (__cpsTouched2) mcSaveData('checkpoints');
+                }
+            } catch (eCpAttach) { console.warn('[program checkpoint attach]', eCpAttach); }
 
             mcHideProgramTabForm();
             mcRenderProgramsTab();
@@ -42651,6 +43207,127 @@
             mcRenderPitches();
         }
         window.mcReturnPitch = mcReturnPitch;
+
+        // ── v1.71 — Apply-to-Join for Programs & Projects ──────────────
+        // Player-facing: create a pending application against a Program or
+        // Project that has applyEnabled turned on. Shape documented at the
+        // mcApplications declaration above.
+        function mcApplyToProgramOrProject(type, itemId) {
+            try {
+                var s = window.activeSession || {};
+                var playerId = s.playerId || s.id || '';
+                if (!playerId) { if (typeof pflxToast === 'function') pflxToast('Sign in to apply.', 'error'); return; }
+                var coll = type === 'program' ? mcPrograms : mcProjects;
+                var item = coll.find(function (x) { return x && x.id === itemId; });
+                if (!item) { if (typeof pflxToast === 'function') pflxToast('Not found.', 'error'); return; }
+                if (!item.applyEnabled) { if (typeof pflxToast === 'function') pflxToast('This isn’t accepting applications.', 'error'); return; }
+                // Block duplicate pending/approved applications from the same player.
+                var dup = mcApplications.find(function (a) {
+                    return a && a.type === type && a.itemId === itemId && a.playerId === playerId && a.status !== 'rejected';
+                });
+                if (dup) { if (typeof pflxToast === 'function') pflxToast(dup.status === 'pending' ? 'Application already pending.' : 'You’re already approved.', 'info'); return; }
+                var who = (typeof pflxLookupPlayer === 'function') ? pflxLookupPlayer(playerId) : null;
+                var brand = (who && (who.brand || who.name)) || s.brand || s.name || 'Player';
+                var app = {
+                    id: 'app-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+                    type: type,
+                    itemId: itemId,
+                    itemName: item.name || item.title || 'Untitled',
+                    playerId: playerId,
+                    playerBrand: brand,
+                    status: 'pending',
+                    price: Number(item.price) || 0,
+                    paymentStatus: 'not_required',
+                    appliedAt: new Date().toISOString(),
+                    decidedAt: '',
+                    decidedBy: '',
+                    hostNote: ''
+                };
+                mcApplications.push(app);
+                mcSaveData('applications');
+                try { if (typeof pflxSyncBus !== 'undefined') pflxSyncBus.publish('mc:applications', { action: 'create', application: app }); } catch (e) {}
+                if (typeof pflxToast === 'function') pflxToast('Application submitted — a host will review it.', 'success');
+                try { pflxPlaySfx('click'); } catch (e) {}
+            } catch (e) { console.warn('[applications] apply failed', e); }
+        }
+        window.mcApplyToProgramOrProject = mcApplyToProgramOrProject;
+
+        // Pushes the applicant's id into the Program's enrolledPlayers[] or
+        // the Project's assignedPlayers[] — the same field the entry-gate
+        // check and the player-facing render already read for cohort-based
+        // access, so an approved application grants entry exactly like
+        // cohort membership does.
+        function _mcFinalizeApplicationEnrollment(app) {
+            try {
+                if (app.type === 'program') {
+                    var pg = mcPrograms.find(function (x) { return x && x.id === app.itemId; });
+                    if (pg) {
+                        if (!Array.isArray(pg.enrolledPlayers)) pg.enrolledPlayers = [];
+                        if (pg.enrolledPlayers.indexOf(app.playerId) === -1) pg.enrolledPlayers.push(app.playerId);
+                        mcSaveData('programs');
+                    }
+                } else if (app.type === 'project') {
+                    var pj = mcProjects.find(function (x) { return x && x.id === app.itemId; });
+                    if (pj) {
+                        if (!Array.isArray(pj.assignedPlayers)) pj.assignedPlayers = [];
+                        if (pj.assignedPlayers.indexOf(app.playerId) === -1) pj.assignedPlayers.push(app.playerId);
+                        mcSaveData('projects');
+                    }
+                }
+            } catch (e) { console.warn('[applications] finalize enrollment failed', e); }
+        }
+
+        // Host-facing: approve a pending application (after reviewing the
+        // player's portfolio, per Ennis's spec). Free items finalize
+        // enrollment immediately; priced items wait on mcMarkApplicationPaid
+        // — "host reviews first, then payment" per Ennis's decision.
+        function mcApproveApplication(id) {
+            var app = mcApplications.find(function (a) { return a && a.id === id; });
+            if (!app) return;
+            app.status = 'approved';
+            app.decidedAt = new Date().toISOString();
+            app.decidedBy = (window.activeSession && (window.activeSession.brand || window.activeSession.name)) || 'Host';
+            if (app.price > 0) {
+                app.paymentStatus = 'awaiting_payment';
+            } else {
+                app.paymentStatus = 'not_required';
+                _mcFinalizeApplicationEnrollment(app);
+            }
+            mcSaveData('applications');
+            try { pflxPlaySfx('success'); } catch (e) {}
+            try { if (typeof pflxToast === 'function') pflxToast(app.price > 0 ? 'Approved — awaiting payment.' : 'Approved — enrolled.', 'success'); } catch (e) {}
+        }
+        window.mcApproveApplication = mcApproveApplication;
+
+        function mcRejectApplication(id, note) {
+            var app = mcApplications.find(function (a) { return a && a.id === id; });
+            if (!app) return;
+            if (note === undefined) note = prompt('Optional note to the player (why it was rejected):', '') || '';
+            app.status = 'rejected';
+            app.hostNote = (note || '').trim();
+            app.decidedAt = new Date().toISOString();
+            app.decidedBy = (window.activeSession && (window.activeSession.brand || window.activeSession.name)) || 'Host';
+            mcSaveData('applications');
+            try { pflxPlaySfx('error'); } catch (e) {}
+        }
+        window.mcRejectApplication = mcRejectApplication;
+
+        // Host-facing payment placeholder (per Ennis: "not yet — build a
+        // placeholder for now"). Real Stripe checkout with Apple Pay/Google
+        // Pay via the browser Payment Request API can slot in here later
+        // without reworking mcApplications' shape — this manual "mark paid"
+        // button is the stand-in until that ships.
+        function mcMarkApplicationPaid(id) {
+            var app = mcApplications.find(function (a) { return a && a.id === id; });
+            if (!app || app.status !== 'approved' || app.price <= 0) return;
+            app.paymentStatus = 'marked_paid';
+            _mcFinalizeApplicationEnrollment(app);
+            mcSaveData('applications');
+            try { if (typeof pflxToast === 'function') pflxToast('Marked paid — player enrolled.', 'success'); } catch (e) {}
+            try { pflxPlaySfx('success'); } catch (e) {}
+            if (typeof mcRenderApprovals === 'function') mcRenderApprovals();
+        }
+        window.mcMarkApplicationPaid = mcMarkApplicationPaid;
 
         // ── Player-side: Propose modal + My Proposals status list ──
         var PFLX_PATHWAY_OPTIONS = [
@@ -51625,6 +52302,11 @@
 
         function mcRenderApprovals() {
             mcLoadData();
+            // v1.71 — run the completion-approval sweep before building the
+            // list so a Program/Checkpoint/Project that crossed its deadline
+            // since the last render immediately shows any newly-qualifying
+            // players (or auto-approves them, if the host bypassed the gate).
+            try { if (typeof mcCheckCompletionApprovals === 'function') mcCheckCompletionApprovals(); } catch (e) {}
             // Auto-collect pending submissions from tasks.
             // July 20 (beta feedback): per-player entries in t.submissions[]
             // are the primary shape now — each PENDING entry is its own
@@ -51641,13 +52323,15 @@
             });
             var pendingTasks = mcTasks.filter(function(t) { return t.status === 'submitted' && !(Array.isArray(t.submissions) && t.submissions.length); });
             var pendingPitches = mcPitches.filter(function(p) { return p.status === 'pending'; });
+            var pendingApplications = mcApplications.filter(function(a) { return a.status === 'pending'; });
 
             var stats = document.getElementById('mc-approval-stats');
             if (stats) {
                 stats.innerHTML = [
-                    { label: 'PENDING', value: pendingSubs.length + pendingTasks.length + pendingPitches.length, color: '#f5c842', icon: '&#x23F3;' },
+                    { label: 'PENDING', value: pendingSubs.length + pendingTasks.length + pendingPitches.length + pendingApplications.length, color: '#f5c842', icon: '&#x23F3;' },
                     { label: 'TASKS SUBMITTED', value: pendingSubs.length + pendingTasks.length, color: 'var(--cyan)', icon: '&#x2705;' },
                     { label: 'PITCHES PENDING', value: pendingPitches.length, color: '#a78bfa', icon: '&#x1F4A1;' },
+                    { label: 'APPLICATIONS PENDING', value: pendingApplications.length, color: '#22d3ee', icon: '&#x1F4DD;' },
                     { label: 'TOTAL APPROVED', value: mcApprovals.filter(function(a) { return a.action === 'approved'; }).length, color: '#22c55e', icon: '&#x2714;' }
                 ].map(function(s) {
                     return '<div class="mc-stat-card"><div class="mc-stat-icon" style="color:' + s.color + ';">' + s.icon + '</div><div class="mc-stat-value">' + s.value + '</div><div class="mc-stat-label">' + s.label + '</div></div>';
@@ -51678,6 +52362,9 @@
             pendingPitches.forEach(function(p) {
                 items.push({ type: 'pitch', id: p.id, title: p.title, submittedBy: p.submittedBy || 'Unknown', date: p.date || '', status: 'pending', ref: p });
             });
+            pendingApplications.forEach(function(a) {
+                items.push({ type: 'application', id: a.id, title: (a.itemName || 'Untitled') + ' — ' + (a.type === 'program' ? 'Program' : 'Project'), submittedBy: a.playerBrand || 'Unknown', date: (a.appliedAt || '').split('T')[0], status: 'pending', ref: a });
+            });
 
             // Add arena external game submissions from approvals
             mcApprovals.filter(function(a) { return a.type === 'arena_external' && a.action === 'pending'; }).forEach(function(a) {
@@ -51702,6 +52389,23 @@
                 }
             });
 
+            // v1.71 — Program/Checkpoint/Project completion approvals, queued
+            // by mcCheckCompletionApprovals() above. A "View Portfolio" link
+            // is included in the card, same as Apply-to-Join, so the host can
+            // sanity-check the player's actual work before signing off.
+            mcApprovals.filter(function(a) { return a.type === 'completion' && a.action === 'pending'; }).forEach(function(a) {
+                if (mcApprovalFilter === 'pending' || mcApprovalFilter === 'all') {
+                    items.push({ type: 'completion', id: a.id, title: a.title, submittedBy: a.submittedBy || '', date: a.date || '', status: 'pending', ref: a });
+                }
+            });
+
+            // Approved-but-unpaid applications still need host action (mark
+            // paid to finalize enrollment) — surface them alongside pending
+            // items regardless of tab, same as the pending queue.
+            mcApplications.filter(function(a) { return a.status === 'approved' && a.paymentStatus === 'awaiting_payment'; }).forEach(function(a) {
+                items.push({ type: 'application', id: a.id, title: (a.itemName || 'Untitled') + ' — ' + (a.type === 'program' ? 'Program' : 'Project'), submittedBy: a.playerBrand || 'Unknown', date: (a.appliedAt || '').split('T')[0], status: 'awaiting_payment', ref: a });
+            });
+
             // Add historical approvals
             if (mcApprovalFilter !== 'pending') {
                 mcApprovals.filter(function(a) { return mcApprovalFilter === 'approved' ? a.action === 'approved' : a.action === 'rejected'; }).forEach(function(a) {
@@ -51710,7 +52414,7 @@
             }
 
             if (mcApprovalFilter === 'pending') {
-                items = items.filter(function(it) { return it.status === 'pending'; });
+                items = items.filter(function(it) { return it.status === 'pending' || it.status === 'awaiting_payment'; });
             }
 
             // Tiered enforcement — scoped hosts only see items their tier covers.
@@ -51718,9 +52422,9 @@
 
             list.innerHTML = items.length === 0 ? '<div style="color:rgba(255,255,255,0.25);font-size:13px;">No items to show.</div>' :
                 items.map(function(it) {
-                    var typeIcon = (it.type === 'task' || it.type === 'tasksub') ? '&#x2705;' : it.type === 'arena_external' ? '&#x1F3AE;' : it.type === 'module_completion' ? '&#x1F393;' : it.type === 'node_submission' ? '&#x1F6F0;' : '&#x1F4A1;';
-                    var sc = it.status === 'pending' ? '#f5c842' : it.status === 'approved' ? '#22c55e' : '#ef4444';
-                    var typeLabel = it.type === 'module_completion' ? 'module completion' : it.type === 'node_submission' ? 'node submission' : (it.type === 'tasksub' ? 'task submission' : it.type);
+                    var typeIcon = (it.type === 'task' || it.type === 'tasksub') ? '&#x2705;' : it.type === 'arena_external' ? '&#x1F3AE;' : it.type === 'module_completion' ? '&#x1F393;' : it.type === 'node_submission' ? '&#x1F6F0;' : it.type === 'application' ? '&#x1F4DD;' : it.type === 'completion' ? '&#x1F3C6;' : '&#x1F4A1;';
+                    var sc = it.status === 'pending' ? '#f5c842' : it.status === 'awaiting_payment' ? '#22d3ee' : it.status === 'approved' ? '#22c55e' : '#ef4444';
+                    var typeLabel = it.type === 'module_completion' ? 'module completion' : it.type === 'node_submission' ? 'node submission' : (it.type === 'tasksub' ? 'task submission' : it.type === 'application' ? 'apply-to-join' : it.type === 'completion' ? ((it.ref && it.ref.subtype) || 'completion') + ' completion' : it.type);
                     var detail = '';
                     if ((it.type === 'module_completion' || it.type === 'node_submission') && it.ref && it.ref.submission) {
                         var sub = it.ref.submission, rw = it.ref.reward, bits = [];
@@ -51731,15 +52435,32 @@
                             (sub.description ? escapeHtml(String(sub.description).substring(0, 280)) + '<br>' : '') +
                             bits.join(' &nbsp;&middot;&nbsp; ') + '</div>';
                     }
+                    if (it.type === 'application' && it.ref) {
+                        var appRef = it.ref, appBits = [];
+                        appBits.push(appRef.price > 0 ? ('<span style="color:#f5c842;">$' + appRef.price + '</span>') : '<span style="color:#22c55e;">Free</span>');
+                        if (typeof window.pflxBrandLink === 'function' && appRef.playerId) {
+                            appBits.push('<span onclick="window.pflxOpenPlayerPortfolio(\'' + escapeHtml(String(appRef.playerId)) + '\')" style="color:var(--cyan);text-decoration:underline;cursor:pointer;">&#x1F4C2; View Portfolio</span>');
+                        }
+                        detail = '<div style="font-size:11px;color:rgba(255,255,255,0.55);margin:4px 0 8px;line-height:1.6;">' + appBits.join(' &nbsp;&middot;&nbsp; ') + '</div>';
+                    }
+                    if (it.type === 'completion' && it.ref) {
+                        var compBits = ['<span style="color:#22c55e;">All required work approved by the deadline</span>'];
+                        if (it.ref.playerId) {
+                            compBits.push('<span onclick="window.pflxOpenPlayerPortfolio(\'' + escapeHtml(String(it.ref.playerId)) + '\')" style="color:var(--cyan);text-decoration:underline;cursor:pointer;">&#x1F4C2; View Portfolio</span>');
+                        }
+                        detail = '<div style="font-size:11px;color:rgba(255,255,255,0.55);margin:4px 0 8px;line-height:1.6;">' + compBits.join(' &nbsp;&middot;&nbsp; ') + '</div>';
+                    }
                     return '<div class="mc-card">' +
                         '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">' +
                         '<div><span style="margin-right:6px;">' + typeIcon + '</span><span style="font-weight:900;color:#f0f0ff;">' + escapeHtml(it.title || 'Untitled') + '</span>' +
                         '<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:2px;">by ' + escapeHtml(it.submittedBy) + ' · ' + typeLabel + '</div></div>' +
-                        '<span class="mc-pill" style="color:' + sc + ';border-color:' + sc + ';">' + it.status.toUpperCase() + '</span></div>' +
+                        '<span class="mc-pill" style="color:' + sc + ';border-color:' + sc + ';">' + it.status.toUpperCase().replace('_', ' ') + '</span></div>' +
                         detail +
                         (it.status === 'pending' ? '<div style="display:flex;gap:6px;">' +
                         '<button class="mc-btn mc-btn-green" style="font-size:10px;padding:4px 10px;" onclick="mcApproveItem(\'' + it.type + '\',\'' + it.id + '\')">Approve</button>' +
                         '<button class="mc-btn" style="font-size:10px;padding:4px 10px;color:#ef4444;border-color:rgba(239,68,68,0.3);" onclick="mcRejectItem(\'' + it.type + '\',\'' + it.id + '\')">Reject</button></div>' : '') +
+                        (it.status === 'awaiting_payment' ? '<div style="display:flex;gap:6px;">' +
+                        '<button class="mc-btn mc-btn-green" style="font-size:10px;padding:4px 10px;" onclick="mcMarkApplicationPaid(\'' + it.id + '\')">Mark Paid — Enroll</button></div>' : '') +
                         '</div>';
                 }).join('');
         }
@@ -51752,6 +52473,8 @@
                 case 'tasksub':
                 case 'task':   return _scopedApprovalCan('approve.task', ref && ref.cohort ? { cohort: ref.cohort } : null);
                 case 'pitch':  return _scopedApprovalCan('approve.node');
+                case 'application': return _scopedApprovalCan('approve.application', ref && ref.type === 'project' ? { projectId: ref.itemId } : null);
+                case 'completion': return _scopedApprovalCan('approve.completion', ref && ref.subtype === 'project' ? { projectId: ref.refId } : ref && ref.subtype === 'checkpoint' ? { checkpointId: ref.refId } : null);
                 case 'arena_external': return _scopedApprovalCan('approve.reward');
                 case 'module_completion': return _scopedApprovalCan('approve.node', ref && ref.nodeId ? { nodeId: ref.nodeId } : null);
                 case 'node_submission': return _scopedApprovalCan('approve.node', ref && ref.nodeId ? { nodeId: ref.nodeId } : null);
@@ -51763,6 +52486,8 @@
                 if (type === 'task') { var t = mcTasks.find(function (x) { return x && x.id === id; }); return _scopedApprovalCan('approve.task', t && t.cohort ? { cohort: t.cohort } : null); }
                 if (type === 'tasksub') { var t2 = mcTasks.find(function (x) { return x && x.id === String(id || '').split('::')[0]; }); return _scopedApprovalCan('approve.task', t2 && t2.cohort ? { cohort: t2.cohort } : null); }
                 if (type === 'pitch') return _scopedApprovalCan('approve.node');
+                if (type === 'application') { var aApp = mcApplications.find(function (x) { return x && x.id === id; }); return _scopedApprovalCan('approve.application', aApp && aApp.type === 'project' ? { projectId: aApp.itemId } : null); }
+                if (type === 'completion') { var cApp = mcApprovals.find(function (x) { return x && x.id === id; }); return _scopedApprovalCan('approve.completion', cApp && cApp.subtype === 'project' ? { projectId: cApp.refId } : cApp && cApp.subtype === 'checkpoint' ? { checkpointId: cApp.refId } : null); }
                 if (type === 'arena_external') return _scopedApprovalCan('approve.reward');
                 if (type === 'module_completion') { var ma = mcApprovals.find(function (x) { return x && x.id === id; }); return _scopedApprovalCan('approve.node', ma && ma.nodeId ? { nodeId: ma.nodeId } : null); }
                 if (type === 'node_submission') { var na = mcApprovals.find(function (x) { return x && x.id === id; }); return _scopedApprovalCan('approve.node', na && na.nodeId ? { nodeId: na.nodeId } : null); }
@@ -51797,6 +52522,16 @@
                     mcBroadcastToApps('pflx_pitch_approved', { pitchId: p.id, title: p.title, pathway: p.pathway, pathwayNodeId: p.pathwayNodeId });
                 }
                 mcApprovals.push({ type:'pitch', id:id, title:p?p.title:'', action:'approved', date:new Date().toISOString().split('T')[0], submittedBy:p?p.submittedBy:'' });
+            } else if (type === 'application') {
+                var appI = mcApplications.find(function(x) { return x.id === id; });
+                mcApproveApplication(id);
+                mcApprovals.push({ type:'application', id:id, title: appI ? (appI.itemName || '') : '', action:'approved', date:new Date().toISOString().split('T')[0], submittedBy: appI ? appI.playerBrand : '' });
+            } else if (type === 'completion') {
+                // The completion record itself already lives in mcApprovals
+                // (pushed by mcCheckCompletionApprovals) — approving just
+                // flips its action, same in-place pattern as module_completion.
+                var cma = mcApprovals.find(function(x) { return x && x.id === id; });
+                if (cma) cma.action = 'approved';
             } else if (type === 'module_completion') {
                 var ma = mcApprovals.find(function(x) { return x.id === id; });
                 if (ma) {
@@ -51858,6 +52593,18 @@
                 var p = mcPitches.find(function(p) { return p.id === id; });
                 if (p) { p.status = 'rejected'; mcSaveData('pitches'); }
                 mcApprovals.push({ type:'pitch', id:id, title:p?p.title:'', action:'rejected', date:new Date().toISOString().split('T')[0], submittedBy:p?p.submittedBy:'' });
+            } else if (type === 'application') {
+                var appR = mcApplications.find(function(x) { return x.id === id; });
+                mcRejectApplication(id, '');
+                mcApprovals.push({ type:'application', id:id, title: appR ? (appR.itemName || '') : '', action:'rejected', date:new Date().toISOString().split('T')[0], submittedBy: appR ? appR.playerBrand : '' });
+            } else if (type === 'completion') {
+                // Rejecting just means "not yet" — the player stays un-approved
+                // for this Program/Checkpoint/Project. Their completionApprovalAt
+                // marker is already set so the sweep won't re-queue them; a host
+                // can flip this record back to 'pending' by hand if the player
+                // finishes more work later (no auto-requeue in this pass).
+                var cmr = mcApprovals.find(function(x) { return x && x.id === id; });
+                if (cmr) cmr.action = 'rejected';
             } else if (type === 'module_completion') {
                 var mr = mcApprovals.find(function(x) { return x.id === id; });
                 if (mr) {
@@ -55389,6 +56136,27 @@ RESPONSE RULES:
                 }
                 if (typeof pflxToast === 'function') pflxToast('Portfolio synced', 'success');
             } catch(e) { console.warn('[Portfolio bridge]', e); }
+            // ── v1.71: write DIRECTLY to Supabase too, not just through the
+            // X-Coin iframe bridge above. That bridge only fires when the
+            // X-Coin iframe happens to be mounted — every other player-scoped
+            // write in this file (roster rows, tombstones) goes straight to
+            // `app_data` so it's readable from any device regardless of what
+            // iframes happen to be open. Portfolios need the same reliability
+            // now that ANY player can open ANY other player's portfolio from
+            // anywhere in PFLX (see pflxFetchPortfolioData below) — that only
+            // works if the data actually lands in the cloud. Same key
+            // (`pflx_portfolio_<id>`) the viewer reads first.
+            try {
+                var _pfClient = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (_pfClient && id) {
+                    _pfClient.from('app_data').upsert(
+                        { key: 'pflx_portfolio_' + id, data: data, updated_at: new Date().toISOString() },
+                        { onConflict: 'key' }
+                    ).then(function (res) {
+                        if (res && res.error) console.warn('[portfolio] cloud upsert error:', res.error.message);
+                    }, function (err) { console.warn('[portfolio] cloud upsert threw', err); });
+                }
+            } catch (e) { console.warn('[portfolio] direct cloud save failed', e); }
         }
 
         // ── Main Render ──────────────────────────────────────────────
@@ -55893,6 +56661,164 @@ RESPONSE RULES:
                 else if (typeof window.switchToView === 'function') window.switchToView('portfolio');
             } catch (e) { console.warn('[portfolio] shortcut nav failed', e); }
         };
+
+        // ── Universal Portfolio Viewer (v1.71) ─────────────────────────
+        // Ennis: "Portfolios should be viewable to anyone in PFLX with no
+        // need to publish. Publish is for viewing outside of PFLX." This is
+        // the in-app half of that — click ANY brand name anywhere in PFLX
+        // and it opens THAT player's live portfolio in a read-only modal,
+        // logged-in only, no publish required. `portfolioPublish()` above is
+        // untouched — it still does exactly what it always did: push a
+        // snapshot to a public, no-login URL for sharing outside PFLX.
+        //
+        // Privacy note: this reads the same LIVE data `portfolioSaveData`
+        // writes (always up to date), not the Publish snapshot — but it
+        // applies the same privacy contract the Publish snapshot always has:
+        // `privateBio` never renders here, and `hideRealName` is respected.
+        // "No need to publish" removes the extra step, not the privacy rules.
+
+        // Strip anything the owner marked private before a non-owner viewer
+        // sees it. `data` here is whatever's actually stored under
+        // `pflx_portfolio_<id>` — which, unlike the Publish snapshot, still
+        // has `privateBio` in it (portfolioLoadData's own defaults include
+        // it) since it was never built to be shown to anyone but the owner
+        // until now.
+        function pflxSanitizePortfolioForViewing(data) {
+            var d = data || {};
+            return {
+                bio: d.bio || '',
+                tagline: d.tagline || '',
+                banner: d.banner || '',
+                hideRealName: d.hideRealName !== false,
+                projects: Array.isArray(d.projects) ? d.projects : []
+            };
+        }
+
+        // Fetch a player's LIVE portfolio data (not the Publish snapshot) by
+        // id or brand. Tries, in order:
+        //   1. Supabase `pflx_portfolio_<id>` — the reliable key every save
+        //      writes to directly as of this patch (see portfolioSaveData).
+        //   2. Supabase `portfolio_<id>` — the legacy key the X-Coin iframe
+        //      bridge wrote to before this patch, so portfolios saved before
+        //      today still resolve instead of appearing empty.
+        //   3. localStorage `pflx_portfolio_<id>` — same-device fallback
+        //      (covers being offline, or viewing your own portfolio through
+        //      this same path).
+        // Returns { player, data: null } — not an error — for a player who
+        // has simply never touched their portfolio yet; that's normal.
+        async function pflxFetchPortfolioData(idOrBrand) {
+            var player = pflxResolvePlayer(idOrBrand);
+            var id = player ? player.id : idOrBrand;
+            if (!id) return { player: null, data: null };
+            try {
+                var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (client) {
+                    var res = await client.from('app_data').select('data').eq('key', 'pflx_portfolio_' + id).maybeSingle();
+                    if (res && res.data && res.data.data) return { player: player, data: res.data.data };
+                    var legacy = await client.from('app_data').select('data').eq('key', 'portfolio_' + id).maybeSingle();
+                    if (legacy && legacy.data && legacy.data.data) return { player: player, data: legacy.data.data };
+                }
+            } catch (e) { console.warn('[portfolio viewer] cloud fetch failed', e); }
+            try {
+                var raw = localStorage.getItem('pflx_portfolio_' + id);
+                if (raw) return { player: player, data: JSON.parse(raw) };
+            } catch (e) {}
+            return { player: player, data: null };
+        }
+
+        var _pflxPortfolioModalEl = null;
+        function pflxClosePortfolioModal() {
+            if (_pflxPortfolioModalEl && _pflxPortfolioModalEl.parentNode) _pflxPortfolioModalEl.parentNode.removeChild(_pflxPortfolioModalEl);
+            _pflxPortfolioModalEl = null;
+        }
+
+        // The one entry point every brand-name click across the app should
+        // call. Works for ANY player, from ANYWHERE in PFLX — no publish
+        // required. Safe to call with a bare id or a brand string.
+        window.pflxOpenPlayerPortfolio = async function (idOrBrand) {
+            if (!idOrBrand) return;
+            pflxClosePortfolioModal();
+            var overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.78);display:flex;align-items:center;justify-content:center;z-index:10000;backdrop-filter:blur(6px);';
+            overlay.innerHTML = '<div style="color:rgba(255,255,255,0.6);font-family:\'Share Tech Mono\',monospace;">Loading portfolio…</div>';
+            overlay.onclick = function (e) { if (e.target === overlay) pflxClosePortfolioModal(); };
+            document.body.appendChild(overlay);
+            _pflxPortfolioModalEl = overlay;
+
+            var result = await pflxFetchPortfolioData(idOrBrand);
+            if (_pflxPortfolioModalEl !== overlay) return; // closed while loading
+            var player = result.player;
+            if (!player) {
+                overlay.innerHTML = '<div style="background:#12121c;border:1px solid rgba(255,255,255,0.15);border-radius:16px;padding:28px;max-width:340px;text-align:center;color:rgba(255,255,255,0.6);font-family:\'Jura\',sans-serif;">Couldn\'t find that player.<br><button onclick="pflxClosePortfolioModal()" style="margin-top:14px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);color:#fff;padding:8px 18px;border-radius:8px;cursor:pointer;">Close</button></div>';
+                return;
+            }
+            var data = pflxSanitizePortfolioForViewing(result.data);
+            overlay.innerHTML = pflxRenderPortfolioModalHtml(player, data);
+        };
+
+        function pflxRenderPortfolioModalHtml(player, data) {
+            var displayName = (data.hideRealName === false && player.name) ? player.name : player.brand;
+            var avatar = player.image || '';
+            var badgeCount = 0;
+            try {
+                var bc = player.badgeCounts || player.digitalBadges;
+                if (Array.isArray(bc)) badgeCount = bc.length;
+                else if (bc && typeof bc === 'object') badgeCount = Object.keys(bc).reduce(function (sum, k) { return sum + (Number(bc[k]) || 0); }, 0);
+                else if (typeof bc === 'number') badgeCount = bc;
+            } catch (e) {}
+            var xc = Number(player.xc || player.totalXcoin || 0);
+
+            var bannerHtml = data.banner
+                ? '<div style="width:100%;height:140px;border-radius:16px 16px 0 0;overflow:hidden;background:#0a0a12;"><img src="' + escapeHtml(data.banner) + '" style="width:100%;height:100%;object-fit:cover;"></div>'
+                : '<div style="width:100%;height:80px;border-radius:16px 16px 0 0;background:linear-gradient(90deg,rgba(0,240,255,0.12),rgba(139,92,246,0.12));"></div>';
+
+            var projectsHtml;
+            if (data.projects.length) {
+                projectsHtml = '<div style="margin-top:18px;"><div style="font-size:11px;letter-spacing:0.1em;color:rgba(255,255,255,0.45);text-transform:uppercase;margin-bottom:10px;">Projects</div>';
+                data.projects.forEach(function (p) {
+                    projectsHtml += '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:14px;margin-bottom:10px;">';
+                    projectsHtml += (typeof portfolioRenderProjectMedia === 'function') ? portfolioRenderProjectMedia(p) : '';
+                    projectsHtml += '<div style="color:#e0e6ff;font-weight:700;font-size:13px;">' + escapeHtml(p.title || 'Untitled') + '</div>';
+                    if (p.description) projectsHtml += '<div style="color:rgba(255,255,255,0.5);font-size:12px;margin-top:4px;line-height:1.4;">' + escapeHtml(p.description) + '</div>';
+                    projectsHtml += '</div>';
+                });
+                projectsHtml += '</div>';
+            } else {
+                projectsHtml = '<div style="margin-top:18px;color:rgba(255,255,255,0.3);font-size:12px;font-style:italic;">No projects added to this portfolio yet.</div>';
+            }
+
+            return '' +
+                '<div style="background:#12121c;border:1px solid rgba(0,240,255,0.2);border-radius:16px;max-width:520px;width:92%;max-height:86vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.5);position:relative;">' +
+                    '<button onclick="pflxClosePortfolioModal()" style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.2);color:#fff;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:14px;z-index:2;">✕</button>' +
+                    bannerHtml +
+                    '<div style="padding:20px 24px 26px;">' +
+                        '<div style="display:flex;align-items:center;gap:12px;margin-top:-38px;">' +
+                            (avatar ? '<img src="' + escapeHtml(avatar) + '" style="width:64px;height:64px;border-radius:16px;object-fit:cover;border:3px solid #12121c;">' : '<div style="width:64px;height:64px;border-radius:16px;background:rgba(0,240,255,0.15);border:3px solid #12121c;display:flex;align-items:center;justify-content:center;font-size:24px;color:#00f0ff;">' + escapeHtml((displayName || '?').charAt(0).toUpperCase()) + '</div>') +
+                            '<div style="padding-top:22px;"><div style="color:#fff;font-weight:800;font-size:17px;font-family:\'Orbitron\',sans-serif;">' + escapeHtml(displayName || 'Player') + '</div>' +
+                            (data.tagline ? '<div style="color:rgba(255,255,255,0.5);font-size:12px;margin-top:2px;">' + escapeHtml(data.tagline) + '</div>' : '') + '</div>' +
+                        '</div>' +
+                        '<div style="display:flex;gap:14px;margin-top:16px;">' +
+                            '<div style="background:rgba(245,200,66,0.08);border:1px solid rgba(245,200,66,0.25);border-radius:10px;padding:8px 14px;color:#f5c842;font-size:12px;font-weight:700;">' + xc + ' XC</div>' +
+                            '<div style="background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.25);border-radius:10px;padding:8px 14px;color:#a78bfa;font-size:12px;font-weight:700;">' + badgeCount + ' Badges</div>' +
+                        '</div>' +
+                        (data.bio ? '<div style="color:rgba(255,255,255,0.7);font-size:13px;line-height:1.5;margin-top:16px;">' + escapeHtml(data.bio) + '</div>' : '') +
+                        projectsHtml +
+                    '</div>' +
+                '</div>';
+        }
+
+        // Reusable clickable-brand-name span for any render site in the app.
+        // Uses the player's id (never raw brand text) inside the onclick
+        // attribute — ids in this system are always machine-generated
+        // slugs, safe to interpolate; brand text (which players choose
+        // freely) is not, so it only ever appears as the escaped visible
+        // label, never inside the handler itself.
+        function pflxBrandLink(player, displayText, extraStyle) {
+            if (!player || !player.id) return escapeHtml(displayText != null ? displayText : '');
+            var text = escapeHtml(displayText != null ? displayText : (player.brand || player.name || ''));
+            return '<span class="pflx-brand-link" onclick="event.stopPropagation();pflxOpenPlayerPortfolio(\'' + player.id + '\')" style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px;' + (extraStyle || '') + '" title="View portfolio">' + text + '</span>';
+        }
+        window.pflxBrandLink = pflxBrandLink;
 
         // ── Quick-profile dropdown shortcuts ──────────────────────────────
         // Deep-link directly to the right sub-page by overriding the iframe
@@ -65308,6 +66234,8 @@ RESPONSE RULES:
                 'approve.node':   ['master', 'admin', 'cohost', 'instructor', 'guest'],// Core Pathway node submissions
                 'approve.trade':  ['master', 'admin', 'cohost', 'instructor'],         // X-Coin trades
                 'approve.barter': ['master', 'admin', 'instructor'],                   // X-Coin barter (Instructor tier)
+                'approve.application': ['master', 'admin', 'cohost', 'instructor', 'guest'], // v1.71 Apply-to-Join (Program/Project)
+                'approve.completion': ['master', 'admin', 'cohost', 'instructor', 'guest'], // v1.71 Program/Checkpoint/Project completion-approval
                 // management surfaces
                 'manage.cohorts': ['master', 'admin', 'cohost', 'instructor'],
                 'manage.project': ['master', 'admin', 'cohost', 'instructor', 'guest'],
