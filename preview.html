@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 73;
+      window.PFLX_PATCH   = 74;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -61179,6 +61179,22 @@ RESPONSE RULES:
                                 window.location.href = u;
                             }
                         } catch (e) { console.warn('[PFLX] pflx_navigate failed', e); }
+                    }
+
+                    // v1.73.1 (Ennis: "It should open directly with no middle
+                    // ground") — X-Coin's old /profile/[id] route (still linked
+                    // from its Leaderboard, Player Management, and side nav) used
+                    // to postMessage `pflx_navigate` to the Console's legacy
+                    // PUBLISHED-only `/<brand>` page, which dead-ends in "Portfolio
+                    // not found" for anyone who hasn't clicked Publish — exactly
+                    // backwards from the v1.71 "no need to publish" viewer. X-Coin's
+                    // stub now posts THIS message instead, so clicking a player
+                    // anywhere in X-Coin opens the same in-app, no-publish-required
+                    // modal a brand-name click inside the Console itself opens —
+                    // one hop, no interstitial "moved"/"not found" screens.
+                    if (msg.type === 'pflx_open_portfolio' && msg.playerId) {
+                        try { if (typeof window.pflxOpenPlayerPortfolio === 'function') window.pflxOpenPlayerPortfolio(String(msg.playerId)); }
+                        catch (e) { console.warn('[PFLX] pflx_open_portfolio failed', e); }
                     }
 
                     // ── X-Tracker reward request from a player ──
