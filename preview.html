@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 71;
+      window.PFLX_PATCH   = 72;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -38221,7 +38221,17 @@
                 if (ptRadio) ptRadio.checked = true;
                 el = document.getElementById('mc-project-status'); if (el) el.value = p.status || 'planning';
                 el = document.getElementById('mc-project-budget'); if (el) el.value = p.budget || 0;
-                el = document.getElementById('mc-project-team'); if (el) el.value = (p.team || []).join(', ');
+                // v1.72 — defensive against legacy/seeded records where `team`
+                // was written as a plain string (e.g. a department name) instead
+                // of an array. (p.team || []).join(', ') threw "team.join is not
+                // a function" and hard-crashed the Edit form for any such
+                // project — reported by Ennis on "Checkpoint Beta: Project
+                // Management & Administration" (team stored as the string
+                // "Project Management & Administration"). Re-saving the form
+                // always writes team back out as a proper array, so this
+                // self-heals the record the next time it's edited.
+                el = document.getElementById('mc-project-team');
+                if (el) el.value = Array.isArray(p.team) ? p.team.join(', ') : (typeof p.team === 'string' ? p.team : '');
                 el = document.getElementById('mc-project-checkpoint'); if (el) el.value = p.checkpointId || '';
                 el = document.getElementById('mc-project-link'); if (el) el.value = p.link || '';
                 // Populate banner
@@ -38425,15 +38435,15 @@
             pflxPlaySfx('save');
             var title = (document.getElementById('mc-project-title')?.value || '').trim();
             if (!title) { alert('Project title is required.'); return; }
-            // ── Structural rule ──
-            // A Project must contain at least one Task. This mirrors the
-            // hierarchy contract Season > Checkpoint > Project > Task where
-            // Task is atomic and everything above rolls up from it.
-            var __projTaskCbCount = document.querySelectorAll('.mc-project-task-cb:checked').length;
-            if (__projTaskCbCount === 0) {
-                alert('A Project needs at least one Task. Please select a Task below, or create one first from the Tasks tab.');
-                return;
-            }
+            // v1.72 (Ennis) — the old "must have ≥1 Task" hard block is gone.
+            // Ennis wants to be able to stand up a Project shell (name, dates,
+            // cohorts, banner, etc.) before any Tasks exist under it, then
+            // attach Tasks later as they're authored — "this allows better
+            // preparation." Rendering already treats an empty taskIds project
+            // safely (progress panel only shows when totalTasks>0 || xcPool>0,
+            // and _pflxPlayerCompletedProject requires comp.total>0 before it
+            // will ever fire a completion-approval), so no downstream guard
+            // was needed beyond removing the block itself.
 
             var teamStr = (document.getElementById('mc-project-team')?.value || '').trim();
             var team = teamStr ? teamStr.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
