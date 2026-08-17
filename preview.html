@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 75;
+      window.PFLX_PATCH   = 76;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -56933,6 +56933,32 @@ RESPONSE RULES:
                 try { return (typeof mcFindBadge === 'function') ? mcFindBadge(r) : (r && typeof r === 'object' ? r : null); } catch (e) { return null; }
             }).filter(Boolean);
 
+            // v1.76 (Ennis: "on Vybe's it doesn't show the badges") — root
+            // cause: badgeCounts and player.badges can drift apart (some
+            // award path bumps the category count without ever pushing the
+            // matching ref into badges[] — confirmed on VYBE: badgeCounts.
+            // signature:1, badges:[]). hmcEditPlayer already self-heals this
+            // for the "badges array missing entirely" case by synthesizing
+            // placeholder entries from badgeCounts (~line 66930), but an
+            // EMPTY array passes `Array.isArray` so that guard never fires
+            // when badges is present-but-short — exactly VYBE's case. Extend
+            // the same synthesis here, per category, topping up only the
+            // shortfall (real resolved badges — matched to a category via
+            // the canonical _pflxBadgeCategoryKey helper — are never
+            // duplicated), so a player's earned-badge artwork always at
+            // least reflects what badgeCounts already credits them with.
+            categories.forEach(function (cat) {
+                var claimed = bc[cat.key] || 0;
+                if (!claimed) return;
+                var real = earned.filter(function (b) {
+                    var k = (typeof _pflxBadgeCategoryKey === 'function') ? _pflxBadgeCategoryKey(b.category || b.tier || b.type) : cat.key;
+                    return k === cat.key;
+                }).length;
+                for (var i = real; i < claimed; i++) {
+                    earned.push({ id: 'legacy-' + cat.key + '-' + i, name: cat.label.replace(/s$/, '') + ' Badge #' + (i + 1), icon: cat.icon, xc: 0 });
+                }
+            });
+
             if (totalBadges === 0 && earned.length === 0) {
                 return '<p style="color:rgba(255,255,255,0.3);font-size:13px;text-align:center;padding:30px 0;">No badges earned yet.</p>';
             }
@@ -66926,18 +66952,29 @@ RESPONSE RULES:
                 });
             } catch (e) {}
 
-            // Ensure player has badges array (legacy badgeCounts → synthesized entries)
-            if (!Array.isArray(p.badges)) {
-                p.badges = [];
-                if (p.badgeCounts) {
-                    BADGE_TYPES.forEach(function (t) {
-                        var k = t.toLowerCase();
-                        var n = (p.badgeCounts[k] || 0) | 0;
-                        for (var i = 0; i < n; i++) {
-                            p.badges.push({ id: 'legacy-' + k + '-' + i + '-' + Date.now(), name: t + ' Badge #' + (i + 1), type: t, xc: 0, awardedAt: Date.now() });
-                        }
-                    });
-                }
+            // Ensure player has badges array (legacy badgeCounts → synthesized entries).
+            // v1.76 (Ennis: "on Vybe's it doesn't show the badges") — badgeCounts
+            // and badges[] can drift apart PER CATEGORY (some award path bumps
+            // the count without ever pushing the matching ref into badges[] —
+            // confirmed on VYBE: badgeCounts.signature:1, badges:[]). An empty
+            // array still satisfies Array.isArray, so this guard used to only
+            // catch "badges missing entirely," never "present but short." Now
+            // tops up whatever shortfall exists per category instead.
+            if (!Array.isArray(p.badges)) p.badges = [];
+            if (p.badgeCounts) {
+                BADGE_TYPES.forEach(function (t) {
+                    var k = t.toLowerCase();
+                    var claimed = (p.badgeCounts[k] || 0) | 0;
+                    if (!claimed) return;
+                    var real = p.badges.filter(function (b) {
+                        var resolved = (typeof mcFindBadge === 'function') ? mcFindBadge(b) : null;
+                        var cat = resolved ? (resolved.category || resolved.tier) : (b && typeof b === 'object' ? (b.type || b.category) : null);
+                        return (typeof _pflxBadgeCategoryKey === 'function' ? _pflxBadgeCategoryKey(cat) : k) === k;
+                    }).length;
+                    for (var i = real; i < claimed; i++) {
+                        p.badges.push({ id: 'legacy-' + k + '-' + i + '-' + Date.now(), name: t + ' Badge #' + (i + 1), type: t, xc: 0, awardedAt: Date.now() });
+                    }
+                });
             }
 
             // Render badge list HTML
