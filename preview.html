@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 77;
+      window.PFLX_PATCH   = 78;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -61528,6 +61528,40 @@ RESPONSE RULES:
                             ev.source.postMessage(JSON.stringify({
                                 type: 'pflx_player_data',
                                 player: updated,
+                                playerId: msg.playerId,
+                                ackId: msg.ackId || null
+                            }), '*');
+                        }
+                    }
+
+                    // sub → Console: "award this SPECIFIC badge to player X" —
+                    // v1.78 (Ennis: "This seems to be showing dummy badges...
+                    // you seem to not be receiving all of the right
+                    // information"). Distinct from pflx_player_update above:
+                    // that message only ever carried a bare digitalBadges
+                    // COUNT (X-Coin's own schema has no concept of badge
+                    // identity), which is why v1.77's fix could only backfill
+                    // a generic "Primary Badge #N" placeholder — technically
+                    // consistent, but not the real badge that was granted.
+                    // This message carries the actual name/image/category
+                    // (X-Coin's Grant button now sends both messages — see
+                    // handleGrantCoin in pflx-xcoin-app), so it can route
+                    // through the canonical award() funnel — the same one
+                    // task/checkpoint/project/module completions already use
+                    // — and store the real artwork instead of a placeholder.
+                    if (msg.type === 'pflx_player_award' && msg.playerId && msg.badge) {
+                        var _awardedPlayer = null;
+                        if (window.PflxDataBus && typeof _pflxResolveAwardBadge === 'function') {
+                            _awardedPlayer = window.PflxDataBus.award(msg.playerId, {
+                                badge: _pflxResolveAwardBadge(msg.badge),
+                                source: msg.source || 'sub-app',
+                                reason: msg.reason || ''
+                            });
+                        }
+                        if (ev.source && ev.source.postMessage) {
+                            ev.source.postMessage(JSON.stringify({
+                                type: 'pflx_player_data',
+                                player: _awardedPlayer,
                                 playerId: msg.playerId,
                                 ackId: msg.ackId || null
                             }), '*');
