@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 76;
+      window.PFLX_PATCH   = 77;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -56788,7 +56788,14 @@ RESPONSE RULES:
             var avatar = player.image || '';
             var bc = player.badgeCounts || {};
             var totalBadges = (bc.primary || 0) + (bc.premium || 0) + (bc.executive || 0) + (bc.signature || 0);
-            var badgeCount = totalBadges || player.digitalBadges || 0;
+            // v1.77 — was `totalBadges || player.digitalBadges`, which only
+            // fell back to the legacy scalar when totalBadges was exactly
+            // 0. When badgeCounts is non-zero but still behind a drifted
+            // digitalBadges (NEUROFLUX: totalBadges 4, digitalBadges 6),
+            // that left the stat tile silently stuck at the lower number.
+            // Match whichever the pflxPlayerBadgesHtml() badge grid below
+            // actually ends up rendering (same v1.77 top-up logic).
+            var badgeCount = Math.max(totalBadges, player.digitalBadges || 0);
             var xc = Number(player.xc || player.totalXcoin || 0);
             var totalXcoin = Number(player.totalXcoin || player.xc || 0);
             var rank = (typeof getRankForXC === 'function') ? getRankForXC(totalXcoin) : { name: 'Player', icon: '', level: 1 };
@@ -56958,6 +56965,26 @@ RESPONSE RULES:
                     earned.push({ id: 'legacy-' + cat.key + '-' + i, name: cat.label.replace(/s$/, '') + ' Badge #' + (i + 1), icon: cat.icon, xc: 0 });
                 }
             });
+
+            // v1.77 (Ennis: "I just gave Neuroflux 2 new badges and it
+            // didn't show") — the pass above only reconciles earned[]
+            // against badgeCounts; it never looks at the legacy numeric
+            // player.digitalBadges at all. Confirmed on NEUROFLUX: badges
+            // (len 4) and badgeCounts (sum 4) agreed with EACH OTHER, so
+            // the per-category pass found no shortfall — yet digitalBadges
+            // was 6 (X-Coin bumped it directly via a partial cross-app
+            // update that never touched badges[]/badgeCounts; see the
+            // matching write-time fix in PflxDataBus.applyUpdate above,
+            // which stops this drift going forward). This is the display
+            // safety net for records that already drifted before that fix
+            // shipped — top up with generic Primary-bucket placeholders
+            // (no category signal exists on a bare number) whenever
+            // digitalBadges still claims more than every other
+            // representation combined.
+            var claimedByLegacy = (player && typeof player.digitalBadges === 'number') ? player.digitalBadges : 0;
+            for (var li = earned.length; li < claimedByLegacy; li++) {
+                earned.push({ id: 'legacy-digitalBadges-' + li, name: 'Primary Badge #' + (li + 1), icon: '&#x1F7E6;', xc: 0 });
+            }
 
             if (totalBadges === 0 && earned.length === 0) {
                 return '<p style="color:rgba(255,255,255,0.3);font-size:13px;text-align:center;padding:30px 0;">No badges earned yet.</p>';
@@ -64950,6 +64977,17 @@ RESPONSE RULES:
                             studioId: (player.studioId !== undefined ? (player.studioId || '') : (mcPlayers[__mi].studioId || '')),
                             xc: player.xc || 0, digitalBadges: player.digitalBadges || 0,
                             badgeCounts: player.badgeCounts || mcPlayers[__mi].badgeCounts,
+                            // v1.77 — this mirror copied digitalBadges/badgeCounts
+                            // but never the badges[] artwork array itself, so any
+                            // Player Management badge edit (award/remove via
+                            // hmcEditPlayer) silently never reached mcPlayers /
+                            // the pflx_mc_players cloud roster — only the PLAYERS-
+                            // side per-id row got the correct array. Found while
+                            // tracing the NEUROFLUX badge-drift report; not the
+                            // root cause of that specific bug, but the same class
+                            // of drift and clearly an oversight next to the two
+                            // fields above it.
+                            badges: player.badges || mcPlayers[__mi].badges,
                             rankOverride: player.rankOverride || null,
                             frozen: !!player.frozen, claimed: !!player.claimed,
                             onboardingComplete: player.onboardingComplete !== false,
@@ -65251,6 +65289,38 @@ RESPONSE RULES:
                 // Keep totalXcoin monotonic
                 if (typeof p.xc === 'number' && typeof p.totalXcoin === 'number' && p.xc > p.totalXcoin) {
                     p.totalXcoin = p.xc;
+                }
+                // v1.77 (Ennis: "I just gave Neuroflux 2 new badges and it
+                // didn't show") — ROOT CAUSE: cross-app partial updates sent
+                // over postMessage (X-Coin's `pflx_player_update` → here)
+                // bump the legacy numeric `digitalBadges` counter — X-Coin's
+                // own schema — but never include `badges`/`badgeCounts`,
+                // the Console's canonical badge-artwork source (the
+                // Handoff's documented "Schema splits" gotcha). Confirmed
+                // via the activity log on NEUROFLUX: a `data_bus_update`
+                // from source "xcoin" with keys [xc,totalXcoin,
+                // digitalBadges,level] — digitalBadges 5→6 while badges[]
+                // (len 4) and badgeCounts (sum 4) never moved. Any update
+                // that raises digitalBadges without also supplying badges[]
+                // now tops up the shortfall with generic placeholders
+                // (bucketed to 'primary' — a bare number carries no
+                // category) so the two representations never drift apart
+                // at the source, not just at display time (v1.76 already
+                // does a display-time top-up, but only reconciles per
+                // category against badgeCounts — it never checks
+                // digitalBadges, so it silently missed this exact case).
+                if (typeof changes.digitalBadges === 'number' && changes.badges === undefined) {
+                    var _haveLen = Array.isArray(p.badges) ? p.badges.length : 0;
+                    var _claimed = changes.digitalBadges | 0;
+                    if (_claimed > _haveLen) {
+                        if (!Array.isArray(p.badges)) p.badges = [];
+                        var _bc = Object.assign({ signature: 0, primary: 0, premium: 0, executive: 0 }, p.badgeCounts || {});
+                        for (var _bi = _haveLen; _bi < _claimed; _bi++) {
+                            p.badges.push({ id: 'legacy-primary-' + _bi + '-' + Date.now(), name: 'Primary Badge #' + (_bi + 1), type: 'Primary', xc: 0, awardedAt: Date.now(), source: source || 'sync' });
+                            _bc.primary = (_bc.primary || 0) + 1;
+                        }
+                        p.badgeCounts = _bc;
+                    }
                 }
                 try { logActivity(p.id, 'data_bus_update', { source: source || 'unknown', keys: Object.keys(changes) }); } catch (e) {}
                 broadcastPlayerChange(p);
