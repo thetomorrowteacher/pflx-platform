@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 88;
+      window.PFLX_PATCH   = 89;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -64265,13 +64265,42 @@ RESPONSE RULES:
                                 try {
                                     var incomingGroups = row.data;
                                     if (Array.isArray(incomingGroups) && incomingGroups.length && typeof mcCohortGroups !== 'undefined') {
+                                        // ECHO GUARD (Aug 18, Ennis-reported: "the descriptions are
+                                        // not saved" — checkpoint edits were being silently lost
+                                        // platform-wide). ROOT CAUSE: this handler unconditionally
+                                        // called mcSaveData('cohortgroups') on every incoming
+                                        // 'cohortGroups' realtime row, even when the merge produced
+                                        // the EXACT SAME list already held locally. mcSaveData ->
+                                        // mcCloudSync('cohortgroups') relays to the X-Coin iframe,
+                                        // which writes 'cohortGroups' back to Supabase — re-firing
+                                        // THIS SAME realtime subscription. With no dirty-check, that
+                                        // closed an infinite echo loop: confirmed live via console
+                                        // (2000+ "[roster] ← realtime cohort-group update" lines in
+                                        // under two minutes). Every cloud push (checkpoints, players,
+                                        // everything in _mcCloudQueue) shares ONE debounce timer
+                                        // (_mcCloudTimer, see mcCloudPush) that gets cleared and
+                                        // restarted on every queue write — the loop fired so
+                                        // continuously that timer never found a quiet 1s window to
+                                        // actually flush, so nothing new ever reached the cloud.
+                                        // That's why a checkpoint description edit could save
+                                        // correctly to memory + localStorage (confirmed live) yet
+                                        // never appear in the cloud row a reload/other device reads.
+                                        // Fix: only merge + resave when the merge actually changes
+                                        // something. A genuine remote edit still applies exactly
+                                        // once; a self-echo (or an already-applied update from
+                                        // another tab) is now a silent no-op instead of a fresh
+                                        // write that re-triggers the loop.
+                                        var __beforeJson = JSON.stringify(mcCohortGroups);
                                         var __byId = {};
                                         (mcCohortGroups || []).forEach(function (g) { if (g && g.id) __byId[g.id] = g; });
                                         incomingGroups.forEach(function (g) { if (g && g.id) __byId[g.id] = g; });
-                                        mcCohortGroups = Object.keys(__byId).map(function (k) { return __byId[k]; });
-                                        try { mcSaveData('cohortgroups'); } catch (e) {}
-                                        console.log('[roster] ← realtime cohort-group update:', mcCohortGroups.length, 'groups');
-                                        try { window.dispatchEvent(new CustomEvent('pflx-cohorts-updated', { detail: { count: mcCohortGroups.length } })); } catch (e) {}
+                                        var __mergedGroups = Object.keys(__byId).map(function (k) { return __byId[k]; });
+                                        if (JSON.stringify(__mergedGroups) !== __beforeJson) {
+                                            mcCohortGroups = __mergedGroups;
+                                            try { mcSaveData('cohortgroups'); } catch (e) {}
+                                            console.log('[roster] ← realtime cohort-group update:', mcCohortGroups.length, 'groups');
+                                            try { window.dispatchEvent(new CustomEvent('pflx-cohorts-updated', { detail: { count: mcCohortGroups.length } })); } catch (e) {}
+                                        }
                                     }
                                 } catch (e) { console.warn('[roster] cohort-group realtime merge failed', e); }
                                 return;
