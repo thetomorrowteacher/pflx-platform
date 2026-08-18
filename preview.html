@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 84;
+      window.PFLX_PATCH   = 85;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -31250,11 +31250,21 @@
                 form:   { label: 'Google Form',   icon: '📝' },
                 file:   { label: 'Drive File',    icon: '📁' },
                 folder: { label: 'Drive Folder',  icon: '🗂️' },
-                // v1.84 (Ennis) — Canva designs attach through this exact same
+                // v1.84 (Ennis) — Canva attaches through this exact same
                 // Resources system as Google files: same paste-a-link modal,
                 // same rec.attachments[] storage shape, same card/Preview/Open/
-                // Remove UI. Only parseLink()/build() below know it's Canva.
-                canva:  { label: 'Canva Design',  icon: '🎨' }
+                // Remove UI. Covers Canva design share links, public Template
+                // Marketplace pages, and canva.link short links — only design
+                // share links get a live Preview (see parseLink() below).
+                canva:  { label: 'Canva',         icon: '🎨' },
+                // v1.85 (Ennis) — "or any embed code": raw <iframe> HTML from
+                // any platform's own "Share > Embed" option (YouTube, Figma,
+                // Loom, etc.), and a last-resort plain link for anything else
+                // recognizable as a URL. Both are attach-flow-only fallbacks —
+                // see parseLinkOrEmbed() below — so submission-link rendering
+                // elsewhere in the app (parseLink()/isGoogle()) is unchanged.
+                embed:  { label: 'Embedded Content', icon: '🔗' },
+                link:   { label: 'Resource Link',    icon: '🔗' }
             };
             function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
             function build(kind, id, url) {
@@ -31287,9 +31297,44 @@
                 // Canva share link: canva.com/design/<DESIGN_ID>/<SHARE_ID>/view|edit|watch
                 m = url.match(/https?:\/\/(?:www\.)?canva\.com\/design\/([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_-]+)\/(?:view|edit|watch)/i);
                 if (m) return build('canva', m[1] + '/' + m[2], url);
+                // Canva public Template Marketplace page (canva.com/templates/
+                // EAFxxxx-template-name/) — not a shared "design", so Canva's
+                // ?embed convention isn't reliable against it. Attach as a
+                // plain Canva link: Open works, no Preview attempted.
+                m = url.match(/https?:\/\/(?:www\.)?canva\.com\/templates\/([a-zA-Z0-9_-]+)/i);
+                if (m) return { kind: 'canva', fileId: m[1], url: url, embedUrl: null, icon: TYPES.canva.icon, label: TYPES.canva.label };
+                // Canva's own short-link domain (canva.link/xxxx) — the Share
+                // "Copy link" button sometimes hands these out instead of the
+                // full canva.com/design/... URL. Can't resolve the redirect
+                // client-side (cross-origin, no CORS access to canva.link), so
+                // attach as a plain Canva link — Open still works perfectly,
+                // the browser just follows the redirect when clicked.
+                m = url.match(/https?:\/\/canva\.link\/[a-zA-Z0-9_-]+/i);
+                if (m) return { kind: 'canva', fileId: null, url: url, embedUrl: null, icon: TYPES.canva.icon, label: TYPES.canva.label };
                 return null;
             }
             function isGoogle(url) { return !!parseLink(url); }
+            // Broader acceptance used ONLY by the attach-a-resource flow (see
+            // attachModal() below) — recognizes raw <iframe> embed code (any
+            // platform's own "Share > Embed" HTML snippet) and, failing that,
+            // accepts ANY plausible http(s) link as a plain Resource Link, so
+            // the Attach dialog essentially never has to flatly reject a real
+            // link — worst case it just won't have a live Preview. Kept
+            // separate from parseLink()/isGoogle() so submission-link
+            // rendering elsewhere in the app is unaffected.
+            function parseLinkOrEmbed(input) {
+                var known = parseLink(input);
+                if (known) return known;
+                var raw = String(input || '').trim();
+                if (!raw) return null;
+                if (/<iframe[\s>]/i.test(raw)) {
+                    var m = raw.match(/<iframe[^>]*\ssrc=["']([^"']+)["']/i);
+                    if (m && m[1]) return { kind: 'embed', fileId: null, url: m[1], embedUrl: m[1], icon: TYPES.embed.icon, label: TYPES.embed.label };
+                    return null; // looked like embed code but no readable src — reject rather than guess
+                }
+                if (/^https?:\/\/\S+$/i.test(raw)) return { kind: 'link', fileId: null, url: raw, embedUrl: null, icon: TYPES.link.icon, label: TYPES.link.label };
+                return null;
+            }
             function cardHtml(att, opts) {
                 opts = opts || {};
                 var t = TYPES[att.kind] || TYPES.file;
@@ -31320,19 +31365,19 @@
             function attachModal(onAttach) {
                 var html =
                     '<div style="font-family:Orbitron,sans-serif;font-size:14px;color:#4285F4;font-weight:800;letter-spacing:0.1em;margin-bottom:6px;">📎 ATTACH RESOURCE</div>' +
-                    '<div style="font-size:12px;color:rgba(224,230,255,0.7);margin-bottom:12px;line-height:1.5;">Paste a share link from Google Docs, Sheets, Slides, Drive, or a Canva design. Make sure sharing is set so your students can open it.</div>' +
-                    '<label style="display:block;font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:4px;text-transform:uppercase;letter-spacing:1px;">Google or Canva link</label>' +
-                    '<input id="pg-attach-url" type="text" placeholder="https://docs.google.com/document/d/… or https://www.canva.com/design/…" style="' + (typeof inputCss === 'function' ? inputCss() : 'width:100%;padding:8px;') + 'margin-bottom:10px;">' +
+                    '<div style="font-size:12px;color:rgba(224,230,255,0.7);margin-bottom:12px;line-height:1.5;">Paste a share link from Google Docs, Sheets, Slides, or Drive · a Canva design, template, or canva.link · or any embed code (an &lt;iframe&gt; snippet from YouTube, Figma, Loom, etc.). Make sure sharing is set so your students can open it.</div>' +
+                    '<label style="display:block;font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:4px;text-transform:uppercase;letter-spacing:1px;">Link or embed code</label>' +
+                    '<textarea id="pg-attach-url" rows="3" placeholder="https://docs.google.com/document/d/… · https://www.canva.com/design/… · or paste an <iframe> embed snippet" style="' + (typeof inputCss === 'function' ? inputCss() : 'width:100%;padding:8px;') + 'margin-bottom:10px;font-family:\'Share Tech Mono\',monospace;font-size:11px;resize:vertical;"></textarea>' +
                     '<label style="display:block;font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:4px;text-transform:uppercase;letter-spacing:1px;">Title (optional)</label>' +
                     '<input id="pg-attach-title" type="text" placeholder="e.g. Project Brief" style="' + (typeof inputCss === 'function' ? inputCss() : 'width:100%;padding:8px;') + 'margin-bottom:14px;">' +
                     '<div style="display:flex;gap:8px;justify-content:flex-end;"><button id="pg-attach-btn" style="' + (typeof btnCss === 'function' ? btnCss('primary') : 'padding:8px 14px;') + '">Attach</button></div>';
-                if (typeof openModal !== 'function') { var raw = prompt('Paste a Google Docs/Drive or Canva link:'); var a0 = parseLink(raw || ''); if (a0) { a0.id = 'g' + Date.now().toString(36); a0.addedAt = Date.now(); onAttach(a0); } else if (raw) alert('Not a recognized Google or Canva link.'); return; }
+                if (typeof openModal !== 'function') { var raw = prompt('Paste a link (Google/Drive/Canva) or an <iframe> embed snippet:'); var a0 = parseLinkOrEmbed(raw || ''); if (a0) { a0.id = 'g' + Date.now().toString(36); a0.addedAt = Date.now(); onAttach(a0); } else if (raw) alert('Couldn\'t read a link or embed code from that.'); return; }
                 openModal(html, function (card, close) {
                     var btn = card.querySelector('#pg-attach-btn');
                     if (btn) btn.onclick = function () {
                         var url = (card.querySelector('#pg-attach-url') || {}).value || '';
-                        var att = parseLink(url);
-                        if (!att) { if (typeof pflxToast === 'function') pflxToast('That doesn\'t look like a Google Docs/Drive or Canva link.', 'error'); else alert('Not a recognized Google or Canva link.'); return; }
+                        var att = parseLinkOrEmbed(url);
+                        if (!att) { if (typeof pflxToast === 'function') pflxToast('Couldn\'t read a link or embed code from that — check it\'s a full https:// link or a complete <iframe> snippet.', 'error'); else alert('Couldn\'t read a link or embed code from that.'); return; }
                         var title = (card.querySelector('#pg-attach-title') || {}).value || '';
                         att.title = title.trim(); att.id = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); att.addedAt = Date.now();
                         onAttach(att); close();
@@ -31350,7 +31395,7 @@
                 // wired, fall back to the fully-working link-paste flow.
                 attachModal(onPick);
             }
-            return { parseLink: parseLink, isGoogle: isGoogle, cardHtml: cardHtml, linkCardIfGoogle: linkCardIfGoogle, togglePreview: togglePreview, attachModal: attachModal, openPicker: openPicker, configure: configure, isConfigured: isConfigured, TYPES: TYPES };
+            return { parseLink: parseLink, parseLinkOrEmbed: parseLinkOrEmbed, isGoogle: isGoogle, cardHtml: cardHtml, linkCardIfGoogle: linkCardIfGoogle, togglePreview: togglePreview, attachModal: attachModal, openPicker: openPicker, configure: configure, isConfigured: isConfigured, TYPES: TYPES };
         })();
         window.pflxGoogle = pflxGoogle;
 
