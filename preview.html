@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 87;
+      window.PFLX_PATCH   = 88;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -33061,6 +33061,16 @@
 
             var obj = {
                 id: mcCPEditIndex >= 0 ? mcCheckpoints[mcCPEditIndex].id : 'cp-' + Date.now(),
+                // MERGE TIMESTAMP (Aug 18, Ennis: "I added new Description for
+                // the first 2 checkpoints yet it didn't persist") — this form
+                // rebuilds the record from scratch on every save and never
+                // stamped updatedAt, so _mcMergeById (the cloud read-merge-write
+                // AND the ingest merge both key off it) saw every freshly-saved
+                // checkpoint as tied-oldest (_mcTs falls back to 0). A stale
+                // cloud copy — or another tab's echo — could then beat a fresh
+                // edit and silently revert it. Stamping now makes a save always
+                // win its own merge.
+                updatedAt: Date.now(),
                 // ATTACHMENT PRESERVE (July 15, Ennis): the form rebuilds this
                 // record from fields, which silently dropped Google attachments
                 // on every save. Carry them from the existing record.
@@ -35917,6 +35927,8 @@
 
             var obj = {
                 id: existing ? existing.id : 'proj-' + Date.now(),
+                // MERGE TIMESTAMP — see the matching note in mcSaveCPForm.
+                updatedAt: Date.now(),
                 name: title,
                 description: document.getElementById('mc-qproject-desc')?.value || '',
                 status: existing ? (existing.status || 'planning') : 'planning',
@@ -36085,6 +36097,8 @@
 
             var obj = {
                 id: existing ? existing.id : 'cp-' + Date.now(),
+                // MERGE TIMESTAMP — see the matching note in mcSaveCPForm.
+                updatedAt: Date.now(),
                 attachments: existing ? (existing.attachments || []) : [],
                 name: name,
                 description: document.getElementById('mc-qcp-desc')?.value || '',
@@ -38704,6 +38718,11 @@
 
             var obj = {
                 id: mcProjectEditIndex >= 0 ? mcProjects[mcProjectEditIndex].id : 'proj-' + Date.now(),
+                // MERGE TIMESTAMP — see the matching note in mcSaveCPForm
+                // (Aug 18 checkpoint-description-revert fix). Projects merge
+                // through the same _mcMergeById path, so they were equally
+                // exposed; stamping here closes it before it's reported too.
+                updatedAt: Date.now(),
                 name: title,
                 description: document.getElementById('mc-project-desc')?.value || '',
                 status: document.getElementById('mc-project-status')?.value || 'planning',
