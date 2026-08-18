@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 83;
+      window.PFLX_PATCH   = 84;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -31249,7 +31249,12 @@
                 slide:  { label: 'Google Slides', icon: '📽️' },
                 form:   { label: 'Google Form',   icon: '📝' },
                 file:   { label: 'Drive File',    icon: '📁' },
-                folder: { label: 'Drive Folder',  icon: '🗂️' }
+                folder: { label: 'Drive Folder',  icon: '🗂️' },
+                // v1.84 (Ennis) — Canva designs attach through this exact same
+                // Resources system as Google files: same paste-a-link modal,
+                // same rec.attachments[] storage shape, same card/Preview/Open/
+                // Remove UI. Only parseLink()/build() below know it's Canva.
+                canva:  { label: 'Canva Design',  icon: '🎨' }
             };
             function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
             function build(kind, id, url) {
@@ -31259,6 +31264,12 @@
                 else if (kind === 'slide') embed = 'https://docs.google.com/presentation/d/' + id + '/embed';
                 else if (kind === 'folder') embed = 'https://drive.google.com/embeddedfolderview?id=' + id + '#grid';
                 else if (kind === 'file') embed = 'https://drive.google.com/file/d/' + id + '/preview';
+                // Canva's own embed convention: the normal view/edit/watch share
+                // link, re-based to /view and given the `embed` query param —
+                // works for any Canva design (doc, whiteboard, presentation,
+                // video) without an API key, same zero-setup deal as the Google
+                // link-paste flow above.
+                else if (kind === 'canva') embed = 'https://www.canva.com/design/' + id + '/view?embed';
                 return { kind: kind, fileId: id, url: url, embedUrl: embed, icon: (TYPES[kind] || TYPES.file).icon, label: (TYPES[kind] || TYPES.file).label };
             }
             function parseLink(url) {
@@ -31273,6 +31284,9 @@
                 if (m) return build('folder', m[1], url);
                 m = url.match(/https?:\/\/(?:drive|docs)\.google\.com\/(?:open|uc)\?[^#]*\bid=([a-zA-Z0-9_-]+)/);
                 if (m) return build('file', m[1], url);
+                // Canva share link: canva.com/design/<DESIGN_ID>/<SHARE_ID>/view|edit|watch
+                m = url.match(/https?:\/\/(?:www\.)?canva\.com\/design\/([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_-]+)\/(?:view|edit|watch)/i);
+                if (m) return build('canva', m[1] + '/' + m[2], url);
                 return null;
             }
             function isGoogle(url) { return !!parseLink(url); }
@@ -31296,7 +31310,7 @@
                 var wrap = document.createElement('div');
                 wrap.className = 'pg-preview';
                 wrap.style.cssText = 'margin:2px 0 8px;border:1px solid rgba(66,133,244,0.3);border-radius:8px;overflow:hidden;';
-                wrap.innerHTML = '<iframe src="' + embedUrl + '" style="width:100%;height:380px;border:0;background:#fff;" allow="autoplay"></iframe>';
+                wrap.innerHTML = '<iframe src="' + embedUrl + '" style="width:100%;height:380px;border:0;background:#fff;" allow="autoplay; fullscreen" allowfullscreen></iframe>';
                 card.parentNode.insertBefore(wrap, card.nextSibling);
                 btn.textContent = 'Hide';
             }
@@ -31305,20 +31319,20 @@
             // paste-a-link modal → onAttach(att)
             function attachModal(onAttach) {
                 var html =
-                    '<div style="font-family:Orbitron,sans-serif;font-size:14px;color:#4285F4;font-weight:800;letter-spacing:0.1em;margin-bottom:6px;">📎 ATTACH GOOGLE FILE</div>' +
-                    '<div style="font-size:12px;color:rgba(224,230,255,0.7);margin-bottom:12px;line-height:1.5;">Paste a share link from Google Docs, Sheets, Slides, or Drive. Make sure sharing is set so your students can open it.</div>' +
-                    '<label style="display:block;font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:4px;text-transform:uppercase;letter-spacing:1px;">Google link</label>' +
-                    '<input id="pg-attach-url" type="text" placeholder="https://docs.google.com/document/d/…" style="' + (typeof inputCss === 'function' ? inputCss() : 'width:100%;padding:8px;') + 'margin-bottom:10px;">' +
+                    '<div style="font-family:Orbitron,sans-serif;font-size:14px;color:#4285F4;font-weight:800;letter-spacing:0.1em;margin-bottom:6px;">📎 ATTACH RESOURCE</div>' +
+                    '<div style="font-size:12px;color:rgba(224,230,255,0.7);margin-bottom:12px;line-height:1.5;">Paste a share link from Google Docs, Sheets, Slides, Drive, or a Canva design. Make sure sharing is set so your students can open it.</div>' +
+                    '<label style="display:block;font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:4px;text-transform:uppercase;letter-spacing:1px;">Google or Canva link</label>' +
+                    '<input id="pg-attach-url" type="text" placeholder="https://docs.google.com/document/d/… or https://www.canva.com/design/…" style="' + (typeof inputCss === 'function' ? inputCss() : 'width:100%;padding:8px;') + 'margin-bottom:10px;">' +
                     '<label style="display:block;font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:4px;text-transform:uppercase;letter-spacing:1px;">Title (optional)</label>' +
                     '<input id="pg-attach-title" type="text" placeholder="e.g. Project Brief" style="' + (typeof inputCss === 'function' ? inputCss() : 'width:100%;padding:8px;') + 'margin-bottom:14px;">' +
                     '<div style="display:flex;gap:8px;justify-content:flex-end;"><button id="pg-attach-btn" style="' + (typeof btnCss === 'function' ? btnCss('primary') : 'padding:8px 14px;') + '">Attach</button></div>';
-                if (typeof openModal !== 'function') { var raw = prompt('Paste a Google Docs/Drive link:'); var a0 = parseLink(raw || ''); if (a0) { a0.id = 'g' + Date.now().toString(36); a0.addedAt = Date.now(); onAttach(a0); } else if (raw) alert('Not a recognized Google link.'); return; }
+                if (typeof openModal !== 'function') { var raw = prompt('Paste a Google Docs/Drive or Canva link:'); var a0 = parseLink(raw || ''); if (a0) { a0.id = 'g' + Date.now().toString(36); a0.addedAt = Date.now(); onAttach(a0); } else if (raw) alert('Not a recognized Google or Canva link.'); return; }
                 openModal(html, function (card, close) {
                     var btn = card.querySelector('#pg-attach-btn');
                     if (btn) btn.onclick = function () {
                         var url = (card.querySelector('#pg-attach-url') || {}).value || '';
                         var att = parseLink(url);
-                        if (!att) { if (typeof pflxToast === 'function') pflxToast('That doesn\'t look like a Google Docs/Drive link.', 'error'); else alert('Not a recognized Google link.'); return; }
+                        if (!att) { if (typeof pflxToast === 'function') pflxToast('That doesn\'t look like a Google Docs/Drive or Canva link.', 'error'); else alert('Not a recognized Google or Canva link.'); return; }
                         var title = (card.querySelector('#pg-attach-title') || {}).value || '';
                         att.title = title.trim(); att.id = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); att.addedAt = Date.now();
                         onAttach(att); close();
@@ -31378,7 +31392,7 @@
                 return pflxGoogle.cardHtml(a, editable ? { onRemove: 'mcGoogleRemove(&quot;' + kind + '&quot;,&quot;' + rec.id + '&quot;,&quot;' + a.id + '&quot;)' } : {});
             }).join('');
             if (editable) {
-                body += '<button type="button" onclick="mcGoogleAttach(&quot;' + kind + '&quot;,&quot;' + rec.id + '&quot;)" style="background:rgba(66,133,244,0.14);border:1px solid rgba(66,133,244,0.4);color:#9db4ff;border-radius:7px;font-size:11px;padding:4px 10px;cursor:pointer;margin-top:4px;">📎 Attach Google Doc / Drive</button>';
+                body += '<button type="button" onclick="mcGoogleAttach(&quot;' + kind + '&quot;,&quot;' + rec.id + '&quot;)" style="background:rgba(66,133,244,0.14);border:1px solid rgba(66,133,244,0.4);color:#9db4ff;border-radius:7px;font-size:11px;padding:4px 10px;cursor:pointer;margin-top:4px;">📎 Attach Google Doc / Canva</button>';
             }
             return '<div class="mc-gdrive" style="margin-top:8px;">' +
                 '<div style="font-size:10px;letter-spacing:0.08em;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-bottom:2px;">📎 Resources</div>' + body + '</div>';
