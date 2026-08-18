@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 85;
+      window.PFLX_PATCH   = 86;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -11529,6 +11529,9 @@
                                 <textarea id="portfolio-private-bio-edit" style="width:100%; min-height:60px; background:rgba(10,18,40,0.4); border:1px dashed rgba(255,255,255,0.12); color:rgba(255,255,255,0.6); padding:10px; border-radius:10px; font-family:'Jura',sans-serif; font-size:12px; line-height:1.6; resize:vertical; box-sizing:border-box;" placeholder="Personal notes only you can see — goals, reminders, drafts."></textarea>
                             </div>
                         </div>
+
+                        <!-- Vision Statement (from the Checkpoint Alpha Diagnostic) -->
+                        <div id="portfolio-vision-section" style="margin-bottom:24px; display:none;"></div>
 
                         <!-- Stats Bar -->
                         <div id="portfolio-stats" style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:24px;"></div>
@@ -56289,6 +56292,12 @@ RESPONSE RULES:
                 studioStakeXC:    src.studioStakeXC || rich.studioStakeXC || 0,
                 studioStakePercent: src.studioStakePercent || rich.studioStakePercent || 0,
                 diagnosticResult: src.diagnosticResult || rich.diagnosticResult || null,
+                // v1.86 (Ennis) — the create/impact/perspective/future vision
+                // statement built during the Checkpoint Alpha Diagnostic
+                // (~line 20218, cadState.results.visionStatement), persisted
+                // onto the player record at signup (~line 20561). Never
+                // surfaced on the Portfolio before this patch.
+                visionStatement:  src.visionStatement || rich.visionStatement || null,
                 pathway:          src.pathway || rich.pathway || '',
                 slogan:           src.slogan || base.slogan || '',
                 interests:        src.interests || base.interests || [],
@@ -56501,6 +56510,9 @@ RESPONSE RULES:
                 `).join('');
             }
 
+            // Vision Statement (from the Checkpoint Alpha Diagnostic)
+            portfolioRenderVision(user);
+
             // Designer Identity (from diagnostic result)
             portfolioRenderDesigner(user);
 
@@ -56518,6 +56530,38 @@ RESPONSE RULES:
 
             // Edit mode UI
             portfolioUpdateEditUI();
+        }
+
+        // ── Vision Statement (from the Checkpoint Alpha Diagnostic) ───
+        // Ennis: "make sure that each Vision Statement generated from the
+        // diagnostic, appears on each player's Portfolio." The diagnostic
+        // (CAD, ~line 19812) builds a 4-part create/impact/perspective/
+        // future statement and saves it onto the player record at signup
+        // (~line 20561) — this was already being collected but never shown
+        // anywhere after the one-time "Assessment Complete" screen during
+        // onboarding. Hidden entirely (not an empty card) for players who
+        // signed up before this existed, or skipped the diagnostic.
+        function portfolioRenderVision(user) {
+            const section = document.getElementById('portfolio-vision-section');
+            if (!section) return;
+            const vs = user.visionStatement;
+            if (!vs || !(vs.create || vs.impact || vs.perspective || vs.future)) {
+                section.style.display = 'none';
+                return;
+            }
+            section.style.display = 'block';
+            section.innerHTML = `
+                <div style="background:rgba(0,240,255,0.04);border:1px solid rgba(0,240,255,0.2);border-radius:16px;padding:22px 24px;position:relative;overflow:hidden;">
+                    <div style="position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--cyan),transparent);"></div>
+                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                        <span style="font-size:20px;">&#x1F52E;</span>
+                        <h3 style="margin:0;font-size:14px;font-weight:800;color:var(--cyan);letter-spacing:0.08em;font-family:'Orbitron',sans-serif;">VISION STATEMENT</h3>
+                    </div>
+                    <div style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:16px 18px;color:#c8cce0;font-size:14px;line-height:1.75;font-family:'Jura',sans-serif;">
+                        I want to create <span style="color:var(--cyan);font-weight:700;">${escapeHtml(vs.create || '')}</span> that will <span style="color:var(--cyan);font-weight:700;">${escapeHtml(vs.impact || '')}</span>. My unique perspective is <span style="color:var(--cyan);font-weight:700;">${escapeHtml(vs.perspective || '')}</span>. In two years, I'll be known for <span style="color:var(--cyan);font-weight:700;">${escapeHtml(vs.future || '')}</span>.
+                    </div>
+                </div>
+            `;
         }
 
         // ── Designer Identity (from X-Coin Diagnostic) ───────────────
@@ -57093,6 +57137,18 @@ RESPONSE RULES:
                 '<div style="margin-bottom:24px;background:rgba(167,139,250,0.05);border:1px solid rgba(167,139,250,0.15);border-radius:16px;padding:22px 24px;">' +
                     '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;"><span style="font-size:16px;">&#x270D;</span><h3 style="margin:0;font-size:14px;font-weight:800;color:#a78bfa;letter-spacing:0.08em;font-family:\'Orbitron\',sans-serif;">BRAND BIO</h3></div>' +
                     '<div style="font-size:14px;color:rgba(255,255,255,0.7);line-height:1.7;white-space:pre-wrap;">' + escapeHtml(data.bio) + '</div>' +
+                '</div>') : '') +
+                // v1.86 (Ennis) — same Vision Statement block as the owner's
+                // own portfolio (portfolioRenderVision), sourced directly
+                // from the target player's record. Hidden entirely if this
+                // player never completed the diagnostic's vision step.
+                ((player.visionStatement && (player.visionStatement.create || player.visionStatement.impact || player.visionStatement.perspective || player.visionStatement.future)) ? (
+                '<div style="margin-bottom:24px;background:rgba(0,240,255,0.04);border:1px solid rgba(0,240,255,0.2);border-radius:16px;padding:22px 24px;position:relative;overflow:hidden;">' +
+                    '<div style="position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--cyan),transparent);"></div>' +
+                    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;"><span style="font-size:20px;">&#x1F52E;</span><h3 style="margin:0;font-size:14px;font-weight:800;color:var(--cyan);letter-spacing:0.08em;font-family:\'Orbitron\',sans-serif;">VISION STATEMENT</h3></div>' +
+                    '<div style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:16px 18px;color:#c8cce0;font-size:14px;line-height:1.75;font-family:\'Jura\',sans-serif;">' +
+                        'I want to create <span style="color:var(--cyan);font-weight:700;">' + escapeHtml(player.visionStatement.create || '') + '</span> that will <span style="color:var(--cyan);font-weight:700;">' + escapeHtml(player.visionStatement.impact || '') + '</span>. My unique perspective is <span style="color:var(--cyan);font-weight:700;">' + escapeHtml(player.visionStatement.perspective || '') + '</span>. In two years, I\'ll be known for <span style="color:var(--cyan);font-weight:700;">' + escapeHtml(player.visionStatement.future || '') + '</span>.' +
+                    '</div>' +
                 '</div>') : '') +
                 '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));gap:12px;margin-bottom:24px;">' + statsHtml + '</div>' +
                 '<div style="margin-bottom:32px;">' +
