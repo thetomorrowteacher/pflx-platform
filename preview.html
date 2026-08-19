@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 90;
+      window.PFLX_PATCH   = 91;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -24974,6 +24974,28 @@
                 var R = { approved: 3, rejected: 2, submitted: 1, pending: 0 };
                 var ls = R[loc.status] || 0, is = R[t.status] || 0;
                 merged.status = is > ls ? t.status : (ls > is ? loc.status : newer.status);
+                // Legacy singular `submission` (Aug 19, Kaitlin: task reverted
+                // to "Submit for Approval" the day after she submitted it) —
+                // unlike `submissions[]` and `status` above, this field had NO
+                // explicit protection: `Object.assign({}, loc, newer)` just took
+                // whichever of loc/t was picked as "newer" by updatedAt. Submit
+                // paths that don't reliably bump updatedAt (or a genuine tie)
+                // could pick a copy that predates the submission, silently
+                // dropping it — status stayed 'submitted' (protected above) but
+                // task.submission went missing, which pflxTaskStateForPlayer
+                // reads as "not mine" and falls back to 'open'. Never let an
+                // ABSENT submission win over a PRESENT one; between two present
+                // ones, prefer whichever was submitted more recently (a real
+                // resubmission legitimately replacing an older one).
+                if (loc.submission && !t.submission) {
+                    merged.submission = loc.submission;
+                } else if (!loc.submission && t.submission) {
+                    merged.submission = t.submission;
+                } else if (loc.submission && t.submission) {
+                    var locSubTs = new Date(loc.submission.submittedAt || 0).getTime() || 0;
+                    var incSubTs = new Date(t.submission.submittedAt || 0).getTime() || 0;
+                    merged.submission = incSubTs > locSubTs ? t.submission : loc.submission;
+                }
                 byId[t.id] = merged;
             });
             return _mcDropTombstoned('tasks', order.map(function (id) { return byId[id]; }));
@@ -38054,6 +38076,14 @@
                 }
                 return;
             }
+            // Idempotency guard (Aug 19) — unlike mcApprovePlayerSubmission
+            // (checks sub.status==='approved') and the checkpoint/project
+            // payOut() helper (checks rec.completionAwards[playerId]), this
+            // legacy single-track branch had no check for an already-approved
+            // task before re-running the award below. A double-click, a
+            // re-render race, or a second call on the same task would pay
+            // the XC/badges twice.
+            if (task.status === 'approved') return;
             // NO dependency checks here (July 29, Ennis): ordering only gates
             // players completing tasks — approvals are never questioned.
             pflxPlaySfx('success');
@@ -53040,7 +53070,12 @@
                     return '<div class="mc-card">' +
                         '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">' +
                         '<div><span style="margin-right:6px;">' + typeIcon + '</span><span style="font-weight:900;color:#f0f0ff;">' + escapeHtml(it.title || 'Untitled') + '</span>' +
-                        '<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:2px;">by ' + escapeHtml(it.submittedBy) + ' · ' + typeLabel + '</div></div>' +
+                        // Aug 19 — 'task' history entries now carry a player ID in
+                        // submittedBy (see mcSubmitToHost/mcPostToDarkCampus fix);
+                        // resolve to a brand for display, falling back to the raw
+                        // stored value for older queue entries that still hold a
+                        // name from before that fix.
+                        '<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:2px;">by ' + escapeHtml((typeof _pflxPlayerBrandById === 'function' && _pflxPlayerBrandById(it.submittedBy)) || it.submittedBy || '') + ' · ' + typeLabel + '</div></div>' +
                         '<span class="mc-pill" style="color:' + sc + ';border-color:' + sc + ';">' + it.status.toUpperCase().replace('_', ' ') + '</span></div>' +
                         detail +
                         (it.status === 'pending' ? '<div style="display:flex;gap:6px;">' +
@@ -56966,13 +57001,24 @@ RESPONSE RULES:
                 const rank = typeof getRankForXC === 'function' ? getRankForXC(user.totalXcoin || 0) : { name: 'Player', icon: '', level: 1 };
                 const bc = user.badgeCounts || {};
                 const totalBadges = (bc.primary||0) + (bc.premium||0) + (bc.executive||0) + (bc.signature||0);
+                // Aug 19 (Kaitlin: Portfolio shows 4 badges, X-Coin home shows
+                // 5) — same v1.77 drift as pflxRenderPortfolioFullHtml, just
+                // never back-ported to the OWNER's own-portfolio view here.
+                // badgeCounts is a category tally maintained incrementally by
+                // award(); it silently misses badges pushed onto badges[]
+                // outside that path (e.g. the onboarding-signature grant),
+                // so it can undercount the true badges[] length. Was
+                // `totalBadges || user.digitalBadges`, which only fell back
+                // to the raw scalar when totalBadges was exactly 0 — take
+                // whichever is higher instead, matching the badge grid below.
+                const badgeCount = Math.max(totalBadges, user.digitalBadges || 0);
                 const projects = (data.projects || []).length;
                 // Also count completed tasks from cross-app data
                 const taskStats = portfolioGetTaskStats();
                 // LEVEL tile removed — Evo Rank conveys progression tier already.
                 // 5 tiles look cleaner in a flexible grid that wraps on narrow widths.
                 const statItems = [
-                    { label: 'DIGITAL BADGES', value: totalBadges || user.digitalBadges || 0, color: '#f5c842', icon: '&#x1F3C5;' },
+                    { label: 'DIGITAL BADGES', value: badgeCount, color: '#f5c842', icon: '&#x1F3C5;' },
                     { label: 'LIFETIME XC', value: (user.totalXcoin || 0).toLocaleString(), color: '#4f8ef7', icon: '&#x26A1;' },
                     { label: 'EVO RANK', value: rank.name, color: '#22c55e', icon: rank.icon || '&#x2B50;' },
                     { label: 'PROJECTS', value: projects, color: '#a78bfa', icon: '&#x1F4BC;' },
@@ -61907,11 +61953,20 @@ RESPONSE RULES:
                 return;
             }
 
+            // Aug 19 (Kaitlin) — submittedBy must be the player's ID, matching
+            // every reader of task.submission.submittedBy across the app
+            // (mcApproveTask's award() resolution, the checkpoint/project
+            // completion sweeps' recipients map, _pflxPlayerBrandById/
+            // _pflxPlayerCohortById — all do a strict PLAYERS.find(x.id===...)
+            // with no name fallback). This used to store activeSession.name,
+            // so PflxDataBus.award() could never resolve the real player
+            // record for a host/DarkCampus submission and silently skipped
+            // the payout ("unknown player — award NOT applied").
             var submission = {
                 link: link,
                 description: description,
                 fileData: mcSubmitFileData,
-                submittedBy: activeSession ? activeSession.name : 'Unknown',
+                submittedBy: activeSession ? activeSession.id : null,
                 submittedAt: new Date().toISOString(),
                 type: 'host',
                 peerReviews: [],
@@ -61920,6 +61975,10 @@ RESPONSE RULES:
 
             mcTasks[mcSubmitTaskIndex].status = 'submitted';
             mcTasks[mcSubmitTaskIndex].submission = submission;
+            // Bump updatedAt so a stale cloud pull can never win a last-write-
+            // wins merge and silently drop this submission (matches
+            // ppSubmitTask's existing behavior — see _mcMergeTasks below).
+            mcTasks[mcSubmitTaskIndex].updatedAt = Date.now();
             mcSaveData('tasks');
 
             // Add to approvals queue
@@ -61957,11 +62016,14 @@ RESPONSE RULES:
                 return;
             }
 
+            // Aug 19 (Kaitlin) — same fix as mcSubmitToHost: submittedBy must
+            // be the player's ID, not their display name (see that function's
+            // comment for the full explanation of what this broke).
             var submission = {
                 link: link,
                 description: description,
                 fileData: mcSubmitFileData,
-                submittedBy: activeSession ? activeSession.name : 'Unknown',
+                submittedBy: activeSession ? activeSession.id : null,
                 submittedAt: new Date().toISOString(),
                 type: 'peer_review',
                 channelId: channelId,
@@ -61971,6 +62033,10 @@ RESPONSE RULES:
 
             mcTasks[mcSubmitTaskIndex].status = 'submitted';
             mcTasks[mcSubmitTaskIndex].submission = submission;
+            // Bump updatedAt so a stale cloud pull can never win a last-write-
+            // wins merge and silently drop this submission (matches
+            // ppSubmitTask's existing behavior — see _mcMergeTasks below).
+            mcTasks[mcSubmitTaskIndex].updatedAt = Date.now();
             mcSaveData('tasks');
 
             mcBroadcastToApps('pflx_dc_post', { taskId: t.id, taskTitle: t.title, submission: submission, channel: channelId });
@@ -66444,12 +66510,27 @@ RESPONSE RULES:
                     }
                     changes.badges = existing;
                     changes.digitalBadges = existing.length;
-                    // Badge may also carry XC value
+                    // Badge may also carry XC value. Track it separately from
+                    // deltaXC (Aug 19, Kaitlin: 4 badges "should total 1800 XC"
+                    // but her activity feed only ever showed xc:0 entries for
+                    // them) — the XC below WAS correctly credited to p.xc/
+                    // totalXcoin, but deltaXC was captured before this branch
+                    // ran, so the broadcast + activity-log entries further down
+                    // silently reported 0 for every badge-only award() call,
+                    // even one carrying real XC. badgeXcDelta makes the report
+                    // match what was actually applied.
+                    // NOTE: intentionally NOT scaled by grantCount, matching
+                    // this branch's pre-existing crediting behavior exactly —
+                    // this fix only corrects what gets REPORTED, not how much
+                    // XC a badge grant actually credits.
+                    var badgeXcDelta = 0;
                     if (typeof b.xcValue === 'number' && b.xcValue > 0) {
-                        changes.xc = Math.max(0, (changes.xc !== undefined ? changes.xc : (p.xc || 0)) + b.xcValue);
-                        changes.totalXcoin = (changes.totalXcoin !== undefined ? changes.totalXcoin : (p.totalXcoin || 0)) + b.xcValue;
+                        badgeXcDelta = b.xcValue;
+                        changes.xc = Math.max(0, (changes.xc !== undefined ? changes.xc : (p.xc || 0)) + badgeXcDelta);
+                        changes.totalXcoin = (changes.totalXcoin !== undefined ? changes.totalXcoin : (p.totalXcoin || 0)) + badgeXcDelta;
                     }
                 }
+                var totalXcDelta = deltaXC + (typeof badgeXcDelta === 'number' ? badgeXcDelta : 0);
                 if (Object.keys(changes).length === 0) return Object.assign({}, p);
                 var updated = applyUpdate(playerId, changes, awardObj.source || 'award');
                 // Emit canonical award event for sub-app animations / feed entries
@@ -66459,14 +66540,14 @@ RESPONSE RULES:
                     playerId: playerId,
                     txId: txId,
                     award: {
-                        xc: deltaXC || 0,
+                        xc: totalXcDelta || 0,
                         badge: awardObj.badge || null,
                         source: awardObj.source || 'unknown',
                         reason: awardObj.reason || ''
                     },
                     player: updated
                 });
-                try { logActivity(playerId, 'award_granted', { xc: deltaXC, badge: awardObj.badge ? awardObj.badge.id : null, source: awardObj.source, reason: awardObj.reason, txId: txId }); } catch (e) {}
+                try { logActivity(playerId, 'award_granted', { xc: totalXcDelta, badge: awardObj.badge ? awardObj.badge.id : null, source: awardObj.source, reason: awardObj.reason, txId: txId }); } catch (e) {}
                 // Canonical X-Coin event for a BADGE grant — the single choke
                 // point every badge award (task/checkpoint/project/node/xcoin/
                 // coinsub) funnels through, so the per-player popup + ticker fire
