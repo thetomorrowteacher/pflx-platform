@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 91;
+      window.PFLX_PATCH   = 92;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -8899,6 +8899,13 @@
                                             <input type="checkbox" id="mc-program-tab-skip-completion-approval"> Skip completion approval — auto-approve players who finish on time
                                         </label>
                                     </div>
+                                    <!-- v1.92 (Ennis) — pull FeedForward Form submissions tagged to any
+                                         Checkpoint under this Program into its Player Analytics report. -->
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;">
+                                            <input type="checkbox" id="mc-program-tab-feedforward-enabled"> Include FeedForward Form submissions in this Program's report
+                                        </label>
+                                    </div>
                                     <!-- v1.71 (Ennis) — "Apply to Join": when on, players outside the
                                          attached cohort(s) can still SEE this Program (visibility is
                                          universal now, see pflxPlayerCanSeeCatalogItem) but can only
@@ -9075,6 +9082,16 @@
                                     <div style="margin-bottom:12px;">
                                         <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;">
                                             <input type="checkbox" id="mc-cp-skip-completion-approval"> Skip completion approval — auto-approve players who finish on time
+                                        </label>
+                                    </div>
+                                    <!-- v1.92 (Ennis) — pull FeedForward Form submissions tagged to this
+                                         Checkpoint into its Player Analytics scope report. Off by default:
+                                         requires a live server proxy (pflx-darkcampus) and touches tester
+                                         PII (email/notes), so a host opts in per-node rather than it being
+                                         on everywhere by default. -->
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;">
+                                            <input type="checkbox" id="mc-cp-feedforward-enabled"> Include FeedForward Form submissions in this Checkpoint's report
                                         </label>
                                     </div>
                                     <!-- Tier Variants — per-tier deadline + XC overrides.
@@ -10054,6 +10071,13 @@
                                             <input type="checkbox" id="mc-project-skip-completion-approval"> Skip completion approval — auto-approve players who finish on time
                                         </label>
                                     </div>
+                                    <!-- v1.92 (Ennis) — pull FeedForward Form submissions tagged to this
+                                         Project's Checkpoint into its Player Analytics scope report. -->
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;">
+                                            <input type="checkbox" id="mc-project-feedforward-enabled"> Include FeedForward Form submissions in this Project's report
+                                        </label>
+                                    </div>
                                     <!-- Player Scoping (July 12) — pick specific players inside the
                                          selected cohorts, or leave empty for ALL. Child tasks inherit
                                          this scope (pflxEffectiveAssignees). -->
@@ -10261,6 +10285,11 @@
                                         <div id="mc-season-cohorts" style="display:none;flex-wrap:wrap;gap:6px;"></div>
                                         <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#fbbf24;cursor:pointer;margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.05);">
                                             <input type="checkbox" id="mc-season-pass-enabled"> &#x1F39F; Enable Season Pass tier (daily bonus rewards for premium access)
+                                        </label>
+                                        <!-- v1.92 (Ennis) — pull FeedForward Form submissions tagged to any
+                                             Checkpoint under this Season into its Player Analytics report. -->
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.05);">
+                                            <input type="checkbox" id="mc-season-feedforward-enabled"> Include FeedForward Form submissions in this Season's report
                                         </label>
                                         <div id="mc-season-pass-config" style="display:none;margin-top:8px;padding:10px;background:rgba(245,200,66,0.04);border:1px solid rgba(245,200,66,0.15);border-radius:6px;">
                                             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
@@ -12167,12 +12196,14 @@
                                                     <th style="text-align:center;padding:10px 8px;font-size:10px;color:#6a7290;text-transform:uppercase;letter-spacing:1px;font-family:'Share Tech Mono',monospace;">Tax/Fines</th>
                                                     <th style="text-align:center;padding:10px 8px;font-size:10px;color:#6a7290;text-transform:uppercase;letter-spacing:1px;font-family:'Share Tech Mono',monospace;">SLA Misses†</th>
                                                     <th style="text-align:center;padding:10px 8px;font-size:10px;color:#6a7290;text-transform:uppercase;letter-spacing:1px;font-family:'Share Tech Mono',monospace;">SLA Pending†</th>
+                                                    <th style="text-align:center;padding:10px 8px;font-size:10px;color:#6a7290;text-transform:uppercase;letter-spacing:1px;font-family:'Share Tech Mono',monospace;">FeedForward‡</th>
+                                                    <th style="text-align:center;padding:10px 8px;font-size:10px;color:#6a7290;text-transform:uppercase;letter-spacing:1px;font-family:'Share Tech Mono',monospace;">Bright Ideas‡</th>
                                                 </tr>
                                             </thead>
-                                            <tbody id="pa-scope-tbody"><tr><td colspan="7" style="padding:18px;text-align:center;color:#6a7290;">Select a Season, Program, Checkpoint, or Project above.</td></tr></tbody>
+                                            <tbody id="pa-scope-tbody"><tr><td colspan="9" style="padding:18px;text-align:center;color:#6a7290;">Select a Season, Program, Checkpoint, or Project above.</td></tr></tbody>
                                         </table>
                                     </div>
-                                    <p style="margin:8px 0 0;font-size:10px;color:#6a7290;">* Time Online is tracked per-device (this browser's session log) — it undercounts players who use PFLX mainly on their own device. † SLA data comes from DarkCampus's Discord/Slack tag tracking (PATCH DARKCAMPUS v1.24) and only appears once loaded — click Run Report to fetch it.</p>
+                                    <p style="margin:8px 0 0;font-size:10px;color:#6a7290;">* Time Online is tracked per-device (this browser's session log) — it undercounts players who use PFLX mainly on their own device. † SLA data comes from DarkCampus's Discord/Slack tag tracking (PATCH DARKCAMPUS v1.24) and only appears once loaded — click Run Report to fetch it. ‡ FeedForward columns only populate when "Include FeedForward Form submissions" is checked on the selected Season/Program/Checkpoint/Project's edit form — off by default (PATCH PLATFORM v1.92).</p>
                                 </div>
 
                                 <!-- Player Analytics Table -->
@@ -17139,6 +17170,116 @@
             return ids;
         }
 
+        // Which Checkpoint objects fall under a scope node — used to match
+        // FeedForward Form submissions (each tagged to exactly one
+        // Checkpoint by name in the Sheet) up into a Project/Program/Season
+        // report. Walks both forward (project.checkpointId) and reverse
+        // (checkpoint.projectIds) pointers like pflxScopeGetTaskIds does,
+        // since either can be the one actually populated depending on how
+        // the Project was attached (Aug 19, Ennis).
+        function pflxScopeGetCheckpointsInScope(scopeType, scopeId) {
+            var checkpoints = (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) ? mcCheckpoints : [];
+            var projects = (typeof mcProjects !== 'undefined' && Array.isArray(mcProjects)) ? mcProjects : [];
+            if (scopeType === 'checkpoint') {
+                var cp = checkpoints.find(function (c) { return c && c.id === scopeId; });
+                return cp ? [cp] : [];
+            }
+            if (scopeType === 'project') {
+                var proj = projects.find(function (p) { return p && p.id === scopeId; });
+                if (!proj) return [];
+                var seen = {};
+                checkpoints.forEach(function (c) {
+                    if (!c) return;
+                    var matches = (proj.checkpointId && c.id === proj.checkpointId) ||
+                        (Array.isArray(c.projectIds) && c.projectIds.indexOf(proj.id) >= 0);
+                    if (matches) seen[c.id] = c;
+                });
+                return Object.keys(seen).map(function (k) { return seen[k]; });
+            }
+            if (scopeType === 'program') {
+                return checkpoints.filter(function (c) { return c && c.programId === scopeId; });
+            }
+            if (scopeType === 'season') {
+                return checkpoints.filter(function (c) { return c && c.seasonId === scopeId; });
+            }
+            return [];
+        }
+
+        // Normalizes a Checkpoint name / Sheet "CHECKPOINT:" value down to
+        // just its distinguishing token — "Checkpoint Alpha" and "ALPHA"
+        // both become "ALPHA" — so matching doesn't depend on the host and
+        // the Form using the exact same casing/wording.
+        function pflxFeedForwardNormalizeCpName(s) {
+            return String(s || '').toUpperCase().replace(/CHECKPOINT/g, '').replace(/[^A-Z0-9]/g, '');
+        }
+
+        // FeedForward Form submissions, bridged the same way DarkCampus's
+        // SLA data is (see pflxScopeFetchSlaData below) — a server-side scan
+        // (pflx-darkcampus's xbot-scan cron, piggybacking a Sheets API read
+        // using its existing Google service-account credentials) refreshes
+        // `pflx_feedforward_cache` in Supabase; the Console just reads it.
+        // Nothing here ever talks to Google directly — no credentials, no
+        // CORS, and the Console only fetches this when a node's
+        // feedforwardEnabled toggle is actually on.
+        function pflxScopeFetchFeedForward(done) {
+            window._pflxScopeFfCache = window._pflxScopeFfCache || { rows: [], fetchedAt: null };
+            try {
+                if (typeof pflxCloudKvLoad === 'function') {
+                    pflxCloudKvLoad('pflx_feedforward_cache', function (v) {
+                        window._pflxScopeFfCache = (v && Array.isArray(v.rows)) ? v : { rows: [], fetchedAt: null };
+                        if (typeof done === 'function') done();
+                    });
+                } else if (typeof done === 'function') { done(); }
+            } catch (e) { if (typeof done === 'function') done(); }
+        }
+
+        // Match cached FeedForward rows into a scope: by Checkpoint name
+        // first (every row carries one), then attribute each matched row to
+        // a player — brand name first (normalized, matches the new "BRAND
+        // NAME" dropdown column), falling back to email for rows submitted
+        // before that column existed. An unmatched row (name/email doesn't
+        // resolve to any current player) is dropped rather than guessed at.
+        function pflxScopeGetFeedForwardForNode(scopeType, scopeId, players) {
+            var cache = window._pflxScopeFfCache || { rows: [] };
+            var rows = Array.isArray(cache.rows) ? cache.rows : [];
+            if (!rows.length) return { byPlayer: {}, fetchedAt: cache.fetchedAt || null };
+            var cps = pflxScopeGetCheckpointsInScope(scopeType, scopeId);
+            var cpTokens = {};
+            cps.forEach(function (c) {
+                var tok = pflxFeedForwardNormalizeCpName(c.name || c.title || '');
+                if (tok) cpTokens[tok] = 1;
+            });
+            if (!Object.keys(cpTokens).length) return { byPlayer: {}, fetchedAt: cache.fetchedAt || null };
+
+            var byBrand = {}, byEmail = {};
+            (players || []).forEach(function (p) {
+                var b = String(p.brand || p.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                if (b) byBrand[b] = p.id;
+                var e = String(p.email || '').trim().toLowerCase();
+                if (e) byEmail[e] = p.id;
+            });
+
+            var byPlayer = {};
+            rows.forEach(function (r) {
+                var tok = pflxFeedForwardNormalizeCpName(r.checkpoint);
+                if (!tok || !cpTokens[tok]) return;
+                var pid = null;
+                var rb = String(r.respondent || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                if (rb && byBrand[rb]) pid = byBrand[rb];
+                else {
+                    var re = String(r.email || '').trim().toLowerCase();
+                    if (re && byEmail[re]) pid = byEmail[re];
+                }
+                if (!pid) return; // no current player matches this row — drop it
+                if (!byPlayer[pid]) byPlayer[pid] = { count: 0, brightIdeas: 0, latestNote: '', latestTs: 0 };
+                byPlayer[pid].count++;
+                if (r.brightIdeas && String(r.brightIdeas).trim() && !/^n\/?a$/i.test(String(r.brightIdeas).trim())) byPlayer[pid].brightIdeas++;
+                var t = new Date(r.ts).getTime() || 0;
+                if (t >= byPlayer[pid].latestTs) { byPlayer[pid].latestTs = t; byPlayer[pid].latestNote = String(r.notes || '').slice(0, 200); }
+            });
+            return { byPlayer: byPlayer, fetchedAt: cache.fetchedAt || null };
+        }
+
         // DarkCampus's Supabase app_data keys — preview.html has no existing
         // loader for these (they're written by the separate pflx-darkcampus
         // Next.js app; see PATCH DARKCAMPUS v1.24), so this follows the same
@@ -17178,6 +17319,13 @@
             var winMs = (windowDays || 30) * 86400000;
             var sla = window._pflxScopeSlaCache || { violations: [], watch: [] };
             var paAgg = (typeof pflxAnalyticsAggregate === 'function') ? pflxAnalyticsAggregate(windowDays) : { rows: [] };
+            // FeedForward Form data — opt-in per node (see the node's edit
+            // form), gated because this is real tester PII, not just app
+            // telemetry. Computed even if the cache hasn't loaded yet
+            // (returns empty until pflxScopeFetchFeedForward's callback
+            // re-renders), matching the SLA data's async pattern above.
+            var ffEnabled = !!(node && node.feedforwardEnabled);
+            var ff = ffEnabled ? pflxScopeGetFeedForwardForNode(scopeType, scopeId, players) : { byPlayer: {}, fetchedAt: null };
 
             var rows = players.map(function (p) {
                 var subs = [];
@@ -17220,16 +17368,21 @@
                 }).length;
                 var slaPending = (sla.watch || []).filter(function (w) { return w && w.status === 'pending' && matchesPlayer(w); }).length;
 
+                var ffRow = ff.byPlayer[p.id] || null;
+
                 return {
                     id: p.id, brand: p.brand || p.name || p.id,
                     subsTotal: subs.length, subsWindow: subsInWindow.length,
                     minutes: minutes, badgesWon: badgesWon,
                     taxCount: taxCount, taxTotal: taxTotal,
-                    slaMisses: slaMisses, slaPending: slaPending
+                    slaMisses: slaMisses, slaPending: slaPending,
+                    ffSubs: ffRow ? ffRow.count : 0,
+                    ffBrightIdeas: ffRow ? ffRow.brightIdeas : 0,
+                    ffLatestNote: ffRow ? ffRow.latestNote : ''
                 };
             });
             rows.sort(function (a, b) { return b.subsWindow - a.subsWindow; });
-            return { node: node, players: players, scopedTasks: scopedTasks, rows: rows };
+            return { node: node, players: players, scopedTasks: scopedTasks, rows: rows, feedforward: { enabled: ffEnabled, fetchedAt: ff.fetchedAt } };
         }
 
         function pflxScopeReportRender(forceReload) {
@@ -17243,7 +17396,7 @@
             var scopeId = nodeSel.value;
             var windowDays = parseInt((winSel && winSel.value) || '30', 10);
             if (!scopeId) {
-                tbody.innerHTML = '<tr><td colspan="7" style="padding:18px;text-align:center;color:#6a7290;">Select a Season, Program, Checkpoint, or Project above.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="9" style="padding:18px;text-align:center;color:#6a7290;">Select a Season, Program, Checkpoint, or Project above.</td></tr>';
                 if (summary) summary.textContent = '';
                 return;
             }
@@ -17253,14 +17406,26 @@
             if (forceReload || !window._pflxScopeSlaCache) {
                 pflxScopeFetchSlaData(function () { pflxScopeReportRender(false); });
             }
+            // Same async pattern for FeedForward — only bother fetching when
+            // the selected node actually has it toggled on, so a report on
+            // a node with the toggle off never even loads tester PII into
+            // memory client-side.
+            var _ffNode = pflxScopeResolveNode(scopeType, scopeId);
+            if (_ffNode && _ffNode.feedforwardEnabled && (forceReload || !window._pflxScopeFfCache)) {
+                pflxScopeFetchFeedForward(function () { pflxScopeReportRender(false); });
+            }
             var report = pflxScopeComputeReport(scopeType, scopeId, windowDays);
             if (summary) {
                 var nodeName = (report.node && (report.node.name || report.node.title)) || scopeId;
                 summary.innerHTML = '<b>' + pflxScopeEsc(nodeName) + '</b>'
                     + ' — ' + report.players.length + ' player' + (report.players.length === 1 ? '' : 's') + ' in scope, '
-                    + report.scopedTasks.length + ' task' + (report.scopedTasks.length === 1 ? '' : 's') + ' under this ' + scopeType + '.';
+                    + report.scopedTasks.length + ' task' + (report.scopedTasks.length === 1 ? '' : 's') + ' under this ' + scopeType + '.'
+                    + (report.feedforward.enabled
+                        ? (report.feedforward.fetchedAt ? ' FeedForward data as of ' + pflxScopeEsc(new Date(report.feedforward.fetchedAt).toLocaleString()) + '.' : ' Loading FeedForward data…')
+                        : ' FeedForward data off for this node — enable it on the edit form to include it.');
             }
             tbody.innerHTML = report.rows.length ? report.rows.map(function (r) {
+                var ffTitle = r.ffLatestNote ? ' title="' + pflxScopeEsc(r.ffLatestNote) + '"' : '';
                 return '<tr style="border-top:1px solid rgba(124,58,237,0.1);">'
                     + '<td style="padding:9px 12px;color:#e0e6ff;font-family:\'Rajdhani\',sans-serif;font-weight:600;">' + pflxScopeEsc(r.brand) + '</td>'
                     + '<td style="text-align:center;padding:9px 8px;color:#c9d1ff;font-family:\'Share Tech Mono\',monospace;">' + r.subsWindow + ' <span style="color:#6a7290;">(' + r.subsTotal + ' all-time)</span></td>'
@@ -17269,8 +17434,10 @@
                     + '<td style="text-align:center;padding:9px 8px;font-family:\'Share Tech Mono\',monospace;color:' + (r.taxCount ? '#ef4444' : '#6a7290') + ';">' + (r.taxCount ? (r.taxCount + ' (' + r.taxTotal.toLocaleString() + ' XC)') : '—') + '</td>'
                     + '<td style="text-align:center;padding:9px 8px;font-family:\'Share Tech Mono\',monospace;color:' + (r.slaMisses ? '#ef4444' : '#6a7290') + ';">' + r.slaMisses + '</td>'
                     + '<td style="text-align:center;padding:9px 8px;font-family:\'Share Tech Mono\',monospace;color:' + (r.slaPending ? '#f5c842' : '#6a7290') + ';">' + r.slaPending + '</td>'
+                    + '<td' + ffTitle + ' style="text-align:center;padding:9px 8px;font-family:\'Share Tech Mono\',monospace;color:' + (r.ffSubs ? '#c9d1ff' : '#6a7290') + ';">' + (report.feedforward.enabled ? r.ffSubs : '—') + '</td>'
+                    + '<td style="text-align:center;padding:9px 8px;font-family:\'Share Tech Mono\',monospace;color:' + (r.ffBrightIdeas ? '#a78bfa' : '#6a7290') + ';">' + (report.feedforward.enabled ? r.ffBrightIdeas : '—') + '</td>'
                     + '</tr>';
-            }).join('') : '<tr><td colspan="7" style="padding:18px;text-align:center;color:#6a7290;">No players in scope.</td></tr>';
+            }).join('') : '<tr><td colspan="9" style="padding:18px;text-align:center;color:#6a7290;">No players in scope.</td></tr>';
         }
 
         function pflxScopeReportExportCSV() {
@@ -17280,11 +17447,12 @@
             if (!typeSel || !nodeSel || !nodeSel.value) { try { if (typeof showToast === 'function') showToast('Select a scope first.'); else alert('Select a scope first.'); } catch (e) { alert('Select a scope first.'); } return; }
             var windowDays = parseInt((winSel && winSel.value) || '30', 10);
             var report = pflxScopeComputeReport(typeSel.value, nodeSel.value, windowDays);
-            var header = ['player', 'taskSubmissionsWindow', 'taskSubmissionsAllTime', 'minutesOnline', 'badgesEarnedWindow', 'taxFineCountWindow', 'taxFineXcWindow', 'slaMissesWindow', 'slaPending'];
+            var header = ['player', 'taskSubmissionsWindow', 'taskSubmissionsAllTime', 'minutesOnline', 'badgesEarnedWindow', 'taxFineCountWindow', 'taxFineXcWindow', 'slaMissesWindow', 'slaPending', 'feedforwardSubmissions', 'feedforwardBrightIdeas'];
             var esc = function (v) { return '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"'; };
             var lines = [header.join(',')];
             report.rows.forEach(function (r) {
-                lines.push([r.brand, r.subsWindow, r.subsTotal, r.minutes, r.badgesWon, r.taxCount, r.taxTotal, r.slaMisses, r.slaPending].map(esc).join(','));
+                lines.push([r.brand, r.subsWindow, r.subsTotal, r.minutes, r.badgesWon, r.taxCount, r.taxTotal, r.slaMisses, r.slaPending,
+                    report.feedforward.enabled ? r.ffSubs : '', report.feedforward.enabled ? r.ffBrightIdeas : ''].map(esc).join(','));
             });
             var blob = new Blob([lines.join('\n')], { type: 'text/csv' });
             var url = URL.createObjectURL(blob);
@@ -33115,6 +33283,7 @@
             if (cp) { cp.updatedAt = cp.updatedAt || Date.now(); }
             document.getElementById('mc-cp-xc').value = cp ? (cp.xcReward || 0) : 0;
             { var _cpSkipEl = document.getElementById('mc-cp-skip-completion-approval'); if (_cpSkipEl) _cpSkipEl.checked = !!(cp && cp.skipCompletionApproval); }
+            { var _cpFfEl = document.getElementById('mc-cp-feedforward-enabled'); if (_cpFfEl) _cpFfEl.checked = !!(cp && cp.feedforwardEnabled); }
 
             // Tier variants — repopulate from cp.tierVariants. Open the
             // disclosure block automatically when any variant is set so the
@@ -33426,6 +33595,7 @@
                 link: document.getElementById('mc-cp-link')?.value || '',
                 embedUrl: (document.getElementById('mc-cp-embed')?.value || '').trim(),
                 skipCompletionApproval: !!document.getElementById('mc-cp-skip-completion-approval')?.checked,
+                feedforwardEnabled: !!document.getElementById('mc-cp-feedforward-enabled')?.checked,
                 // Preserve the sweep's dedupe marker across edits — re-saving
                 // a Checkpoint's form must never re-queue players who were
                 // already evaluated (see mcCheckCompletionApprovals).
@@ -38872,6 +39042,7 @@
                 var __projPriceRow = document.getElementById('mc-project-price-row');
                 if (__projPriceRow) __projPriceRow.style.display = p.applyEnabled ? 'flex' : 'none';
                 el = document.getElementById('mc-project-skip-completion-approval'); if (el) el.checked = !!p.skipCompletionApproval;
+                el = document.getElementById('mc-project-feedforward-enabled'); if (el) el.checked = !!p.feedforwardEnabled;
                 // Node type & Co-op fields
                 el = document.getElementById('mc-project-node-type'); if (el) el.value = p.nodeType || 'course';
                 el = document.getElementById('mc-project-coop-mode'); if (el) el.value = p.coopMode || 'solo';
@@ -39126,6 +39297,7 @@
                 applyEnabled: !!document.getElementById('mc-project-apply-enabled')?.checked,
                 price: Math.max(0, Number(document.getElementById('mc-project-price')?.value) || 0),
                 skipCompletionApproval: !!document.getElementById('mc-project-skip-completion-approval')?.checked,
+                feedforwardEnabled: !!document.getElementById('mc-project-feedforward-enabled')?.checked,
                 // Preserve the sweep's dedupe marker across edits (see the
                 // Checkpoint save function for why).
                 completionApprovalAt: mcProjectEditIndex >= 0 ? (mcProjects[mcProjectEditIndex].completionApprovalAt || {}) : {},
@@ -39438,6 +39610,7 @@
                 spCb.checked = !!sp.enabled;
                 spCb.onchange = function() { var cfg = document.getElementById('mc-season-pass-config'); if (cfg) cfg.style.display = this.checked ? 'block' : 'none'; };
             }
+            { var _seFfEl = document.getElementById('mc-season-feedforward-enabled'); if (_seFfEl) _seFfEl.checked = !!(s && s.feedforwardEnabled); }
             var spCfg = document.getElementById('mc-season-pass-config');
             if (spCfg) spCfg.style.display = sp.enabled ? 'block' : 'none';
             el = document.getElementById('mc-season-pass-cost'); if (el) el.value = sp.cost || 2000;
@@ -40038,6 +40211,7 @@
             var priceRow = document.getElementById('mc-program-tab-price-row');
             if (priceRow) priceRow.style.display = (pg && pg.applyEnabled) ? 'flex' : 'none';
             el = document.getElementById('mc-program-tab-skip-completion-approval'); if (el) el.checked = !!(pg && pg.skipCompletionApproval);
+            el = document.getElementById('mc-program-tab-feedforward-enabled'); if (el) el.checked = !!(pg && pg.feedforwardEnabled);
 
             // Populate "attach existing checkpoints" — every checkpoint whose
             // programId already matches this Program (or has no Program yet)
@@ -40158,6 +40332,7 @@
                 // When true, a player who finishes on time is enrolled/marked
                 // complete automatically instead of queuing in Approvals.
                 skipCompletionApproval: !!document.getElementById('mc-program-tab-skip-completion-approval')?.checked,
+                feedforwardEnabled: !!document.getElementById('mc-program-tab-feedforward-enabled')?.checked,
                 description: document.getElementById('mc-program-tab-desc')?.value || '',
                 rewardBadges: rewardBadges,
                 cohortIds: cohortIds,
@@ -40545,7 +40720,16 @@
                     count: parseInt(document.getElementById('mc-season-loot-count')?.value, 10) || 1,
                     style: document.getElementById('mc-season-loot-style')?.value || 'standard',
                     pool: JSON.parse(JSON.stringify(mcSeasonLootPool))
-                }
+                },
+                feedforwardEnabled: !!document.getElementById('mc-season-feedforward-enabled')?.checked,
+                // v1.92 — Season was the one save function of the four
+                // (Season/Program/Checkpoint/Project) still missing an
+                // updatedAt stamp; Checkpoint/Project got this in v1.88 and
+                // Program already had it. Same exposure: an unstamped save
+                // reads as timestamp 0 in _mcMergeById and can silently lose
+                // to a stale cloud copy on the next sync. Stamped now while
+                // this object literal was already being touched.
+                updatedAt: Date.now()
             };
 
             if (mcSeasonEditIndex >= 0) { mcSeasons[mcSeasonEditIndex] = obj; }
