@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 92;
+      window.PFLX_PATCH   = 93;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -24669,7 +24669,13 @@
             }
         }
         function mcSaveData(type) {
-            if (type === 'players' || type === 'all') _mcSetItemSafe('pflx_mc_players', mcPlayers);
+            if (type === 'players' || type === 'all') {
+                _mcSetItemSafe('pflx_mc_players', mcPlayers);
+                // Self-heal any mc-side write that landed reward fields on
+                // mcPlayers without reaching PLAYERS/pflx_player_<id> — see
+                // _mcReconcilePlayersFromMc above for the full root cause.
+                try { if (typeof _mcReconcilePlayersFromMc === 'function') _mcReconcilePlayersFromMc(); } catch (e) {}
+            }
             if (type === 'checkpoints' || type === 'all') _mcSetItemSafe('pflx_mc_checkpoints', mcCheckpoints);
             if (type === 'tasks' || type === 'all') _mcSetItemSafe('pflx_mc_tasks', mcTasks);
             if (type === 'projects' || type === 'all') _mcSetItemSafe('pflx_mc_projects', mcProjects);
@@ -25328,6 +25334,92 @@
             return order.map(function (id) { return byId[id]; });
         }
         window._mcMergePlayers = _mcMergePlayers;
+
+        // ── Reconcile mcPlayers → PLAYERS/pflx_player_<id> (Aug 24 patch) ──
+        // ROOT CAUSE (Kaitlin + Nirmal "XC and badges have some problems"):
+        // PflxDataBus.award()/applyUpdate() mirror PLAYERS → mcPlayers on
+        // every write (broadcastPlayerChange, above), but nothing mirrored
+        // the reverse direction. Mission Control's own "Edit Player" modal
+        // (mcSavePlayerForm) and badge revoke (mcRemovePlayerBadge) — now
+        // fixed to mirror forward directly — plus any OTHER write path this
+        // trace didn't find (CSV import, future features) could still leave
+        // mcPlayers ahead of the canonical row X-Coin/Portfolio/login read
+        // from. Confirmed live in Supabase: Kaitlin's pflx_mc_players entry
+        // carried 3,400 XC / 7 badges — two of them (badge-digital-tool-
+        // master, badge-resilient-learner) existing NOWHERE on her
+        // pflx_player_<id> row — while that canonical row sat frozen at
+        // 1,875 XC / 5 badges since Aug 18, the exact numbers her own
+        // X-Coin screen showed her. This is the defense-in-depth half of
+        // the fix: hooked into mcSaveData('players'|'all') — the single
+        // choke point every mc-side player mutation funnels through — so
+        // it self-heals any current or future drift, not just the two call
+        // sites patched directly.
+        //
+        // Deliberately ONE-WAY and MONOTONIC (mc's value only ever wins
+        // when it's numerically ahead, badges only ever UNION): a stale
+        // mcPlayers snapshot in some other tab can never use this path to
+        // regress a player's real balance — the exact class of bug the
+        // v1.82 "onlyIds" scoping fix (persistPlayers, above) closed for
+        // the whole-roster overwrite case. A deliberate host CORRECTION
+        // (lowering XC, revoking a badge) is handled by the direct mirrors
+        // added to mcSavePlayerForm/mcRemovePlayerBadge instead, since an
+        // intentional decrease is exactly what this monotonic safety net
+        // must never propagate.
+        function _pflxUnionBadgeArrays(a, b) {
+            var bset = {};
+            [].concat(Array.isArray(a) ? a : [], Array.isArray(b) ? b : []).forEach(function (x) {
+                if (x == null) return;
+                if (typeof x === 'string' && /^\[object \w+\]$/i.test(x.trim())) return;
+                var k = (x && typeof x === 'object') ? (x.id || x.name || JSON.stringify(x)) : x;
+                if (k == null) return;
+                if (bset[k] === undefined || (typeof bset[k] !== 'object' && typeof x === 'object')) bset[k] = x;
+            });
+            return Object.keys(bset).map(function (k) { return bset[k]; });
+        }
+        window._pflxUnionBadgeArrays = _pflxUnionBadgeArrays;
+
+        function _mcReconcilePlayersFromMc() {
+            try {
+                if (typeof mcPlayers === 'undefined' || !Array.isArray(mcPlayers)) return;
+                if (typeof PLAYERS === 'undefined' || !Array.isArray(PLAYERS)) return;
+                var touchedIds = [];
+                mcPlayers.forEach(function (mp) {
+                    if (!mp || !mp.id || (mp.role || 'player') !== 'player') return;
+                    var pl = PLAYERS.find(function (x) { return x && (x.id === mp.id || (x.brand && mp.brand && x.brand.toUpperCase() === mp.brand.toUpperCase())); });
+                    if (!pl) return; // net-new players are handled by _mcBackfillMissingPlayerRows
+                    var dirty = false;
+                    var mpXc = Number(mp.xc) || 0, plXc = Number(pl.xc) || 0;
+                    if (mpXc > plXc) { pl.xc = mpXc; dirty = true; }
+                    var mpTot = Number(mp.totalXcoin) || 0, plTot = Number(pl.totalXcoin) || 0;
+                    if (mpTot > plTot) { pl.totalXcoin = mpTot; dirty = true; }
+                    if (typeof pl.xc === 'number' && typeof pl.totalXcoin === 'number' && pl.xc > pl.totalXcoin) pl.totalXcoin = pl.xc;
+                    var mpBadgeLen = Array.isArray(mp.badges) ? mp.badges.length : 0;
+                    var plBadgeLen = Array.isArray(pl.badges) ? pl.badges.length : 0;
+                    if (mpBadgeLen > plBadgeLen) {
+                        var unioned = _pflxUnionBadgeArrays(pl.badges, mp.badges);
+                        if (unioned.length > plBadgeLen) {
+                            pl.badges = unioned;
+                            pl.digitalBadges = Math.max(Number(pl.digitalBadges) || 0, unioned.length);
+                            dirty = true;
+                        }
+                    }
+                    var mpBc = mp.badgeCounts || {}, plBc = Object.assign({}, pl.badgeCounts || {});
+                    var bcChanged = false;
+                    Object.keys(mpBc).forEach(function (bk) {
+                        var mv = Number(mpBc[bk]) || 0;
+                        if (mv > (Number(plBc[bk]) || 0)) { plBc[bk] = mv; bcChanged = true; }
+                    });
+                    if (bcChanged) { pl.badgeCounts = plBc; dirty = true; }
+                    if (dirty) { pl.updatedAt = Date.now(); touchedIds.push(pl.id); }
+                });
+                if (touchedIds.length) {
+                    try { persistPlayers(touchedIds); } catch (e) {}
+                    console.log('[reconcile] mcPlayers → PLAYERS synced reward fields for', touchedIds.length, 'player(s):', touchedIds.join(', '));
+                }
+            } catch (e) { console.warn('[reconcile] mcPlayers → PLAYERS failed', e); }
+        }
+        window._mcReconcilePlayersFromMc = _mcReconcilePlayersFromMc;
+
         // MC's player shape (brand/xc/badges[]) → X-Coin's User shape
         // (brandName/xcoin/digitalBadges). Only needed for the 'players' →
         // 'users' legacy key: X-Coin's own PflxBridge used to do this mapping
@@ -31140,7 +31232,37 @@
             var label = (typeof removed === 'string') ? removed : (removed && (removed.name || removed.id || removed.category || removed.type)) || 'this badge';
             if (typeof confirm === 'function' && !confirm('Revoke "' + label + '" from ' + (p.brand || p.name || 'this player') + '?')) return;
             p.badges.splice(idx, 1);
+            // Keep badgeCounts/digitalBadges in step with the trimmed array —
+            // same shape mcSavePlayerForm's sibling "pm-ed-" edit modal
+            // recomputes on save (see p.badgeCounts / p.digitalBadges there).
+            try {
+                var _bc2 = { signature: 0, primary: 0, premium: 0, executive: 0 };
+                p.badges.forEach(function (b) {
+                    var _k = ((b && typeof b === 'object' ? b.type : null) || 'primary').toLowerCase();
+                    if (_bc2[_k] === undefined) _bc2.primary++; else _bc2[_k]++;
+                });
+                p.badgeCounts = _bc2;
+                p.digitalBadges = p.badges.length;
+            } catch (e) {}
             try { mcSaveData('players'); } catch(e) {}
+            // Aug 24 (Kaitlin/Nirmal XC+badge drift) — ROOT CAUSE: this revoke
+            // only ever touched mcPlayers (cloud key pflx_mc_players via
+            // mcSaveData above). It never reached PLAYERS or the individual
+            // pflx_player_<id> row X-Coin/Portfolio read from, so a revoked
+            // badge kept showing on the player's own dashboard indefinitely.
+            // Mirror the same trimmed badges/counts into PLAYERS directly.
+            try {
+                if (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) {
+                    var _plMatch2 = PLAYERS.find(function (x) { return x && (x.id === p.id || (x.brand && p.brand && x.brand.toUpperCase() === p.brand.toUpperCase())); });
+                    if (_plMatch2) {
+                        _plMatch2.badges = p.badges.slice();
+                        _plMatch2.badgeCounts = Object.assign({}, p.badgeCounts);
+                        _plMatch2.digitalBadges = p.digitalBadges;
+                        _plMatch2.updatedAt = Date.now();
+                        if (typeof persistPlayers === 'function') persistPlayers([_plMatch2.id]);
+                    }
+                }
+            } catch (eReconcile) { console.warn('[MC] badge revoke → PLAYERS mirror failed', eReconcile); }
             try {
                 if (typeof mcBroadcastToApps === 'function') {
                     mcBroadcastToApps('badge_revoke', { playerId: playerId, badgeId: badgeKey, byHost: true, at: Date.now() });
@@ -31557,6 +31679,38 @@
                     mcPlayers[idx].image = image;
                     mcPlayers[idx].studioId = studioId;
                     mcApplyTierToRecord(mcPlayers[idx]);
+                    // Aug 24 (Kaitlin/Nirmal XC+badge drift) — ROOT CAUSE: this
+                    // edit-existing branch only ever wrote mcPlayers[idx] (cloud
+                    // key pflx_mc_players, via mcSaveData below). It never
+                    // touched PLAYERS or the individual pflx_player_<id> cloud
+                    // row — the ONLY record X-Coin, Portfolio, and the login
+                    // screen actually read. Any XC edit made here (this is the
+                    // one field this modal can set to a deliberate, possibly
+                    // LOWER, corrected value — unlike an award, which only ever
+                    // adds) silently never reached the player's own dashboard.
+                    // Mirror the same canonical fields into PLAYERS here, same
+                    // as broadcastPlayerChange already does in the opposite
+                    // direction for every PflxDataBus-routed edit.
+                    try {
+                        if (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) {
+                            var _plMatch = PLAYERS.find(function (x) { return x && (x.id === id || (x.brand && brand && x.brand.toUpperCase() === brand.toUpperCase())); });
+                            if (_plMatch) {
+                                _plMatch.name = name;
+                                _plMatch.brand = brand;
+                                _plMatch.cohort = cohort;
+                                _plMatch.pathway = pathway;
+                                _plMatch.email = email;
+                                _plMatch.xc = xc;
+                                if (typeof _plMatch.totalXcoin === 'number' && xc > _plMatch.totalXcoin) _plMatch.totalXcoin = xc;
+                                _plMatch.level = level;
+                                _plMatch.pin = pin;
+                                if (image) _plMatch.image = image;
+                                _plMatch.studioId = studioId;
+                                _plMatch.updatedAt = Date.now();
+                                if (typeof persistPlayers === 'function') persistPlayers([_plMatch.id]);
+                            }
+                        }
+                    } catch (eReconcile) { console.warn('[MC] edit-player → PLAYERS mirror failed', eReconcile); }
                 }
             } else {
                 // New player
