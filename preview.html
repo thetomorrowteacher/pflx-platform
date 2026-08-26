@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 94;
+      window.PFLX_PATCH   = 95;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -8590,7 +8590,7 @@
                                                     <option value="3d-modeler">3D Modeler</option>
                                                     <option value="sound-designer">Sound Designer</option>
                                                     <option value="digital-artist">Digital Artist</option>
-                                                    <option value="computer-programmer">Computer Programmer</option>
+                                                    <option value="computer-programmer">CS/AI Specialist</option>
                                                     <option value="game-designer">Game Designer</option>
                                                     <option value="industrial-designer">Industrial Designer</option>
                                                 </select>
@@ -9454,7 +9454,7 @@
                                                 <option value="3d-modeler">🎮 3D Modeler</option>
                                                 <option value="sound-designer">🎵 Sound Designer</option>
                                                 <option value="digital-artist">🎨 Digital Artist</option>
-                                                <option value="computer-programmer">💻 Computer Programmer</option>
+                                                <option value="computer-programmer">💻 CS/AI Specialist</option>
                                                 <option value="game-designer">🎯 Game Designer</option>
                                                 <option value="industrial-designer">🔧 Industrial Designer</option>
                                             </select>
@@ -10012,7 +10012,7 @@
                                                     <option value="3d-modeler">🎮 3D Modeler</option>
                                                     <option value="sound-designer">🎵 Sound Designer</option>
                                                     <option value="digital-artist">🎨 Digital Artist</option>
-                                                    <option value="computer-programmer">💻 Computer Programmer</option>
+                                                    <option value="computer-programmer">💻 CS/AI Specialist</option>
                                                     <option value="game-designer">🎯 Game Designer</option>
                                                     <option value="industrial-designer">🔧 Industrial Designer</option>
                                                 </select>
@@ -20220,7 +20220,7 @@
                 '3d-modeler':         { name:'3D Modeler',         focus:'3D Modeling and Virtual Reality', icon:'\u{1F3AE}' },
                 'sound-designer':     { name:'Sound Designer',     focus:'Audio Production',                icon:'\u{1F3B5}' },
                 'digital-artist':     { name:'Digital Artist',     focus:'Graphic Design and Digital Art',  icon:'\u{1F3A8}' },
-                'computer-programmer':{ name:'Computer Programmer',focus:'Software and Web Development',    icon:'\u{1F4BB}' },
+                'computer-programmer':{ name:'CS/AI Specialist',focus:'Software and Web Development',    icon:'\u{1F4BB}' },
                 'game-designer':      { name:'Game Designer',      focus:'Game Design and Development',     icon:'\u{1F3AF}' },
                 'industrial-designer':{ name:'Industrial Designer',focus:'Product Design and Manufacturing', icon:'\u{1F527}' }
             };
@@ -22623,6 +22623,88 @@
         window._pflxIngestNodeSubmission = _pflxIngestNodeSubmission;
         window._pflxMirrorNodeSubStatus = _pflxMirrorNodeSubStatus;
 
+        // ── Core Pathways node enrollment → Mission Control Project/Program activation ──
+        // FEATURE (Aug 26, CP_MC_WIRING phase 1) — a player entering a node in Core
+        // Pathways used to have NO effect on Mission Control at all beyond the
+        // existing manual node_submission approval queue; Projects/Programs stayed
+        // exactly as a host configured them (host-authored pathway/pathwayNodeName
+        // cross-links only, no player-triggered activation). This is the missing
+        // "player enters a node → the linked Project activates, the Program gains
+        // a player" wiring the Core Pathways ↔ Mission Control design calls for.
+        // Idempotent by design (checks before mutating) so pathway.html can safely
+        // fire this on every node launch, not just the very first one.
+        function _pflxFinalizeNodeEnrollment(payload) {
+            try {
+                if (!payload || !payload.playerId || !payload.pathwayId) return false;
+                var playerId = payload.playerId;
+                var brand = payload.brand || 'Player';
+                var pathwayId = payload.pathwayId;
+                var nodeName = payload.nodeName || '';
+                var changedAny = false;
+                var newToProgramProjects = [];
+
+                var matches = (mcProjects || []).filter(function (p) {
+                    if (!p || p.pathway !== pathwayId) return false;
+                    // Node-name match when the node carries one; a project linked to
+                    // the pathway with no specific node name matches every node in it
+                    // (host set up a pathway-wide project rather than a per-node one).
+                    return !p.pathwayNodeName || !nodeName || p.pathwayNodeName === nodeName;
+                });
+
+                matches.forEach(function (p) {
+                    var wasNewToProject = false;
+                    if (!Array.isArray(p.assignedPlayers)) p.assignedPlayers = [];
+                    if (p.assignedPlayers.indexOf(playerId) === -1) {
+                        p.assignedPlayers.push(playerId);
+                        wasNewToProject = true;
+                        changedAny = true;
+                    }
+                    if (p.status === 'inactive') {
+                        p.status = 'active';
+                        changedAny = true;
+                    }
+                    if (!p.startedAt) {
+                        p.startedAt = new Date().toISOString().split('T')[0];
+                        changedAny = true;
+                    }
+                    if (wasNewToProject) newToProgramProjects.push(p);
+                });
+
+                if (changedAny) mcSaveData('projects');
+
+                // Walk Project → Checkpoint → Program to find who to notify.
+                newToProgramProjects.forEach(function (p) {
+                    try {
+                        var cp = (mcCheckpoints || []).find(function (c) { return c && c.id === p.checkpointId; });
+                        var pg = cp ? (mcPrograms || []).find(function (g) { return g && g.id === cp.programId; }) : null;
+                        var pgIsNew = false;
+                        if (pg) {
+                            if (!Array.isArray(pg.enrolledPlayers)) pg.enrolledPlayers = [];
+                            if (pg.enrolledPlayers.indexOf(playerId) === -1) {
+                                pg.enrolledPlayers.push(playerId);
+                                pgIsNew = true;
+                                mcSaveData('programs');
+                            }
+                        }
+                        // Host-facing "new player" notice — reuses the existing
+                        // Project → DarkCampus/X-Bot event bridge (pflxEmitProjectEvent)
+                        // rather than inventing a new notification path.
+                        try {
+                            pflxEmitProjectEvent(p.id, 'alerts',
+                                '🎉 ' + brand + ' just entered "' + (nodeName || p.name) + '" — ' + p.name + ' is now active for them.',
+                                { kind: 'new_player', playerId: playerId, programId: pg ? pg.id : '', programNew: pgIsNew });
+                        } catch (eEv) {}
+                        try {
+                            mcBroadcastToApps('program_new_player', { projectId: p.id, programId: pg ? pg.id : '', playerId: playerId, brand: brand });
+                        } catch (eBc) {}
+                    } catch (eWalk) {}
+                });
+
+                return changedAny;
+            } catch (e) { console.warn('[core-pathways] node enrollment finalize failed', e); return false; }
+        }
+        window._pflxFinalizeNodeEnrollment = _pflxFinalizeNodeEnrollment;
+
         function _pflxResolveCoinSub(id, status, note) {
             var i = (_pflxCloudSubs || []).findIndex(function (s) { return s && s.id === id; });
             if (i < 0) { if (typeof pflxToast === 'function') pflxToast('Submission not found — it may have been handled in X-Coin', 'info'); return; }
@@ -22730,6 +22812,15 @@
                             if (typeof pflxToast === 'function') pflxToast('🛰 Pathways submission from @' + (m.submission.brand || 'Player'), 'info');
                         }
                     } catch (e) {}
+                }
+                // Core Pathways node ENROLLMENT (player pressed Start/Continue on a
+                // node) — activates the linked Mission Control Project + adds the
+                // player to its Program roster. See _pflxFinalizeNodeEnrollment.
+                if (m && m.type === 'pflx_node_enrolled' && m.pathwayId && m.playerId) {
+                    try {
+                        var _wasNewNode = _pflxFinalizeNodeEnrollment(m);
+                        if (_wasNewNode && typeof pflxToast === 'function') pflxToast('🛰 ' + (m.brand || 'A player') + ' entered a Core Pathways node — Mission Control updated.', 'info');
+                    } catch (eEnr) {}
                 }
             } catch (e) {}
         });
@@ -24946,7 +25037,7 @@
                 { id: 'da-env', name: 'Environment Painting', type: 'course' },
                 { id: 'da-color', name: 'Color Theory for Games', type: 'game' }
             ] },
-            { id: 'computer-programmer', name: '💻 Computer Programmer', nodes: [
+            { id: 'computer-programmer', name: '💻 CS/AI Specialist', nodes: [
                 { id: 'cp-intro', name: 'Intro to Programming', type: 'course' },
                 { id: 'cp-py', name: 'Python Foundations', type: 'course' },
                 { id: 'cp-js', name: 'JavaScript Foundations', type: 'course' },
@@ -54679,7 +54770,7 @@ THE 4 CORE APPS:
    - Fines and taxes for missed deadlines or violations
 
 2. CORE PATHWAYS (Skill Tree Portal)
-   - Visual skill tree interface with 8 pathways: Content Creator, 3D Modeler, Sound Designer, Digital Artist, Computer Programmer, Game Designer, Industrial Designer + custom
+   - Visual skill tree interface with 8 pathways: Content Creator, 3D Modeler, Sound Designer, Digital Artist, CS/AI Specialist, Game Designer, Industrial Designer + custom
    - Each pathway has checkpoints (nodes on the skill tree) with tasks, resources, and deliverables
    - Completing checkpoints earns XC and unlocks further nodes
    - Hosts can create, customize, and manage pathway content — add nodes, set requirements, attach resources
@@ -54822,7 +54913,7 @@ PLAYER MODE — You are speaking to a PFLX Player/Student.
 YOUR PERSONALITY: Hype coach meets brilliant tutor. Bold, encouraging, a little competitive. You're the player's personal AI mentor who genuinely wants them to level up — both on the platform and in real life. Think Tony Stark's JARVIS if JARVIS was obsessed with your career growth.
 
 PLAYER CAPABILITIES YOU ASSIST WITH:
-- Course & Skill Development: Help players understand what skills they need, which of the 8 pathways to pursue (Content Creator, 3D Modeler, Sound Designer, Digital Artist, Computer Programmer, Game Designer, Industrial Designer), and how to approach checkpoint tasks
+- Course & Skill Development: Help players understand what skills they need, which of the 8 pathways to pursue (Content Creator, 3D Modeler, Sound Designer, Digital Artist, CS/AI Specialist, Game Designer, Industrial Designer), and how to approach checkpoint tasks
 - Task Submission: Guide players through submitting tasks in Mission Control — file uploads, link attachments, checklist completion, and submission notes
 - Project Proposals: Help players craft project proposals (pitch ideas) with Core Pathways node fields — pathway, skill level, learning objectives, deliverables
 - Ideation Partner: Brainstorm project ideas, help plan approaches to challenges, think through problems together
