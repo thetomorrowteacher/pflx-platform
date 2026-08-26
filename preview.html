@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 96;
+      window.PFLX_PATCH   = 97;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -9977,6 +9977,13 @@
                                     <div style="margin-bottom:12px;">
                                         <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Badge Rewards</label>
                                         <div id="mc-project-badges" style="display:flex;flex-direction:column;gap:6px;max-height:100px;overflow-y:auto;"></div>
+                                    </div>
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Official Signature Badge</label>
+                                        <select id="mc-project-signature-badge" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                            <option value="">None</option>
+                                        </select>
+                                        <div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:4px;">Earning this badge pays this Project's assigned host(s) a residual XC royalty — 10% base, +2% for each further Signature Badge the player earns along this same Core Pathway.</div>
                                     </div>
                                     <!-- Timeframe Scoping for Projects -->
                                     <div style="margin-bottom:12px;padding:12px;background:rgba(245,200,66,0.03);border:1px solid rgba(245,200,66,0.1);border-radius:8px;">
@@ -22713,6 +22720,99 @@
             } catch (e) { console.warn('[core-pathways] node enrollment finalize failed', e); return false; }
         }
         window._pflxFinalizeNodeEnrollment = _pflxFinalizeNodeEnrollment;
+
+        // FEATURE (Aug 26, CP_MC_WIRING phase 3) — Signature Badge residual
+        // royalty. Every node's Project can designate ONE of its reward
+        // badges as its "Official Signature Badge" (project.signatureBadgeId,
+        // set in the Project form). Earning that badge pays the Project's
+        // assigned host(s) — resolved via the EXISTING per-player
+        // managedScope grant system (the same "assign a host to a
+        // Project/Checkpoint" mechanism Player Manager already uses),
+        // deliberately excluding global Master/Admin — a residual XC
+        // royalty: 10% of the badge's own configured XC value, +2% for every
+        // Signature Badge the player has ALREADY earned earlier in the SAME
+        // Core Pathway (2nd badge in a path → 12%, 3rd → 14%, etc. — no
+        // ceiling enforced; flag to Ennis if one should exist). "Earlier"
+        // is by EARN ORDER for that player, not the nodes' authored map
+        // position — a simpler proxy that satisfies the worked example in
+        // the spec without needing a reliable cross-project node-sequence
+        // field. Multiple assigned hosts split the royalty evenly (rounded).
+        // One-time payout per player per badge — tracked in
+        // project.signatureRoyaltyPaid[] — NOT an ongoing tax on every
+        // future badge that player earns elsewhere. A badge with no XC value
+        // of its own pays no royalty (0% of 0 is 0); this mirrors the
+        // existing pitched-node residual pattern (processResidualPayment in
+        // pathway.html), which is also a percentage of a configured XC value.
+        // Reversal on badge revocation is NOT implemented — flagged as a gap.
+        function _pflxProcessSignatureBadgeRoyalty(playerId, badgeId, badgeXcValue, updatedBadges) {
+            try {
+                if (!playerId || !badgeId) return;
+                var projects = (typeof mcProjects !== 'undefined' && Array.isArray(mcProjects)) ? mcProjects : [];
+                var matches = projects.filter(function (pr) { return pr && pr.signatureBadgeId === badgeId; });
+                if (!matches.length) return;
+                var earnedIds = (Array.isArray(updatedBadges) ? updatedBadges : []).map(function (e) {
+                    return (e && typeof e === 'object') ? e.id : e;
+                });
+                matches.forEach(function (project) {
+                    try {
+                        if (!Array.isArray(project.signatureRoyaltyPaid)) project.signatureRoyaltyPaid = [];
+                        if (project.signatureRoyaltyPaid.indexOf(playerId) !== -1) return; // one-time only
+                        var basisXc = Math.max(0, Number(badgeXcValue) || 0);
+                        if (basisXc <= 0) return; // nothing to take a percentage of
+
+                        var pathwayProjects = projects.filter(function (pr) {
+                            return pr && pr.signatureBadgeId && project.pathway && pr.pathway === project.pathway;
+                        });
+                        var rank = 0;
+                        pathwayProjects.forEach(function (pr) {
+                            if (earnedIds.indexOf(pr.signatureBadgeId) !== -1) rank++;
+                        });
+                        if (rank < 1) rank = 1; // this badge itself always counts
+                        var pct = 10 + 2 * (rank - 1);
+                        var royaltyTotal = Math.round(basisXc * pct / 100);
+                        if (royaltyTotal <= 0) return;
+
+                        var owners = [];
+                        if (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS) &&
+                            window.pflxHostTier && window.pflxManagedScope && window.pflxScopeGrants) {
+                            PLAYERS.forEach(function (pl) {
+                                if (!pl || !pl.id) return;
+                                var tier = window.pflxHostTier(pl);
+                                if (tier !== 'cohost' && tier !== 'instructor' && tier !== 'guest') return;
+                                var scope = window.pflxManagedScope(pl);
+                                if (!scope.length) return;
+                                if (window.pflxScopeGrants(scope, { type: 'project', id: project.id })) owners.push(pl.id);
+                            });
+                        }
+                        if (!owners.length) {
+                            console.warn('[signature-royalty] no assigned host for project', project.id, '— royalty not paid');
+                            return;
+                        }
+                        var share = Math.round(royaltyTotal / owners.length);
+                        if (share <= 0) return;
+                        owners.forEach(function (ownerId) {
+                            try {
+                                if (window.PflxDataBus && typeof window.PflxDataBus.award === 'function') {
+                                    window.PflxDataBus.award(ownerId, {
+                                        xc: share,
+                                        source: 'signature_badge_royalty',
+                                        reason: 'Signature Badge royalty (' + pct + '%) — ' + (project.name || 'Project') + (owners.length > 1 ? ', split ' + owners.length + ' ways' : '')
+                                    });
+                                }
+                            } catch (eAward) {}
+                        });
+                        project.signatureRoyaltyPaid.push(playerId);
+                        try { mcSaveData('projects'); } catch (eSave) {}
+                        try {
+                            pflxEmitProjectEvent(project.id, 'alerts',
+                                '💎 Signature Badge royalty: +' + royaltyTotal + ' XC (' + pct + '%) — a player just earned ' + (project.name || 'your project') + '’s Signature Badge.',
+                                { kind: 'signature_royalty', playerId: playerId, pct: pct, amount: royaltyTotal, owners: owners });
+                        } catch (eEv) {}
+                    } catch (eProj) {}
+                });
+            } catch (e) { console.warn('[signature-royalty] failed', e); }
+        }
+        window._pflxProcessSignatureBadgeRoyalty = _pflxProcessSignatureBadgeRoyalty;
 
         function _pflxResolveCoinSub(id, status, note) {
             var i = (_pflxCloudSubs || []).findIndex(function (s) { return s && s.id === id; });
@@ -39235,6 +39335,16 @@
                             '<span style="color:#f5c842;font-weight:700;font-size:11px;">' + (b.xc || 0) + ' XC</span>' +
                             '</label>';
                     }).join('');
+                // FEATURE (Aug 26, CP_MC_WIRING phase 3) — the "Official
+                // Signature Badge" picker shares the same unified catalog as
+                // the Reward Badges checklist above (allBadges, just fetched).
+                var sigSelect = document.getElementById('mc-project-signature-badge');
+                if (sigSelect) {
+                    sigSelect.innerHTML = '<option value="">None</option>' + allBadges.map(function (b) {
+                        return '<option value="' + b.id + '">' + escapeHtml(b.name) + ' (' + (b.xc || 0) + ' XC)</option>';
+                    }).join('');
+                    sigSelect.value = (index >= 0 && mcProjects[index] && mcProjects[index].signatureBadgeId) || '';
+                }
             }
 
             // Populate cohort checkboxes
@@ -39575,6 +39685,15 @@
                 link: document.getElementById('mc-project-link')?.value || '',
                 taskIds: taskIds,
                 rewardBadges: rewardBadges,
+                // FEATURE (Aug 26, CP_MC_WIRING phase 3) — the node's ONE
+                // official Signature Badge (a subset-of-one relationship to
+                // rewardBadges above) and the idempotency log of which
+                // players' Signature-Badge royalty has already been paid to
+                // this Project's host(s) — see _pflxProcessSignatureBadgeRoyalty.
+                // Preserved across every re-save exactly like fineTaxIds/links
+                // below, so editing the form never wipes payout history.
+                signatureBadgeId: document.getElementById('mc-project-signature-badge')?.value || '',
+                signatureRoyaltyPaid: mcProjectEditIndex >= 0 ? (mcProjects[mcProjectEditIndex].signatureRoyaltyPaid || []) : [],
                 // v1.34 — fineTaxIds and the Quick-form multi-link list live
                 // only in Quick UI for now; preserve them here so saving from
                 // Advanced doesn't wipe what Quick set.
@@ -67053,6 +67172,20 @@ RESPONSE RULES:
                             icon: '🏅',
                             xc: (typeof awardObj.badge.xcValue === 'number' ? awardObj.badge.xcValue : 0)
                         });
+                    } catch (e) {}
+                }
+                // FEATURE (Aug 26, CP_MC_WIRING phase 3) — a badge grant may
+                // be a node's "Official Signature Badge"; if so, pay the
+                // Project's assigned host(s) their residual royalty. Uses
+                // badgeXcDelta (this badge's own configured XC value, already
+                // computed above) and updated.badges (the player's full
+                // post-grant badge list) so the royalty rank calc sees the
+                // badge that was JUST earned. See the function's own header
+                // comment (near _pflxFinalizeNodeEnrollment) for the full
+                // rules and the assumptions this makes.
+                if (awardObj.badge && awardObj.badge.id && typeof window._pflxProcessSignatureBadgeRoyalty === 'function') {
+                    try {
+                        window._pflxProcessSignatureBadgeRoyalty(playerId, awardObj.badge.id, badgeXcDelta, updated.badges);
                     } catch (e) {}
                 }
                 // FEATURE (Aug 26, CP_MC_WIRING phase 2) -- badge grants got a
