@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 93;
+      window.PFLX_PATCH   = 94;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -24196,8 +24196,25 @@
                 source: source || 'manual'
             });
             // Stack badge XC on top of any other rewards
+            // FIX (Aug 26, XCOIN_SYNC) — this only ever bumped xc/totalXcoin
+            // (the Console-side fields). X-Coin's own wallet/marketplace code
+            // reads and spends from `.xcoin` exclusively (see xcoin-app's
+            // data.ts reward/purchase paths), which this function never
+            // touched. Every badge granted from the Console (host GRANT
+            // button, checkpoint auto-award, onboarding signature badge)
+            // credited the player's lifetime total and Console display but
+            // never actually landed in their spendable X-Coin balance —
+            // confirmed on KABIR: xc/totalXcoin=12,810 vs xcoin=1,800, an
+            // 11,010 gap that lines up with his badge/task history far
+            // better than any single spend would. Crediting `.xcoin` here
+            // too (same pattern X-Coin's own reward code uses) closes the
+            // gap for every badge granted from now on. Past drift for
+            // players already affected is NOT auto-corrected by this
+            // change — that needs a one-by-one audit against real spend
+            // history, not a blind balance rewrite.
             var xc = badge.xc || 0;
             player.xc = (player.xc || 0) + xc;
+            player.xcoin = (player.xcoin || 0) + xc;
             player.totalXcoin = (player.totalXcoin || 0) + xc;
             return xc;
         }
@@ -31358,6 +31375,14 @@
                 awardedBy: 'auto-onboarding'
             };
             p.badges.push(entry);
+            // FIX (Aug 26, XCOIN_SYNC) — this function never credited any
+            // wallet field at all; the badge's xcValue was recorded on the
+            // badge entry itself but nothing ever added it to the player's
+            // balance. Same root cause and same fix as mcGrantBadgeToPlayer
+            // above — see that comment for the Kabir data confirming it.
+            p.xc = (p.xc || 0) + resolvedXc;
+            p.xcoin = (p.xcoin || 0) + resolvedXc;
+            p.totalXcoin = (p.totalXcoin || 0) + resolvedXc;
             try { mcSaveData('players'); } catch(e) {}
 
             // Broadcast to sub-apps so X-Coin updates the wallet/leaderboard.
