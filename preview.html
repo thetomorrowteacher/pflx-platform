@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 95;
+      window.PFLX_PATCH   = 96;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -22021,6 +22021,15 @@
             } catch (e) {}
             try { renderApprovalsCard(); } catch (e) {}
             try { _pflxPullApprovalFeeds(); } catch (e) {}
+            // FEATURE (Aug 26, CP_MC_WIRING phase 2) -- Portfolio previously had
+            // no path back into this refresh at all (it isn't triggered by
+            // pflx_player_changed the way My Tasks/Job Board/Approvals now
+            // are), so a player's own XC/badge/rank changes never showed up
+            // on their Portfolio until they manually navigated away and back.
+            // Guarded on .portfolio-view.active (same pattern already used at
+            // the Home tab-switch call site) so this is a no-op when the
+            // Portfolio tab isn't actually mounted.
+            try { if (typeof portfolioRender === 'function' && document.querySelector('.portfolio-view.active')) portfolioRender(); } catch (e) {}
         }
 
         // ─────────────────────────────────────────────────────────────────
@@ -31487,6 +31496,22 @@
                         xcValue: resolvedXc,
                         reason: 'PFLX onboarding completed',
                         at: Date.now()
+                    });
+                }
+            } catch(e) {}
+            // FEATURE (Aug 26, CP_MC_WIRING phase 2) -- this function has always
+            // bypassed PflxDataBus.award() entirely (it mutates the mcPlayers
+            // record directly), so it never fed the canonical X-Coin ticker/
+            // popup event every OTHER badge grant produces via
+            // pflxEmitXcoinEvent -- the very first badge a player ever earns
+            // was also the one badge that never showed up on the ticker.
+            try {
+                if (typeof window.pflxEmitXcoinEvent === 'function') {
+                    window.pflxEmitXcoinEvent(p.id, 'badge', {
+                        title: BADGE_NAME,
+                        desc: 'PFLX onboarding completed',
+                        icon: '🎓',
+                        xc: resolvedXc
                     });
                 }
             } catch(e) {}
@@ -66546,6 +66571,18 @@ RESPONSE RULES:
                         }), '*');
                     } catch (e) {}
                 });
+                // FEATURE (Aug 26, CP_MC_WIRING phase 2) -- pflx_player_changed
+                // was only ever sent to iframes via postMessage. Home Base's
+                // own refresh wiring (_hbScheduleRefresh, see the comment
+                // block above it) already listens for a window-level
+                // 'pflx_player_changed' CustomEvent expecting exactly this --
+                // but nothing in the whole file ever dispatched one, so that
+                // listener has been dead since it was written: XC/badge
+                // changes never live-refreshed My Tasks/Job Board/Approvals
+                // inside the Console itself. Firing it here, once, for every
+                // player change (active session or not) turns that dead
+                // listener live for free.
+                try { window.dispatchEvent(new CustomEvent('pflx_player_changed', { detail: { player: wirePlayer } })); } catch (e) {}
             } catch (e) {}
             try { logActivity(player.id, 'profile_updated', { by: window.activeSession && window.activeSession.id || null }); } catch (e) {}
         }
@@ -67018,6 +67055,55 @@ RESPONSE RULES:
                         });
                     } catch (e) {}
                 }
+                // FEATURE (Aug 26, CP_MC_WIRING phase 2) -- badge grants got a
+                // canonical ticker/popup event (above); a plain XC-only award
+                // (no badge) never did, so host quick-awards, task/checkpoint/
+                // project XC, trade payouts, etc. were invisible on the bottom
+                // ticker and the per-player popup even though the balance
+                // itself updated fine. Every nonzero-XC award now gets the
+                // same treatment, through the same single choke point.
+                if (!(awardObj.badge && awardObj.badge.id) && totalXcDelta !== 0 && typeof window.pflxEmitXcoinEvent === 'function') {
+                    try {
+                        window.pflxEmitXcoinEvent(playerId, 'xc', {
+                            title: totalXcDelta > 0 ? 'X-Coin Earned' : 'X-Coin Deducted',
+                            desc: awardObj.reason || '',
+                            icon: totalXcDelta > 0 ? '💰' : '📉',
+                            xc: totalXcDelta
+                        });
+                    } catch (e) {}
+                }
+                // FEATURE (Aug 26, CP_MC_WIRING phase 2) -- Evo rank has always
+                // been computed live for display (getRankForXC/mcGetEvoRankObj)
+                // but nothing ever detected a player CROSSING into a new rank
+                // as a result of an award. Two consequences: players got zero
+                // notice of a rank-up from any award path, and the "On Rank
+                // Up" automation trigger -- already sitting in the automation
+                // editor's dropdown (see the mc-automation-trigger select) --
+                // has never fired once, ever, since nothing calls
+                // pflxModifiers.fireEvent('onRankUp', ...) anywhere in the
+                // codebase. Comparing rank before/after this award closes both
+                // gaps for every award() call site at once (~30 sites: tasks,
+                // checkpoints, projects, nodes, trades, host quick-award,
+                // modifiers, sub-app messages).
+                try {
+                    if (typeof getRankForXC === 'function') {
+                        var _rankBefore = getRankForXC(p.xc || 0);
+                        var _rankAfter = getRankForXC(updated.xc || 0);
+                        if (_rankAfter && (!_rankBefore || (_rankAfter.level || 0) > (_rankBefore.level || 0))) {
+                            if (typeof window.pflxEmitXcoinEvent === 'function') {
+                                window.pflxEmitXcoinEvent(playerId, 'rank', {
+                                    title: 'Rank Up: ' + (_rankAfter.name || _rankAfter.id || ''),
+                                    desc: 'Reached ' + (_rankAfter.name || _rankAfter.id || '') + '!',
+                                    icon: _rankAfter.icon || '⭐',
+                                    xc: 0
+                                });
+                            }
+                            if (window.pflxModifiers && typeof window.pflxModifiers.fireEvent === 'function') {
+                                window.pflxModifiers.fireEvent('onRankUp', { playerId: playerId, targetType: 'rank', targetId: _rankAfter.id || '', cohort: updated.cohort || '' });
+                            }
+                        }
+                    }
+                } catch (e) {}
                 return updated;
             }
 
