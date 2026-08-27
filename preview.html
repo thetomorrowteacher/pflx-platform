@@ -9072,7 +9072,8 @@
                                         </div>
                                         <div style="grid-column:1/-1;">
                                             <label style="display:block;font-size:11px;color:rgba(139,92,246,0.7);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">🖥 Embed (shows instead of the banner)</label>
-                                            <input type="url" id="mc-cp-embed" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(139,92,246,0.25);color:#e0e6ff;padding:10px;border-radius:8px;font-size:13px;box-sizing:border-box;" placeholder="YouTube, Google Slides, Canva, or any embed URL — leave blank to use the banner image">
+                                            <input type="url" id="mc-cp-embed" oninput="pflxEmbedHint(this,'mc-cp-embed-hint')" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(139,92,246,0.25);color:#e0e6ff;padding:10px;border-radius:8px;font-size:13px;box-sizing:border-box;" placeholder="YouTube, Google Slides, Canva, or any embed URL — leave blank to use the banner image">
+                                            <div id="mc-cp-embed-hint"></div>
                                         </div>
                                     </div>
                                     <!-- v1.71 (Ennis) — bypass the completion-approval gate for this
@@ -9885,7 +9886,8 @@
                                          its embeddable form. Blank = fall back to the cover image. -->
                                     <div style="margin-bottom:14px;">
                                         <label style="display:block;font-size:11px;color:rgba(139,92,246,0.7);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">&#x1F5A5; Embed Cover (shows instead of the image)</label>
-                                        <input type="url" id="mc-project-embed" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(139,92,246,0.25);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="Canva, Google Slides, YouTube, or any embed URL — leave blank to use the cover image">
+                                        <input type="url" id="mc-project-embed" oninput="pflxEmbedHint(this,'mc-project-embed-hint')" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(139,92,246,0.25);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="Canva, Google Slides, YouTube, or any embed URL — leave blank to use the cover image">
+                                        <div id="mc-project-embed-hint"></div>
                                     </div>
                                     <div style="margin-bottom:12px;">
                                         <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Title *</label>
@@ -57962,6 +57964,28 @@ RESPONSE RULES:
                 return cv + '/view?embed';
             }
             return url;   // already an embed/iframe-able URL
+        };
+        // ── Embed field live hint (v1.98) ────────────────────────────
+        // Canva serves x-frame-options: deny on a plain /view URL and only
+        // drops it when ?embed is present — verified against the live headers
+        // 2026-08-27. pflxEmbedSrc() appends it automatically, so a normal
+        // share link is fine. What CANNOT be made to work is a canva.link/*
+        // short link: it 301s to a /view URL with no ?embed, and the browser
+        // can't follow-and-rewrite it (no CORS). Rather than let a host paste
+        // one and see a blank frame, say so at the point of entry.
+        window.pflxEmbedHint = function (el, hintId) {
+            var box = document.getElementById(hintId); if (!box) return;
+            var v = String((el && el.value) || '').trim();
+            if (!v) { box.innerHTML = ''; return; }
+            if (/canva\.link\//i.test(v)) {
+                box.innerHTML = '<div style="margin-top:6px;font-size:11px;color:#f5c842;line-height:1.5;">&#x26A0; Canva <strong>short links</strong> can\'t be embedded. Open it, then use Share &rarr; Copy link and paste the full <code style="color:#e0e6ff;">canva.com/design/&hellip;</code> URL here.</div>';
+                return;
+            }
+            var src = (typeof pflxEmbedSrc === 'function') ? pflxEmbedSrc(v) : v;
+            var known = /canva\.com\/design\/|docs\.google\.com\/(presentation|document)\/|youtube\.com\/embed\/|player\.vimeo\.com\//i.test(src);
+            box.innerHTML = '<div style="margin-top:6px;font-size:11px;color:' + (known ? 'rgba(34,197,94,0.9)' : 'rgba(255,255,255,0.4)') + ';line-height:1.5;word-break:break-all;">' +
+                (known ? '&#x2713; Embeds as: ' : '&#x2139; Will be framed as-is: ') +
+                '<code style="color:rgba(255,255,255,0.6);">' + escapeHtml(src) + '</code></div>';
         };
         // Media element for a cover: iframe (embedUrl) else image else ''.
         window.pflxCoverMediaEl = function (embedUrl, imgUrl) {
