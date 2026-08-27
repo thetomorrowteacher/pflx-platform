@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 101;
+      window.PFLX_PATCH   = 102;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -29758,7 +29758,14 @@
                 html += '<div class="mc-card" style="text-align:center;padding:30px;color:rgba(255,255,255,0.3);">No tasks in this project yet.</div>';
             } else {
                 // Sort by priority DESC then urgency ASC — same rule as MyTasks.
-                tasks.sort(function (a, b) {
+                // v1.102 — DO NOT re-sort. The host now orders these by hand on
+                // the Project card (drag) and groups them into Sections, and the
+                // array order IS that order. Re-sorting here by priority/urgency
+                // silently overrode the host's arrangement, so a drag in Mission
+                // Control never showed up for the player. Kept behind a flag so
+                // the old behaviour is one edit away if it is ever wanted back.
+                var __ppAutoSort = false;
+                if (__ppAutoSort) tasks.sort(function (a, b) {
                     var wa = (typeof _mcPriorityWeight === 'function') ? _mcPriorityWeight(a.priority || 'normal') : 2;
                     var wb = (typeof _mcPriorityWeight === 'function') ? _mcPriorityWeight(b.priority || 'normal') : 2;
                     if (wa !== wb) return wb - wa;
@@ -32534,6 +32541,27 @@
             } else if (kind === 'program') {
                 moved = mcMoveArrayItem(mcPrograms, 'id', d.id, targetId);
                 if (moved) { try { mcSaveData('programs'); } catch (e) {} mcRenderProgramsTab(); }
+            } else if (kind === 'task') {
+                // v1.102 (Ennis) — reorder tasks inside a Project card. `group`
+                // is the projectId, so a drag can never cross projects. Tasks
+                // live in the one global mcTasks array and a Project's list is
+                // a filtered view of it, so moving the dragged task to the
+                // target's index in mcTasks changes exactly the relative order
+                // the Project renders — same "the array IS the order" model the
+                // Checkpoint/Project/Program cards already use, no new field.
+                // Both rows are stamped so the reorder survives _mcMergeById
+                // (item-level last-write-wins) instead of being reverted by a
+                // stale cloud copy.
+                var _tFrom = mcTasks.find(function (t) { return t && t.id === d.id; });
+                var _tTo   = mcTasks.find(function (t) { return t && t.id === targetId; });
+                moved = mcMoveArrayItem(mcTasks, 'id', d.id, targetId);
+                if (moved) {
+                    var _now = Date.now();
+                    if (_tFrom) _tFrom.updatedAt = _now;
+                    if (_tTo)   _tTo.updatedAt   = _now;
+                    try { mcSaveData('tasks'); } catch (e) {}
+                    mcRenderProjects();
+                }
             }
         }
         window.mcDragDrop = mcDragDrop;
@@ -32555,6 +32583,50 @@
                 'ondragend="mcDragEnd(event)" ';
         }
         window._mcDragAttrs = _mcDragAttrs;
+
+        // ── v1.102 Sections/Topics + task reordering, straight from the card ──
+        // Topics were authorable only inside the Advanced Project form, which
+        // meant leaving the board to organise it. These two put both on the
+        // Project card itself: a "+ SECTION" button that appends to
+        // project.topics, and a per-row dropdown that moves a task between
+        // sections. Schema is unchanged — project.topics = [{id,name}] and
+        // task.topicId, exactly as _mcGroupTasksByTopic already expects.
+        window.mcAddTopicInline = function (projectId) {
+            var p = mcProjects.find(function (x) { return x && x.id === projectId; });
+            if (!p) return;
+            var name = prompt('Section / Topic name (e.g. "Phase 1 · Discover"):', '');
+            if (name === null) return;
+            name = String(name).trim();
+            if (!name) return;
+            p.topics = Array.isArray(p.topics) ? p.topics : [];
+            if (p.topics.some(function (t) { return t && String(t.name).toLowerCase() === name.toLowerCase(); })) {
+                alert('That section already exists on this Project.'); return;
+            }
+            p.topics.push({ id: 'topic-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6), name: name });
+            p.updatedAt = Date.now();   // survive _mcMergeById
+            try { mcSaveData('projects'); } catch (e) {}
+            mcRenderProjects();
+        };
+        window.mcSetTaskTopic = function (taskId, topicId) {
+            var t = mcTasks.find(function (x) { return x && x.id === taskId; });
+            if (!t) return;
+            t.topicId = topicId || '';
+            t.updatedAt = Date.now();
+            try { mcSaveData('tasks'); } catch (e) {}
+            mcRenderProjects();
+        };
+        function _mcTopicPickerHtml(proj, task) {
+            var topics = (proj && Array.isArray(proj.topics)) ? proj.topics : [];
+            if (!topics.length) return '';
+            var opts = '<option value=""' + (!task.topicId ? ' selected' : '') + '>No section</option>' +
+                topics.map(function (tp) {
+                    return '<option value="' + escapeHtml(tp.id) + '"' + (task.topicId === tp.id ? ' selected' : '') + '>' + escapeHtml(tp.name || 'Topic') + '</option>';
+                }).join('');
+            return '<select onclick="event.stopPropagation()" onchange="event.stopPropagation();mcSetTaskTopic(&quot;' + task.id + '&quot;,this.value)" ' +
+                'title="Move this task to a section" ' +
+                'style="background:rgba(10,18,40,0.8);border:1px solid rgba(167,139,250,0.25);color:#c4b5fd;border-radius:5px;font-size:9px;padding:2px 4px;max-width:110px;cursor:pointer;">' + opts + '</select>';
+        }
+        window._mcTopicPickerHtml = _mcTopicPickerHtml;
 
         // ── Numbered task order toggle (Aug 18, Ennis: "add a toggle to put
         // the tasks ordered. Each topic or project would start the numbering
@@ -39015,15 +39087,23 @@
                     var __topicGroups = _mcGroupTasksByTopic(projChildTasks, p.topics);
                     var __taskRowHtml = function (ct, idx) {
                         var ctStatusCol = ct.status === 'approved' ? '#22c55e' : ct.status === 'submitted' ? '#f5a500' : ct.status === 'open' ? '#00d4ff' : 'rgba(255,255,255,0.4)';
-                        return '<div ' + _mcJumpAttr('task', ct.id) + ' style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 8px;background:rgba(255,255,255,0.02);border-radius:6px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(122,169,255,0.08)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.02)\'">' +
-                            '<span style="font-size:11px;color:#e0e6ff;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;">' + _mcTaskNumberPrefix(idx) + escapeHtml(ct.title || 'Untitled') + '</span>' +
+                        // Drag handle is its own element so the row itself stays a
+                        // click-to-open target — dragging from the grip reorders,
+                        // clicking anywhere else still jumps to the task.
+                        return '<div ' + _mcDragAttrs(ct.id, p.id, 'task') + ' style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:5px 8px;background:rgba(255,255,255,0.02);border-radius:6px;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(122,169,255,0.08)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.02)\'">' +
+                            '<span title="Drag to reorder" style="cursor:grab;color:rgba(255,255,255,0.28);font-size:12px;line-height:1;user-select:none;">&#x2261;</span>' +
+                            '<span ' + _mcJumpAttr('task', ct.id) + ' style="font-size:11px;color:#e0e6ff;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;cursor:pointer;">' + _mcTaskNumberPrefix(idx) + escapeHtml(ct.title || 'Untitled') + '</span>' +
+                            _mcTopicPickerHtml(p, ct) +
                             _mcTaskCountsChip(ct) +
                         '</div>';
                     };
                     projTasksPanel = '<div style="margin-top:10px;padding:10px 12px;background:rgba(79,142,247,0.05);border:1px solid rgba(79,142,247,0.2);border-radius:8px;">' +
                         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
                             '<div style="font-family:Orbitron,sans-serif;font-size:10px;font-weight:800;color:#7aa9ff;letter-spacing:0.08em;">📋 TASKS IN THIS PROJECT' + _mcTasksNumberedToggleHtml() + '</div>' +
-                            '<div style="font-size:10px;color:rgba(122,169,255,0.6);font-family:monospace;">' + projChildTasks.length + '</div>' +
+                            '<div style="display:flex;align-items:center;gap:8px;">' +
+                                '<button type="button" onclick="event.stopPropagation();mcAddTopicInline(&quot;' + p.id + '&quot;)" title="Add a section / topic to this Project" style="background:rgba(167,139,250,0.12);border:1px solid rgba(167,139,250,0.35);color:#c4b5fd;border-radius:6px;font-size:9px;padding:3px 8px;cursor:pointer;letter-spacing:0.06em;">&#x1F3F7; + SECTION</button>' +
+                                '<div style="font-size:10px;color:rgba(122,169,255,0.6);font-family:monospace;">' + projChildTasks.length + '</div>' +
+                            '</div>' +
                         '</div>' +
                         '<div style="display:flex;flex-direction:column;gap:4px;">' +
                         __topicGroups.map(function (grp) {
