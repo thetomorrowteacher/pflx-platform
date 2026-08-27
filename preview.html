@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 100;
+      window.PFLX_PATCH   = 101;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -33517,10 +33517,55 @@
         // new tab and stopPropagation so links inside clickable rows/cards
         // don't trigger the row's own onclick navigation. Window-attached
         // so every script scope (MC + Player Portal) can use it.
+        // v1.101 — RICH TEXT. Descriptions are still stored as PLAIN TEXT; the
+        // markup below is rendered at display time. That is deliberate: storing
+        // HTML would mean sanitising it on every one of the ~10 render sites, and
+        // a host-authored description already flows into innerHTML. Generating the
+        // tags ourselves from fully-escaped text keeps XSS impossible by
+        // construction, needs no schema change, and upgrades every existing
+        // description for free.
+        //   **bold**   *italic*   __underline__   ~~strike~~   `code`
+        //   - or * bullet lines, 1. numbered lines
+        //   blank line = paragraph break, single newline = line break
+        //   leading spaces/tabs preserved (indent), then URLs linkified.
+        window.pflxRichInline = function (esc) {
+            return esc
+                .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+                .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>')
+                .replace(/__([^_\n]+)__/g, '<u>$1</u>')
+                .replace(/~~([^~\n]+)~~/g, '<s>$1</s>')
+                .replace(/`([^`\n]+)`/g, '<code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:4px;font-size:0.92em;">$1</code>');
+        };
         window.pflxLinkify = function (text) {
             var esc = String(text == null ? '' : text)
                 .replace(/&/g, '&amp;').replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            esc = window.pflxRichInline(esc);
+            // Line structure: bullets and numbered items become real list rows;
+            // everything else keeps its newline as a <br>. Leading whitespace is
+            // preserved so indents/tabs survive (HTML would otherwise collapse it).
+            var lines = esc.split(/\n/), out = [], listOpen = null;
+            function closeList() { if (listOpen) { out.push(listOpen === 'ul' ? '</ul>' : '</ol>'); listOpen = null; } }
+            for (var i = 0; i < lines.length; i++) {
+                var ln = lines[i];
+                var bullet = ln.match(/^\s*[-\u2022*]\s+(.*)$/);
+                var numbered = ln.match(/^\s*\d+[.)]\s+(.*)$/);
+                if (bullet) {
+                    if (listOpen !== 'ul') { closeList(); out.push('<ul style="margin:4px 0 4px 18px;padding:0;">'); listOpen = 'ul'; }
+                    out.push('<li style="margin:2px 0;">' + bullet[1] + '</li>');
+                } else if (numbered) {
+                    if (listOpen !== 'ol') { closeList(); out.push('<ol style="margin:4px 0 4px 20px;padding:0;">'); listOpen = 'ol'; }
+                    out.push('<li style="margin:2px 0;">' + numbered[1] + '</li>');
+                } else {
+                    closeList();
+                    if (!ln.trim()) { out.push('<div style="height:8px;"></div>'); continue; }
+                    var lead = ln.match(/^[ \t]+/);
+                    if (lead) ln = lead[0].replace(/\t/g, '&nbsp;&nbsp;&nbsp;&nbsp;').replace(/ /g, '&nbsp;') + ln.slice(lead[0].length);
+                    out.push(ln + (i < lines.length - 1 ? '<br>' : ''));
+                }
+            }
+            closeList();
+            esc = out.join('');
             return esc.replace(/\b((?:https?:\/\/|www\.)[^\s<>"']+)/gi, function (m) {
                 var url = m, trail = '';
                 var tm = url.match(/[),.;:!?\]]+$/);
@@ -55605,7 +55650,8 @@ RESPONSE RULES:
                 document.querySelectorAll('[data-ai-toolbar]').forEach(function (el) {
                     if (el.dataset.aiToolbarFilled) return;
                     var parts = String(el.getAttribute('data-ai-toolbar') || '').split('|');
-                    el.innerHTML = PFLX_AI_ASSIST.toolbarHtml(parts[0] || '', parts[1] || '');
+                    el.innerHTML = PFLX_AI_ASSIST.toolbarHtml(parts[0] || '', parts[1] || '')
+                                 + (parts[1] ? window.pflxFormatToolbarHtml(parts[1]) : '');
                     el.dataset.aiToolbarFilled = '1';
                 });
             } catch (e) { console.warn('[AI Assist] toolbar init failed', e); }
@@ -55616,6 +55662,52 @@ RESPONSE RULES:
             pflxAIAssistInitToolbars();
         }
         window.pflxAIAssistInitToolbars = pflxAIAssistInitToolbars;
+
+        // ── v1.101 Rich-text formatting toolbar ──────────────────────────
+        // Wraps/inserts the plain-text markers pflxLinkify renders. Sits in the
+        // same slot as the AI toolbar so every description box that already has
+        // one gets formatting for free (project, task, checkpoint, program +
+        // their Quick variants). Works on a normal <textarea>, so nothing about
+        // how descriptions are stored or merged changes.
+        window.pflxFmtWrap = function (targetId, before, after, blockPrefix) {
+            var ta = document.getElementById(targetId); if (!ta) return;
+            var s = ta.selectionStart || 0, e = ta.selectionEnd || 0, v = ta.value || '';
+            if (blockPrefix) {
+                var ls = v.lastIndexOf('\n', s - 1) + 1;
+                var le = v.indexOf('\n', e); if (le === -1) le = v.length;
+                var block = v.slice(ls, le).split('\n').map(function (ln, i) {
+                    return blockPrefix === '1. ' ? (i + 1) + '. ' + ln.replace(/^\s*(?:[-\u2022*]|\d+[.)])\s+/, '')
+                                                 : blockPrefix + ln.replace(/^\s*(?:[-\u2022*]|\d+[.)])\s+/, '');
+                }).join('\n');
+                ta.value = v.slice(0, ls) + block + v.slice(le);
+                ta.focus(); ta.setSelectionRange(ls, ls + block.length);
+            } else {
+                var sel = v.slice(s, e) || 'text';
+                ta.value = v.slice(0, s) + before + sel + after + v.slice(e);
+                ta.focus(); ta.setSelectionRange(s + before.length, s + before.length + sel.length);
+            }
+            try { ta.dispatchEvent(new Event('input', { bubbles: true })); } catch (err) {}
+        };
+        window.pflxFormatToolbarHtml = function (targetId) {
+            var b = function (label, title, args) {
+                return '<button type="button" title="' + title + '" onclick="pflxFmtWrap(' + args + ')" ' +
+                    'style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);color:#cfd8ff;' +
+                    'border-radius:6px;min-width:26px;height:24px;font-size:11px;cursor:pointer;padding:0 7px;line-height:1;">' + label + '</button>';
+            };
+            var t = "'" + targetId + "'";
+            return '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin:6px 0 4px;">' +
+                '<span style="font-size:9px;color:rgba(255,255,255,0.3);letter-spacing:0.08em;text-transform:uppercase;margin-right:2px;">Format</span>' +
+                b('<b>B</b>', 'Bold  **text**', t + ",'**','**'") +
+                b('<i>I</i>', 'Italic  *text*', t + ",'*','*'") +
+                b('<u>U</u>', 'Underline  __text__', t + ",'__','__'") +
+                b('<s>S</s>', 'Strikethrough  ~~text~~', t + ",'~~','~~'") +
+                b('&lt;/&gt;', 'Code  `text`', t + ',"`","`"') +
+                b('&#8226;', 'Bullet list', t + ",'','','- '") +
+                b('1.', 'Numbered list', t + ",'','','1. '") +
+                b('&#8677;', 'Indent line', t + ",'','','    '") +
+                '<span style="font-size:9px;color:rgba(255,255,255,0.25);margin-left:4px;">line breaks &amp; emoji supported</span>' +
+            '</div>';
+        };
 
         // ═══════════════════════════════════════════════════════════════
         // PLAYER BYO-LLM — "bring your own AI" activation for X-Bot
