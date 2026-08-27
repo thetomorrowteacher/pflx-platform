@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 103;
+      window.PFLX_PATCH   = 104;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -8810,6 +8810,16 @@
                                             <label class="mc-btn" style="padding:4px 12px;font-size:10px;cursor:pointer;">&#x1F4F7; Upload <input type="file" accept="image/*" onchange="mcUploadProgramBanner(this)" style="display:none;"></label>
                                             <button class="mc-btn mc-btn-red" style="padding:4px 12px;font-size:10px;" onclick="mcRemoveProgramBanner()">&#x2715; Remove</button>
                                         </div>
+                                    </div>
+                                    <!-- v1.104 Embed cover — same field Checkpoint (#mc-cp-embed, since
+                                         v1.6) and Project (#mc-project-embed, since v1.98) already have.
+                                         Paste a Canva design link, a Google Slides link, or a YouTube URL
+                                         and the Program header/card renders a live 16:9 iframe instead of
+                                         the static cover image. Blank = fall back to the cover image. -->
+                                    <div style="margin-bottom:14px;">
+                                        <label style="display:block;font-size:11px;color:rgba(139,92,246,0.7);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">&#x1F5A5; Embed Cover (shows instead of the image)</label>
+                                        <input type="url" id="mc-program-tab-embed" oninput="pflxEmbedHint(this,'mc-program-tab-embed-hint')" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(139,92,246,0.25);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="Paste a Canva design link (Share &rarr; Copy link) — also accepts Google Slides / YouTube. Blank = use the cover image.">
+                                        <div id="mc-program-tab-embed-hint"></div>
                                     </div>
                                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
                                         <div>
@@ -29011,9 +29021,30 @@
                 return;
             }
 
-            html += '<div style="background:linear-gradient(135deg,rgba(0,240,255,0.08),rgba(139,92,246,0.08));border:1px solid rgba(0,240,255,0.2);border-radius:16px;padding:24px;margin-bottom:20px;">' +
-                '<div style="font-family:\'Orbitron\',sans-serif;font-size:18px;font-weight:700;color:var(--cyan);letter-spacing:2px;margin-bottom:6px;">' + escapeHtml(pg.name || 'Program') + '</div>' +
-                (pg.description ? '<div style="font-size:13px;color:#a0a8c4;line-height:1.6;">' + escapeHtml(pg.description) + '</div>' : '') + '</div>';
+            // v1.104 — Programs gain the same embed/banner treatment
+            // Checkpoints and Projects already have on the player side.
+            // ppBannerHeader returns '' when neither embed nor image is set,
+            // so a Program with no cover renders EXACTLY the old plain
+            // gradient header below — zero visual change for existing
+            // Programs, this only engages once a host sets one.
+            var pgBanner = (typeof ppBannerHeader === 'function') ? ppBannerHeader({
+                image: pg.bannerImage,
+                embed: pg.embedUrl || '',
+                title: pg.name || 'Program',
+                accent: '0,240,255',
+                titleFont: "'Orbitron',sans-serif",
+                kicker: '\uD83D\uDCD8 PROGRAM'
+            }) : '';
+            html += pgBanner
+                ? '<div style="border:1px solid rgba(0,240,255,0.2);border-radius:16px;overflow:hidden;margin-bottom:20px;">' +
+                    pgBanner +
+                    (pg.description
+                        ? '<div style="padding:14px 22px 20px;font-size:13px;color:#a0a8c4;line-height:1.6;">' + escapeHtml(pg.description) + '</div>'
+                        : '<div style="height:14px;"></div>') +
+                  '</div>'
+                : '<div style="background:linear-gradient(135deg,rgba(0,240,255,0.08),rgba(139,92,246,0.08));border:1px solid rgba(0,240,255,0.2);border-radius:16px;padding:24px;margin-bottom:20px;">' +
+                    '<div style="font-family:\'Orbitron\',sans-serif;font-size:18px;font-weight:700;color:var(--cyan);letter-spacing:2px;margin-bottom:6px;">' + escapeHtml(pg.name || 'Program') + '</div>' +
+                    (pg.description ? '<div style="font-size:13px;color:#a0a8c4;line-height:1.6;">' + escapeHtml(pg.description) + '</div>' : '') + '</div>';
 
             var cps = (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) ? mcCheckpoints.filter(function (c) { return c && c.programId === pg.id && c.status !== 'inactive'; }) : [];
             if (cps.length) {
@@ -40794,9 +40825,15 @@
                     // fuller info body below — cohort scope, reward badges,
                     // and a description preview — instead of the old
                     // single skinny text-only row.
-                    var bannerHeader = pg.bannerImage
+                    // v1.104 — pg.embedUrl (new) renders a live iframe via the
+                    // same pflxCoverMediaEl every other card type uses, taking
+                    // priority over the static bannerImage exactly like
+                    // Project/Checkpoint cards already do.
+                    var bannerHeader = (pg.embedUrl || pg.bannerImage)
                         ? '<div style="width:calc(100% + 44px);aspect-ratio:16/9;background:rgba(6,10,20,0.6);overflow:hidden;margin:-22px -22px 16px -22px;border-radius:16px 16px 0 0;">' +
-                            '<img src="' + escapeHtml(pg.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;display:block;" />' +
+                            (typeof pflxCoverMediaEl === 'function'
+                                ? pflxCoverMediaEl(pg.embedUrl, pg.bannerImage)
+                                : '<img src="' + escapeHtml(pg.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;display:block;" />') +
                           '</div>'
                         : '<div style="width:calc(100% + 44px);aspect-ratio:16/9;background:linear-gradient(135deg, rgba(167,139,250,0.14), rgba(0,212,255,0.10));display:flex;align-items:center;justify-content:center;margin:-22px -22px 16px -22px;border-radius:16px 16px 0 0;">' +
                             '<div style="font-size:42px;opacity:0.5;">&#x1F4D0;</div>' +
@@ -40865,6 +40902,7 @@
             }
             var el;
             el = document.getElementById('mc-program-tab-name');   if (el) el.value = pg ? (pg.name || '') : '';
+            el = document.getElementById('mc-program-tab-embed');  if (el) el.value = pg ? (pg.embedUrl || '') : '';
             el = document.getElementById('mc-program-tab-start');  if (el) el.value = pg ? (pg.startDate || '') : '';
             el = document.getElementById('mc-program-tab-end');    if (el) el.value = pg ? (pg.endDate || '') : '';
             el = document.getElementById('mc-program-tab-status'); if (el) el.value = pg ? (pg.status || 'draft') : 'draft';
@@ -41000,6 +41038,8 @@
                 skipCompletionApproval: !!document.getElementById('mc-program-tab-skip-completion-approval')?.checked,
                 feedforwardEnabled: !!document.getElementById('mc-program-tab-feedforward-enabled')?.checked,
                 description: document.getElementById('mc-program-tab-desc')?.value || '',
+                // v1.104 — mirrors Project/Checkpoint's embedUrl exactly.
+                embedUrl: (document.getElementById('mc-program-tab-embed')?.value || '').trim(),
                 rewardBadges: rewardBadges,
                 cohortIds: cohortIds,
                 // v1.71 — "Apply to Join". applyEnabled gates ENTRY (not
@@ -58257,6 +58297,30 @@ RESPONSE RULES:
                 (known ? '&#x2713; Embeds as: ' : '&#x2139; Will be framed as-is: ') +
                 '<code style="color:rgba(255,255,255,0.6);">' + escapeHtml(src) + '</code></div>' + note;
         };
+        // v1.104 (Ennis: "full screen toggle for the Google Slides embed in
+        // Programs and Projects, the Canva embed already has it") — Canva's
+        // own embed chrome draws its own expand icon, but Slides is embedded
+        // in kiosk mode (rm=minimal, see pflxEmbedSrc) specifically so
+        // in-slide navigation links aren't competed with by Google's control
+        // bar — which also strips Slides' OWN fullscreen button along with
+        // everything else. This puts a PFLX-drawn one back, scoped to Slides
+        // embeds only (Canva/YouTube/Vimeo already have their own, or the
+        // browser's native iframe corner controls suffice).
+        window.pflxToggleEmbedFullscreen = function (id) {
+            try {
+                var el = document.getElementById(id);
+                if (!el) return;
+                var d = document;
+                var isFs = d.fullscreenElement || d.webkitFullscreenElement || d.webkitCurrentFullScreenElement || d.mozFullScreenElement;
+                if (!isFs) {
+                    var req = el.requestFullscreen || el.webkitRequestFullscreen || el.webkitRequestFullScreen || el.mozRequestFullScreen || el.msRequestFullscreen;
+                    if (req) { var r = req.call(el); if (r && r.catch) r.catch(function () {}); }
+                } else {
+                    var ex = d.exitFullscreen || d.webkitExitFullscreen || d.webkitCancelFullScreen || d.mozCancelFullScreen || d.msExitFullscreen;
+                    if (ex) ex.call(d);
+                }
+            } catch (e) { console.warn('[fs] embed toggle failed', e); }
+        };
         // Media element for a cover: iframe (embedUrl) else image else ''.
         window.pflxCoverMediaEl = function (embedUrl, imgUrl) {
             if (embedUrl) {
@@ -58265,7 +58329,15 @@ RESPONSE RULES:
                 // loads at a null origin — most destinations break. allow-forms lets
                 // an embedded form deck submit. Both are required for the
                 // navigate-by-in-slide-link model.
-                return '<iframe src="' + escapeHtml(pflxEmbedSrc(embedUrl)) + '" allow="accelerometer *; autoplay *; clipboard-write *; encrypted-media *; fullscreen *; gyroscope *; picture-in-picture *; web-share *; microphone *; camera *" allowfullscreen sandbox="allow-scripts allow-same-origin allow-presentation allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals allow-downloads allow-pointer-lock allow-orientation-lock allow-storage-access-by-user-activation allow-top-navigation-by-user-activation" style="width:100%;height:100%;border:0;display:block;background:#000;"></iframe>';
+                var _cmeSrc = pflxEmbedSrc(embedUrl);
+                var _cmeIsSlides = /docs\.google\.com\/presentation\//.test(_cmeSrc);
+                var _cmeId = 'pflx-embed-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+                var _cmeFsBtn = _cmeIsSlides
+                    ? '<button type="button" onclick="event.stopPropagation();pflxToggleEmbedFullscreen(&quot;' + _cmeId + '&quot;)" title="Fullscreen" style="position:absolute;top:8px;right:8px;z-index:2;width:30px;height:30px;background:rgba(10,18,40,0.72);border:1px solid rgba(255,255,255,0.25);border-radius:6px;color:#e0e6ff;font-size:15px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;">&#x26F6;</button>'
+                    : '';
+                return '<div style="position:relative;width:100%;height:100%;">' + _cmeFsBtn +
+                    '<iframe id="' + _cmeId + '" src="' + escapeHtml(_cmeSrc) + '" allow="accelerometer *; autoplay *; clipboard-write *; encrypted-media *; fullscreen *; gyroscope *; picture-in-picture *; web-share *; microphone *; camera *" allowfullscreen sandbox="allow-scripts allow-same-origin allow-presentation allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals allow-downloads allow-pointer-lock allow-orientation-lock allow-storage-access-by-user-activation allow-top-navigation-by-user-activation" style="width:100%;height:100%;border:0;display:block;background:#000;"></iframe>' +
+                '</div>';
             }
             if (imgUrl) return '<img src="' + escapeHtml(imgUrl) + '" style="width:100%;height:100%;object-fit:cover;display:block;filter:saturate(1.15) brightness(1.02);">';
             return '';
