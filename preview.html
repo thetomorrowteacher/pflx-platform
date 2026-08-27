@@ -9072,7 +9072,7 @@
                                         </div>
                                         <div style="grid-column:1/-1;">
                                             <label style="display:block;font-size:11px;color:rgba(139,92,246,0.7);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">🖥 Embed (shows instead of the banner)</label>
-                                            <input type="url" id="mc-cp-embed" oninput="pflxEmbedHint(this,'mc-cp-embed-hint')" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(139,92,246,0.25);color:#e0e6ff;padding:10px;border-radius:8px;font-size:13px;box-sizing:border-box;" placeholder="YouTube, Google Slides, Canva, or any embed URL — leave blank to use the banner image">
+                                            <input type="url" id="mc-cp-embed" oninput="pflxEmbedHint(this,'mc-cp-embed-hint')" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(139,92,246,0.25);color:#e0e6ff;padding:10px;border-radius:8px;font-size:13px;box-sizing:border-box;" placeholder="Paste a Canva design link (Share &rarr; Copy link) — also accepts Google Slides / YouTube. Blank = use the banner image.">
                                             <div id="mc-cp-embed-hint"></div>
                                         </div>
                                     </div>
@@ -9886,7 +9886,7 @@
                                          its embeddable form. Blank = fall back to the cover image. -->
                                     <div style="margin-bottom:14px;">
                                         <label style="display:block;font-size:11px;color:rgba(139,92,246,0.7);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">&#x1F5A5; Embed Cover (shows instead of the image)</label>
-                                        <input type="url" id="mc-project-embed" oninput="pflxEmbedHint(this,'mc-project-embed-hint')" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(139,92,246,0.25);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="Canva, Google Slides, YouTube, or any embed URL — leave blank to use the cover image">
+                                        <input type="url" id="mc-project-embed" oninput="pflxEmbedHint(this,'mc-project-embed-hint')" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(139,92,246,0.25);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="Paste a Canva design link (Share &rarr; Copy link) — also accepts Google Slides / YouTube. Blank = use the cover image.">
                                         <div id="mc-project-embed-hint"></div>
                                     </div>
                                     <div style="margin-bottom:12px;">
@@ -57992,9 +57992,20 @@ RESPONSE RULES:
             }
             var src = (typeof pflxEmbedSrc === 'function') ? pflxEmbedSrc(v) : v;
             var known = /canva\.com\/design\/|docs\.google\.com\/(presentation|document)\/|youtube\.com\/embed\/|player\.vimeo\.com\//i.test(src);
+            // Per-source footnote. Canva publishes no parameter to suppress its
+            // overlay arrows (its own oEmbed markup is just ?embed&meta), so a
+            // host planning to navigate via links drawn inside the slides should
+            // know the arrows stay. Google Slides takes rm=minimal and renders
+            // bare. Verified against live headers + Canva oEmbed 2026-08-27.
+            var note = '';
+            if (/canva\.com\/design\//i.test(src)) {
+                note = '<div style="margin-top:4px;font-size:10px;color:rgba(255,255,255,0.4);line-height:1.5;">Canva draws its own next/prev arrows over the deck and offers no way to turn them off. In-slide links still work.</div>';
+            } else if (/docs\.google\.com\/presentation\//i.test(src)) {
+                note = '<div style="margin-top:4px;font-size:10px;color:rgba(255,255,255,0.4);line-height:1.5;">Kiosk mode (rm=minimal) — no control bar, no Google branding.</div>';
+            }
             box.innerHTML = '<div style="margin-top:6px;font-size:11px;color:' + (known ? 'rgba(34,197,94,0.9)' : 'rgba(255,255,255,0.4)') + ';line-height:1.5;word-break:break-all;">' +
                 (known ? '&#x2713; Embeds as: ' : '&#x2139; Will be framed as-is: ') +
-                '<code style="color:rgba(255,255,255,0.6);">' + escapeHtml(src) + '</code></div>';
+                '<code style="color:rgba(255,255,255,0.6);">' + escapeHtml(src) + '</code></div>' + note;
         };
         // Media element for a cover: iframe (embedUrl) else image else ''.
         window.pflxCoverMediaEl = function (embedUrl, imgUrl) {
