@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 97;
+      window.PFLX_PATCH   = 98;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -9876,6 +9876,16 @@
                                             <label class="mc-btn" style="padding:4px 12px;font-size:10px;cursor:pointer;">&#x1F4F7; Upload <input type="file" accept="image/*" onchange="mcUploadProjectBanner(this)" style="display:none;"></label>
                                             <button class="mc-btn mc-btn-red" style="padding:4px 12px;font-size:10px;" onclick="mcRemoveProjectBanner()">&#x2715; Remove</button>
                                         </div>
+                                    </div>
+                                    <!-- v1.98 Embed cover — same field the Checkpoint form has had
+                                         since v1.6 (#mc-cp-embed). Paste a Canva design link, a Google
+                                         Slides link, or a YouTube URL and the project header renders a
+                                         live 16:9 iframe the player can page through, instead of the
+                                         static cover image. pflxEmbedSrc() normalizes the share URL to
+                                         its embeddable form. Blank = fall back to the cover image. -->
+                                    <div style="margin-bottom:14px;">
+                                        <label style="display:block;font-size:11px;color:rgba(139,92,246,0.7);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">&#x1F5A5; Embed Cover (shows instead of the image)</label>
+                                        <input type="url" id="mc-project-embed" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(139,92,246,0.25);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="Canva, Google Slides, YouTube, or any embed URL — leave blank to use the cover image">
                                     </div>
                                     <div style="margin-bottom:12px;">
                                         <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Title *</label>
@@ -29112,8 +29122,38 @@
         //   opts.pill       — { label, color } for the right-side pill (optional)
         //   opts.kicker     — small caption above title (e.g. "FROM PROJECT") (optional)
         //   opts.titleFont  — font-family override (default Orbitron)
+        //   opts.embed      — embed URL (Canva / Google Slides / YouTube). When
+        //                     set it WINS over opts.image and renders a live
+        //                     16:9 iframe the player can page through.
         function ppBannerHeader(opts) {
             opts = opts || {};
+            // v1.98 (Ennis) — EMBED COVERS. With opts.embed the header renders a
+            // live 16:9 iframe (Canva slide deck, Google Slides, YouTube) instead
+            // of a static image, so a player can move slide to slide right in the
+            // header. Overlays are deliberately dropped in this mode: the gradient
+            // wash would sit on top of the deck and the deck's own next/prev arrows
+            // would be unclickable. The title moves BELOW the frame instead. This
+            // mirrors the Checkpoint card, which has rendered cp.embedUrl this way
+            // since v1.6 — projects simply never got wired up.
+            if (opts.embed && typeof pflxCoverMediaEl === 'function') {
+                var eAccent = opts.accent || '0,212,255';
+                var eKicker = opts.kicker
+                    ? '<span style="font-family:\'Share Tech Mono\',monospace;font-size:10px;color:rgba(255,255,255,0.55);letter-spacing:0.18em;text-transform:uppercase;">' + escapeHtml(opts.kicker) + '</span>'
+                    : '';
+                var ePill = '';
+                if (opts.pill && opts.pill.label) {
+                    var epc = opts.pill.color || '34,197,94';
+                    ePill = '<span style="background:rgba(' + epc + ',0.2);color:rgb(' + epc + ');padding:4px 11px;border-radius:14px;font-size:11px;font-weight:700;border:1px solid rgba(' + epc + ',0.5);text-transform:uppercase;letter-spacing:0.08em;white-space:nowrap;">' + escapeHtml(opts.pill.label) + '</span>';
+                }
+                return '<div style="position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;background:#000;border-bottom:1px solid rgba(' + eAccent + ',0.35);box-shadow:inset 0 0 60px rgba(' + eAccent + ',0.12);">' +
+                        pflxCoverMediaEl(opts.embed, opts.image) +
+                    '</div>' +
+                    '<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;padding:12px 22px 0;">' +
+                        '<div>' + eKicker +
+                            '<div style="font-family:' + (opts.titleFont || "'Orbitron',sans-serif") + ';font-size:22px;font-weight:800;color:#ffffff;letter-spacing:0.04em;">' + escapeHtml(opts.title || '') + '</div>' +
+                        '</div>' + ePill +
+                    '</div>';
+            }
             if (!opts.image) return '';
             var h = opts.height || 180;
             var accent = opts.accent || '0,212,255';
@@ -29601,6 +29641,7 @@
             // header for projects with no banner set.
             var projBanner = ppBannerHeader({
                 image: proj.bannerImage,
+                embed: proj.embedUrl || '',
                 title: proj.name || proj.title || 'Project',
                 accent: '167,139,250',
                 titleFont: "'Rajdhani',sans-serif",
@@ -39008,9 +39049,11 @@
                 // Falls back to a soft gradient with a 🎬 mark when no
                 // bannerImage is set so cards stay visually consistent.
                 var bannerHeader;
-                if (p.bannerImage) {
+                if (p.embedUrl || p.bannerImage) {
                     bannerHeader = '<div style="width:100%;aspect-ratio:16/9;background:rgba(6,10,20,0.6);overflow:hidden;">' +
-                        '<img src="' + p.bannerImage + '" style="width:100%;height:100%;object-fit:cover;display:block;" />' +
+                        (typeof pflxCoverMediaEl === 'function'
+                            ? pflxCoverMediaEl(p.embedUrl, p.bannerImage)
+                            : '<img src="' + p.bannerImage + '" style="width:100%;height:100%;object-fit:cover;display:block;" />') +
                         '</div>';
                 } else {
                     bannerHeader = '<div style="width:100%;aspect-ratio:16/9;background:linear-gradient(135deg, rgba(0,212,255,0.12), rgba(167,139,250,0.12));display:flex;align-items:center;justify-content:center;">' +
@@ -39386,6 +39429,7 @@
                 }
                 el = document.getElementById('mc-project-due'); if (el) el.value = p.dueDate || '';
                 el = document.getElementById('mc-project-desc'); if (el) el.value = p.description || '';
+                el = document.getElementById('mc-project-embed'); if (el) el.value = p.embedUrl || '';
                 // Subtask checklist — restore prior items including completion state
                 // so the editor can preserve it on save.
                 _mcRenderProjectSubtaskEditorRows(Array.isArray(p.subtasks) ? p.subtasks : []);
@@ -39482,7 +39526,7 @@
                     if (cohortListDiv) cohortListDiv.style.display = 'none';
                 }
             } else {
-                ['mc-project-title','mc-project-desc','mc-project-team','mc-project-link','mc-project-objectives','mc-project-deliverables','mc-project-start','mc-project-due'].forEach(function(id) {
+                ['mc-project-title','mc-project-desc','mc-project-embed','mc-project-team','mc-project-link','mc-project-objectives','mc-project-deliverables','mc-project-start','mc-project-due'].forEach(function(id) {
                     var el = document.getElementById(id); if (el) el.value = '';
                 });
                 // Clear the subtask editor for new projects.
@@ -39650,6 +39694,9 @@
                 updatedAt: Date.now(),
                 name: title,
                 description: document.getElementById('mc-project-desc')?.value || '',
+                // v1.98 — embed cover (Canva / Google Slides / YouTube). Wins over
+                // bannerImage in every project header when set.
+                embedUrl: (document.getElementById('mc-project-embed')?.value || '').trim(),
                 status: document.getElementById('mc-project-status')?.value || 'planning',
                 // Dates — startedAt + dueDate feed pflxComputeFlpStatus + My Work overdue
                 startedAt: document.getElementById('mc-project-start')?.value ||
@@ -57893,11 +57940,27 @@ RESPONSE RULES:
             if (yt) return 'https://www.youtube.com/embed/' + yt[1];
             var vm = url.match(/vimeo\.com\/(\d+)/);
             if (vm) return 'https://player.vimeo.com/video/' + vm[1];
+            // PUBLISHED Slides deck (File > Publish to the web) has the form
+            // /presentation/d/e/<2PACX-long-token>/pub. It must be matched BEFORE
+            // the normal /d/<id> pattern — otherwise the generic regex captures
+            // the literal "e" as the deck id and builds /presentation/d/e/embed,
+            // which 404s. Caught 2026-08-27 on the Nexus Narratives deck.
+            var gsPub = url.match(/docs\.google\.com\/presentation\/d\/e\/([A-Za-z0-9_-]+)/);
+            if (gsPub) return 'https://docs.google.com/presentation/d/e/' + gsPub[1] + '/embed?start=false&loop=false';
             var gs = url.match(/docs\.google\.com\/presentation\/d\/([A-Za-z0-9_-]+)/);
             if (gs) return 'https://docs.google.com/presentation/d/' + gs[1] + '/embed?start=false&loop=false';
             var gd = url.match(/docs\.google\.com\/document\/d\/([A-Za-z0-9_-]+)/);
             if (gd) return 'https://docs.google.com/document/d/' + gd[1] + '/preview';
-            if (/canva\.com\/design\//.test(url) && !/\/view/.test(url)) return url.replace(/\/(edit|watch).*$/, '') + '/view?embed';
+            // Canva: the old guard skipped any URL already containing /view, so a
+            // normal "share > view link" (.../view?utm_content=…) was passed through
+            // WITHOUT ?embed and rendered the full Canva chrome (or refused to frame).
+            // Normalize every design link to <base>/view?embed, preserving the share
+            // token segment when present. Note: canva.link/* short links cannot be
+            // resolved client-side — paste the full canva.com/design/... URL.
+            if (/canva\.com\/design\//.test(url)) {
+                var cv = url.split('?')[0].split('#')[0].replace(/\/+$/, '').replace(/\/(edit|watch|view)$/, '');
+                return cv + '/view?embed';
+            }
             return url;   // already an embed/iframe-able URL
         };
         // Media element for a cover: iframe (embedUrl) else image else ''.
