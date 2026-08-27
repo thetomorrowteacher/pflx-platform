@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 97;
+      window.PFLX_PATCH   = 98;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -9072,7 +9072,8 @@
                                         </div>
                                         <div style="grid-column:1/-1;">
                                             <label style="display:block;font-size:11px;color:rgba(139,92,246,0.7);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">🖥 Embed (shows instead of the banner)</label>
-                                            <input type="url" id="mc-cp-embed" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(139,92,246,0.25);color:#e0e6ff;padding:10px;border-radius:8px;font-size:13px;box-sizing:border-box;" placeholder="YouTube, Google Slides, Canva, or any embed URL — leave blank to use the banner image">
+                                            <input type="url" id="mc-cp-embed" oninput="pflxEmbedHint(this,'mc-cp-embed-hint')" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(139,92,246,0.25);color:#e0e6ff;padding:10px;border-radius:8px;font-size:13px;box-sizing:border-box;" placeholder="Paste a Canva design link (Share &rarr; Copy link) — also accepts Google Slides / YouTube. Blank = use the banner image.">
+                                            <div id="mc-cp-embed-hint"></div>
                                         </div>
                                     </div>
                                     <!-- v1.71 (Ennis) — bypass the completion-approval gate for this
@@ -9876,6 +9877,17 @@
                                             <label class="mc-btn" style="padding:4px 12px;font-size:10px;cursor:pointer;">&#x1F4F7; Upload <input type="file" accept="image/*" onchange="mcUploadProjectBanner(this)" style="display:none;"></label>
                                             <button class="mc-btn mc-btn-red" style="padding:4px 12px;font-size:10px;" onclick="mcRemoveProjectBanner()">&#x2715; Remove</button>
                                         </div>
+                                    </div>
+                                    <!-- v1.98 Embed cover — same field the Checkpoint form has had
+                                         since v1.6 (#mc-cp-embed). Paste a Canva design link, a Google
+                                         Slides link, or a YouTube URL and the project header renders a
+                                         live 16:9 iframe the player can page through, instead of the
+                                         static cover image. pflxEmbedSrc() normalizes the share URL to
+                                         its embeddable form. Blank = fall back to the cover image. -->
+                                    <div style="margin-bottom:14px;">
+                                        <label style="display:block;font-size:11px;color:rgba(139,92,246,0.7);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">&#x1F5A5; Embed Cover (shows instead of the image)</label>
+                                        <input type="url" id="mc-project-embed" oninput="pflxEmbedHint(this,'mc-project-embed-hint')" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(139,92,246,0.25);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="Paste a Canva design link (Share &rarr; Copy link) — also accepts Google Slides / YouTube. Blank = use the cover image.">
+                                        <div id="mc-project-embed-hint"></div>
                                     </div>
                                     <div style="margin-bottom:12px;">
                                         <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Title *</label>
@@ -29112,8 +29124,38 @@
         //   opts.pill       — { label, color } for the right-side pill (optional)
         //   opts.kicker     — small caption above title (e.g. "FROM PROJECT") (optional)
         //   opts.titleFont  — font-family override (default Orbitron)
+        //   opts.embed      — embed URL (Canva / Google Slides / YouTube). When
+        //                     set it WINS over opts.image and renders a live
+        //                     16:9 iframe the player can page through.
         function ppBannerHeader(opts) {
             opts = opts || {};
+            // v1.98 (Ennis) — EMBED COVERS. With opts.embed the header renders a
+            // live 16:9 iframe (Canva slide deck, Google Slides, YouTube) instead
+            // of a static image, so a player can move slide to slide right in the
+            // header. Overlays are deliberately dropped in this mode: the gradient
+            // wash would sit on top of the deck and the deck's own next/prev arrows
+            // would be unclickable. The title moves BELOW the frame instead. This
+            // mirrors the Checkpoint card, which has rendered cp.embedUrl this way
+            // since v1.6 — projects simply never got wired up.
+            if (opts.embed && typeof pflxCoverMediaEl === 'function') {
+                var eAccent = opts.accent || '0,212,255';
+                var eKicker = opts.kicker
+                    ? '<span style="font-family:\'Share Tech Mono\',monospace;font-size:10px;color:rgba(255,255,255,0.55);letter-spacing:0.18em;text-transform:uppercase;">' + escapeHtml(opts.kicker) + '</span>'
+                    : '';
+                var ePill = '';
+                if (opts.pill && opts.pill.label) {
+                    var epc = opts.pill.color || '34,197,94';
+                    ePill = '<span style="background:rgba(' + epc + ',0.2);color:rgb(' + epc + ');padding:4px 11px;border-radius:14px;font-size:11px;font-weight:700;border:1px solid rgba(' + epc + ',0.5);text-transform:uppercase;letter-spacing:0.08em;white-space:nowrap;">' + escapeHtml(opts.pill.label) + '</span>';
+                }
+                return '<div style="position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;background:#000;border-bottom:1px solid rgba(' + eAccent + ',0.35);box-shadow:inset 0 0 60px rgba(' + eAccent + ',0.12);">' +
+                        pflxCoverMediaEl(opts.embed, opts.image) +
+                    '</div>' +
+                    '<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;padding:12px 22px 0;">' +
+                        '<div>' + eKicker +
+                            '<div style="font-family:' + (opts.titleFont || "'Orbitron',sans-serif") + ';font-size:22px;font-weight:800;color:#ffffff;letter-spacing:0.04em;">' + escapeHtml(opts.title || '') + '</div>' +
+                        '</div>' + ePill +
+                    '</div>';
+            }
             if (!opts.image) return '';
             var h = opts.height || 180;
             var accent = opts.accent || '0,212,255';
@@ -29601,6 +29643,7 @@
             // header for projects with no banner set.
             var projBanner = ppBannerHeader({
                 image: proj.bannerImage,
+                embed: proj.embedUrl || '',
                 title: proj.name || proj.title || 'Project',
                 accent: '167,139,250',
                 titleFont: "'Rajdhani',sans-serif",
@@ -36174,7 +36217,7 @@
             var url = (value || '').trim();
             if (!url) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
             wrap.style.display = '';
-            wrap.innerHTML = '<iframe src="' + escapeHtml(pflxEmbedSrc(url)) + '" style="width:100%;height:100%;border:0;" sandbox="allow-scripts allow-same-origin allow-presentation allow-popups" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>';
+            wrap.innerHTML = '<iframe src="' + escapeHtml(pflxEmbedSrc(url)) + '" style="width:100%;height:100%;border:0;" sandbox="allow-scripts allow-same-origin allow-presentation allow-popups allow-popups-to-escape-sandbox allow-forms" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>';
         };
         // Read out the current, saveable link list for a scope — drops rows
         // with no URL (a label-only row is not a usable link).
@@ -39008,9 +39051,11 @@
                 // Falls back to a soft gradient with a 🎬 mark when no
                 // bannerImage is set so cards stay visually consistent.
                 var bannerHeader;
-                if (p.bannerImage) {
+                if (p.embedUrl || p.bannerImage) {
                     bannerHeader = '<div style="width:100%;aspect-ratio:16/9;background:rgba(6,10,20,0.6);overflow:hidden;">' +
-                        '<img src="' + p.bannerImage + '" style="width:100%;height:100%;object-fit:cover;display:block;" />' +
+                        (typeof pflxCoverMediaEl === 'function'
+                            ? pflxCoverMediaEl(p.embedUrl, p.bannerImage)
+                            : '<img src="' + p.bannerImage + '" style="width:100%;height:100%;object-fit:cover;display:block;" />') +
                         '</div>';
                 } else {
                     bannerHeader = '<div style="width:100%;aspect-ratio:16/9;background:linear-gradient(135deg, rgba(0,212,255,0.12), rgba(167,139,250,0.12));display:flex;align-items:center;justify-content:center;">' +
@@ -39386,6 +39431,7 @@
                 }
                 el = document.getElementById('mc-project-due'); if (el) el.value = p.dueDate || '';
                 el = document.getElementById('mc-project-desc'); if (el) el.value = p.description || '';
+                el = document.getElementById('mc-project-embed'); if (el) el.value = p.embedUrl || '';
                 // Subtask checklist — restore prior items including completion state
                 // so the editor can preserve it on save.
                 _mcRenderProjectSubtaskEditorRows(Array.isArray(p.subtasks) ? p.subtasks : []);
@@ -39482,7 +39528,7 @@
                     if (cohortListDiv) cohortListDiv.style.display = 'none';
                 }
             } else {
-                ['mc-project-title','mc-project-desc','mc-project-team','mc-project-link','mc-project-objectives','mc-project-deliverables','mc-project-start','mc-project-due'].forEach(function(id) {
+                ['mc-project-title','mc-project-desc','mc-project-embed','mc-project-team','mc-project-link','mc-project-objectives','mc-project-deliverables','mc-project-start','mc-project-due'].forEach(function(id) {
                     var el = document.getElementById(id); if (el) el.value = '';
                 });
                 // Clear the subtask editor for new projects.
@@ -39650,6 +39696,9 @@
                 updatedAt: Date.now(),
                 name: title,
                 description: document.getElementById('mc-project-desc')?.value || '',
+                // v1.98 — embed cover (Canva / Google Slides / YouTube). Wins over
+                // bannerImage in every project header when set.
+                embedUrl: (document.getElementById('mc-project-embed')?.value || '').trim(),
                 status: document.getElementById('mc-project-status')?.value || 'planning',
                 // Dates — startedAt + dueDate feed pflxComputeFlpStatus + My Work overdue
                 startedAt: document.getElementById('mc-project-start')?.value ||
@@ -57893,17 +57942,80 @@ RESPONSE RULES:
             if (yt) return 'https://www.youtube.com/embed/' + yt[1];
             var vm = url.match(/vimeo\.com\/(\d+)/);
             if (vm) return 'https://player.vimeo.com/video/' + vm[1];
+            // PUBLISHED Slides deck (File > Publish to the web) has the form
+            // /presentation/d/e/<2PACX-long-token>/pub. It must be matched BEFORE
+            // the normal /d/<id> pattern — otherwise the generic regex captures
+            // the literal "e" as the deck id and builds /presentation/d/e/embed,
+            // which 404s. Caught 2026-08-27 on the Nexus Narratives deck.
+            // rm=minimal is Google's kiosk mode: no bottom control bar, no
+            // Google branding — the deck renders as a bare surface. PFLX decks
+            // navigate through links drawn INSIDE the slides (Ennis, 2026-08-27),
+            // so the player chrome is noise competing with those links. Honour an
+            // rm= the host already put on the URL rather than overriding it.
+            // The URL is rebuilt from the deck id, so an rm= the host already set
+            // has to be carried across explicitly or it is silently dropped.
+            var gsRmM = url.match(/[?&]rm=([A-Za-z0-9_-]+)/);
+            var gsRm = '&rm=' + (gsRmM ? gsRmM[1] : 'minimal');
+            var gsPub = url.match(/docs\.google\.com\/presentation\/d\/e\/([A-Za-z0-9_-]+)/);
+            if (gsPub) return 'https://docs.google.com/presentation/d/e/' + gsPub[1] + '/embed?start=false&loop=false' + gsRm;
             var gs = url.match(/docs\.google\.com\/presentation\/d\/([A-Za-z0-9_-]+)/);
-            if (gs) return 'https://docs.google.com/presentation/d/' + gs[1] + '/embed?start=false&loop=false';
+            if (gs) return 'https://docs.google.com/presentation/d/' + gs[1] + '/embed?start=false&loop=false' + gsRm;
             var gd = url.match(/docs\.google\.com\/document\/d\/([A-Za-z0-9_-]+)/);
             if (gd) return 'https://docs.google.com/document/d/' + gd[1] + '/preview';
-            if (/canva\.com\/design\//.test(url) && !/\/view/.test(url)) return url.replace(/\/(edit|watch).*$/, '') + '/view?embed';
+            // Canva: the old guard skipped any URL already containing /view, so a
+            // normal "share > view link" (.../view?utm_content=…) was passed through
+            // WITHOUT ?embed and rendered the full Canva chrome (or refused to frame).
+            // Normalize every design link to <base>/view?embed, preserving the share
+            // token segment when present. Note: canva.link/* short links cannot be
+            // resolved client-side — paste the full canva.com/design/... URL.
+            if (/canva\.com\/design\//.test(url)) {
+                var cv = url.split('?')[0].split('#')[0].replace(/\/+$/, '').replace(/\/(edit|watch|view)$/, '');
+                return cv + '/view?embed';
+            }
             return url;   // already an embed/iframe-able URL
+        };
+        // ── Embed field live hint (v1.98) ────────────────────────────
+        // Canva serves x-frame-options: deny on a plain /view URL and only
+        // drops it when ?embed is present — verified against the live headers
+        // 2026-08-27. pflxEmbedSrc() appends it automatically, so a normal
+        // share link is fine. What CANNOT be made to work is a canva.link/*
+        // short link: it 301s to a /view URL with no ?embed, and the browser
+        // can't follow-and-rewrite it (no CORS). Rather than let a host paste
+        // one and see a blank frame, say so at the point of entry.
+        window.pflxEmbedHint = function (el, hintId) {
+            var box = document.getElementById(hintId); if (!box) return;
+            var v = String((el && el.value) || '').trim();
+            if (!v) { box.innerHTML = ''; return; }
+            if (/canva\.link\//i.test(v)) {
+                box.innerHTML = '<div style="margin-top:6px;font-size:11px;color:#f5c842;line-height:1.5;">&#x26A0; Canva <strong>short links</strong> can\'t be embedded. Open it, then use Share &rarr; Copy link and paste the full <code style="color:#e0e6ff;">canva.com/design/&hellip;</code> URL here.</div>';
+                return;
+            }
+            var src = (typeof pflxEmbedSrc === 'function') ? pflxEmbedSrc(v) : v;
+            var known = /canva\.com\/design\/|docs\.google\.com\/(presentation|document)\/|youtube\.com\/embed\/|player\.vimeo\.com\//i.test(src);
+            // Per-source footnote. Canva publishes no parameter to suppress its
+            // overlay arrows (its own oEmbed markup is just ?embed&meta), so a
+            // host planning to navigate via links drawn inside the slides should
+            // know the arrows stay. Google Slides takes rm=minimal and renders
+            // bare. Verified against live headers + Canva oEmbed 2026-08-27.
+            var note = '';
+            if (/canva\.com\/design\//i.test(src)) {
+                note = '<div style="margin-top:4px;font-size:10px;color:rgba(255,255,255,0.4);line-height:1.5;">Canva draws its own next/prev arrows over the deck and offers no way to turn them off. In-slide links still work.</div>';
+            } else if (/docs\.google\.com\/presentation\//i.test(src)) {
+                note = '<div style="margin-top:4px;font-size:10px;color:rgba(255,255,255,0.4);line-height:1.5;">Kiosk mode (rm=minimal) — no control bar, no Google branding.</div>';
+            }
+            box.innerHTML = '<div style="margin-top:6px;font-size:11px;color:' + (known ? 'rgba(34,197,94,0.9)' : 'rgba(255,255,255,0.4)') + ';line-height:1.5;word-break:break-all;">' +
+                (known ? '&#x2713; Embeds as: ' : '&#x2139; Will be framed as-is: ') +
+                '<code style="color:rgba(255,255,255,0.6);">' + escapeHtml(src) + '</code></div>' + note;
         };
         // Media element for a cover: iframe (embedUrl) else image else ''.
         window.pflxCoverMediaEl = function (embedUrl, imgUrl) {
             if (embedUrl) {
-                return '<iframe src="' + escapeHtml(pflxEmbedSrc(embedUrl)) + '" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen sandbox="allow-scripts allow-same-origin allow-presentation allow-popups" style="width:100%;height:100%;border:0;display:block;background:#000;"></iframe>';
+                // allow-popups-to-escape-sandbox: a link drawn inside the deck opens
+                // in a new tab, and WITHOUT this that tab inherits the sandbox and
+                // loads at a null origin — most destinations break. allow-forms lets
+                // an embedded form deck submit. Both are required for the
+                // navigate-by-in-slide-link model.
+                return '<iframe src="' + escapeHtml(pflxEmbedSrc(embedUrl)) + '" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen sandbox="allow-scripts allow-same-origin allow-presentation allow-popups allow-popups-to-escape-sandbox allow-forms" style="width:100%;height:100%;border:0;display:block;background:#000;"></iframe>';
             }
             if (imgUrl) return '<img src="' + escapeHtml(imgUrl) + '" style="width:100%;height:100%;object-fit:cover;display:block;filter:saturate(1.15) brightness(1.02);">';
             return '';
