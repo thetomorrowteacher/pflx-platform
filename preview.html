@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 102;
+      window.PFLX_PATCH   = 103;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -32557,10 +32557,33 @@
                 moved = mcMoveArrayItem(mcTasks, 'id', d.id, targetId);
                 if (moved) {
                     var _now = Date.now();
-                    if (_tFrom) _tFrom.updatedAt = _now;
+                    // FIX (v1.103, Ennis-reported: "I can't simply move tasks in
+                    // order under each topic") — dropping a task next to a task
+                    // in a DIFFERENT Section only moved it in the flat array;
+                    // _mcGroupTasksByTopic groups purely by topicId, so the row
+                    // kept rendering under its OLD section no matter where it
+                    // was dropped — it looked like drag-to-organize was broken.
+                    // A drop now also adopts the target row's topicId, so
+                    // dragging a task onto a row in a Section actually files it
+                    // into that Section (dropping onto a "No Section" row
+                    // correctly clears topicId).
+                    if (_tFrom) { _tFrom.topicId = (_tTo && _tTo.topicId) || ''; _tFrom.updatedAt = _now; }
                     if (_tTo)   _tTo.updatedAt   = _now;
                     try { mcSaveData('tasks'); } catch (e) {}
                     mcRenderProjects();
+                }
+            } else if (kind === 'topic') {
+                // v1.103 (Ennis-reported: "I can't move the topic") — reorder a
+                // Project's Sections themselves. `group` is the projectId, same
+                // cross-project guard as the task/checkpoint/program branches.
+                var _tpProj = mcProjects.find(function (x) { return x && x.id === group; });
+                if (_tpProj && Array.isArray(_tpProj.topics)) {
+                    moved = mcMoveArrayItem(_tpProj.topics, 'id', d.id, targetId);
+                    if (moved) {
+                        _tpProj.updatedAt = Date.now();
+                        try { mcSaveData('projects'); } catch (e) {}
+                        mcRenderProjects();
+                    }
                 }
             }
         }
@@ -32627,6 +32650,40 @@
                 'style="background:rgba(10,18,40,0.8);border:1px solid rgba(167,139,250,0.25);color:#c4b5fd;border-radius:5px;font-size:9px;padding:2px 4px;max-width:110px;cursor:pointer;">' + opts + '</select>';
         }
         window._mcTopicPickerHtml = _mcTopicPickerHtml;
+        // v1.103 (Ennis-reported: "I can't right click or control click and
+        // have some UI edit options" for a Section) — inline rename/delete,
+        // matching the prompt()/confirm() pattern the rest of the Console
+        // already uses for quick edits (e.g. mcCreateBadge above).
+        window.mcRenameTopicInline = function (projectId, topicId) {
+            var p = mcProjects.find(function (x) { return x && x.id === projectId; });
+            if (!p || !Array.isArray(p.topics)) return;
+            var t = p.topics.find(function (x) { return x && x.id === topicId; });
+            if (!t) return;
+            var name = prompt('Rename section:', t.name || '');
+            if (name === null) return;
+            name = String(name).trim();
+            if (!name) return;
+            t.name = name;
+            p.updatedAt = Date.now();
+            try { mcSaveData('projects'); } catch (e) {}
+            mcRenderProjects();
+        };
+        window.mcDeleteTopicInline = function (projectId, topicId) {
+            var p = mcProjects.find(function (x) { return x && x.id === projectId; });
+            if (!p || !Array.isArray(p.topics)) return;
+            var t = p.topics.find(function (x) { return x && x.id === topicId; });
+            if (!t) return;
+            if (!confirm('Delete section "' + (t.name || 'Section') + '"? Its tasks move to No Section.')) return;
+            p.topics = p.topics.filter(function (x) { return x && x.id !== topicId; });
+            p.updatedAt = Date.now();
+            var _now2 = Date.now();
+            mcTasks.forEach(function (task) {
+                if (task && task.topicId === topicId) { task.topicId = ''; task.updatedAt = _now2; }
+            });
+            try { mcSaveData('projects'); } catch (e) {}
+            try { mcSaveData('tasks'); } catch (e) {}
+            mcRenderProjects();
+        };
 
         // ── Numbered task order toggle (Aug 18, Ennis: "add a toggle to put
         // the tasks ordered. Each topic or project would start the numbering
@@ -39107,9 +39164,23 @@
                         '</div>' +
                         '<div style="display:flex;flex-direction:column;gap:4px;">' +
                         __topicGroups.map(function (grp) {
-                            var header = grp.name
-                                ? '<div style="font-size:9px;color:rgba(167,139,250,0.85);font-weight:800;letter-spacing:0.08em;text-transform:uppercase;margin:6px 0 2px 2px;">🏷 ' + escapeHtml(grp.name) + '</div>'
-                                : '';
+                            var header = '';
+                            if (grp.id) {
+                                // v1.103 — real Sections (grp.id truthy) are now
+                                // draggable (reorders project.topics) and carry
+                                // inline rename/delete, closing the "can't move
+                                // the topic" / "no edit options" gaps. The
+                                // synthetic "No Section" bucket (grp.id === '')
+                                // stays plain — nothing to rename or reorder.
+                                header = '<div ' + _mcDragAttrs(grp.id, p.id, 'topic') + ' style="display:flex;align-items:center;gap:6px;margin:6px 0 2px 2px;cursor:grab;">' +
+                                    '<span style="color:rgba(255,255,255,0.28);font-size:11px;line-height:1;user-select:none;">&#x2261;</span>' +
+                                    '<span style="font-size:9px;color:rgba(167,139,250,0.85);font-weight:800;letter-spacing:0.08em;text-transform:uppercase;flex:1;">🏷 ' + escapeHtml(grp.name) + '</span>' +
+                                    '<span onclick="event.stopPropagation();mcRenameTopicInline(&quot;' + p.id + '&quot;,&quot;' + grp.id + '&quot;)" title="Rename section" style="cursor:pointer;color:rgba(167,139,250,0.6);font-size:10px;">✏️</span>' +
+                                    '<span onclick="event.stopPropagation();mcDeleteTopicInline(&quot;' + p.id + '&quot;,&quot;' + grp.id + '&quot;)" title="Delete section" style="cursor:pointer;color:rgba(239,68,68,0.55);font-size:10px;">🗑️</span>' +
+                                '</div>';
+                            } else if (grp.name) {
+                                header = '<div style="font-size:9px;color:rgba(167,139,250,0.85);font-weight:800;letter-spacing:0.08em;text-transform:uppercase;margin:6px 0 2px 2px;">🏷 ' + escapeHtml(grp.name) + '</div>';
+                            }
                             // Numbering restarts at 1 for each Topic group (idx is
                             // this group's own array index, not a running total).
                             return header + grp.tasks.map(__taskRowHtml).join('');
