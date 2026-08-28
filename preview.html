@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 108;
+      window.PFLX_PATCH   = 109;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -25600,7 +25600,17 @@
                 else win = (bTot > aTot || (bTot === aTot && actN(b) > actN(a))) ? b : a;
                 var lose = win === a ? b : a;
                 var merged = Object.assign({}, lose, win);
-                merged.totalXcoin = Math.max(aTot, bTot);
+                // v1.109 — `b` (incoming) is always a fresh Supabase pull at
+                // this function's one call site, never another device's own
+                // local cache, so a strictly newer incoming updatedAt really
+                // is the authoritative current record — including a
+                // deliberate downward correction (a host fixing a duplicate
+                // badge over-award, e.g.). Only fall back to the old
+                // never-decrease floor when recency can't be determined
+                // (both/neither side has updatedAt) — the genuinely
+                // ambiguous case this guard was built for.
+                var __incomingIsFresher = bU && (!aU || bU > aU);
+                merged.totalXcoin = __incomingIsFresher ? bTot : Math.max(aTot, bTot);
                 merged.xc = num(win.xc);
                 if ((merged.xc == null || merged.xc === 0) && Math.max(num(a.xc), num(b.xc)) > 0) merged.xc = Math.max(num(a.xc), num(b.xc));
                 // badges only grow — union the list, max the counts.
@@ -31363,7 +31373,11 @@
             mcPlayers.forEach(function(p) {
                 if (mcSelectedPlayerIds.has(p.id)) {
                     p.xc = Math.max(0, (p.xc || 0) + delta);
-                    if (delta > 0) p.totalXc = (p.totalXc || 0) + delta;
+                    // v1.109 — was `p.totalXc` (typo): every reader of
+                    // "lifetime XC" (Portfolio, toolbar, rank calc) reads
+                    // `totalXcoin`, so a positive bulk award never actually
+                    // moved that number.
+                    if (delta > 0) p.totalXcoin = (p.totalXcoin || 0) + delta;
                 }
             });
             mcSaveData('players');
@@ -32180,6 +32194,12 @@
                     mcPlayers[idx].email = email;
                     mcPlayers[idx].joinedAt = joinedAt;
                     mcPlayers[idx].xc = xc;
+                    // v1.109 — this modal is a host DECLARING the
+                    // authoritative current XC (not an incremental award),
+                    // so totalXcoin ("Lifetime XC" everywhere it's shown)
+                    // must track it directly, including downward — same
+                    // fix as the PLAYERS mirror a few lines below.
+                    mcPlayers[idx].totalXcoin = xc;
                     mcPlayers[idx].level = level;
                     mcPlayers[idx].pin = pin;
                     mcPlayers[idx].image = image;
@@ -32207,7 +32227,14 @@
                                 _plMatch.pathway = pathway;
                                 _plMatch.email = email;
                                 _plMatch.xc = xc;
-                                if (typeof _plMatch.totalXcoin === 'number' && xc > _plMatch.totalXcoin) _plMatch.totalXcoin = xc;
+                                // v1.109 — was increase-only
+                                // (`xc > _plMatch.totalXcoin`), which is
+                                // exactly why a host's deliberate downward
+                                // correction here (fixing a duplicate badge
+                                // over-award, e.g.) never actually stuck —
+                                // this modal is a declared value, not an
+                                // incremental award, so set it directly.
+                                _plMatch.totalXcoin = xc;
                                 _plMatch.level = level;
                                 _plMatch.pin = pin;
                                 if (image) _plMatch.image = image;
@@ -67385,7 +67412,17 @@ RESPONSE RULES:
             // If the changed player IS the active session, sync activeSession + toolbar
             if (window.activeSession && (window.activeSession.id === player.id || window.activeSession.brand === player.brand)) {
                 window.activeSession.xc = player.xc || 0;
-                window.activeSession.totalXcoin = Math.max(window.activeSession.totalXcoin || 0, player.xc || 0);
+                // v1.109 — `player` here is the record that was JUST
+                // edited/broadcast (see hmcEditPlayer / mcSavePlayerForm
+                // above, both of which now set totalXcoin correctly), not
+                // a second party in a merge race — trust it directly so a
+                // host's downward correction reaches an already-open
+                // session for this same player immediately. Only fall back
+                // to the old never-decrease guard when the caller didn't
+                // set totalXcoin at all.
+                window.activeSession.totalXcoin = (typeof player.totalXcoin === 'number')
+                    ? player.totalXcoin
+                    : Math.max(window.activeSession.totalXcoin || 0, player.xc || 0);
                 window.activeSession.cohort = Array.isArray(player.cohorts) ? player.cohorts.join(', ') : (player.cohort || 'PlayerPool');
                 window.activeSession.cohorts = Array.isArray(player.cohorts) ? player.cohorts : [player.cohort || 'PlayerPool'];
                 window.activeSession.digitalBadges = player.digitalBadges || 0;
@@ -69778,6 +69815,11 @@ RESPONSE RULES:
                         p.role = roleForAccess(pickedAccess); // lowercase storage keeps every existing role gate working
                         p.roleDisplay = accessMetaOf(pickedAccess).short;
                         p.xc = parseInt(card.querySelector('#pm-ed-xc').value, 10) || 0;
+                        // v1.109 — this field is a host declaring the
+                        // authoritative current XC, so Lifetime XC
+                        // (totalXcoin) must track it directly, including
+                        // downward — same fix as mcSavePlayerForm.
+                        p.totalXcoin = p.xc;
                         // Level removed from UI — derived from rank now
                         var rOv = card.querySelector('#pm-ed-rank').value;
                         p.rankOverride = rOv || null;
