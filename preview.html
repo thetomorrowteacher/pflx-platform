@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 107;
+      window.PFLX_PATCH   = 108;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -28409,6 +28409,25 @@
             return pflxPlayerCanSeeItem(item, pid, cohorts);
         }
 
+        // v1.108 (Ennis: cohort/access-cascading bug report) — the actual
+        // ENFORCEMENT gate for opening/submitting a single Task, used by
+        // ppRenderTaskDetail + ppSubmitTask/ppResubmitTask below. Host tiers
+        // always pass (same bypass pattern as pflxPlayerCanEnterItem); every
+        // other player must pass the SAME hierarchical own-settings-first
+        // cascade the list views already use (ppItemAssignedToActivePlayer
+        // → pflxPlayerCanSeeItem). This closes the gap where a task id that
+        // reached the detail view bypassed cohort/player/project scoping
+        // entirely — see the note above ppItemAssignedToActivePlayer.
+        function pflxPlayerCanAccessTask(t) {
+            try {
+                var s = window.activeSession || {};
+                if ((typeof window.pflxIsHostRole === 'function' && window.pflxIsHostRole(s.role)) ||
+                    (typeof window.pflxHostTier === 'function' && !!window.pflxHostTier(s))) return true;
+                return (typeof ppItemAssignedToActivePlayer === 'function') ? !!ppItemAssignedToActivePlayer(t) : true;
+            } catch (e) { return true; }
+        }
+        window.pflxPlayerCanAccessTask = pflxPlayerCanAccessTask;
+
         // ── v1.71 — Apply-to-Join entry gate ────────────────────────────
         // SEE vs ENTER are now different questions for Programs/Projects.
         // Every player can SEE every Program/Project (universal visibility,
@@ -30054,6 +30073,21 @@
                 ]) + '<div class="mc-card" style="text-align:center;padding:30px;color:rgba(255,255,255,0.4);">Task not found.</div>';
                 return;
             }
+            // v1.108 — authorization gate (see pflxPlayerCanAccessTask above).
+            // A task id reaching this view (deep link, stale list, browser
+            // back/forward) no longer renders the full task + submission
+            // form unless this player is actually assigned to it through
+            // the same cohort/player/project cascade the list views use.
+            if (typeof pflxPlayerCanAccessTask === 'function' && !pflxPlayerCanAccessTask(task)) {
+                el.innerHTML = ppBreadcrumb([
+                    { label: 'Home', view: 'home' },
+                    { label: 'Task', view: 'task-detail' }
+                ]) + '<div class="mc-card" style="text-align:center;padding:40px;">' +
+                    '<div style="font-size:48px;margin-bottom:12px;">&#x1F512;</div>' +
+                    '<div style="font-family:\'Orbitron\',sans-serif;font-size:14px;color:rgba(255,255,255,0.4);letter-spacing:2px;">NOT ASSIGNED TO YOU</div>' +
+                    '<div style="font-size:12px;color:rgba(255,255,255,0.25);margin-top:8px;">This task belongs to a Project/Checkpoint scope you are not part of.</div></div>';
+                return;
+            }
             var cps = ppGetCheckpoints();
             var projs = ppGetProjects();
             var parentCp = pflxFindCheckpoint(cps, task.roundId || task.checkpointId);
@@ -30332,6 +30366,15 @@
                 var i = mcTasks.findIndex(function (t) { return t && t.id === taskId; });
                 if (i < 0) { console.warn('[pp] task not found', taskId); return; }
                 var t = mcTasks[i];
+                // v1.108 — hard authorization gate. Rendering-level hiding
+                // (ppRenderTaskDetail) is UI only; this is the real fix —
+                // no submission is accepted for a task this player isn't
+                // actually assigned to, regardless of how its id was reached.
+                if (typeof pflxPlayerCanAccessTask === 'function' && !pflxPlayerCanAccessTask(t)) {
+                    console.warn('[pp] submit blocked — task not assigned to active player', taskId);
+                    if (typeof pflxToast === 'function') pflxToast('This task is not assigned to you.', 'warn', 5500);
+                    return;
+                }
                 var sid = 'ppSubmit-' + taskId;
                 var msgEl = document.getElementById(sid + '-msg');
                 function setErr(s) { if (msgEl) { msgEl.style.color = '#ef4444'; msgEl.textContent = s; } }
@@ -30449,6 +30492,11 @@
                 var i = mcTasks.findIndex(function (t) { return t && t.id === taskId; });
                 if (i < 0) return;
                 var t = mcTasks[i];
+                // v1.108 — same authorization gate as ppSubmitTask.
+                if (typeof pflxPlayerCanAccessTask === 'function' && !pflxPlayerCanAccessTask(t)) {
+                    if (typeof pflxToast === 'function') pflxToast('This task is not assigned to you.', 'warn', 5500);
+                    return;
+                }
                 // Gate still applies on reopen (July 15).
                 var _lk = (typeof window.pflxTaskCheckpointLock === 'function') ? window.pflxTaskCheckpointLock(t, window.activeSession || {}) : null;
                 if (_lk) { if (typeof pflxToast === 'function') pflxToast((typeof pflxCheckpointLockMsg === 'function') ? pflxCheckpointLockMsg(_lk) : 'This task is not open yet.', 'warn', 5500); return; }
