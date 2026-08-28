@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 105;
+      window.PFLX_PATCH   = 106;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -15908,6 +15908,32 @@
             // Apply cohort-based access gating to the toolbar app tiles
             // (dim + grayscale on apps this player's cohorts don't grant).
             try { if (typeof pflxApplyCohortGatingToToolbar === 'function') pflxApplyCohortGatingToToolbar(); } catch (e) {}
+
+            // v1.106 (Ennis: "keep my profile card in the top right
+            // corner"). Everything above this point now correctly reflects
+            // the MIMICKED PLAYER (XC, Position, Rank — full player-fidelity
+            // access, per Ennis's request). The toolbar-profile card
+            // (avatar + name) is the one deliberate exception: it stays
+            // pinned to the real master host's identity as a persistent
+            // "who am I really" anchor, so the host never loses track of
+            // themselves while impersonating. No-op when mimic isn't active.
+            try {
+                var __mimicHost = (typeof window.pflxMimicHostSession === 'function') ? window.pflxMimicHostSession() : null;
+                if (__mimicHost) {
+                    var __hnEl = document.getElementById('toolbar-player-name');
+                    if (__hnEl) __hnEl.textContent = (__mimicHost.name || __mimicHost.brand || 'HOST').toUpperCase();
+                    var __haBox = document.getElementById('toolbar-profile-avatar');
+                    if (__haBox) {
+                        var __hHasImg = __mimicHost.image && String(__mimicHost.image).length > 0;
+                        if (__hHasImg) {
+                            __haBox.innerHTML = `<img id="toolbar-profile-avatar-img" src="${__mimicHost.image}" alt="${(__mimicHost.brand || __mimicHost.name || 'HOST')}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
+                        } else {
+                            var __hInitial = String(__mimicHost.brand || __mimicHost.name || 'H').trim().charAt(0).toUpperCase();
+                            __haBox.innerHTML = `<div style="width:100%;height:100%;border-radius:50%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#f59e0b,#ef4444);color:#fff;font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;">${__hInitial}</div>`;
+                        }
+                    }
+                }
+            } catch (e) {}
         }
 
         // BACKGROUND CANVAS ANIMATION
@@ -59281,6 +59307,15 @@ RESPONSE RULES:
         window.pflxRenderProfileDropdown = function () {
             try {
                 var s = window.activeSession || {};
+                // v1.106 — same host-pin as the compact toolbar-profile card
+                // (updateToolbarStatus): the dropdown this card opens should
+                // show the SAME identity the card itself displays, not the
+                // mimicked player, so opening it never contradicts what the
+                // card just showed. No-op when mimic isn't active.
+                try {
+                    var __ddHost = (typeof window.pflxMimicHostSession === 'function') ? window.pflxMimicHostSession() : null;
+                    if (__ddHost) s = __ddHost;
+                } catch (e) {}
                 // Pull canonical record if available (broader data than session cache)
                 var p = null;
                 if (s.id && typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) {
@@ -65207,6 +65242,24 @@ RESPONSE RULES:
         }
         window.pflxMimicIsActive = pflxMimicIsActive;
 
+        // v1.106 (Ennis: "keep my profile card in the top right corner...
+        // but everything else should function like the mimicked player").
+        // Returns the stashed MASTER HOST session while mimic is active, or
+        // null otherwise. The toolbar-profile card (avatar + name, and its
+        // dropdown) uses this to stay pinned to the real host's identity as
+        // a persistent "who am I really" anchor, while every other
+        // identity-derived surface (hero card, XC/Position/Rank toolbar
+        // stats, tasks, job board) reads the ordinary (now correctly
+        // mimic-synced — see pflxMimicEnter/Exit below) activeSession.
+        window.pflxMimicHostSession = function () {
+            try {
+                if (!pflxMimicIsActive()) return null;
+                var raw = sessionStorage.getItem(STASH_KEY);
+                var stash = raw ? JSON.parse(raw) : null;
+                return (stash && stash.session) || null;
+            } catch (e) { return null; }
+        };
+
         function findPlayer(playerId) {
             try {
                 if (typeof mcPlayers === 'undefined' || !Array.isArray(mcPlayers)) return null;
@@ -65360,6 +65413,25 @@ RESPONSE RULES:
 
             var newSession = buildPlayerSession(player);
             window.activeSession = newSession;
+            // v1.106 (Ennis: "I still see my avatar. I should have full
+            // access of the player's dashboard"). ROOT CAUSE: the Console's
+            // ORIGINAL session variable is a top-level `let activeSession`
+            // (declared near the top of the file) — a lexical binding
+            // that is DISTINCT from the `activeSession` property on the
+            // `window` object. Nearly all of the original rendering code
+            // (initPlatform's hero card, My Tasks, Job Board, and most of
+            // updateToolbarStatus) reads the BARE `activeSession` name, not
+            // `window.activeSession`. Mimic only ever wrote the latter, so
+            // the bare variable — and everything reading it — silently kept
+            // showing the master host's own session the whole time mimic
+            // was "active" (confirmed: login already keeps both in sync,
+            // see the `window.activeSession = activeSession;` line right
+            // after login builds the session — mimic just never followed
+            // that same pattern). Assigning bare `activeSession` here too
+            // (no var/let — this resolves to that same top-level binding)
+            // is what actually makes the dashboard, tasks, and job board
+            // switch to the mimicked player.
+            activeSession = newSession;
             try { sessionStorage.setItem(ACTIVE_KEY, JSON.stringify({ playerId: playerId, name: newSession.name, brand: newSession.brand })); } catch (e) {}
 
             if (typeof window.pflxSetRole === 'function') { window.pflxSetRole('player'); }
@@ -65415,6 +65487,11 @@ RESPONSE RULES:
             }
 
             window.activeSession = stash.session || null;
+            // v1.106 — mirror of the fix in pflxMimicEnter above: restore
+            // the bare `activeSession` binding too, so the dashboard/tasks/
+            // job board (which read the bare name) actually snap back to
+            // the host the instant mimic ends, not just window.activeSession.
+            activeSession = stash.session || null;
 
             if (typeof window.pflxSetRole === 'function') {
                 window.pflxSetRole(stash.role === 'host' ? 'host' : 'player');
