@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 109;
+      window.PFLX_PATCH   = 110;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -15462,6 +15462,30 @@
             }
             return null;
         }
+        // PATCH PLATFORM v1.110 (Ennis, Aug 30) — profile photos never
+        // displayed for ANY player, including both host accounts. PLAYERS
+        // (above) is a compile-time seed array of login identities and never
+        // carried an `image` field; real uploaded photos live only in the
+        // live, Supabase-synced `mcPlayers` collection (written by
+        // mcPlayerPhotoUpload via Player Management). loginUser() and
+        // updateToolbarStatus() both read the image off the hardcoded
+        // PLAYERS record by id — since every seeded id already exists in
+        // PLAYERS, mcPlayers was never consulted, so activeSession.image
+        // was permanently empty and every avatar fell back to a letter
+        // initial (toolbar) or the PFLX logo (Home hero). Resolve the live
+        // upload first; harmless no-op fallback if mcPlayers isn't loaded
+        // yet or has no photo for this id.
+        function pflxResolvePlayerImage(id) {
+            try {
+                if (!id) return '';
+                if (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) {
+                    var mp = mcPlayers.find(function (m) { return m && m.id === id; });
+                    if (mp && mp.image) return mp.image;
+                }
+            } catch (e) {}
+            return '';
+        }
+        window.pflxResolvePlayerImage = pflxResolvePlayerImage;
         function _pflxNameKey(s) {
             return String(s || '').toLowerCase().trim().replace(/\s+/g, ' ');
         }
@@ -15774,7 +15798,7 @@
                         activeSession.xc            = typeof p.xc !== 'undefined' ? p.xc : (activeSession.xc || 0);
                         activeSession.totalXcoin    = typeof p.totalXcoin !== 'undefined' ? p.totalXcoin : (activeSession.totalXcoin || activeSession.xc || 0);
                         activeSession.digitalBadges = p.digitalBadges || 0;
-                        activeSession.image         = p.image || '';
+                        activeSession.image         = pflxResolvePlayerImage(p.id) || p.image || '';
                         activeSession.slogan        = p.slogan || activeSession.slogan || '';
                         activeSession.rankOverride  = p.rankOverride || null;
                         // Access level — explicit hostTier assignment from the
@@ -21282,7 +21306,7 @@
                 // July 20: tolerate X-Coin-shaped records (balance in `xcoin`)
                 xc:             player ? ((player.xc != null ? player.xc : player.xcoin) || 0) : 0,
                 totalXcoin:     player ? (player.totalXcoin || (player.xc != null ? player.xc : player.xcoin) || 0) : 0,
-                image:          player ? (player.image || '') : '',
+                image:          player ? (pflxResolvePlayerImage(player.id) || player.image || '') : '',
                 slogan:         player ? (player.slogan || '') : '',
                 interests:      player ? (player.interests || []) : [],
                 level:          player ? (player.level || 1) : 1,
