@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 111;
+      window.PFLX_PATCH   = 112;
       window.PFLX_BUILD   = '2026.08';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -58547,18 +58547,52 @@ RESPONSE RULES:
         }
 
         // ── Projects Render ──────────────────────────────────────────
+        // ── Reserved "Canva Digital Portfolio" project slot (PATCH v1.112) ──
+        // One project slot is pre-labeled for the player's Canva Digital
+        // Portfolio design. Shown as an inviting placeholder card ONLY to the
+        // owner while editing (mirrors #portfolio-add-project-btn's own
+        // portfolioEditMode gate) until they fill it in; a public viewer never
+        // sees an empty "TODO" card. Recognized by slotKey, not by title, so
+        // renaming the project after adding it doesn't un-fill the slot.
+        const PFLX_CANVA_SLOT_KEY = 'canva-digital-portfolio';
+        function portfolioCanvaPlaceholderCard() {
+            return `
+                <div style="background:linear-gradient(135deg, rgba(139,92,246,0.08), rgba(0,240,255,0.05));border:2px dashed rgba(139,92,246,0.35);border-radius:16px;padding:24px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:8px;min-height:180px;">
+                    <div style="font-size:26px;">&#x1F3A8;</div>
+                    <h4 style="margin:0;font-size:14px;font-weight:800;color:#e0e6ff;">Canva Digital Portfolio</h4>
+                    <p style="margin:0;font-size:11px;color:rgba(255,255,255,0.5);line-height:1.5;max-width:240px;">Reserved project slot &mdash; add your Canva Digital Portfolio design here so it shows up as a slideshow embed.</p>
+                    <button onclick="portfolioAddCanvaSlotProject()" style="background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.4);color:#a78bfa;padding:7px 16px;border-radius:8px;font-weight:700;font-size:11px;cursor:pointer;font-family:'Share Tech Mono',monospace;">+ ADD EMBED</button>
+                </div>
+            `;
+        }
+        // Opens the normal New Project form (same code path as +ADD PROJECT,
+        // so every existing embed/validation rule already applies), then
+        // pre-fills it for the Canva slot specifically.
+        function portfolioAddCanvaSlotProject() {
+            portfolioAddProject();
+            const titleF = document.getElementById('pf-proj-title');
+            const mediaF = document.getElementById('pf-proj-mediatype');
+            const urlF = document.getElementById('pf-proj-embedurl');
+            const slotF = document.getElementById('pf-proj-slotkey');
+            if (titleF && !titleF.value) titleF.value = 'Canva Digital Portfolio';
+            if (mediaF) { mediaF.value = 'slides'; portfolioMediaTypeChanged(); }
+            if (urlF) urlF.placeholder = 'Paste your Canva Digital Portfolio share link (Share \u2192 Copy link)\u2026';
+            if (slotF) slotF.value = PFLX_CANVA_SLOT_KEY;
+        }
         function portfolioRenderProjects(data) {
             const grid = document.getElementById('portfolio-projects-grid');
             const empty = document.getElementById('portfolio-projects-empty');
             if (!grid) return;
             const projects = data.projects || [];
-            if (projects.length === 0) {
+            const canvaSlotFilled = projects.some(p => p && p.slotKey === PFLX_CANVA_SLOT_KEY);
+            const showCanvaPlaceholder = portfolioEditMode && !canvaSlotFilled;
+            if (projects.length === 0 && !showCanvaPlaceholder) {
                 grid.innerHTML = '';
                 if (empty) empty.style.display = 'block';
                 return;
             }
             if (empty) empty.style.display = 'none';
-            grid.innerHTML = projects.map((p, i) => `
+            grid.innerHTML = (showCanvaPlaceholder ? portfolioCanvaPlaceholderCard() : '') + projects.map((p, i) => `
                 <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:16px;padding:20px;position:relative;transition:border-color .2s;" onmouseover="this.style.borderColor='rgba(0,240,255,0.2)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.07)'">
                     ${portfolioEditMode ? `<button onclick="portfolioRemoveProject(${i})" style="position:absolute;top:10px;right:10px;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#ef4444;width:26px;height:26px;border-radius:50%;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;z-index:2;">&#x2715;</button>` : ''}
                     ${portfolioRenderProjectMedia(p)}
@@ -59793,6 +59827,7 @@ RESPONSE RULES:
                     <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;">
                         <input id="pf-proj-tags" placeholder="Tags (comma-separated)" style="flex:1;background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.15);color:#e0e6ff;padding:10px 12px;border-radius:8px;font-family:'Jura',sans-serif;font-size:13px;">
                         <input id="pf-proj-label" placeholder="Link label" value="View Project" style="width:140px;background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.15);color:#e0e6ff;padding:10px 12px;border-radius:8px;font-family:'Jura',sans-serif;font-size:13px;">
+                    <input type="hidden" id="pf-proj-slotkey" value="">
                     </div>
                     <!-- ══ MEDIA EMBED ══ -->
                     <div style="margin-top:6px; padding:12px; background:rgba(139,92,246,0.05); border:1px solid rgba(139,92,246,0.15); border-radius:10px;">
@@ -59843,6 +59878,12 @@ RESPONSE RULES:
             const embedUrl = (document.getElementById('pf-proj-embedurl') || {}).value || '';
             const embedHtml = (document.getElementById('pf-proj-embedhtml') || {}).value || '';
             const coverImage = (document.getElementById('pf-proj-cover') || {}).value || '';
+            // Reserved-slot marker (PATCH v1.112) — set only when this form was
+            // opened via portfolioAddCanvaSlotProject(). Lets
+            // portfolioRenderProjects() recognize "the Canva Digital Portfolio
+            // slot is now filled" and stop showing its placeholder card, without
+            // relying on a fragile title-string match (a player could rename it).
+            const slotKey = (document.getElementById('pf-proj-slotkey') || {}).value || '';
 
             const data = portfolioLoadData();
             if (!data.projects) data.projects = [];
@@ -59853,6 +59894,7 @@ RESPONSE RULES:
                 embedUrl: embedUrl.trim(),
                 embedHtml: embedHtml.trim(),
                 coverImage: coverImage.trim(),
+                slotKey: slotKey || null,
                 addedAt: new Date().toISOString()
             });
             portfolioSaveData(data);
