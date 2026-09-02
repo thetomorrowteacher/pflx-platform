@@ -57,8 +57,8 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 113;
-      window.PFLX_BUILD   = '2026.08';
+      window.PFLX_PATCH   = 115;
+      window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
       window.pflxVersionLogin = function () { return 'System Version ' + window.PFLX_VERSION + ' · Patch ' + window.PFLX_PATCH + ' · Secure Connection'; };
@@ -25826,21 +25826,50 @@
                     if (typeof pl.xc === 'number' && typeof pl.totalXcoin === 'number' && pl.xc > pl.totalXcoin) pl.totalXcoin = pl.xc;
                     var mpBadgeLen = Array.isArray(mp.badges) ? mp.badges.length : 0;
                     var plBadgeLen = Array.isArray(pl.badges) ? pl.badges.length : 0;
+                    var badgesChanged = false;
                     if (mpBadgeLen > plBadgeLen) {
                         var unioned = _pflxUnionBadgeArrays(pl.badges, mp.badges);
                         if (unioned.length > plBadgeLen) {
                             pl.badges = unioned;
                             pl.digitalBadges = Math.max(Number(pl.digitalBadges) || 0, unioned.length);
                             dirty = true;
+                            badgesChanged = true;
                         }
                     }
-                    var mpBc = mp.badgeCounts || {}, plBc = Object.assign({}, pl.badgeCounts || {});
-                    var bcChanged = false;
-                    Object.keys(mpBc).forEach(function (bk) {
-                        var mv = Number(mpBc[bk]) || 0;
-                        if (mv > (Number(plBc[bk]) || 0)) { plBc[bk] = mv; bcChanged = true; }
-                    });
-                    if (bcChanged) { pl.badgeCounts = plBc; dirty = true; }
+                    // badgeCounts must be DERIVED from the final badges[]
+                    // array, never merged as two independent counters. The
+                    // old category-wise-max merge (below, replaced) could
+                    // ratchet a category total up from EITHER side forever
+                    // and never self-correct — once badgeCounts on one side
+                    // got ahead of the real distinct-badge count (e.g. the
+                    // Aug 24/v1.93 manual reconcile that set Kaitlin's
+                    // badgeCounts to {primary:7,signature:3}=10 while her
+                    // real badges array only ever held 7 distinct entries),
+                    // every future run of this function — which fires on
+                    // EVERY mcSaveData('players') call, i.e. constantly on
+                    // any host action — just kept re-applying that same
+                    // inflated max forever. Sept 2 (Kaitlin, Discord):
+                    // confirmed still live — Portfolio (reads badgeCounts'
+                    // sum) showed 10, X-Coin (reads digitalBadges/
+                    // badges.length) showed 7, both from the same record.
+                    // Recomputing badgeCounts from pl.badges — same
+                    // one-count-per-distinct-entry, type-defaults-to-primary
+                    // logic already used by mcRemovePlayerBadge's revoke
+                    // recompute — keeps it a pure function of the actual
+                    // badges, so it can never drift ahead of reality again,
+                    // and self-heals any existing drift (Kaitlin's
+                    // included, and anyone else silently affected) the next
+                    // time a host action anywhere touches mcPlayers.
+                    var _bcSum = Object.keys(pl.badgeCounts || {}).reduce(function (s, k) { return s + (Number((pl.badgeCounts || {})[k]) || 0); }, 0);
+                    if (badgesChanged || _bcSum !== (Array.isArray(pl.badges) ? pl.badges.length : 0)) {
+                        var _bc2 = { signature: 0, primary: 0, premium: 0, executive: 0 };
+                        (pl.badges || []).forEach(function (b) {
+                            var _k = ((b && typeof b === 'object' ? b.type : null) || 'primary').toLowerCase();
+                            if (_bc2[_k] === undefined) _bc2.primary++; else _bc2[_k]++;
+                        });
+                        pl.badgeCounts = _bc2;
+                        dirty = true;
+                    }
                     if (dirty) { pl.updatedAt = Date.now(); touchedIds.push(pl.id); }
                 });
                 if (touchedIds.length) {
