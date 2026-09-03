@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 119;
+      window.PFLX_PATCH   = 120;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -5553,6 +5553,61 @@
                 right: 12px;
                 min-width: 0;
             }
+
+            /* MOBILE — Sept 3 fix (Ennis, task #11 mobile audit): at true
+               phone widths (~390px and below) the toolbar's non-shrinking
+               sections (.toolbar-logo-section + .toolbar-nav's 7 app icons
+               + .toolbar-host-tools + .toolbar-profile, all flex-shrink:0)
+               summed to MORE width than the viewport even after
+               .toolbar-status (the one flex:1/min-width:0/overflow:hidden
+               section) shrank all the way to zero — and since main/body
+               carry overflow:hidden (needed elsewhere to kill page-level
+               horizontal scroll), that excess wasn't scrollable, it was
+               just silently clipped. Confirmed live at a 386px viewport:
+               .toolbar scrollWidth 549 vs clientWidth 386, and
+               .toolbar-status / .toolbar-host-tools / .toolbar-profile
+               rendered 100% off-screen — meaning Sign Out, account
+               settings, XC/rank, and host tools were all unreachable from
+               the toolbar on a real phone, on every screen (this is
+               global chrome, not Mission-Control-specific). Fix: (1) hide
+               .toolbar-status here — its XC number is already duplicated
+               in the profile dropdown's stat row (#pd-xc), so nothing is
+               lost, the same trade-off already made for
+               .toolbar-branding/.profile-info at 768px; (2) let
+               .toolbar-nav and .toolbar-host-tools become their OWN
+               horizontally scrollable strips (flex-shrink:1 +
+               overflow-x:auto — which also drops their flexbox automatic
+               min-width to 0 per spec) so if content still doesn't fit
+               it's swipeable instead of unreachable, with a min-width
+               floor on nav so it can never be squeezed to a literal 0px
+               sliver; (3) shrink .toolbar-profile's padding/avatar and
+               keep it flex-shrink:0 (unchanged) so it's always the LAST
+               thing to give up space, not the first. */
+            .toolbar-status { display: none; }
+
+            .toolbar-nav {
+                flex-shrink: 1;
+                min-width: 44px;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .toolbar-host-tools {
+                flex-shrink: 1;
+                min-width: 0;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .toolbar-profile {
+                gap: 4px;
+                padding: 3px 8px 3px 4px;
+            }
+
+            .toolbar-profile .profile-avatar {
+                width: 30px;
+                height: 30px;
+            }
         }
 
         /* MOBILE — Aug 10 fix #2: .mc-sidebar (Mission Control) is a
@@ -5645,6 +5700,64 @@
                 display: block;
                 overflow-x: auto;
                 -webkit-overflow-scrolling: touch;
+            }
+
+            /* MOBILE — Sept 3 fix (Ennis, task #11): the rule just above
+               (v1.33) gives .mc-table its own overflow-x:auto, but that
+               only matters if its content is allowed to reach that scroll
+               box in the first place. Its parent — the Player Management
+               table's wrapping <div class="mc-card" style="padding:0;
+               overflow:hidden;"> — carries an inline overflow:hidden on
+               BOTH axes (there for desktop's rounded-corner clipping).
+               Confirmed live at a 386px viewport: .mc-table clientWidth
+               346 vs scrollWidth 1361, with no scrollbar and no way to
+               reach the clipped ~1000px of columns — the table was
+               silently clipped, not scrollable, contradicting what
+               v1.33's Handoff entry claimed to have fixed. Only
+               overflow-x needs to reopen; overflow-y:hidden (the corner
+               rounding) is untouched. !important is required because an
+               inline style (even non-important) otherwise beats any
+               stylesheet selector regardless of specificity — an
+               !important stylesheet rule is the one thing that outranks
+               it. */
+            #mc-panel-players .mc-card {
+                overflow-x: auto !important;
+            }
+
+            /* MOBILE — Sept 3 fix (Ennis, task #11): Task/Checkpoint
+               Tools' "Table view" (_mcRenderTasksTable) injects a plain
+               <table style="width:100%"> straight into #mc-tasks-list
+               with no scroll wrapper at all — unlike .mc-table above, it
+               never got the v1.33 treatment. 6 columns, two of them
+               white-space:nowrap, so on a phone it either crushes
+               unreadable or overflows with nothing to scroll it back.
+               Give the list itself the scroll container and let the
+               table size to its content instead of being forced to
+               100%. */
+            #mc-tasks-list {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+            #mc-tasks-list table {
+                width: auto !important;
+                min-width: 600px;
+            }
+
+            /* MOBILE — Sept 3 fix (Ennis, task #11): the same
+               clipped-not-scrollable bug as the Player Management table
+               above, found on Approvals' "Player Usage & Reports" table —
+               its wrapper (id added this patch: pa-analytics-table-wrap)
+               also carries an inline overflow:hidden with no
+               overflow-x:auto and no min-width on the table, so on a
+               phone the 7 columns just crush illegibly small instead of
+               scrolling. Matches the pattern the adjacent "Scope Activity
+               Report" table just above it in the same panel already uses
+               correctly (overflow-x:auto wrapper + min-width table). */
+            #pa-analytics-table-wrap {
+                overflow-x: auto !important;
+            }
+            #pa-analytics-table-wrap table {
+                min-width: 640px;
             }
         }
 
@@ -12397,7 +12510,7 @@
                                     <button class="hmc-btn hmc-btn-cyan" onclick="pflxAnalyticsExportCSV()">⬇ Export CSV</button>
                                     <button class="hmc-btn hmc-btn-gold" onclick="pflxAnalyticsEmailAllHosts()">✉ Email Weekly Report to Hosts</button>
                                 </div>
-                                <div style="border:1px solid rgba(0,240,255,0.08);border-radius:10px;overflow:hidden;">
+                                <div id="pa-analytics-table-wrap" style="border:1px solid rgba(0,240,255,0.08);border-radius:10px;overflow:hidden;">
                                     <table style="width:100%;border-collapse:collapse;">
                                         <thead>
                                             <tr style="background:rgba(0,240,255,0.05);">
