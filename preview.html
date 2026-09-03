@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 117;
+      window.PFLX_PATCH   = 118;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -24391,10 +24391,17 @@
                 { name: "Global Digital Intern L1", xc: 1000 },
                 { name: "Global Digital Intern L2", xc: 1500 }
             ]},
-            { name: "Signature Badges (Skill Mastery)", color: "#ef4444", icon: "\ud83d\udfe5", coins: [
-                { name: "Cert: Photoshop", xc: 5000 }, { name: "Cert: Premiere", xc: 5000 },
-                { name: "Master Builder", xc: 5000 }
-            ]}
+            // Signature Badges (Skill Mastery) hardcoded stubs REMOVED (Sept 3) --
+            // "Cert: Photoshop"/"Cert: Premiere"/"Master Builder" had no
+            // rank-prerequisite reference anywhere (unlike "Design Thinker L1"/
+            // "Digital Citizen L1"/"Global Digital Intern L1"/"L2" above, which
+            // stay -- those ARE matched by name in rank-1/6/7's
+            // specificBadgeRequirements) and no longer exist under those names
+            // in X-Coin's real catalog. They were pure leftover noise in every
+            // badge picker -- exactly the "badges that are not in X-Coin"
+            // Ennis flagged. Signature Badges is now fully X-Coin-owned via the
+            // live coinCategories pull in mcCloudPull (see below).
+            { name: "Signature Badges (Skill Mastery)", color: "#ef4444", icon: "\ud83d\udfe5", coins: [] }
         ];
         // Flat list for search
         const MC_ALL_BADGES = MC_COIN_CATEGORIES.flatMap(function(cat) {
@@ -26461,6 +26468,37 @@
                     var purged = window.pflxPurgeTombstoned();
                     if (purged) console.log('[MC cloud] 🪦 purged ' + purged + ' tombstoned player record(s)');
                 } catch (e) {}
+                // (c) BADGE CATALOG PULL (Sept 3, Ennis: "trying to select a
+                // new signature digital badge but it's not showing up. I
+                // also see badges that are not in X-Coin.") -- mcBadges was
+                // only ever refreshed by a postMessage keyed 'badges' that
+                // NOTHING in the X-Coin app actually sends (X-Coin's own
+                // coin-catalog save only writes Supabase + shows a local
+                // toast, it never notifies the parent Console), or by a
+                // one-off manual Supabase patch done directly in a past
+                // session (v1.78). The boot pull above only fetches keys
+                // matching 'pflx_mc_%', which the real catalog key
+                // ('coinCategories', X-Coin-owned) does not match -- so a
+                // badge created in X-Coin (e.g. BrandBuilder) silently never
+                // reached the Console's pickers, while pflx_mc_badges kept
+                // re-serving whatever the last manual patch left behind
+                // (stale/renamed entries showing as "badges not in X-Coin").
+                // Pull the real catalog directly here, every cloud pull --
+                // read-only, X-Coin remains the sole writer of this key --
+                // so mcBadges can never go stale again.
+                try {
+                    var bres = await client.from('app_data').select('data').eq('key', 'coinCategories').limit(1);
+                    var brow = bres && bres.data && bres.data[0];
+                    if (brow && brow.data && Array.isArray(brow.data)) {
+                        var freshBadges = mcNormalizeBadges(brow.data);
+                        if (freshBadges.length) {
+                            mcBadges = freshBadges;
+                            _mcSetItemSafe('pflx_mc_badges', mcBadges);
+                            if (changed.indexOf('badges') < 0) changed.push('badges');
+                            try { if (typeof mcRefreshBadgePickers === 'function') mcRefreshBadgePickers(); } catch (e2) {}
+                        }
+                    }
+                } catch (e) { console.warn('[MC cloud] badge catalog pull failed', e); }
                 // Pull completed (even with zero rows on a fresh org) —
                 // pushes are now allowed (STOMP GUARD 1).
                 _mcCloudPulledOnce = true;
