@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 118;
+      window.PFLX_PATCH   = 119;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -10497,6 +10497,34 @@
                                         <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px;">Drop Pool (click to toggle; weights default to 1)</label>
                                         <div id="mc-season-loot-pool" style="display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto;padding:6px;background:rgba(10,18,40,0.4);border-radius:6px;"></div>
                                         <input type="hidden" id="mc-season-loot-config">
+                                    </div>
+
+                                    <!-- ═══ Prize Pack Draws (Sept 3, PRIZE PACK) ═══ -->
+                                    <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.1em;margin:16px 0 8px;text-transform:uppercase;">&#x1F3B0; Prize Pack Draws (Checkpoint/Project Bonus)</div>
+                                    <div style="background:rgba(124,58,237,0.03);border:1px solid rgba(124,58,237,0.15);border-radius:8px;padding:12px;margin-bottom:12px;">
+                                        <p style="margin:0 0 8px;font-size:10px;color:rgba(255,255,255,0.35);">An extra randomized bonus draw (XC or Upgrades) that fires automatically ON TOP OF a Checkpoint/Project's normal XC + badge reward, the moment it's completed for a player. Disabled by default — leave off until you've set a pool.</p>
+                                        <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:11px;color:#e0e6ff;">
+                                            <input type="checkbox" id="mc-season-prize-enabled"> Enable Prize Pack draws for this Season
+                                        </label>
+                                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                                            <div>
+                                                <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px;">Fires on</label>
+                                                <label style="display:block;font-size:11px;color:#e0e6ff;margin-bottom:4px;"><input type="checkbox" id="mc-season-prize-trig-cp" checked> Checkpoint completed</label>
+                                                <label style="display:block;font-size:11px;color:#e0e6ff;"><input type="checkbox" id="mc-season-prize-trig-proj" checked> Project completed</label>
+                                            </div>
+                                            <div>
+                                                <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px;">Rewards Per Draw</label>
+                                                <input type="number" id="mc-season-prize-count" value="1" min="1" max="5" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:5px;font-size:11px;box-sizing:border-box;">
+                                                <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin:8px 0 4px;">Draw Style</label>
+                                                <select id="mc-season-prize-style" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:5px;font-size:11px;">
+                                                    <option value="standard">Standard (N picks)</option>
+                                                    <option value="pick3">Pick 1 of 3</option>
+                                                    <option value="bundle">Bundle (all items)</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px;">Prize Pool — XC packs + Upgrades only (click to toggle; weights default to 1)</label>
+                                        <div id="mc-season-prize-pool" style="display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto;padding:6px;background:rgba(10,18,40,0.4);border-radius:6px;"></div>
                                     </div>
 
                                     <div style="display:flex;gap:8px;justify-content:flex-end;">
@@ -34673,6 +34701,10 @@
                             });
                             // Auto-modifiers bound to checkpoint_completed (e.g. Checkpoint Bonus).
                             if (window.pflxModifiers) window.pflxModifiers.fireEvent('checkpoint_completed', { playerId: pid, targetType: 'checkpoint', targetId: obj.id, cohort: obj.cohort });
+                            // PRIZE PACK (Sept 3) — bonus randomized draw, additional to the flat reward above.
+                            if (typeof window.pflxFirePrizePackTrigger === 'function') {
+                                window.pflxFirePrizePackTrigger('checkpoint_complete', 'checkpoint', obj.id, pid);
+                            }
                         } catch (eA) { console.warn('[mc checkpoint reward] award failed for', pid, eA); }
                     });
                     obj._cpRewardedAt = new Date().toISOString();
@@ -39053,16 +39085,35 @@
                 function payOut(rec, kind, label) {
                     rec.completionAwards = rec.completionAwards || {};
                     if (rec.completionAwards[playerId]) return false;
+                    // PRIZE PACK (Sept 3) — guard now set up-front (was
+                    // previously set only after the "nothing to award" early
+                    // return below, or after a real flat payout), so a
+                    // Checkpoint/Project with NO flat xcReward/rewardBadges
+                    // configured still gets exactly one Prize Pack trigger
+                    // call instead of being silently skipped, while staying
+                    // guaranteed to fire at most once per (rec, playerId)
+                    // either way.
+                    rec.completionAwards[playerId] = Date.now();
                     var xc = rec.xcReward || rec.xcAward || 0;
                     var badges = Array.isArray(rec.rewardBadges) ? rec.rewardBadges : [];
-                    if (!xc && !badges.length) { rec.completionAwards[playerId] = Date.now(); return false; }
-                    if (xc) window.PflxDataBus.award(playerId, { xc: xc, source: 'mc', reason: kind + ':' + rec.id });
+                    var didFlat = false;
+                    if (xc) { window.PflxDataBus.award(playerId, { xc: xc, source: 'mc', reason: kind + ':' + rec.id }); didFlat = true; }
                     badges.forEach(function (b) {
                         window.PflxDataBus.award(playerId, { badge: _pflxResolveAwardBadge(b), source: 'mc', reason: kind + ':' + rec.id });
+                        didFlat = true;
                     });
-                    rec.completionAwards[playerId] = Date.now();
-                    try { if (typeof pflxToast === 'function') pflxToast('🏆 @' + brand + ' completed ' + label + (xc ? ' · +' + xc + ' XC' : '') + (badges.length ? ' · ' + badges.length + ' badge(s)' : ''), 'success', 5000); } catch (e) {}
-                    return true;
+                    if (didFlat) {
+                        try { if (typeof pflxToast === 'function') pflxToast('🏆 @' + brand + ' completed ' + label + (xc ? ' · +' + xc + ' XC' : '') + (badges.length ? ' · ' + badges.length + ' badge(s)' : ''), 'success', 5000); } catch (e) {}
+                    }
+                    // PRIZE PACK (Sept 3) — bonus randomized draw, additional
+                    // to the flat reward above. `kind` is literally 'project'
+                    // or 'checkpoint' at both call sites below, so kind +
+                    // '_complete' matches the triggerKey strings used
+                    // everywhere else this feature checks against.
+                    if (typeof window.pflxFirePrizePackTrigger === 'function') {
+                        window.pflxFirePrizePackTrigger(kind + '_complete', kind, rec.id, playerId);
+                    }
+                    return true; // guard was newly set this call — caller should persist rec either way
                 }
                 var cohorts = (typeof pflxPlayerCohorts === 'function') ? pflxPlayerCohorts(player || { id: playerId }) : [];
                 var changedP = false, changedC = false;
@@ -40513,6 +40564,10 @@
                                 var b = _pflxResolveAwardBadge(badgeRef);
                                 window.PflxDataBus.award(pid, { badge: b, source: 'mc', reason: 'project:' + obj.id });
                             });
+                            // PRIZE PACK (Sept 3) — bonus randomized draw, additional to the flat reward above.
+                            if (typeof window.pflxFirePrizePackTrigger === 'function') {
+                                window.pflxFirePrizePackTrigger('project_complete', 'project', obj.id, pid);
+                            }
                         } catch (eA) { console.warn('[mc project reward] award failed for', pid, eA); }
                     });
                     obj._rewardedAt = new Date().toISOString();
@@ -40680,6 +40735,7 @@
         var mcSeasonSpecials = [];
         var mcSeasonLogic = [];
         var mcSeasonLootPool = [];
+        var mcSeasonPrizePool = [];
 
         function mcShowSeasonForm(index) {
             mcSeasonEditIndex = index;
@@ -40744,6 +40800,7 @@
             mcSeasonSpecials = s && s.specialRewards ? JSON.parse(JSON.stringify(s.specialRewards)) : [];
             mcSeasonLogic = s && s.logicRules ? JSON.parse(JSON.stringify(s.logicRules)) : [];
             mcSeasonLootPool = s && s.lootBox && s.lootBox.pool ? JSON.parse(JSON.stringify(s.lootBox.pool)) : [];
+            mcSeasonPrizePool = s && s.prizePack && s.prizePack.pool ? JSON.parse(JSON.stringify(s.prizePack.pool)) : [];
 
             el = document.getElementById('mc-season-xc-bonus'); if (el) el.value = (s && s.rewards && s.rewards.xcBonus != null) ? s.rewards.xcBonus : 500;
             el = document.getElementById('mc-season-top3-bonus'); if (el) el.value = (s && s.rewards && s.rewards.top3Bonus != null) ? s.rewards.top3Bonus : 1000;
@@ -40759,6 +40816,15 @@
             el = document.getElementById('mc-season-loot-count'); if (el) el.value = lb.count || 1;
             el = document.getElementById('mc-season-loot-style'); if (el) el.value = lb.style || 'standard';
 
+            // Prize Pack (Sept 3) — enabled defaults false so a Season
+            // record from before this patch never silently activates.
+            var pp = (s && s.prizePack) ? s.prizePack : { enabled: false, triggers: ['checkpoint_complete', 'project_complete'], count: 1, style: 'standard' };
+            el = document.getElementById('mc-season-prize-enabled'); if (el) el.checked = !!pp.enabled;
+            el = document.getElementById('mc-season-prize-trig-cp'); if (el) el.checked = (pp.triggers || []).indexOf('checkpoint_complete') >= 0;
+            el = document.getElementById('mc-season-prize-trig-proj'); if (el) el.checked = (pp.triggers || []).indexOf('project_complete') >= 0;
+            el = document.getElementById('mc-season-prize-count'); if (el) el.value = pp.count || 1;
+            el = document.getElementById('mc-season-prize-style'); if (el) el.value = pp.style || 'standard';
+
             // Populate pickers (badges/upgrades/fines) and render live sections
             mcSeasonPopulatePickers();
             mcSeasonRenderBadges();
@@ -40767,6 +40833,7 @@
             mcSeasonRenderSpecials();
             mcSeasonRenderLogic();
             mcSeasonRenderLootPool();
+            mcSeasonRenderPrizePackPool();
 
             form.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
@@ -41763,6 +41830,52 @@
             if (p) p.weight = Math.max(1, parseInt(input.value, 10) || 1);
         }
 
+        // Prize Pack pool (Sept 3) — XC packs + Upgrades ONLY (Season
+        // editor "Prize Pack Draws" block). Deliberately excludes
+        // badges/fines/mult/time — those stay Loot-Box-only, per the
+        // confirmed feature scope. Mirrors mcSeasonRenderLootPool's
+        // shape/pattern above.
+        function mcSeasonRenderPrizePackPool() {
+            var host = document.getElementById('mc-season-prize-pool');
+            if (!host) return;
+            var available = [];
+            mcSeasonUpgrades.forEach(function(id) {
+                var m = (mcModifiers || []).find(function(x) { return (x.id || x.name) === id; });
+                available.push({ key: 'upgrade:' + id, icon: '⚡', label: m ? m.name : id, type: 'upgrade' });
+            });
+            [50, 100, 300, 500, 1000].forEach(function(n) {
+                available.push({ key: 'xc:' + n, icon: '🪙', label: n + ' XC', type: 'xc' });
+            });
+            host.innerHTML = available.map(function(it) {
+                var existing = mcSeasonPrizePool.find(function(p) { return p.key === it.key; });
+                var checked = existing ? 'checked' : '';
+                var weight = existing ? existing.weight : 1;
+                return '<label style="display:flex;align-items:center;gap:8px;padding:4px 6px;font-size:11px;color:#e0e6ff;">' +
+                       '<input type="checkbox" data-key="' + it.key + '" data-label="' + it.label.replace(/"/g,'&quot;') + '" data-type="' + it.type + '" data-icon="' + it.icon + '" class="mc-season-prize-cb" onchange="mcSeasonTogglePrize(this)" ' + checked + '> ' +
+                       '<span style="flex:1;">' + it.icon + ' ' + it.label + '</span>' +
+                       '<span style="font-size:10px;color:rgba(255,255,255,0.3);">weight</span>' +
+                       '<input type="number" min="1" value="' + weight + '" data-key="' + it.key + '" onchange="mcSeasonUpdatePrizeWeight(this)" style="width:52px;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:3px;border-radius:4px;font-size:11px;">' +
+                       '</label>';
+            }).join('');
+        }
+        function mcSeasonTogglePrize(cb) {
+            var k = cb.dataset.key;
+            var idx = mcSeasonPrizePool.findIndex(function(p) { return p.key === k; });
+            if (cb.checked && idx < 0) {
+                mcSeasonPrizePool.push({ key: k, label: cb.dataset.label, type: cb.dataset.type, icon: cb.dataset.icon, weight: 1 });
+            } else if (!cb.checked && idx >= 0) {
+                mcSeasonPrizePool.splice(idx, 1);
+            }
+        }
+        function mcSeasonUpdatePrizeWeight(input) {
+            var k = input.dataset.key;
+            var p = mcSeasonPrizePool.find(function(x) { return x.key === k; });
+            if (p) p.weight = Math.max(1, parseInt(input.value, 10) || 1);
+        }
+        window.mcSeasonTogglePrize = mcSeasonTogglePrize;
+        window.mcSeasonUpdatePrizeWeight = mcSeasonUpdatePrizeWeight;
+        window.mcSeasonRenderPrizePackPool = mcSeasonRenderPrizePackPool;
+
         window.mcSeasonToggleAllCohorts = mcSeasonToggleAllCohorts;
         window.mcSeasonAddBadge = mcSeasonAddBadge;
         window.mcSeasonRemoveBadge = mcSeasonRemoveBadge;
@@ -41869,6 +41982,22 @@
                     style: document.getElementById('mc-season-loot-style')?.value || 'standard',
                     pool: JSON.parse(JSON.stringify(mcSeasonLootPool))
                 },
+                // PRIZE PACK (Sept 3) — Season-level bonus draw config,
+                // separate from lootBox (see pflxRollPrizePack's header
+                // comment for why lootBox.reset doesn't fit this). enabled
+                // defaults false via the UI checkbox itself, so a
+                // brand-new (or pre-existing, never-re-saved) Season never
+                // silently ships live prize draws.
+                prizePack: {
+                    enabled: !!document.getElementById('mc-season-prize-enabled')?.checked,
+                    triggers: [
+                        document.getElementById('mc-season-prize-trig-cp')?.checked ? 'checkpoint_complete' : null,
+                        document.getElementById('mc-season-prize-trig-proj')?.checked ? 'project_complete' : null
+                    ].filter(Boolean),
+                    count: parseInt(document.getElementById('mc-season-prize-count')?.value, 10) || 1,
+                    style: document.getElementById('mc-season-prize-style')?.value || 'standard',
+                    pool: JSON.parse(JSON.stringify(mcSeasonPrizePool))
+                },
                 feedforwardEnabled: !!document.getElementById('mc-season-feedforward-enabled')?.checked,
                 // v1.92 — Season was the one save function of the four
                 // (Season/Program/Checkpoint/Project) still missing an
@@ -41931,12 +42060,17 @@
             }
             return pool[pool.length - 1];
         }
-        function pflxRollLootBox(season, player) {
-            if (!season || !season.lootBox) return [];
-            var pool = (season.lootBox.pool || []).slice();
+        // (extracted Sept 3, PRIZE PACK) — pure pool-resolution core shared
+        // by pflxRollLootBox (daily/weekly/checkpoint-cadence loot) and the
+        // new pflxRollPrizePack (checkpoint/project-completion bonus draw).
+        // config = {style, count, pool}, i.e. either season.lootBox or
+        // season.prizePack.
+        function pflxRollFromConfig(config) {
+            if (!config) return [];
+            var pool = (config.pool || []).slice();
             if (!pool.length) return [];
-            var style = season.lootBox.style || 'standard';
-            var count = season.lootBox.count || 1;
+            var style = config.style || 'standard';
+            var count = config.count || 1;
             var results = [];
             if (style === 'bundle') {
                 results = pool.slice();
@@ -41956,6 +42090,11 @@
                     if (pick) results.push(pick);
                 }
             }
+            return results;
+        }
+        function pflxRollLootBox(season, player) {
+            if (!season || !season.lootBox) return [];
+            var results = pflxRollFromConfig(season.lootBox);
             // Season Pass multiplier hook
             if (season.seasonPass && season.seasonPass.enabled && player && player.seasonPassActive) {
                 var mult = season.seasonPass.multiplier || 1;
@@ -41971,21 +42110,73 @@
             }
             return results;
         }
-        function pflxGrantLootReward(player, reward) {
+        // NEW (Sept 3, PRIZE PACK — Ennis: randomized lottery-style bonus
+        // draws at Checkpoint/Project completion) — Season-level bonus draw
+        // config, separate from season.lootBox because lootBox.reset means
+        // "reclaim cooldown" (24h/7d/14d), which doesn't fit "fires once on
+        // a completion event." Deliberately does NOT apply the Season Pass
+        // XC-multiplier remap pflxRollLootBox does above — Prize Pack is a
+        // bonus draw layered on top of the flat reward, not the daily
+        // claim; easy follow-up if Ennis wants Season Pass to also boost
+        // Prize Pack XC later.
+        function pflxRollPrizePack(season) {
+            if (!season || !season.prizePack || !season.prizePack.enabled) return [];
+            return pflxRollFromConfig(season.prizePack);
+        }
+        // FIX (Sept 3, PRIZE PACK) — previously bypassed the entire reward
+        // pipeline: direct player.totalXc/xc/badges mutation, meaning no XC
+        // multiplier, no rank-crossing check, no Signature Badge royalty
+        // check ever applied to a Loot Box XC/badge win, and the caller
+        // (pflxClaimDailyLootBox) revealed via a bare alert() instead of the
+        // real pflxNotify popup every other reward in the platform uses.
+        // xc/badge reward types now route through PflxDataBus.award(),
+        // which already auto-emits the pflxEmitXcoinEvent popup for BOTH
+        // kinds (see award()'s badge-emit and xc-emit blocks) — so this
+        // function does not need to call pflxEmitXcoinEvent itself for
+        // those two types. 'upgrade' has no PflxDataBus concept, so it
+        // always self-emits below, after the free grant confirms (or not —
+        // reveal still fires either way; the grant is fire-and-forget so a
+        // slow/offline Supabase write never blocks the reward reveal, and a
+        // failed grant is logged via console.warn for a host to catch).
+        // tax/mult/time are left as direct mutation, unchanged — the new
+        // Prize Pack pool only ever authors xc/upgrade entries (Season
+        // editor UI restricts it), so this only preserves the existing
+        // (pre-Prize-Pack) Daily Loot Box behavior for those three types.
+        // opts: { source: 'lootbox'|'prizepack', reason: string }
+        function pflxGrantLootReward(player, reward, opts) {
             if (!player || !reward) return;
+            opts = opts || {};
+            var source = opts.source || 'lootbox';
+            var reason = opts.reason || ('reward:' + reward.key);
             var parts = (reward.key || '').split(':');
             var type = parts[0];
             var val = parts[1];
             if (type === 'xc') {
                 var amt = parseInt(val, 10) || 0;
-                player.totalXc = (player.totalXc || player.xc || 0) + amt;
-                player.xc = player.totalXc;
+                if (amt !== 0 && window.PflxDataBus) {
+                    window.PflxDataBus.award(player.id, { xc: amt, source: source, reason: reason });
+                }
             } else if (type === 'badge') {
-                player.badges = player.badges || [];
-                if (player.badges.indexOf(val) < 0) player.badges.push(val);
+                if (window.PflxDataBus) {
+                    var b = (typeof _pflxResolveAwardBadge === 'function') ? _pflxResolveAwardBadge(val) : { id: val, name: reward.label };
+                    window.PflxDataBus.award(player.id, { badge: b, source: source, reason: reason });
+                }
             } else if (type === 'upgrade') {
-                player.upgrades = player.upgrades || [];
-                player.upgrades.push({ id: val, grantedAt: Date.now() });
+                if (typeof window.pflxGrantUpgradeToPlayer === 'function') {
+                    window.pflxGrantUpgradeToPlayer(player.id, val, { source: source, reason: reason }).then(function (ok) {
+                        var mod = (mcModifiers || []).find(function (m) { return m.id === val; });
+                        if (typeof window.pflxEmitXcoinEvent === 'function') {
+                            window.pflxEmitXcoinEvent(player.id, 'upgrade', {
+                                title: (mod && mod.name) || reward.label || 'Upgrade',
+                                desc: (mod && mod.description) || reason,
+                                image: mod && mod.image,
+                                icon: (mod && mod.icon) || reward.icon || '⚡',
+                                xc: 0
+                            });
+                        }
+                        if (!ok) console.warn('[prize pack] upgrade grant did not confirm for', player.id, val);
+                    });
+                }
             } else if (type === 'tax') {
                 player.activeFines = player.activeFines || [];
                 player.activeFines.push({ id: val, appliedAt: Date.now() });
@@ -41997,6 +42188,78 @@
                 player.timeShifts.push({ mode: val, grantedAt: Date.now() });
             }
         }
+        // NEW (Sept 3, PRIZE PACK) — X-Coin has no existing free-grant path
+        // for Upgrades: purchaseUpgrade() (pflx-xcoin-app marketplace page)
+        // always deducts costXcoin/costBadge first, and no admin/reward
+        // path anywhere writes an unpaid PlayerModifier. Can't reliably
+        // reach X-Coin via the xcoin-frame postMessage bridge either — that
+        // iframe is src="about:blank" until a host opens the X-Coin tab,
+        // which a checkpoint/project completion routinely happens without.
+        // So this writes directly to the Supabase app_data row X-Coin
+        // itself reads (key 'playerModifiers', confirmed live against the
+        // real DB before writing this) — the same direct-read/write pattern
+        // this session's earlier v1.118 coinCategories sync fix already
+        // established for the analogous badge-catalog staleness bug.
+        // KNOWN ACCEPTED RISK: this is a read-modify-write, not atomic —
+        // two upgrade grants landing within the same few hundred ms could
+        // race and one could clobber the other's append. Same risk class
+        // every other direct app_data writer in this file already carries
+        // (no row-locking exists anywhere in this pattern today); not a new
+        // risk introduced by this feature. A Postgres RPC append function
+        // would eliminate it if ever wanted — not needed for v1.
+        function pflxGrantUpgradeToPlayer(playerId, modifierId, opts) {
+            opts = opts || {};
+            return new Promise(function (resolve) {
+                try {
+                    var sb = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                    if (!sb) { console.warn('[prize pack] no supabase client — upgrade grant skipped'); resolve(false); return; }
+                    var recId = 'pm-prize-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+                    sb.from('app_data').select('data').eq('key', 'playerModifiers').limit(1).then(function (res) {
+                        var row = res && res.data && res.data[0];
+                        var list = (row && Array.isArray(row.data)) ? row.data.slice() : [];
+                        list.push({
+                            id: recId,
+                            playerId: playerId,
+                            modifierId: modifierId,
+                            status: 'active',
+                            acquiredAt: new Date().toISOString(),
+                            source: 'prize_pack',
+                            reason: opts.reason || ''
+                        });
+                        sb.from('app_data').upsert({ key: 'playerModifiers', data: list }, { onConflict: 'key' }).then(function (r2) {
+                            if (r2 && r2.error) { console.warn('[prize pack] upgrade grant upsert failed', r2.error); resolve(false); return; }
+                            resolve(true);
+                        }, function (err) { console.warn('[prize pack] upgrade grant upsert failed', err); resolve(false); });
+                    }, function (err) { console.warn('[prize pack] upgrade grant read failed', err); resolve(false); });
+                } catch (e) { console.warn('[prize pack] upgrade grant exception', e); resolve(false); }
+            });
+        }
+        window.pflxGrantUpgradeToPlayer = pflxGrantUpgradeToPlayer;
+        // NEW (Sept 3, PRIZE PACK) — the ONE place every current AND future
+        // completion-trigger source calls into. This patch only ever calls
+        // this with triggerKey 'checkpoint_complete' / 'project_complete'
+        // (see mcSaveCPForm / mcSaveProjectForm / _mcRollupAwards). A later
+        // patch adding Arena end-of-game, Task-level, or DarkCampus triggers
+        // adds a NEW triggerKey string plus a call at its own call site —
+        // nothing here, in pflxRollPrizePack, or in pflxGrantLootReward
+        // needs to change.
+        function pflxFirePrizePackTrigger(triggerKey, targetType, targetId, playerId) {
+            try {
+                if (!playerId || !window.PflxDataBus) return;
+                var season = (typeof pflxGetActiveSeason === 'function') ? pflxGetActiveSeason() : null;
+                if (!season || !season.prizePack || !season.prizePack.enabled) return;
+                if ((season.prizePack.triggers || []).indexOf(triggerKey) < 0) return;
+                var player = (typeof pflxLookupPlayer === 'function') ? pflxLookupPlayer(playerId) : null;
+                if (!player) return;
+                if (typeof pflxSeasonAppliesToPlayer === 'function' && !pflxSeasonAppliesToPlayer(season, player)) return;
+                var rewards = pflxRollPrizePack(season);
+                if (!rewards.length) return;
+                rewards.forEach(function (r) {
+                    pflxGrantLootReward(player, r, { source: 'prizepack', reason: triggerKey + ':' + targetType + ':' + targetId });
+                });
+            } catch (e) { console.warn('[prize pack] trigger failed', triggerKey, playerId, e); }
+        }
+        window.pflxFirePrizePackTrigger = pflxFirePrizePackTrigger;
         function pflxClaimDailyLootBox() {
             var player = mcGetCurrentPlayer ? mcGetCurrentPlayer() : null;
             if (!player) { alert('No active player.'); return; }
@@ -42005,7 +42268,19 @@
             if (!pflxLootAvailable(player, season)) { alert('Loot box already claimed. Check back later!'); return; }
             var rewards = pflxRollLootBox(season, player);
             if (!rewards.length) { alert('No rewards configured.'); return; }
-            rewards.forEach(function(r) { pflxGrantLootReward(player, r); });
+            // FIX (Sept 3, PRIZE PACK) — was a bare alert() dump of every
+            // reward's label; each reward now reveals through the real
+            // pflxNotify popup via pflxGrantLootReward -> PflxDataBus.award()
+            // (xc/badge, which auto-emits) or pflxEmitXcoinEvent directly
+            // (upgrade). NOTE: because xc/badge rewards now credit through
+            // PflxDataBus.award() (a different, canonical player record)
+            // instead of mutating this local `player` object synchronously,
+            // the investment-tax calc just below now runs against this
+            // player's PRE-loot-claim balance rather than including this
+            // claim's own winnings, a small behavior change from before —
+            // arguably more correct (not taxing your own same-transaction
+            // winnings) and not worth blocking this fix over.
+            rewards.forEach(function(r) { pflxGrantLootReward(player, r, { source: 'lootbox', reason: 'daily_login' }); });
 
             // Investment tax deduction on claim/login
             if (season.investTax && season.investTax.rate > 0) {
@@ -42022,7 +42297,6 @@
             try { mcSaveData('players'); } catch (e) {}
             try { mcBroadcastToApps('pflx_loot_claim', { playerId: player.id, rewards: rewards }); } catch (e) {}
             mcRenderLootWidget();
-            alert('🎁 You received:\n\n' + rewards.map(function(r) { return '• ' + (r.icon || '') + ' ' + r.label; }).join('\n'));
         }
         function mcGetCurrentPlayer() {
             // Preferred: explicit current user lookup
