@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 121;
+      window.PFLX_PATCH   = 122;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -39499,6 +39499,13 @@
                     }
                 } catch (eAward) { console.warn('[MC] PflxDataBus.award failed', eAward); }
 
+                // Checkpoint/Project completion rewards for this player
+                // (Sept 4 fix — mcApprovePlayerSubmission already does this;
+                // this legacy single-submission branch didn't, so a player
+                // whose last task landed here never got their checkpoint's
+                // own bonus). Idempotent via _mcRollupAwards' own guard.
+                try { _mcRollupAwards(submitterId); } catch (eRollup) { console.warn('[MC] legacy-path rollup awards failed', eRollup); }
+
                 // Mirror the canonical PLAYERS record back into mcPlayers so the
                 // MC roster row re-renders with the new XC / badge count without
                 // requiring a full reload.
@@ -55086,10 +55093,19 @@
                 mcApprovals.push({ type:'application', id:id, title: appI ? (appI.itemName || '') : '', action:'approved', date:new Date().toISOString().split('T')[0], submittedBy: appI ? appI.playerBrand : '' });
             } else if (type === 'completion') {
                 // The completion record itself already lives in mcApprovals
-                // (pushed by mcCheckCompletionApprovals) — approving just
-                // flips its action, same in-place pattern as module_completion.
+                // (pushed by mcCheckCompletionApprovals) — approving flips
+                // its action AND attempts the checkpoint/project/program
+                // reward payout via the same idempotent path task-level
+                // approval uses (Sept 4 fix — this branch used to flip the
+                // status flag only and never paid anything; _mcRollupAwards'
+                // own rec.completionAwards[playerId] guard makes this call
+                // a safe no-op if the reward already landed via the task
+                // approval that made this card eligible in the first place).
                 var cma = mcApprovals.find(function(x) { return x && x.id === id; });
-                if (cma) cma.action = 'approved';
+                if (cma) {
+                    cma.action = 'approved';
+                    if (cma.playerId) { try { _mcRollupAwards(cma.playerId); } catch (eComp) { console.warn('[MC] completion approval payout failed', eComp); } }
+                }
             } else if (type === 'module_completion') {
                 var ma = mcApprovals.find(function(x) { return x.id === id; });
                 if (ma) {
