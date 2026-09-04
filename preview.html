@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 122;
+      window.PFLX_PATCH   = 123;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -16090,7 +16090,20 @@
             // they don't compete on the leaderboard.
             try {
                 var posInfo = (function () {
-                    var roster = (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) ? PLAYERS.slice() : [];
+                    // Sept 4 fix (Kaitlin: leaderboard position showed 54th
+                    // here vs 55th on X-Coin's leaderboard) — PLAYERS is the
+                    // small hardcoded boot literal (a few seed/test rows),
+                    // not the full synced roster; real players merge in a
+                    // few seconds after boot via the cloud pull but nothing
+                    // ever re-ran this calc, so a toolbar rendered before
+                    // that merge landed stayed off-by-one for the rest of
+                    // the session. mcPlayers is the live cloud-synced roster
+                    // (the same source X-Coin's canonical leaderboard
+                    // reads) — prefer it, falling back to PLAYERS only if
+                    // it's empty (e.g. before the very first cloud pull).
+                    var roster = (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers) && mcPlayers.length)
+                        ? mcPlayers.slice()
+                        : ((typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) ? PLAYERS.slice() : []);
                     roster = roster.filter(function (p) {
                         if (!p) return false;
                         var r = String(p.role || '').toLowerCase();
@@ -30890,7 +30903,15 @@
                     var xcChip = (t.xcReward || t.xc)
                         ? '<span style="background:rgba(245,200,66,0.16);color:#f5c842;padding:4px 9px;border-radius:10px;font-size:11px;font-weight:800;border:1px solid rgba(245,200,66,0.4);white-space:nowrap;box-shadow:0 0 8px rgba(245,200,66,0.14);">⚡ ' + (t.xcReward || t.xc) + '</span>'
                         : '';
-                    var statusChip = (t.status === 'submitted')
+                    // Sept 4 fix (Kaitlin: 2 tasks she never touched
+                    // showed "Submitted") — this chip read the task's GLOBAL
+                    // status field, so another player's submission (or
+                    // rejection) showed as "Submitted" on every OTHER
+                    // assigned player's row too. Same class of bug the July
+                    // 19 fix already closed for _rowState/_statusIcon/
+                    // _statusColor above (Checkpoint Detail) — just missed
+                    // here on the sibling My Tasks page.
+                    var statusChip = (pflxTaskStateForPlayer(t, __mtPid) === 'submitted')
                         ? '<span style="display:inline-block;background:rgba(245,165,0,0.14);color:#f5a500;font-size:9px;font-weight:800;padding:3px 8px;border-radius:5px;text-transform:uppercase;letter-spacing:0.06em;">◐ SUBMITTED</span>'
                         : '';
                     html += '<div onclick="ppNav(\'task-detail\',{id:\'' + (t.id || '') + '\'})" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px;margin-bottom:8px;cursor:pointer;transition:background 0.15s ease;" onmouseover="this.style.background=\'rgba(30,30,42,0.7)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.02)\'">' +
@@ -33812,8 +33833,19 @@
                 tasks.push({ id: t.id, title: t.title || t.name || 'Task', state: pflxTaskStateForPlayer(t, pid), project: viaProject || null });
             }
             mcChildProjectsForCheckpoint(cp).forEach(function (pr) {
-                var projSeen = canSee(pr);
-                mcChildTasksForProject(pr).forEach(function (t) { if (projSeen || canSee(t)) push(t, pr.name || pr.title || 'Project'); });
+                // Sept 4 fix (Kaitlin: Beta showed 4/7 even though her
+                // checkpoint completion payout had already fired) — a task
+                // under a VISIBLE project used to count toward every
+                // viewer's progress just because the parent project was
+                // visible, even when the task itself carries its own
+                // narrower cohortIds/assignedTo that exclude this player
+                // (e.g. a per-team "Discord username" task). canSee(t)
+                // alone already correctly inherits from the parent project
+                // when the task has no scope of its own (pflxPlayerCanSeeItem
+                // step 5a) — dropping the projSeen bypass only removes the
+                // over-count, it can't make a legitimately-visible task
+                // disappear.
+                mcChildTasksForProject(pr).forEach(function (t) { if (canSee(t)) push(t, pr.name || pr.title || 'Project'); });
             });
             mcChildTasksForCheckpoint(cp).forEach(function (t) { if (canSee(t)) push(t, null); });
             var approved = tasks.filter(function (x) { return x.state === 'approved'; }).length;
@@ -67070,6 +67102,12 @@ RESPONSE RULES:
                 if (typeof hmcRenderPlayers === 'function') hmcRenderPlayers();
                 if (typeof mcRenderPlayers === 'function') mcRenderPlayers();
                 if (typeof populateBrandSelect === 'function') populateBrandSelect();
+                // Sept 4 fix — the toolbar's Leaderboard Position badge reads
+                // the roster live but nothing re-rendered it when a delayed
+                // cloud merge added players PLAYERS/mcPlayers didn't have at
+                // boot, so a badge rendered just before this event fired
+                // stayed stale for the rest of the session. Re-run it here.
+                if (typeof updateToolbarStatus === 'function') updateToolbarStatus();
                 if (typeof pflxToast === 'function' && ev.detail && ev.detail.count) {
                     var n = ev.detail.count;
                     pflxToast('Roster synced — ' + n + ' player' + (n === 1 ? '' : 's') + ' from cloud', 'success');
