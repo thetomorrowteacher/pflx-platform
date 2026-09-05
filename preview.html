@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 129;
+      window.PFLX_PATCH   = 130;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -11963,7 +11963,7 @@
                             <div style="position:absolute; top:0; left:0; right:0; height:3px; background:linear-gradient(90deg, var(--cyan), #8b5cf6, transparent);"></div>
                             <!-- Avatar — click to change your profile image -->
                             <div style="position:relative; flex-shrink:0;">
-                                <div id="portfolio-avatar" onclick="document.getElementById('portfolio-avatar-input').click()" title="Click to change your profile image" style="width:120px; height:120px; border-radius:22px; background:linear-gradient(135deg, #4f8ef7, #8b5cf6); display:flex; align-items:center; justify-content:center; font-size:36px; font-weight:900; color:white; overflow:hidden; border:3px solid rgba(255,255,255,0.1); cursor:pointer;"></div>
+                                <div id="portfolio-avatar" onclick="document.getElementById('portfolio-avatar-input').click()" title="Click to change your profile image" style="position:relative; width:120px; height:120px; border-radius:22px; background:linear-gradient(135deg, #4f8ef7, #8b5cf6); display:flex; align-items:center; justify-content:center; font-size:36px; font-weight:900; color:white; overflow:hidden; border:3px solid rgba(255,255,255,0.1); cursor:pointer;"></div>
                                 <div onclick="document.getElementById('portfolio-avatar-input').click()" title="Change profile image" style="position:absolute; bottom:-6px; right:-6px; width:34px; height:34px; border-radius:50%; background:linear-gradient(135deg,#00d4ff,#7c3aed); border:2px solid #0a0a0f; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:15px; box-shadow:0 2px 10px rgba(0,212,255,0.4);">📷</div>
                                 <input type="file" id="portfolio-avatar-input" accept="image/*" style="display:none;" onchange="portfolioUploadAvatar(event)">
                             </div>
@@ -29378,13 +29378,17 @@
             var longestStreak = (myPlayer && myPlayer.longestStreak) || 0;
 
             // ── Player header ── avatar shows the PLAYER'S brand/logo image
-            // (canonical record first, then session), not the PFLX logo —
-            // that's only the fallback when no image is set.
-            var __avatarSrc = (myPlayer && myPlayer.image) || s.image || 'public/PFLX Core Flat 6.png';
-            var __avatarFit = ((myPlayer && myPlayer.image) || s.image) ? 'cover' : 'contain';
+            // (canonical record first, then session); when nothing is
+            // uploaded, show the brand initial rather than the PFLX logo,
+            // which made every photo-less player look like the platform
+            // brand itself (Ennis, Sep 5 — "brand name initials in every app").
+            var __avatarSrc = (myPlayer && myPlayer.image) || s.image || '';
+            var __avatarInitial = String((myPlayer && myPlayer.brand) || s.brand || displayName || 'P').trim().charAt(0).toUpperCase();
             html += '<div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;flex-wrap:wrap;">' +
                 '<div style="width:52px;height:52px;border-radius:50%;border:2px solid var(--cyan);overflow:hidden;display:flex;align-items:center;justify-content:center;background:rgba(0,240,255,0.05);">' +
-                '<img src="' + escapeHtml(__avatarSrc) + '" alt="" style="width:100%;height:100%;object-fit:' + __avatarFit + ';" onerror="this.src=\'public/PFLX Core Flat 6.png\';this.style.objectFit=\'contain\';this.onerror=null;">' +
+                (__avatarSrc
+                    ? '<img src="' + escapeHtml(__avatarSrc) + '" alt="" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\'">'
+                    : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#00d4ff,#7c3aed);color:#fff;font-family:Orbitron,sans-serif;font-weight:700;font-size:20px;">' + escapeHtml(__avatarInitial) + '</div>') +
                 '</div>' +
                 '<div style="flex:1;min-width:0;">' +
                 '<div style="font-family:\'Rajdhani\',sans-serif;font-size:20px;font-weight:900;color:#fff;">Welcome back, ' + escapeHtml(displayName) + '</div>' +
@@ -31278,7 +31282,11 @@
             // ── Hero header ──
             html += '<div style="background:linear-gradient(135deg, rgba(245,200,66,0.10), rgba(139,92,246,0.08));border:1.5px solid rgba(245,200,66,0.35);border-radius:22px;padding:28px;margin-bottom:22px;box-shadow:0 0 40px rgba(245,200,66,0.10);">' +
                 '<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">' +
-                    '<div style="width:80px;height:80px;border-radius:50%;border:3px solid #f5c842;background:rgba(0,240,255,0.05);display:flex;align-items:center;justify-content:center;font-size:36px;overflow:hidden;box-shadow:0 0 20px rgba(245,200,66,0.35);"><img src="public/PFLX Core Flat 6.png" alt="" style="width:100%;height:100%;object-fit:contain;" onerror="this.parentElement.innerHTML=\'&#x1F464;\'"></div>' +
+                    '<div style="width:80px;height:80px;border-radius:50%;border:3px solid #f5c842;background:rgba(0,240,255,0.05);display:flex;align-items:center;justify-content:center;font-size:36px;overflow:hidden;box-shadow:0 0 20px rgba(245,200,66,0.35);">' +
+                    ((myPlayer && myPlayer.image) || s.image
+                        ? '<img src="' + escapeHtml((myPlayer && myPlayer.image) || s.image) + '" alt="" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\'">'
+                        : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#00d4ff,#7c3aed);color:#fff;font-family:Orbitron,sans-serif;font-weight:700;font-size:28px;">' + escapeHtml(String((myPlayer && myPlayer.brand) || s.brand || displayName || 'P').trim().charAt(0).toUpperCase()) + '</div>') +
+                    '</div>' +
                     '<div style="flex:1;min-width:200px;">' +
                         '<div style="font-family:Orbitron,sans-serif;font-size:9px;color:rgba(255,255,255,0.4);letter-spacing:0.2em;font-weight:800;">PORTFOLIO</div>' +
                         '<div style="font-family:Orbitron,sans-serif;font-size:26px;font-weight:900;color:#f5c842;letter-spacing:0.02em;margin:4px 0 8px;">' + escapeHtml(displayName) + '</div>' +
@@ -59519,7 +59527,10 @@ RESPONSE RULES:
                     avatarEl.innerHTML = `<img src="${user.image}" alt="${(user.brand || 'PFLX')}" style="width:100%;height:100%;object-fit:cover;">`;
                 } else {
                     const initial = String(user.brand || user.name || 'P').trim().charAt(0).toUpperCase();
-                    avatarEl.innerHTML = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#00d4ff,#7c3aed);color:#fff;font-family:Orbitron,sans-serif;font-weight:700;font-size:clamp(28px,5vw,52px);letter-spacing:1px;">${initial}</div>`;
+                    // Portfolio is one of the two surfaces (with Home Base) that
+                    // prompts for a logo on top of the initial fallback — every
+                    // other app just shows the plain initial (Ennis, Sep 5).
+                    avatarEl.innerHTML = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#00d4ff,#7c3aed);color:#fff;font-family:Orbitron,sans-serif;font-weight:700;font-size:clamp(28px,5vw,52px);letter-spacing:1px;">${initial}</div><div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(6,10,24,0.55);color:#fff;font-family:'Share Tech Mono',monospace;font-size:11px;font-weight:800;letter-spacing:0.06em;text-align:center;line-height:1.3;pointer-events:none;">ADD<br>LOGO</div>`;
                 }
             }
             const brandEl = document.getElementById('portfolio-brand');
@@ -63305,12 +63316,18 @@ RESPONSE RULES:
                     }
                 }
             } catch (e) {}
-            // Resolve the hero avatar — prefer the player's own uploaded image,
-            // fall back to the PFLX core logo only when nothing is uploaded.
-            const heroAvatarSrc = (s.image && String(s.image).length > 0)
-                ? s.image
-                : 'public/PFLX Core Flat 6.png';
-            const heroAvatarFit = (s.image && String(s.image).length > 0) ? 'cover' : 'contain';
+            // Resolve the hero avatar — prefer the player's own uploaded image;
+            // when nothing is uploaded, show the brand/name initial (same
+            // fallback the toolbar avatar and Portfolio already use) instead
+            // of the PFLX Core logo, which made every photo-less player look
+            // like the platform brand itself. Home Base additionally overlays
+            // an "ADD LOGO" prompt on the initial — Portfolio is the only
+            // other surface that gets that prompt (Ennis, Sep 5); every other
+            // app just shows the plain initial with no prompt.
+            const heroHasImg = !!(s.image && String(s.image).length > 0);
+            const heroAvatarSrc = heroHasImg ? s.image : '';
+            const heroAvatarFit = 'cover';
+            const heroInitial = String(s.brand || displayName || 'P').trim().charAt(0).toUpperCase();
             // Player header — name + subtitle only. The XC / Rank / Quests /
             // Position stat row has been removed because the toolbar already
             // surfaces XC, Checkpoint progress, and Rank live. Duplicating
@@ -63334,7 +63351,10 @@ RESPONSE RULES:
                 </div>
                 <input type="file" id="home-banner-input" accept="image/*,image/gif" style="display:none;" onchange="pflxHomeBannerUpload(this)">
                 <div class="player-avatar-lg" style="position:relative;z-index:2;" onclick="document.getElementById('home-avatar-input').click()" title="Click to change your profile image (image or GIF)">
-                    <img src="${heroAvatarSrc}" alt="${displayName}" style="width:100%;height:100%;border-radius:50%;object-fit:${heroAvatarFit};">
+                    ${heroHasImg
+                        ? `<img src="${heroAvatarSrc}" alt="${displayName}" style="width:100%;height:100%;border-radius:50%;object-fit:${heroAvatarFit};">`
+                        : `<div style="width:100%;height:100%;border-radius:50%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#00d4ff,#7c3aed);color:#fff;font-family:Orbitron,sans-serif;font-weight:700;font-size:32px;">${heroInitial}</div><div style="position:absolute;inset:0;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(6,10,24,0.55);color:#fff;font-family:'Share Tech Mono',monospace;font-size:9px;font-weight:800;letter-spacing:0.06em;text-align:center;line-height:1.3;pointer-events:none;">ADD<br>LOGO</div>`
+                    }
                     <div class="avatar-cam-badge" aria-hidden="true">&#x1F4F7;</div>
                     <input type="file" id="home-avatar-input" accept="image/*,image/gif" style="display:none;" onclick="event.stopPropagation();" onchange="pflxHomeAvatarUpload(this)">
                 </div>
