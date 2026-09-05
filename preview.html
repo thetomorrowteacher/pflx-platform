@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 131;
+      window.PFLX_PATCH   = 132;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -17176,6 +17176,7 @@
                         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
                             <span style="font-size:9px;padding:3px 10px;border-radius:4px;font-family:'Orbitron',sans-serif;letter-spacing:1px;background:${tierColor}18;border:1px solid ${tierColor}40;color:${tierColor};">${escapeHtml(tierLabel.toUpperCase())}</span>
                             <span style="font-size:10px;padding:3px 8px;border-radius:4px;background:${org.active ? 'rgba(52,211,153,0.1)' : 'rgba(255,51,85,0.1)'};color:${org.active ? '#34d399' : '#ff3355'};border:1px solid ${org.active ? 'rgba(52,211,153,0.2)' : 'rgba(255,51,85,0.2)'};">${org.active ? 'ACTIVE' : 'INACTIVE'}</span>
+                            <button onclick="hmcOpenRoster('org','${escapeHtml(key)}')" style="font-size:10px;padding:4px 10px;border-radius:4px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.3);color:#22c55e;font-family:'Share Tech Mono',monospace;letter-spacing:0.06em;cursor:pointer;">ROSTER</button>
                             <button onclick="hmcOpenOrgEditor('${escapeHtml(key)}')" style="font-size:10px;padding:4px 10px;border-radius:4px;background:rgba(0,240,255,0.08);border:1px solid rgba(0,240,255,0.3);color:var(--cyan);font-family:'Share Tech Mono',monospace;letter-spacing:0.06em;cursor:pointer;">EDIT</button>
                             ${key !== 'STANDALONE' ? `<button onclick="hmcDeleteOrg('${escapeHtml(key)}')" style="font-size:10px;padding:4px 10px;border-radius:4px;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.3);color:#ef4444;font-family:'Share Tech Mono',monospace;letter-spacing:0.06em;cursor:pointer;">DELETE</button>` : ''}
                         </div>
@@ -17195,7 +17196,7 @@
                         </div>
                     </div>
                     <div style="display:flex;flex-wrap:wrap;gap:4px;">
-                        ${(org.cohorts || []).map(c => `<span style="font-size:10px;padding:2px 8px;border-radius:3px;background:rgba(0,240,255,0.06);border:1px solid rgba(0,240,255,0.12);color:var(--cyan);font-family:'Share Tech Mono',monospace;">${escapeHtml(c)}</span>`).join('') || '<span style="font-size:10px;color:rgba(255,255,255,0.3);font-style:italic;">No cohorts assigned</span>'}
+                        ${(org.cohorts || []).map(c => `<button onclick="hmcOpenRoster('cohort','${escapeHtml(c).split("'").join("\\'")}')" title="View ${escapeHtml(c)} roster" style="font-size:10px;padding:2px 8px;border-radius:3px;background:rgba(0,240,255,0.06);border:1px solid rgba(0,240,255,0.12);color:var(--cyan);font-family:'Share Tech Mono',monospace;cursor:pointer;">${escapeHtml(c)}</button>`).join('') || '<span style="font-size:10px;color:rgba(255,255,255,0.3);font-style:italic;">No cohorts assigned</span>'}
                     </div>
                     ${planPills.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);">${planPills.map(p => `<span style="font-size:10px;padding:2px 8px;border-radius:3px;background:${tierColor}10;border:1px solid ${tierColor}30;color:${tierColor};font-family:'Jura',sans-serif;">${p}</span>`).join('')}</div>` : ''}
                 `;
@@ -17457,6 +17458,110 @@
             hmcSaveOrgs();
             hmcRenderOrgs();
             if (typeof pflxToast === 'function') pflxToast('Organization deleted', 'info');
+        };
+
+// ── Organization / Cohort Roster (Sep 5, Ennis-requested) ────────────────
+        // Shows the real player roster for a whole Organization (every cohort it
+        // owns) or a single Cohort, with each player's current host tier and Evo
+        // Rank, and a one-click path to grant Instructor Host access. Reuses the
+        // SAME tier-assignment system the Player Edit form already uses
+        // (mcApplyTierToRecord via mcEditPlayer/mcSavePlayerForm) — never a
+        // parallel role flag. A player is flagged "eligible" once they reach T6
+        // Mentor/Intern (250,000 XC) and are still a plain player; Instructor
+        // access itself is never auto-applied — the host must open the
+        // pre-filled edit form and click Save (see hmcGrantInstructor below).
+        window.hmcOpenRoster = function (scope, key) {
+            var cohortNames, title;
+            if (scope === 'org') {
+                var org = ORGANIZATIONS[key];
+                if (!org) return;
+                cohortNames = org.cohorts || [];
+                title = escapeHtml(org.name) + ' — Full Roster';
+            } else {
+                cohortNames = [key];
+                title = escapeHtml(key) + ' — Cohort Roster';
+            }
+            var normSet = {};
+            cohortNames.forEach(function (c) { normSet[String(c).trim().toLowerCase()] = true; });
+            function playerCohorts(p) {
+                if (Array.isArray(p.cohorts) && p.cohorts.length) return p.cohorts;
+                return String(p.cohort || '').split(/[,;]/).map(function (s) { return s.trim(); }).filter(Boolean);
+            }
+            var roster = (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers) ? mcPlayers : []).filter(function (p) {
+                if (!p || p.godTier) return false;
+                return playerCohorts(p).some(function (c) { return normSet[String(c).trim().toLowerCase()]; });
+            });
+            roster.sort(function (a, b) { return String(a.brand || a.name || '').localeCompare(String(b.brand || b.name || '')); });
+
+            var eligibleCount = 0;
+            var tierColors = { player: '#6a7290', guest: '#22c55e', instructor: '#00d4ff', cohost: '#a78bfa', admin: '#f5c842', master: '#ff00ff' };
+            var rowsHtml = roster.map(function (p) {
+                var tier = (typeof mcPlayerTier === 'function') ? mcPlayerTier(p) : 'player';
+                var tierMeta = (window.PFLX_TIER_META || {})[tier];
+                var rank = (typeof mcGetEvoRankObj === 'function') ? mcGetEvoRankObj(p) : null;
+                var isEligible = tier === 'player' && rank && (rank.level || 0) >= 6;
+                if (isEligible) eligibleCount++;
+                var tierColor = tierColors[tier] || '#6a7290';
+                var avatarHtml = p.image
+                    ? '<img src="' + escapeHtml(p.image) + '" style="width:36px;height:36px;border-radius:8px;object-fit:cover;flex:none;">'
+                    : '<div style="width:36px;height:36px;border-radius:8px;background:' + tierColor + '18;border:1px solid ' + tierColor + '40;color:' + tierColor + ';display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:none;">' + escapeHtml((p.brand || p.name || '?').charAt(0).toUpperCase()) + '</div>';
+                var firstCohort = (cohortNames[0] || '').split("'").join("\\'");
+                var actionHtml = isEligible
+                    ? '<button onclick="hmcGrantInstructor(\'' + escapeHtml(p.id) + '\',\'' + escapeHtml(firstCohort) + '\')" style="font-size:10px;padding:5px 10px;border-radius:4px;background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.4);color:var(--cyan);font-family:\'Share Tech Mono\',monospace;cursor:pointer;white-space:nowrap;">⭐ Approve Instructor</button>'
+                    : '<button onclick="hmcEditPlayerFromRoster(\'' + escapeHtml(p.id) + '\')" style="font-size:10px;padding:5px 10px;border-radius:4px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.6);font-family:\'Share Tech Mono\',monospace;cursor:pointer;">Edit Access</button>';
+                return '<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);margin-bottom:6px;">' +
+                    avatarHtml +
+                    '<div style="flex:1;min-width:0;">' +
+                        '<div style="font-size:13px;color:#e0e6ff;font-family:\'Rajdhani\',sans-serif;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(p.brand || p.name || '(unnamed)') + '</div>' +
+                        '<div style="font-size:10px;color:rgba(255,255,255,0.35);">' + escapeHtml(playerCohorts(p).join(', ') || '—') + '</div>' +
+                    '</div>' +
+                    (rank ? '<span style="font-size:9px;padding:3px 8px;border-radius:4px;background:' + rank.color + '18;border:1px solid ' + rank.color + '40;color:' + rank.color + ';font-family:\'Orbitron\',sans-serif;letter-spacing:0.05em;white-space:nowrap;">T' + rank.level + ' ' + escapeHtml(rank.name) + '</span>' : '') +
+                    '<span style="font-size:9px;padding:3px 8px;border-radius:4px;background:' + tierColor + '18;border:1px solid ' + tierColor + '40;color:' + tierColor + ';font-family:\'Share Tech Mono\',monospace;white-space:nowrap;">' + (tierMeta ? escapeHtml(tierMeta.label) : 'Player') + '</span>' +
+                    (isEligible ? '<span style="font-size:9px;padding:3px 8px;border-radius:4px;background:rgba(0,212,255,0.12);border:1px solid rgba(0,212,255,0.4);color:var(--cyan);white-space:nowrap;">⭐ Eligible</span>' : '') +
+                    actionHtml +
+                    '</div>';
+            }).join('') || '<div style="text-align:center;padding:24px;color:rgba(255,255,255,0.3);font-size:12px;">No players in this roster yet.</div>';
+
+            var overlay = document.createElement('div');
+            overlay.id = 'pflx-roster-modal';
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;z-index:10000;backdrop-filter:blur(6px);padding:20px;';
+            overlay.innerHTML =
+                '<div style="background:#12121c;border:1px solid rgba(0,240,255,0.3);border-radius:18px;padding:28px;max-width:680px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.5);">' +
+                    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">' +
+                        '<h3 style="margin:0;color:var(--cyan);font-family:Orbitron,sans-serif;font-size:15px;letter-spacing:0.05em;">' + title + '</h3>' +
+                        '<button onclick="document.getElementById(\'pflx-roster-modal\').remove();" style="background:none;border:none;color:rgba(255,255,255,0.4);font-size:24px;cursor:pointer;line-height:1;">×</button>' +
+                    '</div>' +
+                    '<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:16px;">' + roster.length + ' player' + (roster.length === 1 ? '' : 's') + (eligibleCount ? ' · <span style="color:var(--cyan);">⭐ ' + eligibleCount + ' eligible for Instructor (T6 Mentor/Intern+)</span>' : '') + '</div>' +
+                    '<div>' + rowsHtml + '</div>' +
+                '</div>';
+            document.body.appendChild(overlay);
+        };
+
+        // Opens the existing Player Edit modal (unchanged save/permission logic)
+        // with Tier pre-set to Instructor and the managed cohort pre-filled —
+        // the host still has to review the Host Control Scope checklist and
+        // click Save, so nothing is granted until they explicitly confirm (per
+        // Ennis: host must approve, not silent auto-grant).
+        window.hmcGrantInstructor = function (playerId, cohortName) {
+            try { var m = document.getElementById('pflx-roster-modal'); if (m) m.remove(); } catch (e) {}
+            if (typeof mcEditPlayer !== 'function') return;
+            mcEditPlayer(playerId);
+            setTimeout(function () {
+                var tierSel = document.getElementById('mc-player-form-tier');
+                if (tierSel) { tierSel.value = 'instructor'; if (typeof mcTierScopeRefresh === 'function') mcTierScopeRefresh(); }
+                var cohortsInput = document.getElementById('mc-player-form-cohorts');
+                if (cohortsInput && cohortName) cohortsInput.value = cohortName;
+                var section = document.getElementById('mc-player-access-section');
+                if (section && section.scrollIntoView) section.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                if (typeof pflxToast === 'function') pflxToast('Tier set to Instructor Host for ' + cohortName + ' — review and Save to confirm', 'info');
+            }, 30);
+        };
+
+        // Plain "Edit Access" from the roster — no forced tier, just opens the
+        // normal Player Edit modal (closing the roster modal first).
+        window.hmcEditPlayerFromRoster = function (playerId) {
+            try { var m = document.getElementById('pflx-roster-modal'); if (m) m.remove(); } catch (e) {}
+            if (typeof mcEditPlayer === 'function') mcEditPlayer(playerId);
         };
 
         function hmcAddOrg() {
