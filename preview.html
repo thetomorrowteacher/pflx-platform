@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 125;
+      window.PFLX_PATCH   = 127;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -26251,11 +26251,11 @@
                 case 'checkpoints': mcCheckpoints = _mcMergeById(mcCheckpoints, items, 'checkpoints'); break;
                 case 'tasks': mcTasks = _mcMergeTasks(mcTasks, items); break;
                 case 'projects': mcProjects = _mcMergeById(mcProjects, items, 'projects'); break;
-                case 'seasons': mcSeasons = items; break;
-                case 'programs': mcPrograms = items; break;
+                case 'seasons': mcSeasons = _mcMergeById(mcSeasons, items, 'seasons'); break;
+                case 'programs': mcPrograms = _mcMergeById(mcPrograms, items, 'programs'); break;
                 case 'announcements': mcAnnouncements = items; break;
                 case 'badges': mcBadges = mcNormalizeBadges(items); break;
-                case 'jobs': mcJobs = items; break;
+                case 'jobs': mcJobs = _mcMergeById(mcJobs, items, 'jobs'); break;
                 case 'pitches': mcPitches = items; break;
                 case 'applications': mcApplications = items; break;
                 case 'studios': mcStudios = items; break;
@@ -26299,7 +26299,10 @@
             var mergeable = { tasks: (typeof _mcMergeTasks === 'function' ? _mcMergeTasks : null),
                               checkpoints: (typeof _mcMergeById === 'function' ? _mcMergeById : null),
                               projects: (typeof _mcMergeById === 'function' ? _mcMergeById : null),
-                              players: (typeof _mcMergePlayers === 'function' ? _mcMergePlayers : null) };
+                              players: (typeof _mcMergePlayers === 'function' ? _mcMergePlayers : null),
+                              seasons: (typeof _mcMergeById === 'function' ? _mcMergeById : null),
+                              programs: (typeof _mcMergeById === 'function' ? _mcMergeById : null),
+                              jobs: (typeof _mcMergeById === 'function' ? _mcMergeById : null) };
             var keys = types.filter(function (t) { return mergeable[t]; }).map(function (t) { return 'pflx_mc_' + t; });
             if (!keys.length) { done(); return; }
             client.from('app_data').select('key,data').in('key', keys).then(function (res) {
@@ -26318,6 +26321,9 @@
                             else if (t === 'checkpoints') { mcCheckpoints = merged; _mcSetItemSafe('pflx_mc_checkpoints', mcCheckpoints); }
                             else if (t === 'projects') { mcProjects = merged; _mcSetItemSafe('pflx_mc_projects', mcProjects); }
                             else if (t === 'players') { mcPlayers = merged; _mcSetItemSafe('pflx_mc_players', mcPlayers); }
+                            else if (t === 'seasons') { mcSeasons = merged; _mcSetItemSafe('pflx_mc_seasons', mcSeasons); }
+                            else if (t === 'programs') { mcPrograms = merged; _mcSetItemSafe('pflx_mc_programs', mcPrograms); }
+                            else if (t === 'jobs') { mcJobs = merged; _mcSetItemSafe('pflx_mc_jobs', mcJobs); }
                         } catch (e) {}
                     });
                 } catch (e) { console.warn('[MC cloud] merge-before-write failed', e); }
@@ -27060,9 +27066,9 @@
                     if (msg.key === 'checkpoints' && msg.data && msg.data.length) { mcCheckpoints = _mcMergeById(mcCheckpoints, msg.data, 'checkpoints'); mcSaveData('checkpoints'); dataUpdated = true; }
                     if (msg.key === 'tasks' && msg.data && msg.data.length) { mcTasks = _mcMergeTasks(mcTasks, msg.data); mcSaveData('tasks'); dataUpdated = true; }
                     if (msg.key === 'projects' && msg.data && msg.data.length) { mcProjects = _mcMergeById(mcProjects, msg.data, 'projects'); mcSaveData('projects'); dataUpdated = true; }
-                    if (msg.key === 'seasons' && msg.data && msg.data.length) { mcSeasons = msg.data; mcSaveData('seasons'); dataUpdated = true; }
+                    if (msg.key === 'seasons' && msg.data && msg.data.length) { mcSeasons = _mcMergeById(mcSeasons, msg.data, 'seasons'); mcSaveData('seasons'); dataUpdated = true; }
                     if (msg.key === 'badges' && msg.data && msg.data.length) { mcBadges = mcNormalizeBadges(msg.data); mcSaveData('badges'); dataUpdated = true; try { mcRefreshBadgePickers(); } catch (e) {} }
-                    if (msg.key === 'jobs' && msg.data && msg.data.length) { mcJobs = msg.data; mcSaveData('jobs'); dataUpdated = true; }
+                    if (msg.key === 'jobs' && msg.data && msg.data.length) { mcJobs = _mcMergeById(mcJobs, msg.data, 'jobs'); mcSaveData('jobs'); dataUpdated = true; }
                     if (msg.key === 'cohortGroups' && msg.data && msg.data.length) { mcCohortGroups = msg.data; mcSaveData('cohortgroups'); dataUpdated = true; }
                     if (msg.key === 'pflxRanks' && msg.data && msg.data.length) { mcPflxRanks = msg.data; mcSaveData('pflxranks'); dataUpdated = true; }
                     if (msg.key === 'studios' && msg.data && msg.data.length) { mcStudios = msg.data; mcSaveData('studios'); dataUpdated = true; }
@@ -41732,6 +41738,7 @@
             if (!pg) return;
             if (!confirm('Delete program "' + (pg.name || 'Program') + '"? Any checkpoints it already generated stay in place — only the Program link/record is removed.')) return;
             mcPrograms = (mcPrograms || []).filter(function (p) { return p && p.id !== id; });
+            try { _mcTombstone('programs', id); } catch (e) {}
             // Unlink (not delete) any checkpoints that referenced this program —
             // they keep their seasonId and remain fully intact, only the
             // programId back-link is cleared.
@@ -45323,9 +45330,11 @@
         }
 
         function mcDeleteSeason(index) {
-            if (!confirm('Delete season "' + (mcSeasons[index].name || '') + '"?')) return;
+            var season = mcSeasons[index]; if (!season) return;
+            if (!confirm('Delete season "' + (season.name || '') + '"?')) return;
             pflxPlaySfx('delete');
             mcSeasons.splice(index, 1);
+            try { _mcTombstone('seasons', season.id); } catch (e) {}
             mcSaveData('seasons');
             mcRenderSeasons();
             mcRenderSettingsSeasons();
@@ -45830,9 +45839,11 @@
         }
 
         function mcDeleteJob(i) {
-            if (!confirm('Delete job "' + mcJobs[i]?.title + '"?')) return;
+            var job = mcJobs[i]; if (!job) return;
+            if (!confirm('Delete job "' + job.title + '"?')) return;
             pflxPlaySfx('delete');
             mcJobs.splice(i, 1);
+            try { _mcTombstone('jobs', job.id); } catch (e) {}
             mcSaveData('jobs');
             mcRenderJobs();
             mcBroadcastToApps('job_deleted', { index: i });
