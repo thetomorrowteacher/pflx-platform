@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 132;
+      window.PFLX_PATCH   = 133;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -16648,7 +16648,7 @@
                 var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
                 if (client) {
                     client.from('app_data').upsert(
-                        { key: 'pflx_organizations', data: { orgs: ORGANIZATIONS, cohortPatch: (typeof PFLX_COHORT_PATCH !== 'undefined' ? PFLX_COHORT_PATCH : undefined), updatedAt: Date.now() }, updated_at: new Date().toISOString() },
+                        { key: 'pflx_organizations', data: { orgs: ORGANIZATIONS, cohortPatch: (typeof PFLX_COHORT_PATCH !== 'undefined' ? PFLX_COHORT_PATCH : undefined), orgPatch: (typeof PFLX_ORG_PATCH !== 'undefined' ? PFLX_ORG_PATCH : undefined), updatedAt: Date.now() }, updated_at: new Date().toISOString() },
                         { onConflict: 'key' }
                     ).then(function (res) {
                         if (res && res.error) console.warn('[org] cloud save error:', res.error.message);
@@ -16663,12 +16663,14 @@
                 if (!orgs || typeof orgs !== 'object') return false;
                 // Cohort registry patch (added/removed cohorts) rides on the same row
                 try { if (payload && payload.cohortPatch && typeof pflxCohortPatchMerge === 'function') pflxCohortPatchMerge(payload.cohortPatch); } catch (e) {}
+                try { if (payload && payload.orgPatch && typeof pflxOrgPatchMerge === 'function') pflxOrgPatchMerge(payload.orgPatch); } catch (e) {}
                 _hmcApplyingCloudOrgs = true;
                 Object.keys(orgs).forEach(function (k) {
                     if (orgs[k] && typeof orgs[k] === 'object') {
                         ORGANIZATIONS[k] = Object.assign({}, ORGANIZATIONS[k] || {}, orgs[k]);
                     }
                 });
+                try { if (typeof pflxOrgPatchApply === 'function') pflxOrgPatchApply(); } catch (e) {}
                 hmcSaveOrgs();   // mirror to localStorage; cloud re-push suppressed
                 _hmcApplyingCloudOrgs = false;
                 try { if (typeof hmcRenderOrgs === 'function') hmcRenderOrgs(); } catch (e) {}
@@ -16676,8 +16678,39 @@
                 return true;
             } catch (e) { _hmcApplyingCloudOrgs = false; console.warn('[org] apply cloud failed', e); return false; }
         };
+        // Org-deletion tombstones -- ORGANIZATIONS starts from a hardcoded
+        // seed object literal every page load, so simply deleting a key from
+        // the in-memory map (hmcDeleteOrg) is not enough: the seed always
+        // re-introduces it on the next boot, and a merge-only cloud pull
+        // (hmcApplyCloudOrgs) can never remove a key either -- this is the
+        // root cause of "delete isn't working" (Sept 5, Ennis report: a
+        // deleted org silently reappears). Mirrors PFLX_COHORT_PATCH's exact
+        // removed[]/apply/merge/save pattern, one level up at the org level.
+        var PFLX_ORG_PATCH_KEY = 'pflx_org_patch_v1';
+        var PFLX_ORG_PATCH = { removed: [] };
+        function pflxOrgPatchApply() {
+            try { (PFLX_ORG_PATCH.removed || []).forEach(function (k) { delete ORGANIZATIONS[k]; }); } catch (e) {}
+        }
+        function pflxOrgPatchMerge(patch) {
+            if (!patch || typeof patch !== 'object') return;
+            try {
+                (patch.removed || []).forEach(function (k) {
+                    if (PFLX_ORG_PATCH.removed.indexOf(k) < 0) PFLX_ORG_PATCH.removed.push(k);
+                });
+                pflxOrgPatchApply();
+            } catch (e) {}
+        }
+        try {
+            var __op = JSON.parse(localStorage.getItem(PFLX_ORG_PATCH_KEY) || 'null');
+            if (__op) { PFLX_ORG_PATCH = { removed: __op.removed || [] }; pflxOrgPatchApply(); }
+        } catch (e) {}
+        function pflxOrgPatchSave() {
+            try { localStorage.setItem(PFLX_ORG_PATCH_KEY, JSON.stringify(PFLX_ORG_PATCH)); } catch (e) {}
+            try { hmcSaveOrgs(); } catch (e) {}   // org cloud row carries the patch everywhere
+        }
         // Boot-load org overrides (local first, then cloud)
         try { hmcLoadOrgs(); } catch (e) {}
+        try { pflxOrgPatchApply(); } catch (e) {}   // strip any already-tombstoned org keys the seed just re-introduced
         setTimeout(function () {
             try {
                 var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
@@ -17446,6 +17479,16 @@
 
         window.hmcDeleteOrg = function (orgKey) {
             if (orgKey === 'STANDALONE') return;
+            if (orgKey === 'PFLX_INTERNAL') {
+                // Built-in default org -- hardcoded system/host cohorts
+                // (COHORTS['PFLX'], ['Cohort 2'], ['Cohort 3'], ['N/A']) point
+                // at it via a static org: field in code, not the editable
+                // registry. Deleting it would break host/admin app-access
+                // gating. Blocked, same as STANDALONE.
+                var msg = "This is the built-in Prototype FLX internal organization and can't be deleted -- host/system accounts depend on it.";
+                if (typeof pflxToast === 'function') pflxToast(msg, 'warn'); else alert(msg);
+                return;
+            }
             var org = ORGANIZATIONS[orgKey];
             if (!org) return;
             if (!confirm('Delete organization "' + (org.name || orgKey) + '"? Its cohorts will be returned to the Standalone Players pool.')) return;
@@ -17455,7 +17498,10 @@
                 if (ORGANIZATIONS.STANDALONE.cohorts.indexOf(c) < 0) ORGANIZATIONS.STANDALONE.cohorts.push(c);
             });
             delete ORGANIZATIONS[orgKey];
-            hmcSaveOrgs();
+            // Tombstone so the seed literal / a merge-only cloud pull can
+            // never resurrect this org key on the next boot or sync.
+            if (PFLX_ORG_PATCH.removed.indexOf(orgKey) < 0) PFLX_ORG_PATCH.removed.push(orgKey);
+            pflxOrgPatchSave();
             hmcRenderOrgs();
             if (typeof pflxToast === 'function') pflxToast('Organization deleted', 'info');
         };
