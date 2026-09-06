@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 143;
+      window.PFLX_PATCH   = 144;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -249,6 +249,52 @@
         .pflx-widget-page-arrow { background: none; border: none; color: rgba(255,255,255,0.5); font-size: 14px; cursor: pointer; padding: 2px 4px; }
         .pflx-widget-page-arrow:hover { color: var(--cyan); }
         .pflx-widget-page-arrow:disabled { opacity: 0.25; cursor: default; }
+
+        /* PATCH PLATFORM v1.144 -- free/detachable widgets + rich widget
+           content (leaderboard/wallet/sound). Free widgets portal onto a
+           dedicated <body>-level layer (same portal pattern already used
+           for the backdrop and the dropdown itself) so they can float over
+           the blurred screen independently of the dropdown panel's own
+           scroll/clip box, and reuse the exact same .pflx-widget card
+           design -- only the positioning mechanism (grid-column/row span
+           vs. fixed left/top) differs, per Ennis's "same design, just
+           freed" scoping answer. */
+        #pflx-free-widgets-layer {
+            position: fixed; inset: 0; z-index: 99999;
+            pointer-events: none; display: none;
+        }
+        #pflx-free-widgets-layer .pflx-widget {
+            position: fixed; pointer-events: auto;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        .pflx-widget-interactive { touch-action: auto; }
+        .pflx-widget-rich {
+            cursor: default; align-items: stretch; justify-content: flex-start;
+            padding: 8px 8px 6px;
+        }
+        .pflx-widget-rich .pflx-widget-resize-handle { cursor: nwse-resize; }
+        .pflx-widget-lb-tabs { display: flex; gap: 4px; margin-bottom: 4px; }
+        .pflx-widget-lb-tab {
+            font-family: Orbitron, sans-serif; font-size: 8px; font-weight: 800;
+            padding: 2px 6px; border-radius: 6px; letter-spacing: 0.06em;
+            text-transform: uppercase; cursor: pointer; border: 1px solid transparent;
+            background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.5);
+        }
+        .pflx-widget-lb-tab.on { background: rgba(0,212,255,0.18); color: var(--cyan); border-color: rgba(0,212,255,0.4); }
+        .pflx-widget-lb-list { flex: 1; width: 100%; overflow-y: auto; font-family: monospace; min-height: 0; }
+        .pflx-widget-lb-row { display: flex; align-items: center; gap: 5px; padding: 2px 4px; font-size: 9px; color: #e0e6ff; }
+        .pflx-widget-lb-row .rank { width: 14px; text-align: center; color: rgba(255,255,255,0.4); }
+        .pflx-widget-lb-row .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .pflx-widget-lb-row .xc { color: #f5c842; font-weight: 700; }
+        .pflx-widget-wallet-balance { font-family: monospace; font-weight: 900; color: var(--cyan); font-size: 20px; }
+        .pflx-widget-wallet-open {
+            font-family: Orbitron, sans-serif; font-size: 8px; font-weight: 800; letter-spacing: 0.08em;
+            color: var(--cyan); background: rgba(0,212,255,0.12); border: 1px solid var(--border-glow);
+            border-radius: 6px; padding: 2px 8px; margin-top: 3px; cursor: pointer;
+        }
+        .pflx-widget-sound-row { width: 100%; display: flex; align-items: center; gap: 5px; font-size: 8px; color: rgba(255,255,255,0.55); }
+        .pflx-widget-sound-row input[type="range"] { flex: 1; accent-color: var(--cyan); height: 12px; }
+        .pflx-widget-sound-label { width: 30px; flex-shrink: 0; }
 
         /* ═══ REALITY WARP SKIN THEMES ═══ */
         [data-pflx-skin="afrofuturistic"] {
@@ -61738,10 +61784,17 @@ RESPONSE RULES:
             { id: 'xcoin',       icon: '\uD83D\uDC8E', label: 'X-COIN',      kind: 'stat',   defaultW: 1, defaultH: 1 },
             { id: 'badges',      icon: '\uD83C\uDF96\uFE0F', label: 'BADGES',      kind: 'stat',   defaultW: 1, defaultH: 1 },
             { id: 'rank',        icon: '\uD83D\uDC51', label: 'RANK',        kind: 'stat',   defaultW: 1, defaultH: 1 },
-            { id: 'wallet',      icon: '\uD83D\uDCB0', label: 'MY WALLET',   kind: 'action', defaultW: 2, defaultH: 1, action: 'pflxOpenWalletShortcut' },
+            // PATCH PLATFORM v1.144 -- wallet/leaderboard/sound are now
+            // "rich" widgets with real embedded content (see
+            // pflxBuildWidgetCardHtml) instead of a plain icon+label
+            // deep-link button. Bigger default footprint gives the
+            // embedded content room; still fully resizable like any
+            // other widget. `action`, where present, is now used for an
+            // in-card "view more" button rather than a whole-card click.
+            { id: 'wallet',      icon: '\uD83D\uDCB0', label: 'MY WALLET',   kind: 'rich', render: 'wallet',      defaultW: 2, defaultH: 1, action: 'pflxOpenWalletShortcut' },
             { id: 'tasks',       icon: '\uD83D\uDCCB', label: 'MY TASKS',    kind: 'action', defaultW: 2, defaultH: 1, action: 'pflxOpenTasksShortcut' },
-            { id: 'leaderboard', icon: '\uD83C\uDFC6', label: 'LEADERBOARD', kind: 'action', defaultW: 2, defaultH: 1, action: 'pflxOpenLeaderboardShortcut' },
-            { id: 'sound',       icon: '\u266B',  label: 'SOUND',       kind: 'action', defaultW: 2, defaultH: 1, action: 'pflxWidgetOpenSound' }
+            { id: 'leaderboard', icon: '\uD83C\uDFC6', label: 'LEADERBOARD', kind: 'rich', render: 'leaderboard', defaultW: 2, defaultH: 2, action: 'pflxOpenTierLeaderboard' },
+            { id: 'sound',       icon: '\u266B',  label: 'SOUND',       kind: 'rich', render: 'sound',       defaultW: 2, defaultH: 2, action: 'pflxWidgetOpenSound' }
         ];
         function pflxWidgetCatalogMeta(id) {
             for (var i = 0; i < PFLX_WIDGET_CATALOG.length; i++) if (PFLX_WIDGET_CATALOG[i].id === id) return PFLX_WIDGET_CATALOG[i];
@@ -61774,7 +61827,17 @@ RESPONSE RULES:
                 seen[entry.id] = true;
                 var w = Math.max(1, Math.min(2, parseInt(entry.w, 10) || known[entry.id].defaultW));
                 var h = Math.max(1, Math.min(2, parseInt(entry.h, 10) || known[entry.id].defaultH));
-                out.push({ id: entry.id, w: w, h: h });
+                var built = { id: entry.id, w: w, h: h };
+                // PATCH PLATFORM v1.144 -- carry through free-floating state
+                // (Ennis: "hides with the blur" -- a detached widget's last
+                // free position is remembered across dropdown open/close and
+                // across reloads, same as its size already was).
+                if (entry.free && typeof entry.x === 'number' && typeof entry.y === 'number' && isFinite(entry.x) && isFinite(entry.y)) {
+                    built.free = true;
+                    built.x = entry.x;
+                    built.y = entry.y;
+                }
+                out.push(built);
             });
             catalog.forEach(function (w) {
                 if (!seen[w.id]) out.push({ id: w.id, w: w.defaultW, h: w.defaultH });
@@ -61821,31 +61884,135 @@ RESPONSE RULES:
             return '';
         }
 
+        // ── PATCH PLATFORM v1.144 -- rich widget content ──────────────────
+        // Leaderboard/Wallet/Sound widgets embed real functionality instead
+        // of a plain icon+label deep-link button. Every data source below is
+        // an EXISTING function/field, reused as-is (never reimplemented):
+        //   - leaderboard: window.pflxLeaderboardByTier(n), already shipped
+        //     for the tier-aware leaderboard modal -- "filterable categories"
+        //     = the same starter/novice/pro tiers that modal already uses,
+        //     picked here via small in-widget tabs.
+        //   - wallet: window._pflxProfileStats.xc, the same balance the plain
+        //     xcoin stat widget already reads, shown larger/prominent, plus a
+        //     button that still opens the full X-Coin app -- the Console has
+        //     no local wallet ledger of its own (pflxOpenWalletShortcut is a
+        //     pure deep-link), so "show the actual wallet" is implemented as
+        //     "show the real balance inline, stay one tap from the full app."
+        //   - sound: SE.playerPrefs + sePlayerPrefSave() -- the same state and
+        //     save/side-effect path the full Sound Settings panel uses, wired
+        //     through a new pflxWidgetVolUpdate wrapper because the panel's
+        //     own sePlayerVolUpdate/etc. hardcode THAT panel's element ids and
+        //     can't be reused verbatim for a second, simultaneous set of
+        //     sliders on screen.
+        window._pflxWidgetLBTier = 'novice';
+        window.pflxWidgetSetLBTier = function (tier, ev) {
+            try { if (ev) ev.stopPropagation(); } catch (e) {}
+            window._pflxWidgetLBTier = tier;
+            pflxRenderWidgetGrid();
+            pflxRenderFreeWidgets();
+        };
+        function pflxWidgetLeaderboardHtml() {
+            var tier = window._pflxWidgetLBTier || 'novice';
+            var tabs = ['starter', 'novice', 'pro'].map(function (t) {
+                var m = pflxTierMeta(t);
+                return '<span class="pflx-widget-lb-tab pflx-widget-interactive' + (t === tier ? ' on' : '') + '" onpointerdown="event.stopPropagation()" onclick="pflxWidgetSetLBTier(\'' + t + '\', event)">' + m.label + '</span>';
+            }).join('');
+            var rows = '';
+            try {
+                var data = (typeof pflxLeaderboardByTier === 'function') ? pflxLeaderboardByTier(10) : {};
+                var list = (data && data[tier]) || [];
+                rows = list.length === 0
+                    ? '<div style="text-align:center;color:rgba(255,255,255,0.3);font-size:9px;padding:6px;">No players yet</div>'
+                    : list.map(function (p, i) {
+                        var medal = i === 0 ? '\uD83E\uDD47' : i === 1 ? '\uD83E\uDD48' : i === 2 ? '\uD83E\uDD49' : (i + 1) + '.';
+                        return '<div class="pflx-widget-lb-row"><span class="rank">' + medal + '</span><span class="name">' + escapeHtml(p.brand || p.name || '?') + '</span><span class="xc">' + (p.xc || 0).toLocaleString() + '</span></div>';
+                    }).join('');
+            } catch (e) { rows = ''; }
+            return '<div class="pflx-widget-lb-tabs">' + tabs + '</div>' +
+                '<div class="pflx-widget-lb-list">' + rows + '</div>';
+        }
+        function pflxWidgetWalletHtml() {
+            var st = window._pflxProfileStats || {};
+            return '<div class="pflx-widget-icon">\uD83D\uDCB0</div>' +
+                '<div class="pflx-widget-wallet-balance">' + (st.xc || 0).toLocaleString() + '</div>' +
+                '<div class="pflx-widget-label">X-COIN BALANCE</div>' +
+                '<div class="pflx-widget-wallet-open pflx-widget-interactive" onpointerdown="event.stopPropagation()" onclick="pflxOpenWalletShortcut()">OPEN WALLET \u2192</div>';
+        }
+        function pflxWidgetVolUpdate(kind, val) {
+            var pct = Math.max(0, Math.min(100, parseInt(val, 10) || 0));
+            if (typeof SE === 'undefined' || !SE.playerPrefs) return;
+            if (kind === 'master') SE.playerPrefs.volume = pct / 100;
+            else if (kind === 'music') SE.playerPrefs.musicVolume = pct / 100;
+            else if (kind === 'sfx') SE.playerPrefs.sfxVolume = pct / 100;
+            var label = document.getElementById('pflx-widget-vol-' + kind + '-label');
+            if (label) label.textContent = pct + '%';
+            try { sePlayerPrefSave(); } catch (e) {}
+        }
+        window.pflxWidgetVolUpdate = pflxWidgetVolUpdate;
+        function pflxWidgetSoundHtml() {
+            var prefs = (typeof SE !== 'undefined' && SE.playerPrefs) ? SE.playerPrefs : { volume: 0.7, musicVolume: 0.5, sfxVolume: 0.8 };
+            function row(kind, label, val) {
+                var pct = Math.round((val || 0) * 100);
+                return '<div class="pflx-widget-sound-row">' +
+                    '<span class="pflx-widget-sound-label">' + label + '</span>' +
+                    '<input class="pflx-widget-interactive" type="range" min="0" max="100" value="' + pct + '" onpointerdown="event.stopPropagation()" oninput="pflxWidgetVolUpdate(\'' + kind + '\', this.value)">' +
+                    '<span id="pflx-widget-vol-' + kind + '-label" style="width:26px;text-align:right;">' + pct + '%</span>' +
+                '</div>';
+            }
+            return '<div style="width:100%;display:flex;flex-direction:column;gap:3px;">' +
+                row('master', 'MASTER', prefs.volume) +
+                row('music', 'MUSIC', prefs.musicVolume) +
+                row('sfx', 'SFX', prefs.sfxVolume) +
+            '</div>';
+        }
+
+        // Shared by the docked grid and the free-floating layer -- builds
+        // one widget's inner HTML + wrapper div. `posStyle` is the CSS that
+        // actually places it (grid-column/row span for docked, explicit
+        // left/top/width/height for free) so the two renderers differ only
+        // in positioning, never in content -- this is what keeps a free
+        // widget's design identical to its docked form (Ennis: "same
+        // design, just freed").
+        function pflxBuildWidgetCardHtml(entry, meta, posStyle, extraClass) {
+            var showLabel = entry.w >= 2 || meta.kind === 'stat';
+            var inner;
+            if (meta.kind === 'rich') {
+                if (meta.render === 'leaderboard') inner = pflxWidgetLeaderboardHtml();
+                else if (meta.render === 'wallet') inner = pflxWidgetWalletHtml();
+                else if (meta.render === 'sound') inner = pflxWidgetSoundHtml();
+                else inner = '<div class="pflx-widget-icon">' + meta.icon + '</div>';
+            } else if (meta.kind === 'stat') {
+                inner = '<div class="pflx-widget-icon">' + meta.icon + '</div>' +
+                   '<div class="pflx-widget-value" style="font-size:' + (entry.w >= 2 || entry.h >= 2 ? '18px' : '13px') + '">' + pflxWidgetStatValue(entry.id) + '</div>' +
+                   (showLabel ? '<div class="pflx-widget-label">' + meta.label + '</div>' : '');
+            } else {
+                inner = '<div class="pflx-widget-icon">' + meta.icon + '</div>' +
+                   (showLabel ? '<div class="pflx-widget-label" style="color:#e6eaff;font-size:10px;letter-spacing:0.05em;">' + meta.label + '</div>' : '');
+            }
+            var clickable = meta.kind !== 'rich' && meta.action;
+            var richFooter = (meta.kind === 'rich' && meta.action && meta.render !== 'wallet')
+                ? '<div class="pflx-widget-wallet-open pflx-widget-interactive" onpointerdown="event.stopPropagation()" onclick="' + meta.action + '()">' + (meta.render === 'leaderboard' ? 'VIEW ALL \u2192' : 'FULL MIXER \u2192') + '</div>'
+                : '';
+            return '<div class="pflx-widget' + (meta.kind === 'rich' ? ' pflx-widget-rich' : '') + (extraClass ? ' ' + extraClass : '') + '" data-widget-id="' + entry.id + '" style="' + posStyle + '"' +
+                (clickable ? ' onclick="if(!this._pflxDragged){' + meta.action + '()}"' : '') + '>' +
+                inner + richFooter +
+                '<div class="pflx-widget-resize-handle" data-widget-id="' + entry.id + '"></div>' +
+                '</div>';
+        }
         function pflxRenderWidgetGrid() {
             var grid = document.getElementById('pflx-widget-grid');
             var dotsWrap = document.getElementById('pflx-widget-page-dots');
             if (!grid) return;
             if (!window._pflxWidgetLayout) window._pflxWidgetLayout = pflxLoadWidgetLayout();
-            var layout = window._pflxWidgetLayout;
-            var pages = pflxComputeWidgetPages(layout);
+            var docked = window._pflxWidgetLayout.filter(function (e) { return !e.free; });
+            var pages = pflxComputeWidgetPages(docked);
             if (window._pflxWidgetPage >= pages.length) window._pflxWidgetPage = pages.length - 1;
             if (window._pflxWidgetPage < 0) window._pflxWidgetPage = 0;
             var page = pages[window._pflxWidgetPage] || [];
             grid.innerHTML = page.map(function (entry) {
                 var meta = pflxWidgetCatalogMeta(entry.id);
                 if (!meta) return '';
-                var showLabel = entry.w >= 2 || meta.kind === 'stat';
-                var inner = meta.kind === 'stat'
-                    ? ('<div class="pflx-widget-icon">' + meta.icon + '</div>' +
-                       '<div class="pflx-widget-value" style="font-size:' + (entry.w >= 2 || entry.h >= 2 ? '18px' : '13px') + '">' + pflxWidgetStatValue(entry.id) + '</div>' +
-                       (showLabel ? '<div class="pflx-widget-label">' + meta.label + '</div>' : ''))
-                    : ('<div class="pflx-widget-icon">' + meta.icon + '</div>' +
-                       (showLabel ? '<div class="pflx-widget-label" style="color:#e6eaff;font-size:10px;letter-spacing:0.05em;">' + meta.label + '</div>' : ''));
-                return '<div class="pflx-widget" data-widget-id="' + entry.id + '" style="grid-column:span ' + entry.w + ';grid-row:span ' + entry.h + '"' +
-                    (meta.action ? ' onclick="if(!this._pflxDragged){' + meta.action + '()}"' : '') + '>' +
-                    inner +
-                    '<div class="pflx-widget-resize-handle" data-widget-id="' + entry.id + '"></div>' +
-                    '</div>';
+                return pflxBuildWidgetCardHtml(entry, meta, 'grid-column:span ' + entry.w + ';grid-row:span ' + entry.h);
             }).join('');
             if (dotsWrap) {
                 if (pages.length <= 1) {
@@ -61862,6 +62029,44 @@ RESPONSE RULES:
             }
             pflxWidgetBindDragHandlers();
         }
+        // Pixel footprint for a free-floating widget of w x h grid cells --
+        // same CELL step already tuned for resize-by-drag below, so a free
+        // widget is visually the same size as it was docked.
+        function pflxWidgetFreeSize(w, h) {
+            var CELL = 76;
+            return { width: Math.max(60, w * CELL - 8), height: Math.max(60, h * CELL - 8) };
+        }
+        function pflxEnsureFreeWidgetsLayer() {
+            var layer = document.getElementById('pflx-free-widgets-layer');
+            if (layer) return layer;
+            layer = document.createElement('div');
+            layer.id = 'pflx-free-widgets-layer';
+            document.body.appendChild(layer);
+            return layer;
+        }
+        // Renders every widget with entry.free === true onto the dedicated
+        // body-level layer, positioned at its saved x/y. Hidden along with
+        // the blur backdrop on close (see pflxCloseProfileDropdown) and
+        // re-shown on open (pflxToggleProfileDropdown) -- per Ennis's
+        // "hides with the blur" scoping answer, a free widget's position is
+        // remembered (it's just saved layout state) but the widget itself
+        // isn't visible outside an open dropdown.
+        function pflxRenderFreeWidgets() {
+            var layer = document.getElementById('pflx-free-widgets-layer');
+            if (!layer) return;
+            if (!window._pflxWidgetLayout) window._pflxWidgetLayout = pflxLoadWidgetLayout();
+            var free = window._pflxWidgetLayout.filter(function (e) { return e.free; });
+            layer.innerHTML = free.map(function (entry) {
+                var meta = pflxWidgetCatalogMeta(entry.id);
+                if (!meta) return '';
+                var size = pflxWidgetFreeSize(entry.w, entry.h);
+                var x = typeof entry.x === 'number' ? entry.x : 24;
+                var y = typeof entry.y === 'number' ? entry.y : 90;
+                var posStyle = 'left:' + x + 'px;top:' + y + 'px;width:' + size.width + 'px;height:' + size.height + 'px;';
+                return pflxBuildWidgetCardHtml(entry, meta, posStyle, 'pflx-widget-free');
+            }).join('');
+            pflxWidgetBindDragHandlers();
+        }
         window.pflxWidgetGoToPage = function (i) {
             window._pflxWidgetPage = i;
             pflxRenderWidgetGrid();
@@ -61873,63 +62078,117 @@ RESPONSE RULES:
         // the widget's current page (page navigation is via the arrows/dots
         // above, kept separate so a page-swipe gesture never fights with a
         // widget-drag gesture).
-        var _pflxWidgetDrag = null; // { id, mode: 'move'|'resize', startX, startY, startW, startH, moved }
-        function pflxWidgetBindDragHandlers() {
-            var grid = document.getElementById('pflx-widget-grid');
-            if (!grid) return;
-            grid.querySelectorAll('.pflx-widget').forEach(function (el) {
+        var _pflxWidgetDrag = null; // { id, mode: 'move'|'resize', location: 'grid'|'free', startX, startY, startW, startH, moved, offsetX, offsetY }
+        function pflxWidgetBindHandlersIn(container, location) {
+            if (!container) return;
+            container.querySelectorAll('.pflx-widget').forEach(function (el) {
                 el.onpointerdown = function (ev) {
-                    if (ev.target && ev.target.classList.contains('pflx-widget-resize-handle')) return;
+                    if (ev.target && ev.target.closest && ev.target.closest('.pflx-widget-resize-handle, .pflx-widget-interactive')) return;
                     var id = el.getAttribute('data-widget-id');
-                    _pflxWidgetDrag = { id: id, mode: 'move', startX: ev.clientX, startY: ev.clientY, moved: false };
+                    var rect = el.getBoundingClientRect();
+                    _pflxWidgetDrag = {
+                        id: id, mode: 'move', location: location,
+                        startX: ev.clientX, startY: ev.clientY, moved: false,
+                        offsetX: ev.clientX - rect.left, offsetY: ev.clientY - rect.top
+                    };
                     try { el.setPointerCapture(ev.pointerId); } catch (e) {}
                 };
             });
-            grid.querySelectorAll('.pflx-widget-resize-handle').forEach(function (handle) {
+            container.querySelectorAll('.pflx-widget-resize-handle').forEach(function (handle) {
                 handle.onpointerdown = function (ev) {
                     ev.stopPropagation();
                     var id = handle.getAttribute('data-widget-id');
                     var entry = (window._pflxWidgetLayout || []).find(function (e) { return e.id === id; });
                     if (!entry) return;
-                    _pflxWidgetDrag = { id: id, mode: 'resize', startX: ev.clientX, startY: ev.clientY, startW: entry.w, startH: entry.h };
+                    _pflxWidgetDrag = { id: id, mode: 'resize', location: location, startX: ev.clientX, startY: ev.clientY, startW: entry.w, startH: entry.h };
                     try { handle.setPointerCapture(ev.pointerId); } catch (e) {}
                 };
             });
+        }
+        // PATCH PLATFORM v1.144 -- also binds the free-floating layer so a
+        // detached widget can still be resized, and dragged back onto the
+        // grid to reattach (see the pointermove handler below).
+        function pflxWidgetBindDragHandlers() {
+            pflxWidgetBindHandlersIn(document.getElementById('pflx-widget-grid'), 'grid');
+            pflxWidgetBindHandlersIn(document.getElementById('pflx-free-widgets-layer'), 'free');
+        }
+        function pflxPointInRect(x, y, rect, margin) {
+            margin = margin || 0;
+            return x >= rect.left - margin && x <= rect.right + margin && y >= rect.top - margin && y <= rect.bottom + margin;
         }
         if (!window._pflxWidgetPointerBound) {
             window._pflxWidgetPointerBound = true;
             document.addEventListener('pointermove', function (ev) {
                 if (!_pflxWidgetDrag) return;
                 var layout = window._pflxWidgetLayout; if (!layout) return;
+                var entry = layout.find(function (e) { return e.id === _pflxWidgetDrag.id; });
+                if (!entry) return;
                 var dx = ev.clientX - _pflxWidgetDrag.startX;
                 var dy = ev.clientY - _pflxWidgetDrag.startY;
                 if (_pflxWidgetDrag.mode === 'resize') {
                     var CELL = 76; // approx cell step (width incl. gap) tuned to the grid CSS above
-                    var entry = layout.find(function (e) { return e.id === _pflxWidgetDrag.id; });
-                    if (!entry) return;
                     var w = Math.max(1, Math.min(2, _pflxWidgetDrag.startW + Math.round(dx / CELL)));
                     var h = Math.max(1, Math.min(2, _pflxWidgetDrag.startH + Math.round(dy / CELL)));
-                    if (w !== entry.w || h !== entry.h) { entry.w = w; entry.h = h; pflxRenderWidgetGrid(); }
-                } else {
-                    if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
-                        _pflxWidgetDrag.moved = true;
-                        var draggedEl = document.querySelector('.pflx-widget[data-widget-id="' + _pflxWidgetDrag.id + '"]');
-                        if (draggedEl) draggedEl.classList.add('pflx-widget-dragging');
-                        var overEl = document.elementFromPoint(ev.clientX, ev.clientY);
-                        var overWidget = overEl && overEl.closest && overEl.closest('.pflx-widget');
-                        if (overWidget) {
-                            var overId = overWidget.getAttribute('data-widget-id');
-                            if (overId && overId !== _pflxWidgetDrag.id) {
-                                var fromIdx = layout.findIndex(function (e) { return e.id === _pflxWidgetDrag.id; });
-                                var toIdx = layout.findIndex(function (e) { return e.id === overId; });
-                                if (fromIdx !== -1 && toIdx !== -1) {
-                                    var tmp = layout[fromIdx]; layout[fromIdx] = layout[toIdx]; layout[toIdx] = tmp;
-                                    pflxRenderWidgetGrid();
-                                    _pflxWidgetDrag.startX = ev.clientX; _pflxWidgetDrag.startY = ev.clientY;
-                                }
+                    if (w !== entry.w || h !== entry.h) {
+                        entry.w = w; entry.h = h;
+                        pflxRenderWidgetGrid();
+                        pflxRenderFreeWidgets();
+                    }
+                    return;
+                }
+                if (Math.abs(dx) <= 6 && Math.abs(dy) <= 6) return;
+                _pflxWidgetDrag.moved = true;
+                var gridEl = document.getElementById('pflx-widget-grid');
+                var gridRect = gridEl ? gridEl.getBoundingClientRect() : null;
+                // PATCH PLATFORM v1.144 -- drag/reattach across grid <-> free.
+                if (_pflxWidgetDrag.location === 'grid') {
+                    // Drag past the grid's edge onto the blurred background
+                    // detaches the widget there (Ennis: "drag it out").
+                    if (gridRect && !pflxPointInRect(ev.clientX, ev.clientY, gridRect, 24)) {
+                        entry.free = true;
+                        entry.x = ev.clientX - _pflxWidgetDrag.offsetX;
+                        entry.y = ev.clientY - _pflxWidgetDrag.offsetY;
+                        _pflxWidgetDrag.location = 'free';
+                        pflxRenderWidgetGrid();
+                        pflxRenderFreeWidgets();
+                        var freshEl = document.querySelector('#pflx-free-widgets-layer .pflx-widget[data-widget-id="' + entry.id + '"]');
+                        if (freshEl) { freshEl.classList.add('pflx-widget-dragging'); try { freshEl.setPointerCapture(ev.pointerId); } catch (e) {} }
+                        return;
+                    }
+                    var draggedEl = document.querySelector('#pflx-widget-grid .pflx-widget[data-widget-id="' + entry.id + '"]');
+                    if (draggedEl) draggedEl.classList.add('pflx-widget-dragging');
+                    var overEl = document.elementFromPoint(ev.clientX, ev.clientY);
+                    var overWidget = overEl && overEl.closest && overEl.closest('#pflx-widget-grid .pflx-widget');
+                    if (overWidget) {
+                        var overId = overWidget.getAttribute('data-widget-id');
+                        if (overId && overId !== entry.id) {
+                            var fromIdx = layout.findIndex(function (e) { return e.id === entry.id; });
+                            var toIdx = layout.findIndex(function (e) { return e.id === overId; });
+                            if (fromIdx !== -1 && toIdx !== -1) {
+                                var tmp = layout[fromIdx]; layout[fromIdx] = layout[toIdx]; layout[toIdx] = tmp;
+                                pflxRenderWidgetGrid();
+                                _pflxWidgetDrag.startX = ev.clientX; _pflxWidgetDrag.startY = ev.clientY;
                             }
                         }
                     }
+                } else {
+                    // location === 'free': follow the pointer; dragging it back
+                    // over the grid's bounding rect reattaches it.
+                    entry.x = ev.clientX - _pflxWidgetDrag.offsetX;
+                    entry.y = ev.clientY - _pflxWidgetDrag.offsetY;
+                    if (gridRect && pflxPointInRect(ev.clientX, ev.clientY, gridRect, 0)) {
+                        entry.free = false;
+                        delete entry.x; delete entry.y;
+                        _pflxWidgetDrag.location = 'grid';
+                        pflxRenderWidgetGrid();
+                        pflxRenderFreeWidgets();
+                        var regrabEl = document.querySelector('#pflx-widget-grid .pflx-widget[data-widget-id="' + entry.id + '"]');
+                        if (regrabEl) { regrabEl.classList.add('pflx-widget-dragging'); try { regrabEl.setPointerCapture(ev.pointerId); } catch (e) {} }
+                        return;
+                    }
+                    pflxRenderFreeWidgets();
+                    var freeEl = document.querySelector('#pflx-free-widgets-layer .pflx-widget[data-widget-id="' + entry.id + '"]');
+                    if (freeEl) { freeEl.classList.add('pflx-widget-dragging'); try { freeEl.setPointerCapture(ev.pointerId); } catch (e) {} }
                 }
             });
             document.addEventListener('pointerup', function () {
@@ -62044,12 +62303,18 @@ RESPONSE RULES:
         window.pflxCloseProfileDropdown = function () {
             var dd = document.getElementById('pflx-profile-dropdown');
             var bd = document.getElementById('pflx-dd-backdrop');
+            var freeLayer = document.getElementById('pflx-free-widgets-layer');
             if (bd) bd.classList.remove('pflx-dd-backdrop-on');
             if (!dd) return;
             dd.classList.remove('pflx-dd-open');
             setTimeout(function () {
                 if (dd && !dd.classList.contains('pflx-dd-open')) dd.style.display = 'none';
                 if (bd && !bd.classList.contains('pflx-dd-backdrop-on')) bd.style.display = 'none';
+                // PATCH PLATFORM v1.144 -- free-floating widgets hide along
+                // with the blur (Ennis: "hides with the blur"); their position
+                // is already saved in _pflxWidgetLayout/localStorage so
+                // reopening restores them exactly where they were.
+                if (freeLayer) freeLayer.style.display = 'none';
             }, 300);
         };
 
@@ -62073,6 +62338,12 @@ RESPONSE RULES:
             }
             var bd = pflxEnsureWidgetBackdrop();
             window.pflxRenderProfileDropdown();
+            // PATCH PLATFORM v1.144 -- show any free-floating widgets back at
+            // their saved position along with the dropdown (Ennis: "hides
+            // with the blur" -- they disappear on close, reappear on open).
+            var freeLayer = pflxEnsureFreeWidgetsLayer();
+            pflxRenderFreeWidgets();
+            freeLayer.style.display = 'block';
             dd.style.display = 'block';
             bd.style.display = 'block';
             // Force a reflow so the browser registers the pre-transition
