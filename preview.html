@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 146;
+      window.PFLX_PATCH   = 147;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -295,6 +295,19 @@
         .pflx-widget-sound-row { width: 100%; display: flex; align-items: center; gap: 5px; font-size: 8px; color: rgba(255,255,255,0.55); }
         .pflx-widget-sound-row input[type="range"] { flex: 1; accent-color: var(--cyan); height: 12px; }
         .pflx-widget-sound-label { width: 30px; flex-shrink: 0; }
+        /* PATCH PLATFORM v1.147 -- My Tasks widget compact calendar view */
+        .pflx-widget-cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px; }
+        .pflx-widget-cal-month { font-family: Orbitron, sans-serif; font-size: 8px; font-weight: 800; letter-spacing: 0.06em; color: rgba(255,255,255,0.7); }
+        .pflx-widget-cal-nav { font-size: 11px; color: rgba(255,255,255,0.5); cursor: pointer; padding: 0 4px; }
+        .pflx-widget-cal-nav:hover { color: var(--cyan); }
+        .pflx-widget-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; margin-bottom: 4px; }
+        .pflx-widget-cal-dow { font-size: 6px; text-align: center; color: rgba(255,255,255,0.3); font-weight: 700; }
+        .pflx-widget-cal-cell { font-size: 8px; text-align: center; color: rgba(255,255,255,0.6); padding: 2px 0; border-radius: 4px; cursor: pointer; position: relative; }
+        .pflx-widget-cal-cell:hover { background: rgba(255,255,255,0.06); }
+        .pflx-widget-cal-cell.today { color: var(--cyan); font-weight: 800; }
+        .pflx-widget-cal-cell.selected { background: rgba(0,212,255,0.18); color: var(--cyan); }
+        .pflx-widget-cal-cell.has-item::after { content: ''; position: absolute; bottom: 1px; left: 50%; transform: translateX(-50%); width: 3px; height: 3px; border-radius: 50%; background: #f5a500; }
+        .pflx-widget-cal-cell.blank { cursor: default; }
 
         /* ═══ REALITY WARP SKIN THEMES ═══ */
         [data-pflx-skin="afrofuturistic"] {
@@ -61808,7 +61821,7 @@ RESPONSE RULES:
             // other widget. `action`, where present, is now used for an
             // in-card "view more" button rather than a whole-card click.
             { id: 'wallet',      icon: '\uD83D\uDCB0', label: 'MY WALLET',   kind: 'rich', render: 'wallet',      defaultW: 2, defaultH: 1, action: 'pflxOpenWalletShortcut' },
-            { id: 'tasks',       icon: '\uD83D\uDCCB', label: 'MY TASKS',    kind: 'action', defaultW: 2, defaultH: 1, action: 'pflxOpenTasksShortcut' },
+            { id: 'tasks',       icon: '\uD83D\uDCCB', label: 'MY TASKS',    kind: 'rich',   render: 'tasks', defaultW: 2, defaultH: 3, action: 'pflxOpenTasksShortcut' },
             { id: 'leaderboard', icon: '\uD83C\uDFC6', label: 'LEADERBOARD', kind: 'rich', render: 'leaderboard', defaultW: 2, defaultH: 3, action: 'pflxOpenTierLeaderboard' },
             { id: 'sound',       icon: '\u266B',  label: 'SOUND',       kind: 'rich', render: 'sound',       defaultW: 2, defaultH: 2, action: 'pflxWidgetOpenSound' }
         ];
@@ -61982,6 +61995,181 @@ RESPONSE RULES:
             '</div>';
         }
 
+        // ── PATCH PLATFORM v1.147 -- My Tasks multi-view widget ────────────
+        // TASKS / TODAY / CAL tabs inside the My Tasks widget (Ennis: "show
+        // the tasks in different views....calender view, task view, daily
+        // view, etc."). pflxWidgetMyTasksItems() is a NEW function -- it
+        // mirrors pflxRenderMyWork()'s exact host-queue vs. player-assigned
+        // filter+sort logic (same functions, same order, same fields) but
+        // returns a plain flat array instead of writing into
+        // mc-my-work-body, so the already-shipped MC dashboard widget is
+        // never touched. `dueDate` stays a plain "YYYY-MM-DD" string
+        // throughout (the format _mcUrgencyForDueDate already expects) so
+        // the calendar view's day-bucketing can just string-compare it.
+        function pflxWidgetTodayStr() {
+            try {
+                var d = new Date();
+                return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+            } catch (e) { return ''; }
+        }
+        window.pflxWidgetTodayStr = pflxWidgetTodayStr;
+        function pflxWidgetMyTasksItems() {
+            var isHost = window.pflxRole !== 'player';
+            var items = [];
+            try {
+                if (isHost) {
+                    var awaiting = (mcTasks || []).filter(function (t) { return t && t.status === 'submitted'; });
+                    awaiting.forEach(function (t) {
+                        items.push({ id: t.id, kind: 'task', section: 'awaiting', title: t.title, dueDate: null });
+                    });
+                    var overdueTasks = (mcTasks || []).filter(function (t) {
+                        if (!t || t.status === 'approved') return false;
+                        if (!t.dueDate) return false;
+                        try { if (window.pflxItemHierarchyClosed && window.pflxItemHierarchyClosed(t)) return false; } catch (e) {}
+                        return _mcUrgencyForDueDate(t.dueDate).days < 0;
+                    });
+                    overdueTasks.forEach(function (t) {
+                        items.push({ id: t.id, kind: 'task', section: 'overdue-task', title: t.title, dueDate: t.dueDate });
+                    });
+                    var overdueProjects = (mcProjects || []).filter(function (p) {
+                        if (!p || p.status === 'completed') return false;
+                        var d = p.dueDate || p.endDate || p.deadline;
+                        if (!d) return false;
+                        try { if (window.pflxItemHierarchyClosed && window.pflxItemHierarchyClosed(p)) return false; } catch (e) {}
+                        return _mcUrgencyForDueDate(d).days < 0;
+                    });
+                    overdueProjects.forEach(function (p) {
+                        var d = p.dueDate || p.endDate || p.deadline;
+                        items.push({ id: p.id, kind: 'project', section: 'overdue-project', title: p.name || p.title, dueDate: d });
+                    });
+                } else {
+                    var me = window.activeSession || {};
+                    var myId = me.id || me.brand || me.brandName || '';
+                    var mine = (mcTasks || []).filter(function (t) {
+                        if (!t || t.status === 'approved') return false;
+                        var assigned = t.assignedTo;
+                        if (!assigned || assigned === 'all') return true;
+                        if (Array.isArray(assigned)) return assigned.indexOf(myId) !== -1;
+                        return String(assigned) === String(myId);
+                    });
+                    mine.sort(function (a, b) {
+                        var wa = _mcPriorityWeight(a.priority || 'normal');
+                        var wb = _mcPriorityWeight(b.priority || 'normal');
+                        if (wa !== wb) return wb - wa;
+                        var da = a.dueDate ? _mcUrgencyForDueDate(a.dueDate).days : 999;
+                        var db = b.dueDate ? _mcUrgencyForDueDate(b.dueDate).days : 999;
+                        return da - db;
+                    });
+                    mine.forEach(function (t) {
+                        items.push({ id: t.id, kind: 'task', section: 'assigned', title: t.title, dueDate: t.dueDate || null });
+                    });
+                }
+            } catch (e) { console.warn('[widget-tasks] items failed', e); }
+            return { isHost: isHost, items: items };
+        }
+        window.pflxWidgetMyTasksItems = pflxWidgetMyTasksItems;
+        function pflxWidgetTaskRowHtml(item) {
+            var icon = item.section === 'awaiting' ? '\uD83D\uDCE4' : item.section === 'overdue-project' ? '\uD83C\uDFAC' : '\uD83D\uDCCB';
+            var badge = '';
+            if (item.dueDate) {
+                var u = _mcUrgencyForDueDate(item.dueDate);
+                badge = '<span class="xc" style="color:rgba(' + u.rgb + ',1);">' + u.label + '</span>';
+            } else if (item.section === 'awaiting') {
+                badge = '<span class="xc" style="color:#f5a500;">PENDING</span>';
+            }
+            return '<div class="pflx-widget-lb-row"><span class="rank">' + icon + '</span><span class="name">' + escapeHtml(item.title || 'Untitled') + '</span>' + badge + '</div>';
+        }
+        function pflxWidgetTasksListHtml(items) {
+            if (!items || items.length === 0) {
+                return '<div style="text-align:center;color:rgba(255,255,255,0.3);font-size:9px;padding:10px;">Nothing here \uD83C\uDF89</div>';
+            }
+            return items.slice(0, 20).map(pflxWidgetTaskRowHtml).join('');
+        }
+        window._pflxWidgetTasksCalMonth = null;
+        window._pflxWidgetTasksCalSelectedDay = null;
+        function pflxWidgetTasksCalendarHtml(items) {
+            var now = new Date();
+            var cur = window._pflxWidgetTasksCalMonth || { y: now.getFullYear(), m: now.getMonth() };
+            var y = cur.y, m = cur.m;
+            var todayStr = pflxWidgetTodayStr();
+            var byDate = {};
+            (items || []).forEach(function (it) {
+                if (!it.dueDate) return;
+                if (!byDate[it.dueDate]) byDate[it.dueDate] = [];
+                byDate[it.dueDate].push(it);
+            });
+            var monthNames = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+            var firstDow = new Date(y, m, 1).getDay();
+            var daysInMonth = new Date(y, m + 1, 0).getDate();
+            var dow = ['S','M','T','W','T','F','S'].map(function (d) { return '<div class="pflx-widget-cal-dow">' + d + '</div>'; }).join('');
+            var cells = '';
+            for (var i = 0; i < firstDow; i++) cells += '<div class="pflx-widget-cal-cell blank"></div>';
+            for (var d = 1; d <= daysInMonth; d++) {
+                var dateStr = y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+                var cls = 'pflx-widget-cal-cell pflx-widget-interactive';
+                if (dateStr === todayStr) cls += ' today';
+                if (byDate[dateStr]) cls += ' has-item';
+                if (dateStr === window._pflxWidgetTasksCalSelectedDay) cls += ' selected';
+                cells += '<div class="' + cls + '" onpointerdown="event.stopPropagation()" onclick="pflxWidgetCalSelectDay(\'' + dateStr + '\', event)">' + d + '</div>';
+            }
+            var selectedList = '';
+            if (window._pflxWidgetTasksCalSelectedDay) {
+                var sel = byDate[window._pflxWidgetTasksCalSelectedDay] || [];
+                selectedList = '<div style="margin-top:4px;border-top:1px solid rgba(255,255,255,0.08);padding-top:3px;">' + pflxWidgetTasksListHtml(sel) + '</div>';
+            }
+            return '<div class="pflx-widget-cal-head">' +
+                '<span class="pflx-widget-cal-nav pflx-widget-interactive" onpointerdown="event.stopPropagation()" onclick="pflxWidgetCalMoveMonth(-1, event)">\u2039</span>' +
+                '<span class="pflx-widget-cal-month">' + monthNames[m] + ' ' + y + '</span>' +
+                '<span class="pflx-widget-cal-nav pflx-widget-interactive" onpointerdown="event.stopPropagation()" onclick="pflxWidgetCalMoveMonth(1, event)">\u203A</span>' +
+                '</div>' +
+                '<div class="pflx-widget-cal-grid">' + dow + cells + '</div>' +
+                selectedList;
+        }
+        function pflxWidgetTasksHtml() {
+            var view = window._pflxWidgetTasksView || 'tasks';
+            var tabsDef = [{ k: 'tasks', label: 'TASKS' }, { k: 'today', label: 'TODAY' }, { k: 'cal', label: 'CAL' }];
+            var tabs = tabsDef.map(function (t) {
+                return '<span class="pflx-widget-lb-tab pflx-widget-interactive' + (t.k === view ? ' on' : '') + '" onpointerdown="event.stopPropagation()" onclick="pflxWidgetSetTasksView(\'' + t.k + '\', event)">' + t.label + '</span>';
+            }).join('');
+            var data;
+            try { data = pflxWidgetMyTasksItems(); } catch (e) { data = { isHost: false, items: [] }; }
+            var items = data.items || [];
+            var body;
+            if (view === 'today') {
+                var todayStr = pflxWidgetTodayStr();
+                body = pflxWidgetTasksListHtml(items.filter(function (it) { return it.dueDate === todayStr; }));
+            } else if (view === 'cal') {
+                body = pflxWidgetTasksCalendarHtml(items);
+            } else {
+                body = pflxWidgetTasksListHtml(items);
+            }
+            return '<div class="pflx-widget-lb-tabs">' + tabs + '</div>' +
+                '<div class="pflx-widget-lb-list">' + body + '</div>';
+        }
+        window._pflxWidgetTasksView = 'tasks';
+        window.pflxWidgetSetTasksView = function (view, ev) {
+            try { if (ev) ev.stopPropagation(); } catch (e) {}
+            window._pflxWidgetTasksView = view;
+            pflxRenderWidgetGrid();
+            pflxRenderFreeWidgets();
+        };
+        window.pflxWidgetCalMoveMonth = function (delta, ev) {
+            try { if (ev) ev.stopPropagation(); } catch (e) {}
+            var now = new Date();
+            var cur = window._pflxWidgetTasksCalMonth || { y: now.getFullYear(), m: now.getMonth() };
+            var m = cur.m + delta, y = cur.y;
+            if (m < 0) { m = 11; y--; } else if (m > 11) { m = 0; y++; }
+            window._pflxWidgetTasksCalMonth = { y: y, m: m };
+            pflxRenderWidgetGrid();
+            pflxRenderFreeWidgets();
+        };
+        window.pflxWidgetCalSelectDay = function (dateStr, ev) {
+            try { if (ev) ev.stopPropagation(); } catch (e) {}
+            window._pflxWidgetTasksCalSelectedDay = (window._pflxWidgetTasksCalSelectedDay === dateStr) ? null : dateStr;
+            pflxRenderWidgetGrid();
+            pflxRenderFreeWidgets();
+        };
+
         // Shared by the docked grid and the free-floating layer -- builds
         // one widget's inner HTML + wrapper div. `posStyle` is the CSS that
         // actually places it (grid-column/row span for docked, explicit
@@ -61996,6 +62184,7 @@ RESPONSE RULES:
                 if (meta.render === 'leaderboard') inner = pflxWidgetLeaderboardHtml();
                 else if (meta.render === 'wallet') inner = pflxWidgetWalletHtml();
                 else if (meta.render === 'sound') inner = pflxWidgetSoundHtml();
+                else if (meta.render === 'tasks') inner = pflxWidgetTasksHtml();
                 else inner = '<div class="pflx-widget-icon">' + meta.icon + '</div>';
             } else if (meta.kind === 'stat') {
                 inner = '<div class="pflx-widget-icon">' + meta.icon + '</div>' +
@@ -62007,7 +62196,7 @@ RESPONSE RULES:
             }
             var clickable = meta.kind !== 'rich' && meta.action;
             var richFooter = (meta.kind === 'rich' && meta.action && meta.render !== 'wallet')
-                ? '<div class="pflx-widget-wallet-open pflx-widget-interactive" onpointerdown="event.stopPropagation()" onclick="' + meta.action + '()">' + (meta.render === 'leaderboard' ? 'VIEW ALL \u2192' : 'FULL MIXER \u2192') + '</div>'
+                ? '<div class="pflx-widget-wallet-open pflx-widget-interactive" onpointerdown="event.stopPropagation()" onclick="' + meta.action + '()">' + ((meta.render === 'leaderboard' || meta.render === 'tasks') ? 'VIEW ALL \u2192' : 'FULL MIXER \u2192') + '</div>'
                 : '';
             return '<div class="pflx-widget' + (meta.kind === 'rich' ? ' pflx-widget-rich' : '') + (extraClass ? ' ' + extraClass : '') + '" data-widget-id="' + entry.id + '" style="' + posStyle + '"' +
                 (clickable ? ' onclick="if(!this._pflxDragged){' + meta.action + '()}"' : '') + '>' +
