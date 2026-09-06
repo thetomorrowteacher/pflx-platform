@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 148;
+      window.PFLX_PATCH   = 149;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -2088,18 +2088,6 @@
         @keyframes eventBannerSlide { from { transform: translateY(-100%); } to { transform: translateY(0); } }
         .pflx-system-event-banner .event-timer { font-family: 'Share Tech Mono', monospace; font-size: 14px; font-weight: 700; }
 
-        /* Escape Room overlay */
-        .pflx-escape-room-overlay {
-            position: fixed; inset: 0; z-index: 10080;
-            background: radial-gradient(ellipse at center, rgba(239,68,68,0.15), rgba(10,10,10,0.98) 70%);
-            display: flex; align-items: center; justify-content: center;
-            font-family: 'Jura', sans-serif;
-        }
-        .pflx-escape-room-card {
-            background: rgba(10,14,30,0.98); border: 2px solid rgba(239,68,68,0.4);
-            border-radius: 16px; padding: 30px; max-width: 600px; width: 90%;
-            box-shadow: 0 0 60px rgba(239,68,68,0.2), inset 0 0 30px rgba(239,68,68,0.03);
-        }
 
         * {
             margin: 0;
@@ -10915,7 +10903,7 @@
                             <!-- ═══ SYSTEM EVENTS PANEL ═══ -->
                             <div class="mc-panel" id="mc-panel-systemevents">
                                 <h1 class="mc-page-title">&#x26A1; System Events</h1>
-                                <p class="mc-page-desc">Reality Warp skins, system taxes, XC boosts, escape rooms, and live challenges.</p>
+                                <p class="mc-page-desc">Reality Warp skins, system taxes, and XC boosts.</p>
                                 <div id="mc-system-events-content"></div>
                             </div>
 
@@ -50023,7 +50011,6 @@
                             '<div class="pflx-pip-action" onclick="pflxSysEvtPipQuick(\'xc_rain\')"><span class="pip-icon">&#x1F327;</span> XC Rain</div>' +
                             '<div class="pflx-pip-action" onclick="pflxSysEvtPipQuick(\'golden_hour\')"><span class="pip-icon">&#x2728;</span> Golden Hour</div>' +
                             '<div class="pflx-pip-action danger" onclick="pflxSysEvtPipQuick(\'market_crash\')"><span class="pip-icon">&#x1F4C9;</span> Market Crash</div>' +
-                            '<div class="pflx-pip-action" onclick="pflxSysEvtPipQuick(\'flash_challenge\')" style="grid-column:1/-1;"><span class="pip-icon">&#x1F3AF;</span> Flash Challenge</div>' +
                         '</div>' +
                     '</div>' +
                     '<div class="pflx-pip-section">' +
@@ -50069,7 +50056,6 @@
                         else if (eventType === 'xc_rain') { evt.params.amountPerDrop = 10; evt.params.interval = 60; evt.icon = '&#x1F327;'; }
                         else if (eventType === 'golden_hour') { evt.params.multiplier = 3; evt.icon = '&#x2728;'; }
                         else if (eventType === 'market_crash') { evt.params.percentage = 10; evt.icon = '&#x1F4C9;'; }
-                        else if (eventType === 'flash_challenge') { evt.icon = '&#x1F3AF;'; }
                         pflxActivateEvent(evt.id);
                     }
                 } catch(e) { console.warn('[SysEvtPip] quick launch error:', e); }
@@ -54859,8 +54845,6 @@
                 { id: 'studio_surge',   name: 'Studio Surge',      icon: '🏢', desc: 'Boost a specific Startup Studio — members earn bonus XC.' },
                 { id: 'xc_rain',        name: 'XC Rain',           icon: '🌧️', desc: 'Random XC drops to active players at intervals.' },
                 { id: 'badge_rush',     name: 'Badge Rush',        icon: '🏅', desc: 'Completing any task awards a bonus badge during the event.' },
-                { id: 'escape_room',    name: 'Escape Room',       icon: '🔒', desc: 'Players are locked into a challenge they must complete to escape.' },
-                { id: 'flash_challenge',name: 'Flash Challenge',   icon: '⏱️', desc: 'A timed mini-challenge — first to complete earns bonus XC.' },
                 { id: 'market_crash',   name: 'Market Crash',      icon: '📉', desc: 'All upgrades cost 2x during this event.' },
                 { id: 'golden_hour',    name: 'Golden Hour',       icon: '🌟', desc: 'All actions earn 2x XC for one hour.' }
             ];
@@ -55063,8 +55047,7 @@
                     skin: config.skin || 'afrofuturistic',
                     taxPercent: config.taxPercent || 5,
                     boostMultiplier: config.boostMultiplier || 2,
-                    xcRainAmount: config.xcRainAmount || 25,
-                    escapeChallenge: config.escapeChallenge || null
+                    xcRainAmount: config.xcRainAmount || 25
                 };
                 _sysEvents.push(evt);
                 saveEvents();
@@ -55097,9 +55080,6 @@
                         break;
                     case 'xc_rain':
                         startXCRain(evt);
-                        break;
-                    case 'escape_room':
-                        launchEscapeRoom(evt);
                         break;
                     case 'golden_hour':
                         // Handled by boost multiplier
@@ -55201,149 +55181,6 @@
                     });
                     if (typeof mcSaveData === 'function') mcSaveData('players');
                 }, interval);
-            }
-
-            // ── Escape Room ──
-            function launchEscapeRoom(evt) {
-                var targets = getTargetPlayers(evt);
-                var challenge = evt.escapeChallenge || {
-                    title: 'System Lockdown',
-                    description: 'Complete the challenge to unlock your console!',
-                    tasks: [
-                        { id: 'er-1', name: 'Find a PFLX Job posting', type: 'find_job', xc: 25, completed: false },
-                        { id: 'er-2', name: 'Complete a Battle Arena match', type: 'arena_match', xc: 50, completed: false },
-                        { id: 'er-3', name: 'Submit a quick design (SDG logo sketch)', type: 'design_submit', xc: 75, completed: false }
-                    ],
-                    timeLimit: evt.duration || 30,
-                    totalXC: 150,
-                    escapePhrase: 'UNLOCKED'
-                };
-
-                // Store active escape state
-                evt.escapeState = {
-                    challenge: challenge,
-                    participants: targets.map(function(p) {
-                        return { id: p.id, name: p.name || p.brand, progress: [], escaped: false, startedAt: new Date().toISOString() };
-                    })
-                };
-                saveEvents();
-
-                // Show escape room overlay for current player
-                showEscapeRoomOverlay(evt);
-            }
-
-            function showEscapeRoomOverlay(evt) {
-                var existing = document.getElementById('pflx-escape-room-overlay');
-                if (existing) existing.remove();
-                if (!evt.escapeState || !evt.escapeState.challenge) return;
-
-                var ch = evt.escapeState.challenge;
-                var currentPlayer = null;
-                try { currentPlayer = window.activeSession; } catch(e) {}
-                if (!currentPlayer) return;
-
-                // Check if this player is a target
-                var isTarget = evt.targeting.mode === 'all' || (currentPlayer.role === 'player' || currentPlayer.role === 'student');
-                // Don't lock admins/hosts
-                if (currentPlayer.role === 'admin' || currentPlayer.role === 'host' || currentPlayer.godTier) return;
-
-                var pState = (evt.escapeState.participants || []).find(function(p) { return p.id === currentPlayer.id; });
-                if (pState && pState.escaped) return;
-
-                var overlay = document.createElement('div');
-                overlay.id = 'pflx-escape-room-overlay';
-                overlay.className = 'pflx-escape-room-overlay';
-
-                var tasksHtml = ch.tasks.map(function(t, i) {
-                    var done = pState && pState.progress && pState.progress.indexOf(t.id) >= 0;
-                    return '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:' + (done ? 'rgba(34,197,94,0.08)' : 'rgba(255,255,255,0.02)') + ';border:1px solid ' + (done ? 'rgba(34,197,94,0.3)' : 'rgba(255,255,255,0.06)') + ';border-radius:8px;margin-bottom:6px;">' +
-                        '<span style="font-size:18px;">' + (done ? '✅' : '🔒') + '</span>' +
-                        '<div style="flex:1;">' +
-                        '<div style="font-size:13px;font-weight:700;color:' + (done ? '#22c55e' : '#f0f0ff') + ';">' + escapeHtml(t.name) + '</div>' +
-                        '<div style="font-size:10px;color:rgba(255,255,255,0.4);">+' + t.xc + ' XC</div>' +
-                        '</div>' +
-                        (done ? '' : '<button class="pflx-cr-action" style="font-size:10px;padding:6px 12px;color:var(--cyan);border-color:rgba(0,229,255,0.3);" onclick="pflxEscapeRoomComplete(\'' + evt.id + '\',\'' + t.id + '\')">Complete</button>') +
-                        '</div>';
-                }).join('');
-
-                var completedCount = pState ? (pState.progress || []).length : 0;
-                var totalTasks = ch.tasks.length;
-                var pct = Math.round((completedCount / totalTasks) * 100);
-
-                overlay.innerHTML =
-                    '<div class="pflx-escape-room-card">' +
-                    '<div style="text-align:center;margin-bottom:20px;">' +
-                    '<div style="font-size:40px;margin-bottom:8px;">🔒</div>' +
-                    '<div style="font-family:\'Orbitron\',sans-serif;font-size:18px;letter-spacing:2px;color:#ef4444;font-weight:900;">SYSTEM LOCKDOWN</div>' +
-                    '<div style="font-size:12px;color:rgba(255,255,255,0.5);margin-top:6px;">' + escapeHtml(ch.description) + '</div>' +
-                    '</div>' +
-                    '<div style="margin-bottom:16px;">' +
-                    '<div style="display:flex;justify-content:space-between;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:4px;">' +
-                    '<span>Progress: ' + completedCount + '/' + totalTasks + '</span>' +
-                    '<span>' + pct + '%</span></div>' +
-                    '<div style="height:6px;background:rgba(255,255,255,0.05);border-radius:3px;overflow:hidden;">' +
-                    '<div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg,#ef4444,#f5c842);border-radius:3px;transition:width 0.4s;"></div>' +
-                    '</div></div>' +
-                    '<div style="margin-bottom:16px;">' + tasksHtml + '</div>' +
-                    (completedCount >= totalTasks ?
-                        '<div style="text-align:center;"><button onclick="pflxEscapeRoomEscape(\'' + evt.id + '\')" style="background:linear-gradient(135deg,rgba(34,197,94,0.3),rgba(34,197,94,0.1));border:2px solid rgba(34,197,94,0.5);color:#22c55e;padding:14px 40px;border-radius:12px;font-family:\'Orbitron\',sans-serif;font-size:14px;font-weight:900;letter-spacing:2px;cursor:pointer;animation:pulse 1.5s infinite;">🔓 ESCAPE</button></div>' :
-                        '<div style="text-align:center;font-size:11px;color:rgba(255,255,255,0.3);margin-top:8px;">Complete all tasks to escape. Earn XC along the way!</div>') +
-                    '</div>';
-
-                document.body.appendChild(overlay);
-            }
-
-            function escapeRoomComplete(eventId, taskId) {
-                var evt = _sysEvents.find(function(e) { return e.id === eventId; });
-                if (!evt || !evt.escapeState) return;
-                var currentPlayer = window.activeSession;
-                if (!currentPlayer) return;
-
-                var pState = (evt.escapeState.participants || []).find(function(p) { return p.id === currentPlayer.id; });
-                if (!pState) {
-                    pState = { id: currentPlayer.id, name: currentPlayer.name || currentPlayer.brand, progress: [], escaped: false, startedAt: new Date().toISOString() };
-                    evt.escapeState.participants.push(pState);
-                }
-
-                if (pState.progress.indexOf(taskId) < 0) {
-                    pState.progress.push(taskId);
-                    // Award XC for this task
-                    var task = evt.escapeState.challenge.tasks.find(function(t) { return t.id === taskId; });
-                    if (task && currentPlayer.xc !== Infinity) {
-                        var playerObj = (typeof PLAYERS !== 'undefined') ? PLAYERS.find(function(p) { return p.id === currentPlayer.id; }) : null;
-                        if (playerObj) { playerObj.xc = (playerObj.xc || 0) + (task.xc || 0); }
-                        currentPlayer.xc = (currentPlayer.xc || 0) + (task.xc || 0);
-                    }
-                }
-                saveEvents();
-                if (typeof pflxPlaySfx === 'function') pflxPlaySfx('click');
-
-                // Re-render
-                showEscapeRoomOverlay(evt);
-            }
-
-            function escapeRoomEscape(eventId) {
-                var evt = _sysEvents.find(function(e) { return e.id === eventId; });
-                if (!evt || !evt.escapeState) return;
-                var currentPlayer = window.activeSession;
-                if (!currentPlayer) return;
-
-                var pState = (evt.escapeState.participants || []).find(function(p) { return p.id === currentPlayer.id; });
-                if (pState) pState.escaped = true;
-                saveEvents();
-
-                var overlay = document.getElementById('pflx-escape-room-overlay');
-                if (overlay) overlay.remove();
-                if (typeof pflxPlaySfx === 'function') pflxPlaySfx('click');
-
-                // Victory toast
-                var toast = document.createElement('div');
-                toast.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(10,18,40,0.98);border:2px solid rgba(34,197,94,0.5);border-radius:16px;padding:30px 40px;z-index:10090;text-align:center;font-family:\'Jura\',sans-serif;box-shadow:0 0 60px rgba(34,197,94,0.3);animation:fadeIn 0.3s;';
-                toast.innerHTML = '<div style="font-size:48px;margin-bottom:12px;">🔓</div>' +
-                    '<div style="font-family:\'Orbitron\',sans-serif;font-size:18px;color:#22c55e;letter-spacing:2px;font-weight:900;">ESCAPED!</div>' +
-                    '<div style="font-size:13px;color:rgba(255,255,255,0.6);margin-top:8px;">+' + (evt.escapeState.challenge.totalXC || 150) + ' XC earned</div>';
-                document.body.appendChild(toast);
-                setTimeout(function() { if (toast.parentNode) toast.remove(); }, 4000);
             }
 
             // ── Target Resolution ──
@@ -55596,8 +55433,6 @@
             window.pflxSysEvtTargetChange = sysEvtTargetChange;
             window.pflxGetActiveBoostMultiplier = getActiveBoostMultiplier;
             window.pflxGetActiveEvents = getActiveEvents;
-            window.pflxEscapeRoomComplete = escapeRoomComplete;
-            window.pflxEscapeRoomEscape = escapeRoomEscape;
             window.PFLX_SKINS = PFLX_SKINS;
             window.SYSTEM_EVENT_TYPES = SYSTEM_EVENT_TYPES;
         })();
