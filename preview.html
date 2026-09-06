@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 145;
+      window.PFLX_PATCH   = 146;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -270,7 +270,7 @@
         .pflx-widget-interactive { touch-action: auto; }
         .pflx-widget-rich {
             cursor: default; align-items: stretch; justify-content: flex-start;
-            padding: 8px 8px 6px;
+            padding: 8px 8px 6px; overflow: hidden;
         }
         .pflx-widget-rich .pflx-widget-resize-handle { cursor: nwse-resize; }
         .pflx-widget-lb-tabs { display: flex; gap: 4px; margin-bottom: 4px; }
@@ -61792,10 +61792,14 @@ RESPONSE RULES:
         // only kicks in once a user resizes widgets up enough that they
         // collectively exceed one page's cell budget.
         var PFLX_WIDGET_PAGE_CELLS = 12; // a page holds up to 12 1x1-equivalent cells
+        // PATCH PLATFORM v1.146 -- the plain X-Coin/Badges/Rank stat widgets
+        // were removed per Ennis (screenshot markup, "some widgets are
+        // unnecessary"): X-Coin duplicated the Wallet widget's real balance,
+        // Rank duplicated the always-visible toolbar RANK chip, and Badges
+        // just showed a bare count with nothing else useful. pflxWidgetStatValue()
+        // (below) is now unreachable dead code -- left in place rather than
+        // deleted since a future stat widget could reuse it.
         var PFLX_WIDGET_CATALOG = [
-            { id: 'xcoin',       icon: '\uD83D\uDC8E', label: 'X-COIN',      kind: 'stat',   defaultW: 1, defaultH: 1 },
-            { id: 'badges',      icon: '\uD83C\uDF96\uFE0F', label: 'BADGES',      kind: 'stat',   defaultW: 1, defaultH: 1 },
-            { id: 'rank',        icon: '\uD83D\uDC51', label: 'RANK',        kind: 'stat',   defaultW: 1, defaultH: 1 },
             // PATCH PLATFORM v1.144 -- wallet/leaderboard/sound are now
             // "rich" widgets with real embedded content (see
             // pflxBuildWidgetCardHtml) instead of a plain icon+label
@@ -61805,7 +61809,7 @@ RESPONSE RULES:
             // in-card "view more" button rather than a whole-card click.
             { id: 'wallet',      icon: '\uD83D\uDCB0', label: 'MY WALLET',   kind: 'rich', render: 'wallet',      defaultW: 2, defaultH: 1, action: 'pflxOpenWalletShortcut' },
             { id: 'tasks',       icon: '\uD83D\uDCCB', label: 'MY TASKS',    kind: 'action', defaultW: 2, defaultH: 1, action: 'pflxOpenTasksShortcut' },
-            { id: 'leaderboard', icon: '\uD83C\uDFC6', label: 'LEADERBOARD', kind: 'rich', render: 'leaderboard', defaultW: 2, defaultH: 2, action: 'pflxOpenTierLeaderboard' },
+            { id: 'leaderboard', icon: '\uD83C\uDFC6', label: 'LEADERBOARD', kind: 'rich', render: 'leaderboard', defaultW: 2, defaultH: 3, action: 'pflxOpenTierLeaderboard' },
             { id: 'sound',       icon: '\u266B',  label: 'SOUND',       kind: 'rich', render: 'sound',       defaultW: 2, defaultH: 2, action: 'pflxWidgetOpenSound' }
         ];
         function pflxWidgetCatalogMeta(id) {
@@ -61837,8 +61841,8 @@ RESPONSE RULES:
             (saved || []).forEach(function (entry) {
                 if (!entry || !known[entry.id] || seen[entry.id]) return;
                 seen[entry.id] = true;
-                var w = Math.max(1, Math.min(2, parseInt(entry.w, 10) || known[entry.id].defaultW));
-                var h = Math.max(1, Math.min(2, parseInt(entry.h, 10) || known[entry.id].defaultH));
+                var w = Math.max(1, Math.min(3, parseInt(entry.w, 10) || known[entry.id].defaultW));
+                var h = Math.max(1, Math.min(3, parseInt(entry.h, 10) || known[entry.id].defaultH));
                 var built = { id: entry.id, w: w, h: h };
                 // PATCH PLATFORM v1.144 -- carry through free-floating state
                 // (Ennis: "hides with the blur" -- a detached widget's last
@@ -62139,8 +62143,8 @@ RESPONSE RULES:
                 var dy = ev.clientY - _pflxWidgetDrag.startY;
                 if (_pflxWidgetDrag.mode === 'resize') {
                     var CELL = 76; // approx cell step (width incl. gap) tuned to the grid CSS above
-                    var w = Math.max(1, Math.min(2, _pflxWidgetDrag.startW + Math.round(dx / CELL)));
-                    var h = Math.max(1, Math.min(2, _pflxWidgetDrag.startH + Math.round(dy / CELL)));
+                    var w = Math.max(1, Math.min(3, _pflxWidgetDrag.startW + Math.round(dx / CELL)));
+                    var h = Math.max(1, Math.min(3, _pflxWidgetDrag.startH + Math.round(dy / CELL)));
                     if (w !== entry.w || h !== entry.h) {
                         entry.w = w; entry.h = h;
                         pflxRenderWidgetGrid();
