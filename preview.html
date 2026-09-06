@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 137;
+      window.PFLX_PATCH   = 138;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -15368,7 +15368,8 @@
                         var reserved = {
                             'landing': 1, 'api': 1, 'public': 1, '_next': 1, 'favicon.ico': 1,
                             'preview.html': 1, 'landing.html': 1, 'index.html': 1, 'p': 1,
-                            'admin': 1, 'login': 1, 'settings': 1, 'host': 1, 'logout': 1
+                            'admin': 1, 'login': 1, 'settings': 1, 'host': 1, 'logout': 1,
+                            'xlive': 1  // v1.138 -- dedicated X-Live Mode (only) login route
                         };
                         // Reject if it has a file extension (e.g. .png, .css, .js)
                         var hasExt = /\.[a-z0-9]{2,5}$/i.test(candidate);
@@ -15719,6 +15720,317 @@
                 // Throw a sentinel so the rest of the script block stops executing
                 // (wrapped in try/catch below so it only halts this IIFE, not the rest)
             } catch(e) { console.error('[PFLX Public] fatal', e); }
+        })();
+
+        // ═══════════════════════════════════════════════════════════════
+        // ██  X-LIVE MODE (ONLY) LOGIN  (URL: /xlive)  — v1.138
+        // ═══════════════════════════════════════════════════════════════
+        // A dedicated, restricted login screen for players whose cohort/org
+        // has "X-Live Mode (only)" flagged (v1.136/v1.137). These players
+        // never see the normal Mission Control login — they pick their name
+        // from a roster (filtered to ONLY xliveOnly-flagged players) and
+        // enter their existing PIN on a touch-friendly keypad, then get
+        // handed straight to X-Live with a restricted SSO payload.
+        //
+        // Per SUB_APP_SSO_CONTRACT.md's house rule ("the Platform handles
+        // identity — do not maintain your own login/signup form"), this UI
+        // lives here in preview.html, not inside x-live-check.
+        //
+        // No new auth primitive: reuses the exact same PLAYERS[].pin data
+        // and hmcCohortIsXLiveOnly() cascade (v1.137) that already exist.
+        (function () {
+            try {
+                var path = window.location.pathname.replace(/\/$/, '');
+                if (path !== '/xlive') return;
+                window.__PFLX_XLIVE_MODE__ = true;
+
+                var style = document.createElement('style');
+                style.textContent = 'html,body{background:#05060c !important;margin:0;padding:0;overflow-x:hidden}' +
+                    'body > *{display:none !important}body > #pflx-xlive-login{display:flex !important}' +
+                    '#pflx-xlive-login{min-height:100vh;width:100%;flex-direction:column;align-items:center;justify-content:center;color:#e0e6ff;font-family:"Jura",sans-serif;padding:32px 16px;box-sizing:border-box;}' +
+                    '.pflx-xl-card{width:100%;max-width:420px;background:rgba(15,18,32,0.9);border:1px solid rgba(0,212,255,0.18);border-radius:18px;padding:28px 24px;box-shadow:0 20px 60px rgba(0,0,0,0.5);box-sizing:border-box;}' +
+                    '.pflx-xl-title{font-family:"Orbitron",sans-serif;letter-spacing:4px;font-size:22px;color:var(--cyan,#00d4ff);text-align:center;margin:0 0 2px;}' +
+                    '.pflx-xl-sub{text-align:center;font-size:12px;color:rgba(224,230,255,0.5);margin:0 0 22px;letter-spacing:1px;text-transform:uppercase;}' +
+                    '.pflx-xl-roster-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;max-height:340px;overflow-y:auto;padding-right:2px;}' +
+                    '.pflx-xl-roster-btn{background:rgba(0,212,255,0.06);border:1px solid rgba(0,212,255,0.2);border-radius:10px;color:#e0e6ff;padding:14px 8px;font-family:"Rajdhani",sans-serif;font-size:14px;font-weight:600;cursor:pointer;text-align:center;transition:background .15s ease,border-color .15s ease;}' +
+                    '.pflx-xl-roster-btn:hover{background:rgba(0,212,255,0.14);border-color:rgba(0,212,255,0.4);}' +
+                    '.pflx-xl-empty{text-align:center;font-size:13px;color:rgba(224,230,255,0.5);padding:20px 10px;line-height:1.6;}' +
+                    '.pflx-xl-selected-name{text-align:center;font-family:"Orbitron",sans-serif;font-size:16px;color:var(--cyan,#00d4ff);margin-bottom:18px;letter-spacing:1px;}' +
+                    '.pflx-xl-pin-dots{display:flex;justify-content:center;gap:14px;margin-bottom:22px;}' +
+                    '.pflx-xl-pin-dot{width:16px;height:16px;border-radius:50%;border:2px solid rgba(0,212,255,0.4);background:transparent;transition:background .12s ease;}' +
+                    '.pflx-xl-pin-dot.filled{background:var(--cyan,#00d4ff);border-color:var(--cyan,#00d4ff);}' +
+                    '.pflx-xl-pin-dot.shake-error{border-color:#ef4444;}' +
+                    '.pflx-xl-keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;}' +
+                    '.pflx-xl-key{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:12px;color:#e0e6ff;font-family:"Share Tech Mono",monospace;font-size:22px;font-weight:700;padding:16px 0;cursor:pointer;transition:background .12s ease;}' +
+                    '.pflx-xl-key:hover{background:rgba(255,255,255,0.09);}' +
+                    '.pflx-xl-key.pflx-xl-key-clear{font-size:13px;font-family:"Rajdhani",sans-serif;color:#ef4444;}' +
+                    '.pflx-xl-key.pflx-xl-key-back{font-size:16px;color:#8a92b0;}' +
+                    '.pflx-xl-link-btn{display:block;width:100%;text-align:center;background:none;border:none;color:rgba(0,212,255,0.7);font-size:12px;font-family:"Rajdhani",sans-serif;cursor:pointer;padding:6px;text-decoration:underline;}' +
+                    '.pflx-xl-error{text-align:center;font-size:12px;color:#ef4444;margin-top:10px;min-height:16px;font-family:"Rajdhani",sans-serif;}' +
+                    '.pflx-xl-success{text-align:center;font-size:14px;color:#22c55e;font-family:"Orbitron",sans-serif;letter-spacing:1px;padding:30px 0;}' +
+                    '.pflx-xl-footer{margin-top:24px;}' +
+                    '@keyframes pflxXlShake{10%,90%{transform:translateX(-1px);}20%,80%{transform:translateX(2px);}30%,50%,70%{transform:translateX(-4px);}40%,60%{transform:translateX(4px);}}' +
+                    '.pflx-xl-shake{animation:pflxXlShake .4s;}';
+                (document.head || document.documentElement).appendChild(style);
+
+                // Stub the same noisy init functions Public Portfolio Mode
+                // already stubs, so the full shell never boots behind this.
+                var noop = function () {};
+                window.initLogin = noop;
+                window.initVideoBackground = noop;
+                window.initBackgroundCanvas = noop;
+                window.initLoginParticles = noop;
+                window.seInit = noop;
+                window.sePlayLoginMusic = noop;
+                window.pdInitSliders = noop;
+                window.initPlayerSettingsListeners = noop;
+
+                var PFLX_XL_REMEMBER_KEY = 'pflx_xlive_remember_v1';
+
+                // ── Pure, unit-testable helpers (no DOM) ──
+
+                // Filters ANY player array down to the ones actually
+                // eligible for the /xlive door: real player-role accounts,
+                // not soft-deleted/godTier, with a PIN set, whose cohort (or
+                // that cohort's parent org, via v1.136/v1.137's cascade) is
+                // flagged X-Live Mode (only).
+                window.pflxXLiveFilterRoster = function (players) {
+                    try {
+                        return (players || []).filter(function (p) {
+                            if (!p || p.godTier) return false;
+                            if (p.role && p.role !== 'player') return false;
+                            if (!p.pin) return false;
+                            var cohorts = Array.isArray(p.cohorts) ? p.cohorts.slice()
+                                : String(p.cohort || '').split(/[,;]/).map(function (s) { return s.trim(); }).filter(Boolean);
+                            if (!cohorts.length) cohorts = ['PlayerPool'];
+                            return cohorts.some(function (c) {
+                                return typeof hmcCohortIsXLiveOnly === 'function' && hmcCohortIsXLiveOnly(c);
+                            });
+                        });
+                    } catch (e) { return []; }
+                };
+
+                // PIN match — kept as its own function (rather than an
+                // inline ===) so it's independently testable and so a
+                // future PIN-format change (e.g. non-numeric) has one place
+                // to update.
+                window.pflxXLivePinMatches = function (player, buffer) {
+                    return !!(player && player.pin != null && String(player.pin) === String(buffer));
+                };
+
+                // Builds the restricted SSO handoff URL. Deliberately NOT
+                // routed through the shared buildAppURL() (which reads
+                // window.activeSession and computes Mission-Control-level
+                // allowedApps) — an /xlive login never creates a normal MC
+                // session, so allowedApps is empty here on purpose, and a
+                // new xliveOnly=true flag tells X-Live (PATCH X-LIVE v0.17)
+                // to restrict itself to the bundled Vault Rush mini-game
+                // and hide the Battle Arena dead-end card.
+                window.pflxXLiveBuildRedirectURL = function (player, baseUrl) {
+                    var params = new URLSearchParams({
+                        sso: 'pflx',
+                        user: player.name || player.brand || 'Player',
+                        brand: player.brand || player.name || 'Player',
+                        xc: String(player.xc || 0),
+                        pin: player.pin || '',
+                        role: player.role || 'Student',
+                        cohort: player.cohort || 'PlayerPool',
+                        tier: 'novice',
+                        allowedApps: '',
+                        autoselect: 'true',
+                        xliveOnly: 'true'
+                    });
+                    return baseUrl + '?' + params.toString();
+                };
+
+                window.pflxXLiveGetRemembered = function () {
+                    try {
+                        var raw = localStorage.getItem(PFLX_XL_REMEMBER_KEY);
+                        if (!raw) return null;
+                        var saved = JSON.parse(raw);
+                        return (saved && saved.id) ? saved : null;
+                    } catch (e) { return null; }
+                };
+                window.pflxXLiveSetRemembered = function (playerId) {
+                    try { localStorage.setItem(PFLX_XL_REMEMBER_KEY, JSON.stringify({ id: playerId, ts: Date.now() })); } catch (e) {}
+                };
+                window.pflxXLiveClearRemembered = function () {
+                    try { localStorage.removeItem(PFLX_XL_REMEMBER_KEY); } catch (e) {}
+                };
+
+                // ── DOM wiring ──
+                function escapeHtmlXL(s) {
+                    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                }
+
+                var pinBuffer = '';
+                var selectedPlayer = null;
+
+                function renderPinDots(root) {
+                    var dotsEl = root.querySelector('#pflx-xl-pin-dots');
+                    if (!dotsEl) return;
+                    dotsEl.innerHTML = '';
+                    for (var i = 0; i < 4; i++) {
+                        var d = document.createElement('div');
+                        d.className = 'pflx-xl-pin-dot' + (i < pinBuffer.length ? ' filled' : '');
+                        dotsEl.appendChild(d);
+                    }
+                }
+
+                function showRosterStep(root) {
+                    pinBuffer = '';
+                    selectedPlayer = null;
+                    root.querySelector('#pflx-xl-step-roster').style.display = '';
+                    root.querySelector('#pflx-xl-step-pin').style.display = 'none';
+                    root.querySelector('#pflx-xl-error').textContent = '';
+                }
+
+                function showPinStep(root, player) {
+                    selectedPlayer = player;
+                    pinBuffer = '';
+                    root.querySelector('#pflx-xl-step-roster').style.display = 'none';
+                    var pinStep = root.querySelector('#pflx-xl-step-pin');
+                    pinStep.style.display = '';
+                    root.querySelector('#pflx-xl-selected-name').textContent = player.name || player.brand || 'Player';
+                    root.querySelector('#pflx-xl-error').textContent = '';
+                    renderPinDots(root);
+                }
+
+                function attemptLogin(root) {
+                    if (!selectedPlayer) return;
+                    if (window.pflxXLivePinMatches(selectedPlayer, pinBuffer)) {
+                        window.pflxXLiveSetRemembered(selectedPlayer.id || selectedPlayer.brand);
+                        var pinStep = root.querySelector('#pflx-xl-step-pin');
+                        pinStep.innerHTML = '';
+                        var ok = document.createElement('div');
+                        ok.className = 'pflx-xl-success';
+                        ok.textContent = 'Welcome, ' + (selectedPlayer.name || selectedPlayer.brand) + '! Loading X-Live…';
+                        pinStep.appendChild(ok);
+                        var baseUrl = (typeof APP_BASE_URLS !== 'undefined' && APP_BASE_URLS.lite) ? APP_BASE_URLS.lite : 'https://thetomorrowteacher.github.io/x-live';
+                        var url = window.pflxXLiveBuildRedirectURL(selectedPlayer, baseUrl);
+                        setTimeout(function () { window.location.href = url; }, 500);
+                    } else {
+                        pinBuffer = '';
+                        renderPinDots(root);
+                        var dotsEl = root.querySelector('#pflx-xl-pin-dots');
+                        dotsEl.classList.add('pflx-xl-shake');
+                        setTimeout(function () { dotsEl.classList.remove('pflx-xl-shake'); }, 400);
+                        root.querySelector('#pflx-xl-error').textContent = 'Incorrect PIN — try again.';
+                    }
+                }
+
+                function renderXLiveLogin() {
+                    var root = document.getElementById('pflx-xlive-login');
+                    if (!root) return;
+
+                    var roster = window.pflxXLiveFilterRoster(typeof PLAYERS !== 'undefined' ? PLAYERS : []);
+
+                    root.innerHTML =
+                        '<div class="pflx-xl-card">' +
+                            '<h1 class="pflx-xl-title">X-LIVE</h1>' +
+                            '<p class="pflx-xl-sub">Live Class Login</p>' +
+                            '<div id="pflx-xl-step-roster">' +
+                                '<div class="pflx-xl-roster-grid" id="pflx-xl-roster-grid"></div>' +
+                            '</div>' +
+                            '<div id="pflx-xl-step-pin" style="display:none;">' +
+                                '<div class="pflx-xl-selected-name" id="pflx-xl-selected-name"></div>' +
+                                '<div class="pflx-xl-pin-dots" id="pflx-xl-pin-dots"></div>' +
+                                '<div class="pflx-xl-keypad" id="pflx-xl-keypad"></div>' +
+                                '<button type="button" class="pflx-xl-link-btn" id="pflx-xl-not-you">Not you? Pick someone else</button>' +
+                            '</div>' +
+                            '<div class="pflx-xl-error" id="pflx-xl-error"></div>' +
+                        '</div>' +
+                        '<div class="pflx-xl-footer login-credit-footer">' +
+                            '<a class="ttt-credit" href="https://www.thetomorrowteacher.org" target="_blank" rel="noopener noreferrer" title="The Tomorrow Teacher">' +
+                                '<img src="public/ttt-logo-white-v2.png" alt="The Tomorrow Teacher" class="ttt-credit-logo">' +
+                                '<span class="ttt-credit-label">Production</span>' +
+                            '</a>' +
+                            '<div class="login-version" data-pflx-version="login"></div>' +
+                        '</div>';
+
+                    try { if (typeof window.pflxApplyVersion === 'function') window.pflxApplyVersion(); } catch (e) {}
+
+                    var grid = root.querySelector('#pflx-xl-roster-grid');
+                    if (!roster.length) {
+                        grid.innerHTML = '';
+                        var empty = document.createElement('div');
+                        empty.className = 'pflx-xl-empty';
+                        empty.textContent = 'No X-Live classes are set up yet. Ask your teacher.';
+                        grid.appendChild(empty);
+                    } else {
+                        grid.innerHTML = '';
+                        roster.forEach(function (p) {
+                            var btn = document.createElement('button');
+                            btn.type = 'button';
+                            btn.className = 'pflx-xl-roster-btn';
+                            btn.textContent = p.name || p.brand || 'Player';
+                            btn.addEventListener('click', function () { showPinStep(root, p); });
+                            grid.appendChild(btn);
+                        });
+                    }
+
+                    // Keypad
+                    var keypad = root.querySelector('#pflx-xl-keypad');
+                    keypad.innerHTML = '';
+                    ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'clear', '0', 'back'].forEach(function (label) {
+                        var key = document.createElement('button');
+                        key.type = 'button';
+                        if (label === 'clear') {
+                            key.className = 'pflx-xl-key pflx-xl-key-clear';
+                            key.textContent = 'CLEAR';
+                            key.addEventListener('click', function () { pinBuffer = ''; renderPinDots(root); root.querySelector('#pflx-xl-error').textContent = ''; });
+                        } else if (label === 'back') {
+                            key.className = 'pflx-xl-key pflx-xl-key-back';
+                            key.textContent = '⌫';
+                            key.addEventListener('click', function () { pinBuffer = pinBuffer.slice(0, -1); renderPinDots(root); });
+                        } else {
+                            key.className = 'pflx-xl-key';
+                            key.textContent = label;
+                            key.addEventListener('click', function () {
+                                if (pinBuffer.length >= 4) return;
+                                pinBuffer += label;
+                                renderPinDots(root);
+                                if (pinBuffer.length === 4) attemptLogin(root);
+                            });
+                        }
+                        keypad.appendChild(key);
+                    });
+
+                    root.querySelector('#pflx-xl-not-you').addEventListener('click', function () {
+                        window.pflxXLiveClearRemembered();
+                        showRosterStep(root);
+                    });
+
+                    // Remember-me — "remember the last player on this device"
+                    // (Ennis's explicit choice): jump straight to the PIN pad
+                    // for that player, but ALWAYS still require the PIN.
+                    var remembered = window.pflxXLiveGetRemembered();
+                    if (remembered && remembered.id) {
+                        var match = roster.find(function (p) { return (p.id || p.brand) === remembered.id; });
+                        if (match) { showPinStep(root, match); return; }
+                    }
+                    showRosterStep(root);
+                }
+
+                window.addEventListener('DOMContentLoaded', function () {
+                    if (!document.getElementById('pflx-xlive-login')) {
+                        var pre = document.createElement('div');
+                        pre.id = 'pflx-xlive-login';
+                        document.body.appendChild(pre);
+                    }
+                    renderXLiveLogin();
+                    // Re-render once the cloud roster refresh lands, same as
+                    // the normal login's populateBrandSelect() re-run, so a
+                    // player who claimed on another device still shows up.
+                    try {
+                        if (typeof window.pflxIdentityFetchRosterFromCloud === 'function') {
+                            window.pflxIdentityFetchRosterFromCloud().then(function () {
+                                try { renderXLiveLogin(); } catch (e) {}
+                            });
+                        }
+                    } catch (e) {}
+                });
+            } catch (e) { console.error('[PFLX XLive] fatal', e); }
         })();
 
         // Short-circuit: if we're in public portfolio mode, prevent the rest of
