@@ -52247,6 +52247,24 @@
             return { id: 'guest-' + Date.now(), name: 'Guest', cohort: null, pathway: null, xc: 0 };
         }
 
+        // PATCH PLATFORM v1.141 -- redirects the Console's own native Live
+        // Session entry points to X-Live (see Handoff for the full picture).
+        // navigateTo('lite') switches to the X-Live iframe; mcBroadcastToApps
+        // fans a 'pflx_open_session' event out to it (and every other sub-app
+        // iframe, which will just ignore a type they don't recognize). Retried
+        // for ~4s since the first sends can land before X-Live's own message
+        // listener has mounted on a fresh navigation.
+        function pflxOpenXLiveSessionByCode(code) {
+            if (typeof navigateTo === 'function') navigateTo('lite');
+            var tries = 0;
+            var iv = setInterval(function () {
+                tries++;
+                if (typeof mcBroadcastToApps === 'function') mcBroadcastToApps('open_session', { code: code });
+                if (tries >= 10) clearInterval(iv);
+            }, 400);
+        }
+        window.pflxOpenXLiveSessionByCode = pflxOpenXLiveSessionByCode;
+
         function pflxJoinSessionByCode(code) {
             if (!code) return { ok: false, error: 'Code required' };
             code = (code + '').toUpperCase().trim();
@@ -53754,23 +53772,12 @@
             });
             listEl.innerHTML = html;
 
-            // Click to join
+            // Click to join -- opens in X-Live (PATCH PLATFORM v1.141)
             listEl.querySelectorAll('.pflx-active-session-item').forEach(function (item) {
               item.onclick = function () {
                 var code = item.getAttribute('data-session-code');
                 if (!code) return;
-                if (window.pflxRole === 'host') {
-                  // Host clicks just navigate to sessions tab
-                  if (typeof mcNav === 'function') mcNav('sessions');
-                  return;
-                }
-                var result = pflxJoinSessionByCode(code);
-                if (result && result.ok) {
-                  if (typeof pflxToast === 'function') pflxToast('Joined session!', 'success');
-                  if (typeof pflxPlaySfx === 'function') pflxPlaySfx('confirm');
-                } else {
-                  if (typeof pflxToast === 'function') pflxToast((result && result.error) || 'Could not join', 'error');
-                }
+                pflxOpenXLiveSessionByCode(code);
               };
             });
           }
@@ -65377,7 +65384,7 @@ RESPONSE RULES:
                     body.innerHTML =
                         '<div style="padding:12px;text-align:center;font-family:\'Jura\',sans-serif;">' +
                             '<div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:8px;">NO ACTIVE SESSION</div>' +
-                            '<button class="pflx-pip-send" onclick="if(typeof mcNav===\'function\'){navigateTo(\'mission-control\');setTimeout(function(){mcNav(\'livesession\');},300);}" style="width:100%;font-size:12px;">Open Live Session Panel</button>' +
+                            '<button class="pflx-pip-send" onclick="if(typeof navigateTo===\'function\'){navigateTo(\'lite\');}" style="width:100%;font-size:12px;">Open Live Session Panel</button>' +
                         '</div>';
                     return;
                 }
