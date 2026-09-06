@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 135;
+      window.PFLX_PATCH   = 136;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -13604,6 +13604,19 @@
                                     </div>
                                 </div>
 
+                                <!-- ── X-LIVE MODE (ONLY) ── v1.136, Master-tier only.
+                                     Restricts every player in this cohort to the /xlive
+                                     login + bundled X-Live experience. Row is hidden by
+                                     loadCohortSettings() for non-master hosts. -->
+                                <div id="cohort-xliveonly-row" style="margin-top:14px;padding:14px;border:1px solid rgba(239,68,68,0.3);border-radius:10px;background:rgba(239,68,68,0.05);">
+                                    <div style="font-family:'Orbitron',sans-serif;font-size:11px;letter-spacing:1.5px;color:#ef4444;margin-bottom:4px;">&#x1F517; X-LIVE MODE (ONLY)</div>
+                                    <p style="font-size:11px;color:#8a92b0;margin:0 0 10px;">Restricts this cohort's players to the /xlive login and the bundled X-Live experience only. Overrides the organization's setting for this cohort.</p>
+                                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:#e0e6ff;">
+                                        <input type="checkbox" id="cohort-feat-xliveOnly" onchange="updateCohortXLiveOnly(this.checked)">
+                                        X-Live Mode (only) for this cohort
+                                    </label>
+                                </div>
+
                                 <!-- ── EVO RANK BYPASS ── platform-wide per-app thresholds.
                                      A player whose Evolution Rank meets the threshold passes
                                      a cohort deny for that app — maturity earns access. -->
@@ -17500,6 +17513,18 @@
                             }).join('') +
                         '</div>' +
                     '</div>' +
+                    // X-Live Mode (only) -- v1.136, Master-tier only. Restricts
+                    // every player in this org to the /xlive login + bundled
+                    // X-Live experience; normal Mission Control login blocked.
+                    (window.pflxCan && !window.pflxCan('manage.xliveOnly') ? '' :
+                    '<div style="margin-bottom:14px;background:rgba(239,68,68,0.04);border:1px solid rgba(239,68,68,0.25);border-radius:10px;padding:14px;">' +
+                        '<label style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#ef4444;font-weight:700;display:block;margin-bottom:4px;">&#x1F517; X-Live Mode (only) — Master Only</label>' +
+                        '<p style="font-size:11px;color:rgba(255,255,255,0.4);margin:0 0 10px;font-family:Jura,sans-serif;">Restricts every player in this organization to the /xlive login and the bundled X-Live experience only — the normal Mission Control login is blocked for them. Individual cohorts can override in <b style="color:var(--cyan);">Cohort Manager</b>.</p>' +
+                        '<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:6px;cursor:pointer;font-size:12px;color:#e0e6ff;max-width:280px;">' +
+                            '<input type="checkbox" id="org-edit-xliveonly"' + (org.xliveOnly ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:#ef4444;cursor:pointer;">' +
+                            'X-Live Mode (only)' +
+                        '</label>' +
+                    '</div>') +
                     // Organization Plan Features (Rate Card) — auto-filled by
                     // tier above, always manually overridable per-org.
                     '<div style="margin-bottom:14px;background:rgba(0,212,255,0.04);border:1px solid rgba(0,212,255,0.2);border-radius:10px;padding:14px;">' +
@@ -17576,6 +17601,13 @@
             document.querySelectorAll('#pflx-org-editor-modal input[data-app]').forEach(function (cb) {
                 org.apps[cb.getAttribute('data-app')] = !!cb.checked;
             });
+            // X-Live Mode (only) -- v1.136, master-gated org-wide restriction.
+            // The checkbox only exists in the DOM when pflxCan('manage.xliveOnly')
+            // passed at render time, so a missing element here just means the
+            // host lacks the capability -- leave org.xliveOnly untouched rather
+            // than silently clearing a value a Master set earlier.
+            var xliveOnlyEl = document.getElementById('org-edit-xliveonly');
+            if (xliveOnlyEl) org.xliveOnly = !!xliveOnlyEl.checked;
             // Feature flags
             document.querySelectorAll('#pflx-org-editor-modal input[data-feat]').forEach(function (cb) {
                 org[cb.getAttribute('data-feat')] = !!cb.checked;
@@ -20142,7 +20174,7 @@
             } catch (e) {}
 
             // Feature toggles — set defaults if not yet defined
-            const defaults = { pathwayFull: true, pathwaySubmit: true, pathwayLeaderboard: true, arenaFull: true, arenaWager: true, arenaTournament: true, specialChallenges: false, sponsoredProjects: false, internships: false, exclusiveRewards: false };
+            const defaults = { pathwayFull: true, pathwaySubmit: true, pathwayLeaderboard: true, arenaFull: true, arenaWager: true, arenaTournament: true, specialChallenges: false, sponsoredProjects: false, internships: false, exclusiveRewards: false, xliveOnly: false };
             // Premium cohorts get premium features on by default
             if (c.type === 'premium' || c.type === 'host') {
                 defaults.specialChallenges = true;
@@ -20155,6 +20187,12 @@
                 const el = document.getElementById('cohort-feat-' + feat);
                 if (el) el.checked = c[feat];
             });
+
+            // X-Live Mode (only) row -- v1.136, master-tier only. Hidden
+            // entirely from non-master hosts rather than just disabled, so
+            // an Admin/Cohost never sees a control they can't use.
+            var xliveOnlyRow = document.getElementById('cohort-xliveonly-row');
+            if (xliveOnlyRow) xliveOnlyRow.style.display = (window.pflxCan && !window.pflxCan('manage.xliveOnly')) ? 'none' : '';
 
             // Show/hide feature groups based on app access
             document.getElementById('feature-group-pathways').style.display = c.apps.pathways ? 'block' : 'none';
@@ -20216,6 +20254,23 @@
             try { pflxCloudSyncCohortOverrides(); } catch (e) {}
         }
 
+        // ── X-Live Mode (only), cohort-level — v1.136 ──
+        // Master-tier gated setter, separate from the generic
+        // updateCohortFeature() because this flips access to an entire
+        // login mode, not a cosmetic feature flag -- a non-master host
+        // flipping this (stale cached UI, dev console, etc.) must be
+        // blocked and reverted, not silently saved.
+        function updateCohortXLiveOnly(val) {
+            if (window.pflxCan && !window.pflxCan('manage.xliveOnly')) {
+                var el = document.getElementById('cohort-feat-xliveOnly');
+                if (el) el.checked = !val;
+                if (typeof pflxToast === 'function') pflxToast('Only Master hosts can change X-Live Mode (only)', 'warn');
+                return;
+            }
+            updateCohortFeature('xliveOnly', val);
+        }
+        window.updateCohortXLiveOnly = updateCohortXLiveOnly;
+
         // ─────────────────────────────────────────────────────────────────
         // Cohort settings persistence
         // ─────────────────────────────────────────────────────────────────
@@ -20246,7 +20301,8 @@
                     out[k] = {
                         apps: c.apps || {},
                         pathwayFull: !!c.pathwayFull, arenaFull: !!c.arenaFull,
-                        seasons: !!c.seasons, projects: !!c.projects, internships: !!c.internships
+                        seasons: !!c.seasons, projects: !!c.projects, internships: !!c.internships,
+                        xliveOnly: !!c.xliveOnly
                     };
                 });
                 try { out.__rankBypass = window.PFLX_RANK_BYPASS_GET(); } catch (e) {}
@@ -20509,6 +20565,39 @@
             } catch (e) { console.warn('[access] gate error (fail-open)', e); return true; }
         }
         window.pflxPlayerCanAccessApp = pflxPlayerCanAccessApp;
+
+        // ── X-Live Mode (only) resolver — v1.136 ──
+        // Mirrors pflxPlayerCanAccessApp's org->cohort cascade, but with
+        // inverted polarity: instead of "deny wins", here "xliveOnly wins".
+        // Any cohort a player belongs to (or its parent org) with
+        // xliveOnly=true forces the player into X-Live-only mode, even if
+        // another of their cohorts says false. Hosts/admins/masters are
+        // never restricted by this -- it only ever applies to players.
+        function pflxPlayerIsXLiveOnly() {
+            try {
+                var s = window.activeSession || {};
+                var role = String(s.role || '').toLowerCase();
+                if (/admin|host|teacher|instructor|master/.test(role)) return false;
+                var cohorts = [];
+                if (Array.isArray(s.cohorts)) cohorts = s.cohorts.slice();
+                else if (s.cohort) cohorts = String(s.cohort).split(/\s*,\s*/);
+                if (!cohorts.length) cohorts = ['PlayerPool'];
+                function resolveCohortXLiveOnly(cohortName) {
+                    var ov = pflxOverrideByName(cohortName);
+                    if (ov && ov.xliveOnly === true) return true;
+                    var c = pflxCohortByName(cohortName) || COHORTS['PlayerPool'];
+                    if (c && c.xliveOnly === true) return true;
+                    var orgKey = c && c.org;
+                    if (orgKey && ORGANIZATIONS[orgKey] && ORGANIZATIONS[orgKey].xliveOnly === true) return true;
+                    return false;
+                }
+                for (var i = 0; i < cohorts.length; i++) {
+                    if (resolveCohortXLiveOnly(cohorts[i])) return true;
+                }
+                return false;
+            } catch (e) { console.warn('[xlive] restriction-gate error (fail-open to false)', e); return false; }
+        }
+        window.pflxPlayerIsXLiveOnly = pflxPlayerIsXLiveOnly;
 
         // ─────────────────────────────────────────────────────────────────
         // Access-Locked modal — shown when a player taps a toolbar app
@@ -71006,6 +71095,7 @@ RESPONSE RULES:
                 'manage.project': ['master', 'admin', 'cohost', 'instructor', 'guest'],
                 'manage.nodes':   ['master', 'admin', 'cohost', 'instructor', 'guest'],
                 'manage.players': ['master', 'admin', 'cohost', 'instructor'],
+                'manage.xliveOnly': ['master'],                                        // v1.136 -- org/cohort "X-Live Mode (only)" restriction flag
                 'assign.tiers':   ['master', 'admin']                                  // who may promote/scope other hosts
             };
 
