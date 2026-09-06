@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 136;
+      window.PFLX_PATCH   = 137;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -12804,6 +12804,9 @@
                                         </select>
                                     </div>
                                 </div>
+                                <!-- X-Live Mode (only) roster banner -- v1.137, shown only when
+                                     the selected cohort filter is flagged xliveOnly. -->
+                                <div id="hmc-player-xlive-banner" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:10px 14px;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.25);border-radius:8px;color:#e0e6ff;font-size:12px;font-family:'Rajdhani',sans-serif;"></div>
                                 <!-- Player Table -->
                                 <div style="overflow-x: auto; border-radius: 8px; border: 1px solid rgba(0,240,255,0.08);">
                                     <table class="hmc-player-table" id="hmc-player-table">
@@ -12815,6 +12818,7 @@
                                                 <th>XC</th>
                                                 <th>Rank</th>
                                                 <th>Status</th>
+                                                <th>PIN</th>
                                                 <th>Actions</th>
                                             </tr>
                                         </thead>
@@ -71881,6 +71885,20 @@ RESPONSE RULES:
                 });
             }
 
+            // X-Live Mode (only) roster banner -- v1.137. Lets a host land on
+            // a flagged cohort's roster and immediately see (and reveal) the
+            // PINs their players need to log in at /xlive.
+            var xliveBanner = document.getElementById('hmc-player-xlive-banner');
+            if (xliveBanner) {
+                var bannerIsXLive = cohortFilter !== 'all' && typeof hmcCohortIsXLiveOnly === 'function' && hmcCohortIsXLiveOnly(cohortFilter);
+                xliveBanner.style.display = bannerIsXLive ? 'flex' : 'none';
+                if (bannerIsXLive) {
+                    xliveBanner.innerHTML = '&#x1F517; <b>' + String(cohortFilter).replace(/</g, '&lt;') + '</b> is X-Live Mode (only) &mdash; these players log in at <code>/xlive</code> with their PIN, not email/password.' +
+                        ' <button class="hmc-btn-sm hmc-btn-cyan" style="margin-left:auto;" onclick="hmcRevealAllPinsInView()">Reveal All PINs</button>' +
+                        ' <button class="hmc-btn-sm hmc-btn-ghost" onclick="hmcHidePinsInView()">Hide All</button>';
+                }
+            }
+
             // Show every account that isn't a soft-deleted entry
             var rows = (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) ? PLAYERS.slice() : [];
             // Multi-cohort filter — match if filter appears in player's cohorts list/string
@@ -71928,6 +71946,14 @@ RESPONSE RULES:
                     '<td style="font-family:Share Tech Mono,monospace;color:var(--gold);">' + ((p.xc || 0).toLocaleString ? (p.xc || 0).toLocaleString() : (p.xc || 0)) + '</td>' +
                     '<td>' + (rank.icon || '') + ' ' + (rank.name || '—') + '</td>' +
                     '<td>' + statusHtml + '</td>' +
+                    '<td style="font-family:Share Tech Mono,monospace;letter-spacing:2px;white-space:nowrap;">' +
+                        (function () {
+                            var revealed = !!(window._hmcPinRevealed && window._hmcPinRevealed[p.id]);
+                            var shown = p.pin ? (revealed ? p.pin : '&#8226;&#8226;&#8226;&#8226;') : '&mdash;';
+                            var toggleBtn = p.pin ? (' <button class="hmc-btn-sm hmc-btn-ghost" style="padding:2px 8px;font-size:10px;" onclick="event.stopPropagation();hmcTogglePinCell(\'' + p.id + '\')">' + (revealed ? 'Hide' : 'Show') + '</button>') : '';
+                            return shown + toggleBtn;
+                        })() +
+                    '</td>' +
                     '<td>' +
                         '<button class="hmc-btn-sm hmc-btn-green" onclick="event.stopPropagation();hmcAwardXC(\'' + p.id + '\')">+XC</button> ' +
                         '<button class="hmc-btn-sm hmc-btn-ghost" onclick="event.stopPropagation();hmcEditPlayer(\'' + p.id + '\')">Edit</button>' +
@@ -71937,11 +71963,52 @@ RESPONSE RULES:
 
             var countEl = document.getElementById('hmc-player-count');
             if (countEl) countEl.textContent = rows.length + ' accounts';
+            window._hmcLastRenderedIds = rows.map(function (p) { return p.id; }); // v1.137 -- for Reveal/Hide All PINs
             injectButtons();
         }
         window.hmcRenderPlayers = rebuildPlayerTable;
         // Expose old in case anything calls it directly
         window.hmcRenderPlayersOriginal = origRender;
+
+        // ── X-Live Mode (only) roster helpers -- v1.137 ──
+        // hmcCohortIsXLiveOnly mirrors pflxPlayerIsXLiveOnly's org->cohort
+        // cascade (v1.136) but takes a cohort NAME directly rather than
+        // resolving it from a player session -- this runs from the host's
+        // admin panel, not from inside a player's session.
+        function hmcCohortIsXLiveOnly(cohortName) {
+            try {
+                if (!cohortName || cohortName === 'all') return false;
+                var ov = (typeof pflxOverrideByName === 'function') ? pflxOverrideByName(cohortName) : null;
+                if (ov && ov.xliveOnly === true) return true;
+                var c = (typeof pflxCohortByName === 'function') ? pflxCohortByName(cohortName) : (typeof COHORTS !== 'undefined' && COHORTS[cohortName]);
+                if (c && c.xliveOnly === true) return true;
+                var orgKey = c && c.org;
+                if (orgKey && typeof ORGANIZATIONS !== 'undefined' && ORGANIZATIONS[orgKey] && ORGANIZATIONS[orgKey].xliveOnly === true) return true;
+                return false;
+            } catch (e) { return false; }
+        }
+        window.hmcCohortIsXLiveOnly = hmcCohortIsXLiveOnly;
+
+        function hmcTogglePinCell(id) {
+            window._hmcPinRevealed = window._hmcPinRevealed || {};
+            window._hmcPinRevealed[id] = !window._hmcPinRevealed[id];
+            rebuildPlayerTable();
+        }
+        window.hmcTogglePinCell = hmcTogglePinCell;
+
+        function hmcRevealAllPinsInView() {
+            window._hmcPinRevealed = window._hmcPinRevealed || {};
+            (window._hmcLastRenderedIds || []).forEach(function (id) { window._hmcPinRevealed[id] = true; });
+            rebuildPlayerTable();
+        }
+        window.hmcRevealAllPinsInView = hmcRevealAllPinsInView;
+
+        function hmcHidePinsInView() {
+            window._hmcPinRevealed = window._hmcPinRevealed || {};
+            (window._hmcLastRenderedIds || []).forEach(function (id) { window._hmcPinRevealed[id] = false; });
+            rebuildPlayerTable();
+        }
+        window.hmcHidePinsInView = hmcHidePinsInView;
 
         // ── Activity hooks: log key events on the active player ──
         function hookActivity() {
