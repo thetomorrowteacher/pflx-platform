@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 140;
+      window.PFLX_PATCH   = 142;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -190,6 +190,65 @@
             --secondary: rgba(100, 120, 150, 0.3);
             --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
+
+        /* PATCH PLATFORM v1.142 -- Profile Widget Dropdown: glass/blur
+           backdrop + a customizable widget grid inside the profile
+           dropdown (drag to reorder, drag the corner handle to resize,
+           page arrows/dots when widgets overflow one page). Widget cards
+           are built on the same --cyan/--gold/--border-glow/--dark-panel
+           variables every Reality Warp skin above already redefines, so
+           each skin gets a distinct widget look for free -- no per-skin
+           widget CSS needed. */
+        .pflx-dd-backdrop {
+            position: fixed; inset: 0; z-index: 99998;
+            background: rgba(5,8,16,0); backdrop-filter: blur(0px); -webkit-backdrop-filter: blur(0px);
+            pointer-events: none; opacity: 1;
+            transition: background .32s ease, backdrop-filter .32s ease, -webkit-backdrop-filter .32s ease;
+            display: none;
+        }
+        .pflx-dd-backdrop.pflx-dd-backdrop-on {
+            background: rgba(5,8,16,0.55); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+            pointer-events: auto;
+        }
+        #pflx-profile-dropdown.pflx-dd-open {
+            opacity: 1 !important;
+            transform: translateY(0) scale(1) !important;
+        }
+        .pflx-widget-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            grid-auto-rows: 68px;
+            grid-auto-flow: dense;
+            gap: 8px;
+        }
+        .pflx-widget {
+            position: relative;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            background: linear-gradient(150deg, rgba(255,255,255,0.05), rgba(255,255,255,0.015));
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 2px; padding: 6px; cursor: grab; user-select: none; -webkit-user-select: none;
+            transition: border-color .15s, box-shadow .15s;
+            touch-action: none;
+        }
+        .pflx-widget:hover { border-color: var(--border-glow); box-shadow: 0 0 14px var(--border-glow); }
+        .pflx-widget.pflx-widget-dragging { cursor: grabbing; opacity: 0.55; z-index: 5; }
+        .pflx-widget-resize-handle {
+            position: absolute; right: 3px; bottom: 3px; width: 13px; height: 13px;
+            cursor: nwse-resize; opacity: 0.35; touch-action: none;
+            background: linear-gradient(135deg, transparent 50%, var(--border-glow) 50%);
+            border-radius: 0 0 4px 0;
+        }
+        .pflx-widget-resize-handle:hover { opacity: 0.85; }
+        .pflx-widget-icon { font-size: 15px; line-height: 1; }
+        .pflx-widget-value { font-family: monospace; font-weight: 900; color: var(--cyan); }
+        .pflx-widget-label { font-size: 8px; font-weight: 700; letter-spacing: 0.08em; color: rgba(255,255,255,0.45); text-align: center; }
+        .pflx-widget-page-dots { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 10px; }
+        .pflx-widget-page-dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,0.2); cursor: pointer; }
+        .pflx-widget-page-dot.on { background: var(--cyan); box-shadow: 0 0 6px var(--border-glow); }
+        .pflx-widget-page-arrow { background: none; border: none; color: rgba(255,255,255,0.5); font-size: 14px; cursor: pointer; padding: 2px 4px; }
+        .pflx-widget-page-arrow:hover { color: var(--cyan); }
+        .pflx-widget-page-arrow:disabled { opacity: 0.25; cursor: default; }
 
         /* ═══ REALITY WARP SKIN THEMES ═══ */
         [data-pflx-skin="afrofuturistic"] {
@@ -6844,76 +6903,49 @@
                 <!-- Quick player profile dropdown — replaces the old "click avatar → /portfolio" jump.
                      Anchored to .toolbar-profile (position:relative). Click outside closes; click inside
                      stays open. Populated on open via pflxRenderProfileDropdown(). -->
+                <!-- PATCH PLATFORM v1.142 -- glass/blur widget dropdown.
+                     Opens via .pflx-dd-open (see pflxToggleProfileDropdown) which
+                     also raises the #pflx-dd-backdrop full-screen blur. Profile
+                     header is larger per Ennis's reference; X-Coin/Badges/Rank/
+                     Wallet/Tasks/Leaderboard/Sound are now customizable widgets
+                     in #pflx-widget-grid (drag to reorder, drag the corner handle
+                     to resize). Portfolio shortcut + Settings + Sign Out stay
+                     fixed, not widgets, per Ennis's confirmed scope. -->
                 <div id="pflx-profile-dropdown"
                      onclick="event.stopPropagation()"
-                     style="display:none;position:absolute;top:calc(100% + 10px);right:0;width:280px;
-                            background:rgba(13,17,23,0.97);backdrop-filter:blur(12px);
-                            border:1px solid rgba(0,240,255,0.25);border-radius:14px;
-                            padding:16px;z-index:100000;cursor:default;
-                            box-shadow:0 12px 40px rgba(0,0,0,0.6);">
-                    <!-- Header: avatar + name + role -->
-                    <div style="display:flex;align-items:center;gap:12px;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.06);">
-                        <div id="pd-avatar" style="width:48px;height:48px;border-radius:50%;border:2px solid rgba(0,240,255,0.3);overflow:hidden;flex-shrink:0;background:rgba(0,240,255,0.05);">
+                     style="display:none;position:absolute;top:calc(100% + 10px);right:0;width:320px;max-height:min(78vh,640px);overflow-y:auto;overflow-x:hidden;
+                            background:linear-gradient(160deg, var(--dark-panel), rgba(6,10,20,0.94));backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+                            border:1px solid var(--border-color);border-radius:18px;
+                            padding:18px;z-index:100000;cursor:default;
+                            box-shadow:0 20px 60px rgba(0,0,0,0.65), 0 0 40px var(--border-glow);
+                            opacity:0;transform:translateY(-10px) scale(0.94);transition:opacity .28s cubic-bezier(.2,.9,.3,1),transform .28s cubic-bezier(.2,.9,.3,1);">
+                    <!-- Header: LARGER avatar + name + role -->
+                    <div style="display:flex;align-items:center;gap:14px;padding-bottom:14px;border-bottom:1px solid rgba(255,255,255,0.08);">
+                        <div id="pd-avatar" style="width:72px;height:72px;border-radius:50%;border:2px solid var(--border-glow);overflow:hidden;flex-shrink:0;background:rgba(255,255,255,0.04);box-shadow:0 0 18px var(--border-glow);">
                             <img id="pd-avatar-img" src="" alt="" style="width:100%;height:100%;object-fit:cover;display:none;">
                         </div>
                         <div style="flex:1;min-width:0;">
-                            <div id="pd-name" style="font-family:'Orbitron',sans-serif;font-size:13px;font-weight:800;color:#e0e6ff;letter-spacing:0.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</div>
-                            <div id="pd-role" style="font-size:10px;font-weight:700;color:rgba(255,255,255,0.45);letter-spacing:0.1em;margin-top:3px;text-transform:uppercase;">—</div>
+                            <div id="pd-name" style="font-family:'Orbitron',sans-serif;font-size:17px;font-weight:800;color:#e0e6ff;letter-spacing:0.03em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</div>
+                            <div id="pd-role" style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.5);letter-spacing:0.1em;margin-top:4px;text-transform:uppercase;">—</div>
                         </div>
                     </div>
-                    <!-- Stat row: XC / Badges / Level -->
-                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;">
-                        <div style="text-align:center;padding:8px 4px;background:rgba(255,255,255,0.02);border-radius:8px;border:1px solid rgba(255,255,255,0.05);">
-                            <div id="pd-xc" style="font-family:monospace;font-size:14px;font-weight:900;color:#4f8ef7;">0</div>
-                            <div style="font-size:8px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.08em;margin-top:3px;">X-COIN</div>
-                        </div>
-                        <div style="text-align:center;padding:8px 4px;background:rgba(255,255,255,0.02);border-radius:8px;border:1px solid rgba(255,255,255,0.05);">
-                            <div id="pd-badges" style="font-family:monospace;font-size:14px;font-weight:900;color:#f5c842;">0</div>
-                            <div style="font-size:8px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.08em;margin-top:3px;">BADGES</div>
-                        </div>
-                        <div style="text-align:center;padding:8px 4px;background:rgba(255,255,255,0.02);border-radius:8px;border:1px solid rgba(255,255,255,0.05);">
-                            <div id="pd-rank" style="font-family:monospace;font-size:14px;font-weight:900;color:#22c55e;">—</div>
-                            <div style="font-size:8px;font-weight:700;color:rgba(255,255,255,0.4);letter-spacing:0.08em;margin-top:3px;">RANK</div>
-                        </div>
-                    </div>
-                    <!-- Actions —
-                         My Wallet     → X-Coin player wallet view
-                         My Tasks      → MC Tasks tab
-                         Leaderboard   → X-Coin master leaderboard
-                         View Portfolio leads the list (Ennis 2026-07-05); Sign Out stays at the bottom.
-                    -->
+                    <!-- Fixed quick actions: Portfolio shortcut + Settings (not customizable widgets) -->
                     <div style="display:flex;flex-direction:column;gap:6px;margin-top:14px;">
                         <button onclick="pflxCloseProfileDropdown();pflxOpenPortfolioShortcut();"
-                                style="width:100%;padding:9px 10px;background:rgba(0,240,255,0.08);border:1px solid rgba(0,240,255,0.25);color:#00f0ff;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.06em;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+                                style="width:100%;padding:9px 10px;background:rgba(0,240,255,0.08);border:1px solid var(--border-color);color:var(--cyan);font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.06em;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
                             <span style="font-size:13px;">🗂</span> MY PORTFOLIO
-                        </button>
-                        <button onclick="pflxOpenWalletShortcut()"
-                                style="width:100%;padding:9px 10px;background:rgba(245,200,66,0.08);border:1px solid rgba(245,200,66,0.3);color:#f5c842;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.06em;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
-                            <span style="font-size:13px;">💰</span> MY WALLET
-                        </button>
-                        <button onclick="pflxOpenTasksShortcut()"
-                                style="width:100%;padding:9px 10px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.3);color:#22c55e;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.06em;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
-                            <span style="font-size:13px;">📋</span> MY TASKS
-                        </button>
-                        <button onclick="pflxOpenLeaderboardShortcut()"
-                                style="width:100%;padding:9px 10px;background:rgba(167,139,250,0.08);border:1px solid rgba(167,139,250,0.3);color:#a78bfa;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.06em;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
-                            <span style="font-size:13px;">🏆</span> LEADERBOARD
-                        </button>
-                        <!--
-                          Sound + Settings — moved out of the toolbar into the
-                          dropdown to declutter the top bar. Sound shows the
-                          existing #se-player-panel audio controls overlay.
-                          Settings opens the main Settings view via navigateTo.
-                          Sound sits above Settings per host layout request.
-                        -->
-                        <button onclick="pflxCloseProfileDropdown();if(typeof seTogglePlayerPanel==='function'){seTogglePlayerPanel();}"
-                                style="width:100%;padding:9px 10px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.25);color:#22c55e;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.06em;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
-                            <span style="font-size:13px;">♫</span> SOUND
                         </button>
                         <button onclick="pflxCloseProfileDropdown();if(typeof navigateTo==='function'){navigateTo('settings');}"
                                 style="width:100%;padding:9px 10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.12);color:#c8cee6;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.06em;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
                             <span style="font-size:13px;">⚙</span> SETTINGS
                         </button>
+                    </div>
+                    <!-- Customizable widget grid -- X-Coin / Badges / Rank / Wallet /
+                         Tasks / Leaderboard / Sound. Populated by pflxRenderWidgetGrid(). -->
+                    <div id="pflx-widget-grid" class="pflx-widget-grid" style="margin-top:14px;"></div>
+                    <div id="pflx-widget-page-dots" class="pflx-widget-page-dots"></div>
+                    <!-- Sign Out -- stays pinned, not a widget (Ennis confirmed) -->
+                    <div style="margin-top:14px;">
                         <button onclick="pflxCloseProfileDropdown();if(typeof window.pflxSignOut==='function')window.pflxSignOut();"
                                 style="width:100%;padding:9px 10px;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.25);color:#ef4444;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.06em;border-radius:8px;cursor:pointer;">
                             SIGN OUT
@@ -61681,10 +61713,252 @@ RESPONSE RULES:
             _pflxDeepLinkToApp('xcoin', path);
         };
 
+        // ── PATCH PLATFORM v1.142 -- Profile Widget Dropdown ──────────────
+        // Customizable widget grid inside the profile dropdown: X-Coin,
+        // Badges, Rank, Wallet, Tasks, Leaderboard, Sound. Drag a widget to
+        // reorder (immediate swap with whatever widget the pointer is over --
+        // simpler and more robust than a floating-clone drag, chosen given the
+        // scope of this patch); drag its corner handle to resize between 1x1
+        // and 2x2 grid cells. Layout persists per logged-in user via
+        // localStorage (this device -- cross-device sync was scoped OUT of
+        // this patch, see the Handoff entry). CSS grid's own dense auto-flow
+        // packs mixed widget sizes with no gaps within a page, so no custom
+        // bin-packing is needed there; pagination (pflxComputeWidgetPages)
+        // only kicks in once a user resizes widgets up enough that they
+        // collectively exceed one page's cell budget.
+        var PFLX_WIDGET_PAGE_CELLS = 12; // a page holds up to 12 1x1-equivalent cells
+        var PFLX_WIDGET_CATALOG = [
+            { id: 'xcoin',       icon: '\uD83D\uDC8E', label: 'X-COIN',      kind: 'stat',   defaultW: 1, defaultH: 1 },
+            { id: 'badges',      icon: '\uD83C\uDF96\uFE0F', label: 'BADGES',      kind: 'stat',   defaultW: 1, defaultH: 1 },
+            { id: 'rank',        icon: '\uD83D\uDC51', label: 'RANK',        kind: 'stat',   defaultW: 1, defaultH: 1 },
+            { id: 'wallet',      icon: '\uD83D\uDCB0', label: 'MY WALLET',   kind: 'action', defaultW: 2, defaultH: 1, action: 'pflxOpenWalletShortcut' },
+            { id: 'tasks',       icon: '\uD83D\uDCCB', label: 'MY TASKS',    kind: 'action', defaultW: 2, defaultH: 1, action: 'pflxOpenTasksShortcut' },
+            { id: 'leaderboard', icon: '\uD83C\uDFC6', label: 'LEADERBOARD', kind: 'action', defaultW: 2, defaultH: 1, action: 'pflxOpenLeaderboardShortcut' },
+            { id: 'sound',       icon: '\u266B',  label: 'SOUND',       kind: 'action', defaultW: 2, defaultH: 1, action: 'pflxWidgetOpenSound' }
+        ];
+        function pflxWidgetCatalogMeta(id) {
+            for (var i = 0; i < PFLX_WIDGET_CATALOG.length; i++) if (PFLX_WIDGET_CATALOG[i].id === id) return PFLX_WIDGET_CATALOG[i];
+            return null;
+        }
+        function pflxWidgetOpenSound() {
+            pflxCloseProfileDropdown();
+            if (typeof seTogglePlayerPanel === 'function') seTogglePlayerPanel();
+        }
+        window.pflxWidgetOpenSound = pflxWidgetOpenSound;
+        function pflxWidgetUserKey() {
+            var s = window.activeSession || {};
+            return 'pflx_widget_layout_' + (s.id || 'anon');
+        }
+        function pflxDefaultWidgetLayout() {
+            return PFLX_WIDGET_CATALOG.map(function (w) { return { id: w.id, w: w.defaultW, h: w.defaultH }; });
+        }
+        // Merges a saved layout with the current catalog: keeps saved
+        // order/sizes for ids still in the catalog, appends any new catalog
+        // ids the saved layout doesn't know about yet (catalog order, at the
+        // end), and drops ids no longer in the catalog. This is what keeps a
+        // future catalog change from corrupting or losing a saved layout.
+        function pflxMergeWidgetLayout(saved, catalog) {
+            var known = {};
+            catalog.forEach(function (w) { known[w.id] = w; });
+            var out = [];
+            var seen = {};
+            (saved || []).forEach(function (entry) {
+                if (!entry || !known[entry.id] || seen[entry.id]) return;
+                seen[entry.id] = true;
+                var w = Math.max(1, Math.min(2, parseInt(entry.w, 10) || known[entry.id].defaultW));
+                var h = Math.max(1, Math.min(2, parseInt(entry.h, 10) || known[entry.id].defaultH));
+                out.push({ id: entry.id, w: w, h: h });
+            });
+            catalog.forEach(function (w) {
+                if (!seen[w.id]) out.push({ id: w.id, w: w.defaultW, h: w.defaultH });
+            });
+            return out;
+        }
+        function pflxLoadWidgetLayout() {
+            var raw = null;
+            try { raw = localStorage.getItem(pflxWidgetUserKey()); } catch (e) {}
+            var saved = null;
+            if (raw) { try { saved = JSON.parse(raw); } catch (e) { saved = null; } }
+            return pflxMergeWidgetLayout(saved, PFLX_WIDGET_CATALOG);
+        }
+        function pflxSaveWidgetLayout(layout) {
+            try { localStorage.setItem(pflxWidgetUserKey(), JSON.stringify(layout)); } catch (e) {}
+        }
+        // Packs the flat ordered layout into pages by running cell total
+        // (w*h) -- a widget never splits across a page boundary; a page ends
+        // and a new one starts as soon as the NEXT widget would push the
+        // running total over PFLX_WIDGET_PAGE_CELLS.
+        function pflxComputeWidgetPages(layout) {
+            var pages = [[]];
+            var used = 0;
+            (layout || []).forEach(function (entry) {
+                var cells = entry.w * entry.h;
+                if (used > 0 && used + cells > PFLX_WIDGET_PAGE_CELLS) {
+                    pages.push([]);
+                    used = 0;
+                }
+                pages[pages.length - 1].push(entry);
+                used += cells;
+            });
+            return pages;
+        }
+
+        window._pflxWidgetLayout = null;
+        window._pflxWidgetPage = 0;
+
+        function pflxWidgetStatValue(id) {
+            var st = window._pflxProfileStats || {};
+            if (id === 'xcoin') return (st.xc || 0).toLocaleString();
+            if (id === 'badges') return String(st.badges || 0);
+            if (id === 'rank') return st.rankLabel || '—';
+            return '';
+        }
+
+        function pflxRenderWidgetGrid() {
+            var grid = document.getElementById('pflx-widget-grid');
+            var dotsWrap = document.getElementById('pflx-widget-page-dots');
+            if (!grid) return;
+            if (!window._pflxWidgetLayout) window._pflxWidgetLayout = pflxLoadWidgetLayout();
+            var layout = window._pflxWidgetLayout;
+            var pages = pflxComputeWidgetPages(layout);
+            if (window._pflxWidgetPage >= pages.length) window._pflxWidgetPage = pages.length - 1;
+            if (window._pflxWidgetPage < 0) window._pflxWidgetPage = 0;
+            var page = pages[window._pflxWidgetPage] || [];
+            grid.innerHTML = page.map(function (entry) {
+                var meta = pflxWidgetCatalogMeta(entry.id);
+                if (!meta) return '';
+                var showLabel = entry.w >= 2 || meta.kind === 'stat';
+                var inner = meta.kind === 'stat'
+                    ? ('<div class="pflx-widget-icon">' + meta.icon + '</div>' +
+                       '<div class="pflx-widget-value" style="font-size:' + (entry.w >= 2 || entry.h >= 2 ? '18px' : '13px') + '">' + pflxWidgetStatValue(entry.id) + '</div>' +
+                       (showLabel ? '<div class="pflx-widget-label">' + meta.label + '</div>' : ''))
+                    : ('<div class="pflx-widget-icon">' + meta.icon + '</div>' +
+                       (showLabel ? '<div class="pflx-widget-label" style="color:#e6eaff;font-size:10px;letter-spacing:0.05em;">' + meta.label + '</div>' : ''));
+                return '<div class="pflx-widget" data-widget-id="' + entry.id + '" style="grid-column:span ' + entry.w + ';grid-row:span ' + entry.h + '"' +
+                    (meta.action ? ' onclick="if(!this._pflxDragged){' + meta.action + '()}"' : '') + '>' +
+                    inner +
+                    '<div class="pflx-widget-resize-handle" data-widget-id="' + entry.id + '"></div>' +
+                    '</div>';
+            }).join('');
+            if (dotsWrap) {
+                if (pages.length <= 1) {
+                    dotsWrap.innerHTML = '';
+                } else {
+                    var dots = pages.map(function (_, i) {
+                        return '<span class="pflx-widget-page-dot' + (i === window._pflxWidgetPage ? ' on' : '') + '" onclick="pflxWidgetGoToPage(' + i + ')"></span>';
+                    }).join('');
+                    dotsWrap.innerHTML =
+                        '<button class="pflx-widget-page-arrow" onclick="pflxWidgetGoToPage(' + (window._pflxWidgetPage - 1) + ')" ' + (window._pflxWidgetPage <= 0 ? 'disabled' : '') + '>\u2039</button>' +
+                        dots +
+                        '<button class="pflx-widget-page-arrow" onclick="pflxWidgetGoToPage(' + (window._pflxWidgetPage + 1) + ')" ' + (window._pflxWidgetPage >= pages.length - 1 ? 'disabled' : '') + '>\u203A</button>';
+                }
+            }
+            pflxWidgetBindDragHandlers();
+        }
+        window.pflxWidgetGoToPage = function (i) {
+            window._pflxWidgetPage = i;
+            pflxRenderWidgetGrid();
+        };
+
+        // ── Drag-to-reorder + drag-to-resize ──────────────────────────
+        // Pointer events (not native HTML5 drag-and-drop) so the same code
+        // path works for mouse and touch. Reordering only operates within
+        // the widget's current page (page navigation is via the arrows/dots
+        // above, kept separate so a page-swipe gesture never fights with a
+        // widget-drag gesture).
+        var _pflxWidgetDrag = null; // { id, mode: 'move'|'resize', startX, startY, startW, startH, moved }
+        function pflxWidgetBindDragHandlers() {
+            var grid = document.getElementById('pflx-widget-grid');
+            if (!grid) return;
+            grid.querySelectorAll('.pflx-widget').forEach(function (el) {
+                el.onpointerdown = function (ev) {
+                    if (ev.target && ev.target.classList.contains('pflx-widget-resize-handle')) return;
+                    var id = el.getAttribute('data-widget-id');
+                    _pflxWidgetDrag = { id: id, mode: 'move', startX: ev.clientX, startY: ev.clientY, moved: false };
+                    try { el.setPointerCapture(ev.pointerId); } catch (e) {}
+                };
+            });
+            grid.querySelectorAll('.pflx-widget-resize-handle').forEach(function (handle) {
+                handle.onpointerdown = function (ev) {
+                    ev.stopPropagation();
+                    var id = handle.getAttribute('data-widget-id');
+                    var entry = (window._pflxWidgetLayout || []).find(function (e) { return e.id === id; });
+                    if (!entry) return;
+                    _pflxWidgetDrag = { id: id, mode: 'resize', startX: ev.clientX, startY: ev.clientY, startW: entry.w, startH: entry.h };
+                    try { handle.setPointerCapture(ev.pointerId); } catch (e) {}
+                };
+            });
+        }
+        if (!window._pflxWidgetPointerBound) {
+            window._pflxWidgetPointerBound = true;
+            document.addEventListener('pointermove', function (ev) {
+                if (!_pflxWidgetDrag) return;
+                var layout = window._pflxWidgetLayout; if (!layout) return;
+                var dx = ev.clientX - _pflxWidgetDrag.startX;
+                var dy = ev.clientY - _pflxWidgetDrag.startY;
+                if (_pflxWidgetDrag.mode === 'resize') {
+                    var CELL = 76; // approx cell step (width incl. gap) tuned to the grid CSS above
+                    var entry = layout.find(function (e) { return e.id === _pflxWidgetDrag.id; });
+                    if (!entry) return;
+                    var w = Math.max(1, Math.min(2, _pflxWidgetDrag.startW + Math.round(dx / CELL)));
+                    var h = Math.max(1, Math.min(2, _pflxWidgetDrag.startH + Math.round(dy / CELL)));
+                    if (w !== entry.w || h !== entry.h) { entry.w = w; entry.h = h; pflxRenderWidgetGrid(); }
+                } else {
+                    if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
+                        _pflxWidgetDrag.moved = true;
+                        var draggedEl = document.querySelector('.pflx-widget[data-widget-id="' + _pflxWidgetDrag.id + '"]');
+                        if (draggedEl) draggedEl.classList.add('pflx-widget-dragging');
+                        var overEl = document.elementFromPoint(ev.clientX, ev.clientY);
+                        var overWidget = overEl && overEl.closest && overEl.closest('.pflx-widget');
+                        if (overWidget) {
+                            var overId = overWidget.getAttribute('data-widget-id');
+                            if (overId && overId !== _pflxWidgetDrag.id) {
+                                var fromIdx = layout.findIndex(function (e) { return e.id === _pflxWidgetDrag.id; });
+                                var toIdx = layout.findIndex(function (e) { return e.id === overId; });
+                                if (fromIdx !== -1 && toIdx !== -1) {
+                                    var tmp = layout[fromIdx]; layout[fromIdx] = layout[toIdx]; layout[toIdx] = tmp;
+                                    pflxRenderWidgetGrid();
+                                    _pflxWidgetDrag.startX = ev.clientX; _pflxWidgetDrag.startY = ev.clientY;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            document.addEventListener('pointerup', function () {
+                if (!_pflxWidgetDrag) return;
+                var id = _pflxWidgetDrag.id;
+                var wasDrag = _pflxWidgetDrag.moved || _pflxWidgetDrag.mode === 'resize';
+                _pflxWidgetDrag = null;
+                if (window._pflxWidgetLayout) pflxSaveWidgetLayout(window._pflxWidgetLayout);
+                var el = document.querySelector('.pflx-widget[data-widget-id="' + id + '"]');
+                if (el) {
+                    el.classList.remove('pflx-widget-dragging');
+                    if (wasDrag) {
+                        el._pflxDragged = true;
+                        setTimeout(function () { if (el) el._pflxDragged = false; }, 50);
+                    }
+                }
+            });
+        }
+
+        function pflxEnsureWidgetBackdrop() {
+            var bd = document.getElementById('pflx-dd-backdrop');
+            if (bd) return bd;
+            bd = document.createElement('div');
+            bd.id = 'pflx-dd-backdrop';
+            bd.className = 'pflx-dd-backdrop';
+            bd.onclick = function () { window.pflxCloseProfileDropdown(); };
+            document.body.appendChild(bd);
+            return bd;
+        }
+
         // ── Quick Profile Dropdown ────────────────────────────────────
         // Replaces the old "click toolbar avatar → /portfolio" navigation.
-        // Toggles a dropdown anchored to .toolbar-profile showing key player
-        // stats and Sign-Out / View-Portfolio actions. Click outside closes.
+        // Toggles a dropdown anchored to .toolbar-profile showing the profile
+        // header, the customizable widget grid, and the fixed Portfolio/
+        // Settings/Sign-Out actions. Click outside (or the blur backdrop)
+        // closes.
         window.pflxRenderProfileDropdown = function () {
             try {
                 var s = window.activeSession || {};
@@ -61723,9 +61997,11 @@ RESPONSE RULES:
                     if (avatar) { imgEl.src = avatar; imgEl.style.display = 'block'; }
                     else { imgEl.style.display = 'none'; }
                 }
-                var xcEl = document.getElementById('pd-xc'); if (xcEl) xcEl.textContent = (xc || 0).toLocaleString();
-                var bdgEl = document.getElementById('pd-badges'); if (bdgEl) bdgEl.textContent = badges || 0;
-                var rkEl = document.getElementById('pd-rank'); if (rkEl) rkEl.textContent = rankLabel;
+                // PATCH PLATFORM v1.142 -- X-Coin/Badges/Rank moved from the
+                // fixed pd-xc/pd-badges/pd-rank elements into the widget grid;
+                // pflxWidgetStatValue reads these off _pflxProfileStats.
+                window._pflxProfileStats = { xc: xc || 0, badges: badges || 0, rankLabel: rankLabel };
+                if (typeof pflxRenderWidgetGrid === 'function') pflxRenderWidgetGrid();
                 // Tier pill removed from this header — the picker on the
                 // node detail panel is now the canonical surface for tier.
             } catch (e) { console.warn('[profile dropdown] render failed', e); }
@@ -61754,30 +62030,49 @@ RESPONSE RULES:
             return '<span style="font-family:Orbitron,sans-serif;font-size:' + fs + ';font-weight:800;padding:' + pad + ';border-radius:8px;letter-spacing:0.12em;text-transform:uppercase;background:rgba(' + m.rgb + ',0.18);color:rgb(' + m.rgb + ');border:1px solid rgba(' + m.rgb + ',0.4);">' + m.label.toUpperCase() + '</span>';
         };
 
+        // PATCH PLATFORM v1.142 -- close/toggle now animate the panel via
+        // the .pflx-dd-open class (opacity/transform transition defined in
+        // the CSS above) and raise/lower the full-screen blur backdrop in
+        // step, instead of an instant style.display flip.
         window.pflxCloseProfileDropdown = function () {
             var dd = document.getElementById('pflx-profile-dropdown');
-            if (dd) dd.style.display = 'none';
+            var bd = document.getElementById('pflx-dd-backdrop');
+            if (bd) bd.classList.remove('pflx-dd-backdrop-on');
+            if (!dd) return;
+            dd.classList.remove('pflx-dd-open');
+            setTimeout(function () {
+                if (dd && !dd.classList.contains('pflx-dd-open')) dd.style.display = 'none';
+                if (bd && !bd.classList.contains('pflx-dd-backdrop-on')) bd.style.display = 'none';
+            }, 300);
         };
 
         window.pflxToggleProfileDropdown = function (ev) {
             try { if (ev) ev.stopPropagation(); } catch (e) {}
             var dd = document.getElementById('pflx-profile-dropdown');
             if (!dd) return;
-            var open = dd.style.display !== 'none';
-            if (open) { dd.style.display = 'none'; return; }
+            var isOpen = dd.classList.contains('pflx-dd-open');
+            if (isOpen) { window.pflxCloseProfileDropdown(); return; }
+            var bd = pflxEnsureWidgetBackdrop();
             window.pflxRenderProfileDropdown();
             dd.style.display = 'block';
+            bd.style.display = 'block';
+            // Force a reflow so the browser registers the pre-transition
+            // (opacity:0/scaled-down) state before the class flips it --
+            // otherwise the transition is skipped and the panel just pops in.
+            void dd.offsetWidth;
+            dd.classList.add('pflx-dd-open');
+            bd.classList.add('pflx-dd-backdrop-on');
         };
 
-        // One-time bind: click-outside closes the dropdown.
+        // One-time bind: click-outside (or the blur backdrop) closes the dropdown.
         if (!window._pflxProfileOutsideBound) {
             window._pflxProfileOutsideBound = true;
             document.addEventListener('click', function (ev) {
                 var dd = document.getElementById('pflx-profile-dropdown');
-                if (!dd || dd.style.display === 'none') return;
+                if (!dd || !dd.classList.contains('pflx-dd-open')) return;
                 var anchor = document.getElementById('toolbar-profile');
                 if (anchor && anchor.contains(ev.target)) return;
-                dd.style.display = 'none';
+                window.pflxCloseProfileDropdown();
             });
             // Escape key also closes
             document.addEventListener('keydown', function (ev) {
@@ -64265,6 +64560,7 @@ RESPONSE RULES:
                         <span id="home-studio-chip">${studioChip}</span>
                     </div>
                     <div class="player-subtitle" style="font-family:'Jura',sans-serif;font-size:12px;color:#8a92b0;letter-spacing:1px;margin-top:2px;">${role} · ${cohort}${studioBadge}</div>
+                    <button onclick="pflxOpenPortfolioShortcut()" style="margin-top:10px;padding:7px 14px;background:rgba(0,240,255,0.1);border:1px solid var(--border-color);color:var(--cyan);font-family:'Orbitron',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.08em;border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">🗂 MY PORTFOLIO</button>
                 </div>
             `;
             dashboard.appendChild(playerHeader);
