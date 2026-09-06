@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 144;
+      window.PFLX_PATCH   = 145;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -7562,13 +7562,14 @@
                                 <button class="mc-nav-btn active" data-mc="dashboard" onclick="mcNav('dashboard')">
                                     <span class="mc-icon">&#x1F3E0;</span> Home Theater
                                 </button>
-                                <!-- Player Management's canonical home is Platform Settings now.
-                                     Keep this entry as a shortcut so existing muscle memory still works. -->
-                                <div class="mc-nav-label mc-host-only">PLAYER MANAGEMENT</div>
-                                <button class="mc-nav-btn mc-host-only" data-mc="players-shortcut" onclick="pflxOpenPlayerManager()" title="Player Management — now lives in Platform Settings">
-                                    <span class="mc-icon">&#x1F465;</span> Player Management
-                                    <span class="mc-badge" id="mc-player-count">0</span>
-                                </button>
+                                <!-- Player Management now lives ONLY in Platform Settings
+                                     (Host Controls → Players). The MC sidebar shortcut was
+                                     removed per Ennis's request (v1.145) -- "Player Management
+                                     is now in Settings and should be removed from MC." The
+                                     sidebar badge counter (#mc-player-count) is gone with it;
+                                     mcRefreshDashboard()/mcUpdateBadges() still guard every
+                                     write to that id with `if (pc) ...` so this is a clean
+                                     removal, not a dangling reference. -->
                                 <!--
                                   Task Management section. Order is the
                                   flow a host actually plans in:
@@ -7636,11 +7637,12 @@
                                 <button class="mc-nav-btn mc-host-only" data-mc="cohortgroups" onclick="mcNav('cohortgroups')">
                                     <span class="mc-icon">&#x1F465;</span> Cohort Groups
                                 </button>
+                                <!-- Evolution Rankings' canonical home is now Platform Settings
+                                     (Host Controls → Evolution Rankings, host-evos panel) --
+                                     it affects the whole PFLX console and sub-apps, so per
+                                     Ennis (v1.145) it's housed alongside Player Management
+                                     rather than duplicated in MC's own sidebar. -->
                                 <div class="mc-nav-label mc-host-only">SYSTEM</div>
-                                <button class="mc-nav-btn mc-host-only" data-mc="gamemgmt" onclick="pflxOpenEvoRankings()" title="Evolution Rankings — also accessible in Platform Settings">
-                                    <span class="mc-icon">&#x1F3C6;</span> Evolution Rankings
-                                    <span style="margin-left:auto;font-size:9px;color:#6a7290;letter-spacing:1px;">↗ SETTINGS</span>
-                                </button>
                                 <button class="mc-nav-btn mc-host-only" data-mc="approvals" onclick="mcNav('approvals')">
                                     <span class="mc-icon">&#x1F514;</span> Approvals
                                 </button>
@@ -11104,182 +11106,6 @@
                                 <div id="mc-studios-list" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;"></div>
                             </div>
 
-                            <!-- ═══ GAME MANAGEMENT PANEL ═══ -->
-                            <div class="mc-panel" id="mc-panel-gamemgmt">
-                                <h1 class="mc-page-title">&#x1F396; Evolution Rankings</h1>
-                                <p class="mc-page-desc">The 10-tier progression system. Players evolve by earning XC, completing checkpoints, and collecting badges. Economy rules (Upgrades, Fines, Taxes) are managed in X-Coin.</p>
-                                <div style="display:flex;gap:10px;margin-bottom:16px;">
-                                    <button class="mc-btn" onclick="mcShowRankForm(-1)" style="background:linear-gradient(135deg,rgba(79,142,247,0.15),rgba(167,139,250,0.15));border-color:rgba(79,142,247,0.4);font-size:12px;">&#x2795; New Rank</button>
-                                </div>
-
-                                <!-- Rank Edit Form (hidden by default) -->
-                                <div id="mc-rank-form" style="display:none;background:rgba(10,18,40,0.5);border:1px solid rgba(79,142,247,0.3);border-radius:12px;padding:20px;margin-bottom:20px;">
-                                    <div style="font-size:14px;font-weight:700;color:#a7f3d0;margin-bottom:16px;">RANK EDITOR</div>
-                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
-                                        <div>
-                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Rank Name *</label>
-                                            <input type="text" id="mc-rank-name" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="e.g. Advanced Player">
-                                        </div>
-                                        <div>
-                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Tier Level *</label>
-                                            <input type="number" id="mc-rank-level" min="1" max="20" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="1-20">
-                                        </div>
-                                        <div>
-                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Icon / Emoji</label>
-                                            <input type="text" id="mc-rank-icon" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="👤">
-                                        </div>
-                                        <div>
-                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Color</label>
-                                            <input type="color" id="mc-rank-color" value="#4f8ef7" style="width:100%;height:36px;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);border-radius:6px;cursor:pointer;">
-                                        </div>
-                                        <div>
-                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Group</label>
-                                            <select id="mc-rank-group" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;">
-                                                <option value="FOUNDATION">FOUNDATION</option>
-                                                <option value="PRODUCTION">PRODUCTION</option>
-                                                <option value="LEADERSHIP">LEADERSHIP</option>
-                                                <option value="EXECUTIVE">EXECUTIVE</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Rank Image</label>
-                                            <div style="display:flex;align-items:center;gap:8px;">
-                                                <img id="mc-rank-image-preview" src="" style="width:48px;height:48px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);object-fit:cover;display:none;">
-                                                <label style="cursor:pointer;font-size:11px;color:var(--cyan);border:1px dashed rgba(0,212,255,0.3);padding:8px 12px;border-radius:6px;">
-                                                    &#x1F4F7; Upload Image
-                                                    <input type="file" id="mc-rank-image-upload" accept="image/*" style="display:none;" onchange="mcRankImageUpload(this)">
-                                                </label>
-                                                <button onclick="mcRankImageClear()" style="font-size:10px;background:none;border:1px solid rgba(239,68,68,0.3);color:#f87171;padding:4px 8px;border-radius:4px;cursor:pointer;display:none;" id="mc-rank-image-clear">Clear</button>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <!-- XC & Progression Requirements -->
-                                    <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.1em;margin:16px 0 8px;text-transform:uppercase;">Progression Requirements</div>
-                                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;">
-                                        <div>
-                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Unlock XC *</label>
-                                            <input type="number" id="mc-rank-unlock" min="0" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="1000">
-                                        </div>
-                                        <div>
-                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Maintain XC</label>
-                                            <input type="number" id="mc-rank-maintain" min="0" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="0">
-                                        </div>
-                                        <div>
-                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Checkpoints Required</label>
-                                            <input type="number" id="mc-rank-cp" min="0" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="0">
-                                        </div>
-                                    </div>
-
-                                    <!-- Badge Requirements -->
-                                    <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.1em;margin:16px 0 8px;text-transform:uppercase;">Badge Requirements</div>
-                                    <div style="background:rgba(0,212,255,0.03);border:1px solid rgba(0,212,255,0.08);border-radius:8px;padding:12px;margin-bottom:12px;">
-                                        <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em;">&#x1F3C5; Badge Type Requirements</label>
-                                        <div id="mc-rank-badge-types" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px;">
-                                            <!-- Populated by mcRenderBadgeTypeToggles() — one chip per tier found in mcBadges -->
-                                        </div>
-                                        <input type="hidden" id="mc-rank-badges">
-
-                                        <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin:12px 0 6px;text-transform:uppercase;letter-spacing:0.06em;">&#x1F396; Specific Badge Requirements</label>
-                                        <div id="mc-rank-specific-pills" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;"></div>
-                                        <select id="mc-rank-specific-picker" onchange="mcRankAddSpecificBadge(this)" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(34,197,94,0.2);color:#e0e6ff;padding:8px;border-radius:6px;font-size:11px;">
-                                            <option value="">+ Add a badge requirement…</option>
-                                            <!-- Populated by mcRenderBadgePicker() grouped by tier -->
-                                        </select>
-                                        <input type="hidden" id="mc-rank-specific">
-                                        <p style="margin:6px 0 0;font-size:10px;color:rgba(255,255,255,0.25);">
-                                            Badge list pulled from your Host Dashboard &rarr; Badges. Create new ones there to add them to this list.
-                                        </p>
-                                    </div>
-
-                                    <!-- Auto-Apply Logic -->
-                                    <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.1em;margin:16px 0 8px;text-transform:uppercase;">Auto-Apply Logic</div>
-                                    <div style="background:rgba(0,212,255,0.03);border:1px solid rgba(0,212,255,0.08);border-radius:8px;padding:12px;margin-bottom:12px;">
-                                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;margin-bottom:10px;">
-                                            <input type="checkbox" id="mc-rank-auto-enabled"> Enable Auto-Apply
-                                        </label>
-                                        <div id="mc-rank-auto-fields" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
-                                            <div>
-                                                <label style="display:block;font-size:10px;color:rgba(255,255,255,0.3);margin-bottom:4px;">TRIGGER</label>
-                                                <select id="mc-rank-auto-trigger" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:6px;font-size:11px;">
-                                                    <option value="xc_threshold">XC Threshold Reached</option>
-                                                    <option value="checkpoint_complete">Checkpoint Completed</option>
-                                                    <option value="badge_earned">Badge Earned</option>
-                                                    <option value="all_requirements">All Requirements Met</option>
-                                                    <option value="xc_drop_below">XC Drops Below Maintain</option>
-                                                </select>
-                                            </div>
-                                            <div>
-                                                <label style="display:block;font-size:10px;color:rgba(255,255,255,0.3);margin-bottom:4px;">EFFECT</label>
-                                                <select id="mc-rank-auto-effect" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:6px;font-size:11px;">
-                                                    <option value="auto_promote">Auto-Promote</option>
-                                                    <option value="auto_demote">Auto-Demote</option>
-                                                    <option value="notify_host">Notify Host Only</option>
-                                                    <option value="lock_rank">Lock at Current Rank</option>
-                                                </select>
-                                            </div>
-                                            <div>
-                                                <label style="display:block;font-size:10px;color:rgba(255,255,255,0.3);margin-bottom:4px;">SCOPE</label>
-                                                <select id="mc-rank-auto-scope" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:6px;font-size:11px;">
-                                                    <option value="all">All Players</option>
-                                                    <option value="cohort">Selected Cohorts Only</option>
-                                                    <option value="manual_override">Manual Override Required</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <!-- Host Controls & Cohort Scope (unified matrix) -->
-                                    <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.1em;margin:16px 0 8px;text-transform:uppercase;">Host Controls &amp; Cohort Scope</div>
-                                    <div style="background:rgba(245,200,66,0.03);border:1px solid rgba(245,200,66,0.1);border-radius:8px;padding:12px;margin-bottom:12px;">
-                                        <p style="margin:0 0 10px;font-size:10px;color:rgba(255,255,255,0.35);line-height:1.45;">
-                                            Choose which cohorts this rank governs, then pick the control toggles that apply per cohort. Use the defaults row when "Apply to All Cohorts" is checked.
-                                        </p>
-                                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;margin-bottom:12px;">
-                                            <input type="checkbox" id="mc-rank-all-cohorts" checked onchange="mcRankToggleAllCohorts(this)"> Apply to All Cohorts (use defaults below)
-                                        </label>
-
-                                        <!-- Defaults row -->
-                                        <div id="mc-rank-defaults-row" style="display:block;background:rgba(79,142,247,0.04);border:1px solid rgba(79,142,247,0.12);border-radius:6px;padding:8px 10px;margin-bottom:10px;">
-                                            <div style="font-size:9px;color:rgba(79,142,247,0.7);font-weight:900;letter-spacing:0.1em;margin-bottom:6px;">DEFAULT CONTROLS</div>
-                                            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;font-size:11px;">
-                                                <label style="display:flex;align-items:center;gap:4px;color:#e0e6ff;cursor:pointer;"><input type="checkbox" id="mc-rank-hc-promote" checked> &#x2B06; Promote</label>
-                                                <label style="display:flex;align-items:center;gap:4px;color:#e0e6ff;cursor:pointer;"><input type="checkbox" id="mc-rank-hc-demote" checked> &#x2B07; Demote</label>
-                                                <label style="display:flex;align-items:center;gap:4px;color:#e0e6ff;cursor:pointer;"><input type="checkbox" id="mc-rank-hc-override" checked> &#x270F; Override</label>
-                                                <label style="display:flex;align-items:center;gap:4px;color:#e0e6ff;cursor:pointer;"><input type="checkbox" id="mc-rank-hc-freeze"> &#x2744; Freeze</label>
-                                            </div>
-                                        </div>
-
-                                        <!-- Per-cohort control matrix -->
-                                        <div id="mc-rank-cohort-matrix-wrap" style="display:none;">
-                                            <div style="font-size:9px;color:rgba(245,200,66,0.7);font-weight:900;letter-spacing:0.1em;margin-bottom:6px;">PER-COHORT CONTROL MATRIX</div>
-                                            <div style="display:grid;grid-template-columns:1.3fr repeat(4,1fr);gap:4px;font-size:9px;color:rgba(255,255,255,0.35);font-weight:700;letter-spacing:0.05em;padding:4px 8px;">
-                                                <div>COHORT</div>
-                                                <div style="text-align:center;">&#x2B06; PROMOTE</div>
-                                                <div style="text-align:center;">&#x2B07; DEMOTE</div>
-                                                <div style="text-align:center;">&#x270F; OVERRIDE</div>
-                                                <div style="text-align:center;">&#x2744; FREEZE</div>
-                                            </div>
-                                            <div id="mc-rank-cohort-matrix" style="display:flex;flex-direction:column;gap:3px;max-height:260px;overflow-y:auto;"></div>
-                                            <!-- Legacy flat checkbox list used by older code paths; hidden but populated to keep compatibility -->
-                                            <div id="mc-rank-cohorts" style="display:none;"></div>
-                                        </div>
-                                    </div>
-
-                                    <!-- Form Buttons -->
-                                    <div style="display:flex;gap:10px;margin-top:16px;">
-                                        <button class="mc-btn" onclick="mcSaveRankForm()" style="background:linear-gradient(135deg,rgba(34,197,94,0.2),rgba(79,142,247,0.2));border-color:rgba(34,197,94,0.4);font-size:12px;">&#x2714; Save Rank</button>
-                                        <button class="mc-btn" onclick="mcCancelRankForm()" style="font-size:12px;color:rgba(255,255,255,0.4);">Cancel</button>
-                                    </div>
-                                </div>
-
-                                <div class="mc-card">
-                                    <div class="mc-card-title">EVOLUTION RANKING TIERS</div>
-                                    <p style="color:#6a7290;font-size:12px;margin-bottom:14px;">Each tier requires a minimum XC balance, checkpoint count, and badge categories. Higher tiers also require maintaining XC above a threshold. Click Edit to customize any rank.</p>
-                                    <div id="mc-rankings-list" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(380px, 1fr));gap:14px;"></div>
-                                </div>
-                            </div>
-
                             <!-- ═══ LIVE & ASYNC SESSIONS PANEL ═══ -->
                             <div class="mc-panel" id="mc-panel-sessions">
                                 <h1 class="mc-page-title">&#x1F3AC; Live & Async Sessions</h1>
@@ -12602,7 +12428,7 @@
                                 <button class="host-subtab active" data-host-tab="dashboard" onclick="switchHostTab('dashboard')">Dashboard</button>
                                 <button class="host-subtab" data-host-tab="analytics" onclick="switchHostTab('analytics')">📊 Analytics</button>
                                 <button class="host-subtab" data-host-tab="players" onclick="switchHostTab('players')">Players</button>
-                                <button class="host-subtab" data-host-tab="evos" onclick="pflxOpenEvoRankings()">Evolution Rankings</button>
+                                <button class="host-subtab" data-host-tab="evos" onclick="switchHostTab('evos')">Evolution Rankings</button>
                                 <button class="host-subtab" data-host-tab="session" onclick="switchHostTab('session')">Live Session</button>
                                 <button class="host-subtab" data-host-tab="apps" onclick="switchHostTab('apps')">App Manager</button>
                                 <button class="host-subtab" data-host-tab="sound" onclick="switchHostTab('sound')">Sound Engine</button>
@@ -12937,6 +12763,191 @@
                                         <button class="hmc-btn-sm hmc-btn-ghost" id="hmc-detail-save-slots-btn" onclick="(function(){ var pid = document.getElementById('hmc-player-detail')?.dataset?.playerId; if (pid) pflxOpenPlayerSaveSlots(pid); })()">💾 Save Slots</button>
                                         <button class="hmc-btn-sm hmc-btn-ghost" id="hmc-detail-tier-history-btn" onclick="(function(){ var pid = document.getElementById('hmc-player-detail')?.dataset?.playerId; if (pid) pflxOpenTierHistory(pid); })()">🎚 Tier History</button>
                                     </div>
+                                </div>
+                            </div>
+
+                            <!-- ═══ TAB: EVOLUTION RANKINGS ═══
+                                 Relocated from Mission Control (mc-panel-gamemgmt) in
+                                 v1.145 per Ennis: "Evo Ranking Tiers effect the entire
+                                 PFLX console and sub-apps, therefore it should be housed
+                                 in settings along near with Player Management." Only this
+                                 outer wrapper changed (mc-panel/mc-panel-gamemgmt ->
+                                 host-panel/host-evos) -- every inner id and every JS
+                                 function that targets them (mcRenderRankings,
+                                 mcShowRankForm, mcSaveRankForm, mcCancelRankForm) is the
+                                 exact code already shipped, untouched. -->
+                            <div class="host-panel" id="host-evos">
+                                <h1 class="mc-page-title">&#x1F396; Evolution Rankings</h1>
+                                <p class="mc-page-desc">The 10-tier progression system. Players evolve by earning XC, completing checkpoints, and collecting badges. Economy rules (Upgrades, Fines, Taxes) are managed in X-Coin.</p>
+                                <div style="display:flex;gap:10px;margin-bottom:16px;">
+                                    <button class="mc-btn" onclick="mcShowRankForm(-1)" style="background:linear-gradient(135deg,rgba(79,142,247,0.15),rgba(167,139,250,0.15));border-color:rgba(79,142,247,0.4);font-size:12px;">&#x2795; New Rank</button>
+                                </div>
+
+                                <!-- Rank Edit Form (hidden by default) -->
+                                <div id="mc-rank-form" style="display:none;background:rgba(10,18,40,0.5);border:1px solid rgba(79,142,247,0.3);border-radius:12px;padding:20px;margin-bottom:20px;">
+                                    <div style="font-size:14px;font-weight:700;color:#a7f3d0;margin-bottom:16px;">RANK EDITOR</div>
+                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Rank Name *</label>
+                                            <input type="text" id="mc-rank-name" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="e.g. Advanced Player">
+                                        </div>
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Tier Level *</label>
+                                            <input type="number" id="mc-rank-level" min="1" max="20" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="1-20">
+                                        </div>
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Icon / Emoji</label>
+                                            <input type="text" id="mc-rank-icon" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="👤">
+                                        </div>
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Color</label>
+                                            <input type="color" id="mc-rank-color" value="#4f8ef7" style="width:100%;height:36px;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);border-radius:6px;cursor:pointer;">
+                                        </div>
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Group</label>
+                                            <select id="mc-rank-group" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;">
+                                                <option value="FOUNDATION">FOUNDATION</option>
+                                                <option value="PRODUCTION">PRODUCTION</option>
+                                                <option value="LEADERSHIP">LEADERSHIP</option>
+                                                <option value="EXECUTIVE">EXECUTIVE</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Rank Image</label>
+                                            <div style="display:flex;align-items:center;gap:8px;">
+                                                <img id="mc-rank-image-preview" src="" style="width:48px;height:48px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);object-fit:cover;display:none;">
+                                                <label style="cursor:pointer;font-size:11px;color:var(--cyan);border:1px dashed rgba(0,212,255,0.3);padding:8px 12px;border-radius:6px;">
+                                                    &#x1F4F7; Upload Image
+                                                    <input type="file" id="mc-rank-image-upload" accept="image/*" style="display:none;" onchange="mcRankImageUpload(this)">
+                                                </label>
+                                                <button onclick="mcRankImageClear()" style="font-size:10px;background:none;border:1px solid rgba(239,68,68,0.3);color:#f87171;padding:4px 8px;border-radius:4px;cursor:pointer;display:none;" id="mc-rank-image-clear">Clear</button>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- XC & Progression Requirements -->
+                                    <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.1em;margin:16px 0 8px;text-transform:uppercase;">Progression Requirements</div>
+                                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;">
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Unlock XC *</label>
+                                            <input type="number" id="mc-rank-unlock" min="0" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="1000">
+                                        </div>
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Maintain XC</label>
+                                            <input type="number" id="mc-rank-maintain" min="0" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="0">
+                                        </div>
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Checkpoints Required</label>
+                                            <input type="number" id="mc-rank-cp" min="0" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="0">
+                                        </div>
+                                    </div>
+
+                                    <!-- Badge Requirements -->
+                                    <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.1em;margin:16px 0 8px;text-transform:uppercase;">Badge Requirements</div>
+                                    <div style="background:rgba(0,212,255,0.03);border:1px solid rgba(0,212,255,0.08);border-radius:8px;padding:12px;margin-bottom:12px;">
+                                        <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em;">&#x1F3C5; Badge Type Requirements</label>
+                                        <div id="mc-rank-badge-types" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px;">
+                                            <!-- Populated by mcRenderBadgeTypeToggles() — one chip per tier found in mcBadges -->
+                                        </div>
+                                        <input type="hidden" id="mc-rank-badges">
+
+                                        <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin:12px 0 6px;text-transform:uppercase;letter-spacing:0.06em;">&#x1F396; Specific Badge Requirements</label>
+                                        <div id="mc-rank-specific-pills" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;"></div>
+                                        <select id="mc-rank-specific-picker" onchange="mcRankAddSpecificBadge(this)" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(34,197,94,0.2);color:#e0e6ff;padding:8px;border-radius:6px;font-size:11px;">
+                                            <option value="">+ Add a badge requirement…</option>
+                                            <!-- Populated by mcRenderBadgePicker() grouped by tier -->
+                                        </select>
+                                        <input type="hidden" id="mc-rank-specific">
+                                        <p style="margin:6px 0 0;font-size:10px;color:rgba(255,255,255,0.25);">
+                                            Badge list pulled from your Host Dashboard &rarr; Badges. Create new ones there to add them to this list.
+                                        </p>
+                                    </div>
+
+                                    <!-- Auto-Apply Logic -->
+                                    <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.1em;margin:16px 0 8px;text-transform:uppercase;">Auto-Apply Logic</div>
+                                    <div style="background:rgba(0,212,255,0.03);border:1px solid rgba(0,212,255,0.08);border-radius:8px;padding:12px;margin-bottom:12px;">
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;margin-bottom:10px;">
+                                            <input type="checkbox" id="mc-rank-auto-enabled"> Enable Auto-Apply
+                                        </label>
+                                        <div id="mc-rank-auto-fields" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+                                            <div>
+                                                <label style="display:block;font-size:10px;color:rgba(255,255,255,0.3);margin-bottom:4px;">TRIGGER</label>
+                                                <select id="mc-rank-auto-trigger" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:6px;font-size:11px;">
+                                                    <option value="xc_threshold">XC Threshold Reached</option>
+                                                    <option value="checkpoint_complete">Checkpoint Completed</option>
+                                                    <option value="badge_earned">Badge Earned</option>
+                                                    <option value="all_requirements">All Requirements Met</option>
+                                                    <option value="xc_drop_below">XC Drops Below Maintain</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label style="display:block;font-size:10px;color:rgba(255,255,255,0.3);margin-bottom:4px;">EFFECT</label>
+                                                <select id="mc-rank-auto-effect" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:6px;font-size:11px;">
+                                                    <option value="auto_promote">Auto-Promote</option>
+                                                    <option value="auto_demote">Auto-Demote</option>
+                                                    <option value="notify_host">Notify Host Only</option>
+                                                    <option value="lock_rank">Lock at Current Rank</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label style="display:block;font-size:10px;color:rgba(255,255,255,0.3);margin-bottom:4px;">SCOPE</label>
+                                                <select id="mc-rank-auto-scope" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:6px;font-size:11px;">
+                                                    <option value="all">All Players</option>
+                                                    <option value="cohort">Selected Cohorts Only</option>
+                                                    <option value="manual_override">Manual Override Required</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Host Controls & Cohort Scope (unified matrix) -->
+                                    <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.1em;margin:16px 0 8px;text-transform:uppercase;">Host Controls &amp; Cohort Scope</div>
+                                    <div style="background:rgba(245,200,66,0.03);border:1px solid rgba(245,200,66,0.1);border-radius:8px;padding:12px;margin-bottom:12px;">
+                                        <p style="margin:0 0 10px;font-size:10px;color:rgba(255,255,255,0.35);line-height:1.45;">
+                                            Choose which cohorts this rank governs, then pick the control toggles that apply per cohort. Use the defaults row when "Apply to All Cohorts" is checked.
+                                        </p>
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;margin-bottom:12px;">
+                                            <input type="checkbox" id="mc-rank-all-cohorts" checked onchange="mcRankToggleAllCohorts(this)"> Apply to All Cohorts (use defaults below)
+                                        </label>
+
+                                        <!-- Defaults row -->
+                                        <div id="mc-rank-defaults-row" style="display:block;background:rgba(79,142,247,0.04);border:1px solid rgba(79,142,247,0.12);border-radius:6px;padding:8px 10px;margin-bottom:10px;">
+                                            <div style="font-size:9px;color:rgba(79,142,247,0.7);font-weight:900;letter-spacing:0.1em;margin-bottom:6px;">DEFAULT CONTROLS</div>
+                                            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;font-size:11px;">
+                                                <label style="display:flex;align-items:center;gap:4px;color:#e0e6ff;cursor:pointer;"><input type="checkbox" id="mc-rank-hc-promote" checked> &#x2B06; Promote</label>
+                                                <label style="display:flex;align-items:center;gap:4px;color:#e0e6ff;cursor:pointer;"><input type="checkbox" id="mc-rank-hc-demote" checked> &#x2B07; Demote</label>
+                                                <label style="display:flex;align-items:center;gap:4px;color:#e0e6ff;cursor:pointer;"><input type="checkbox" id="mc-rank-hc-override" checked> &#x270F; Override</label>
+                                                <label style="display:flex;align-items:center;gap:4px;color:#e0e6ff;cursor:pointer;"><input type="checkbox" id="mc-rank-hc-freeze"> &#x2744; Freeze</label>
+                                            </div>
+                                        </div>
+
+                                        <!-- Per-cohort control matrix -->
+                                        <div id="mc-rank-cohort-matrix-wrap" style="display:none;">
+                                            <div style="font-size:9px;color:rgba(245,200,66,0.7);font-weight:900;letter-spacing:0.1em;margin-bottom:6px;">PER-COHORT CONTROL MATRIX</div>
+                                            <div style="display:grid;grid-template-columns:1.3fr repeat(4,1fr);gap:4px;font-size:9px;color:rgba(255,255,255,0.35);font-weight:700;letter-spacing:0.05em;padding:4px 8px;">
+                                                <div>COHORT</div>
+                                                <div style="text-align:center;">&#x2B06; PROMOTE</div>
+                                                <div style="text-align:center;">&#x2B07; DEMOTE</div>
+                                                <div style="text-align:center;">&#x270F; OVERRIDE</div>
+                                                <div style="text-align:center;">&#x2744; FREEZE</div>
+                                            </div>
+                                            <div id="mc-rank-cohort-matrix" style="display:flex;flex-direction:column;gap:3px;max-height:260px;overflow-y:auto;"></div>
+                                            <!-- Legacy flat checkbox list used by older code paths; hidden but populated to keep compatibility -->
+                                            <div id="mc-rank-cohorts" style="display:none;"></div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Form Buttons -->
+                                    <div style="display:flex;gap:10px;margin-top:16px;">
+                                        <button class="mc-btn" onclick="mcSaveRankForm()" style="background:linear-gradient(135deg,rgba(34,197,94,0.2),rgba(79,142,247,0.2));border-color:rgba(34,197,94,0.4);font-size:12px;">&#x2714; Save Rank</button>
+                                        <button class="mc-btn" onclick="mcCancelRankForm()" style="font-size:12px;color:rgba(255,255,255,0.4);">Cancel</button>
+                                    </div>
+                                </div>
+
+                                <div class="mc-card">
+                                    <div class="mc-card-title">EVOLUTION RANKING TIERS</div>
+                                    <p style="color:#6a7290;font-size:12px;margin-bottom:14px;">Each tier requires a minimum XC balance, checkpoint count, and badge categories. Higher tiers also require maintaining XC above a threshold. Click Edit to customize any rank.</p>
+                                    <div id="mc-rankings-list" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(380px, 1fr));gap:14px;"></div>
                                 </div>
                             </div>
 
@@ -17014,6 +17025,7 @@
             if (panel) panel.classList.add('active');
             if (tab === 'dashboard') hmcRefreshDashboard();
             if (tab === 'players') hmcRenderPlayers();
+            if (tab === 'evos' && typeof mcRenderGameMgmt === 'function') mcRenderGameMgmt();
             if (tab === 'gallery') hmcRenderGallery();
             if (tab === 'playerdefaults') pdLoadCohortSettings();
             if (tab === 'moderation') hmcModRefresh();
@@ -56837,8 +56849,8 @@
             var list = document.getElementById('mc-evolution-config');
             if (!list) return;
             mcRenderRankings(); // Reuse rankings render in the game management section
-            list.innerHTML = '<p style="color:rgba(255,255,255,0.4);font-size:12px;">Evolution ranking tiers are configured in Game Management → Evolution Rankings.</p>' +
-                '<button class="mc-btn" style="margin-top:10px;" onclick="mcNav(\'gamemgmt\');mcGameTab(\'rankings\');">Open Evolution Rankings</button>';
+            list.innerHTML = '<p style="color:rgba(255,255,255,0.4);font-size:12px;">Evolution ranking tiers are configured in Platform Settings → Evolution Rankings.</p>' +
+                '<button class="mc-btn" style="margin-top:10px;" onclick="pflxOpenEvoRankings();">Open Evolution Rankings</button>';
         }
 
         function mcLoadOnboarding() {
@@ -69600,6 +69612,11 @@ RESPONSE RULES:
         // helpers (pflxIsHost / pflxIsHostRole) so it works from any IIFE.
         // ──────────────────────────────────────────────────────────────
         window.pflxOpenEvoRankings = function () {
+            // v1.145: Evolution Rankings' canonical home is now Platform
+            // Settings (host-evos panel) -- this used to bounce back into
+            // Mission Control's own mc-panel-gamemgmt, which no longer
+            // exists there. Mirrors pflxOpenPlayerManager()'s navigate
+            // pattern exactly.
             var isAHost = false;
             try {
                 if (typeof window.pflxIsHost === 'function' && window.pflxIsHost()) isAHost = true;
@@ -69617,9 +69634,15 @@ RESPONSE RULES:
                 return false;
             }
             try {
-                if (typeof navigateTo === 'function') navigateTo('mission-control');
+                if (typeof navigateTo === 'function') navigateTo('settings');
                 setTimeout(function () {
-                    try { if (typeof mcNav === 'function') mcNav('gamemgmt'); } catch (e) {}
+                    try {
+                        if (typeof switchHostTab === 'function') switchHostTab('evos');
+                        else {
+                            var btn = document.querySelector('.host-subtab[data-host-tab="evos"]');
+                            if (btn) btn.click();
+                        }
+                    } catch (e) { console.warn('[evo-rankings] switch failed', e); }
                 }, 80);
                 return true;
             } catch (e) { return false; }
@@ -69989,6 +70012,37 @@ RESPONSE RULES:
                     var body = document.getElementById('pflx-save-slots-body');
                     if (body) body.innerHTML = '<div style="padding:30px;text-align:center;color:#ef4444;font-size:13px;">Cloud fetch rejected: ' + escapeHtml(String(err && err.message || err)) + '</div>';
                 });
+        };
+
+        // v1.145: the command palette's per-player "Jump to <name>" used to
+        // land inside MC's own mc-panel-players. Now that Player Management
+        // only lives in Settings, this reuses pflxOpenPlayerManager's exact
+        // navigate/switch pattern, then seeds the Settings panel's own
+        // search box (#hmc-player-search) + calls its existing
+        // hmcFilterPlayers() -- both already-shipped, unmodified.
+        window.pflxJumpToPlayerSettings = function (name) {
+            try {
+                if (typeof navigateTo === 'function') navigateTo('settings');
+                setTimeout(function () {
+                    try {
+                        if (typeof switchHostTab === 'function') switchHostTab('players');
+                        else {
+                            var btn = document.querySelector('.host-subtab[data-host-tab="players"]');
+                            if (btn) btn.click();
+                        }
+                        setTimeout(function () {
+                            try {
+                                var searchEl = document.getElementById('hmc-player-search');
+                                if (searchEl && name) {
+                                    searchEl.value = name;
+                                    if (typeof hmcFilterPlayers === 'function') hmcFilterPlayers();
+                                }
+                            } catch (e) {}
+                        }, 60);
+                    } catch (e) { console.warn('[player-jump] switch failed', e); }
+                }, 80);
+                return true;
+            } catch (e) { console.warn('[player-jump] navigate failed', e); return false; }
         };
 
         window.pflxOpenPlayerManager = function () {
@@ -75163,7 +75217,7 @@ RESPONSE RULES:
                 { view: 'cohorts',      label: 'Go to Cohort Groups',    icon: '🎓', kw: 'cohort group class' },
                 { view: 'approvals',    label: 'Go to Approvals',        icon: '✅', kw: 'approve review queue' }
             ].forEach(function (a) {
-                actions.push({ label: a.label, icon: a.icon, group: 'NAVIGATE', hint: '⌥', keywords: a.kw + ' navigate', run: function () { try { if (typeof mcNav === 'function') mcNav(a.view); else if (typeof navigateTo === 'function') navigateTo(a.view); } catch (e) {} } });
+                actions.push({ label: a.label, icon: a.icon, group: 'NAVIGATE', hint: '⌥', keywords: a.kw + ' navigate', run: function () { try { if (a.view === 'players' && typeof pflxOpenPlayerManager === 'function') pflxOpenPlayerManager(); else if (typeof mcNav === 'function') mcNav(a.view); else if (typeof navigateTo === 'function') navigateTo(a.view); } catch (e) {} } });
             });
             // Quick create
             actions.push({ label: 'New Checkpoint', icon: '＋', group: 'CREATE', keywords: 'new create add checkpoint', run: function () { try { mcNav('checkpoints'); mcCreateCheckpoint(); } catch (e) {} } });
@@ -75183,7 +75237,7 @@ RESPONSE RULES:
                 (mcTasks || []).forEach(function (t)     { actions.push({ label: t.title || 'Untitled Task', icon: '📋', group: 'TASKS', keywords: (t.title || '') + ' task ' + (t.priority || ''), run: function () { mcJumpToItem('task', t.id); } }); });
                 (typeof PLAYERS !== 'undefined' ? PLAYERS : []).forEach(function (pl) {
                     var name = pl.brandName || pl.brand || pl.name || pl.id;
-                    actions.push({ label: 'Jump to ' + name, icon: '👤', group: 'PLAYERS', keywords: name + ' player profile', run: function () { try { mcNav('players'); } catch (e) {} } });
+                    actions.push({ label: 'Jump to ' + name, icon: '👤', group: 'PLAYERS', keywords: name + ' player profile', run: function () { try { if (typeof pflxJumpToPlayerSettings === 'function') pflxJumpToPlayerSettings(name); else if (typeof pflxOpenPlayerManager === 'function') pflxOpenPlayerManager(); } catch (e) {} } });
                 });
             } catch (e) { /* stores may not be initialized yet */ }
             return actions;
