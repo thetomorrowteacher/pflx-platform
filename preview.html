@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 142;
+      window.PFLX_PATCH   = 143;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -6911,9 +6911,16 @@
                      in #pflx-widget-grid (drag to reorder, drag the corner handle
                      to resize). Portfolio shortcut + Settings + Sign Out stay
                      fixed, not widgets, per Ennis's confirmed scope. -->
+                <!-- PATCH PLATFORM v1.143 -- position:fixed (not absolute) because
+                     this element gets moved to a direct child of <body> the first
+                     time it opens (see pflxToggleProfileDropdown), escaping the
+                     .toolbar's own stacking context (z-index:100 + backdrop-filter)
+                     so its z-index:100000 actually outranks #pflx-dd-backdrop's
+                     99998 instead of being trapped under it. top/right below are
+                     placeholders, overwritten from the anchor's live rect on open. -->
                 <div id="pflx-profile-dropdown"
                      onclick="event.stopPropagation()"
-                     style="display:none;position:absolute;top:calc(100% + 10px);right:0;width:320px;max-height:min(78vh,640px);overflow-y:auto;overflow-x:hidden;
+                     style="display:none;position:fixed;top:70px;right:12px;width:320px;max-height:min(78vh,640px);overflow-y:auto;overflow-x:hidden;
                             background:linear-gradient(160deg, var(--dark-panel), rgba(6,10,20,0.94));backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
                             border:1px solid var(--border-color);border-radius:18px;
                             padding:18px;z-index:100000;cursor:default;
@@ -62052,6 +62059,18 @@ RESPONSE RULES:
             if (!dd) return;
             var isOpen = dd.classList.contains('pflx-dd-open');
             if (isOpen) { window.pflxCloseProfileDropdown(); return; }
+            // PATCH PLATFORM v1.143 -- portal the dropdown onto <body> (once) so
+            // it shares the backdrop's top-level stacking context instead of being
+            // trapped inside .toolbar's (see the big comment above the CSS this
+            // patch adds). Position it against the profile pill's live rect since
+            // it's no longer positioned relative to .toolbar-profile.
+            if (dd.parentElement !== document.body) document.body.appendChild(dd);
+            var anchor = document.getElementById('toolbar-profile');
+            var rect = anchor ? anchor.getBoundingClientRect() : null;
+            if (rect) {
+                dd.style.top = (rect.bottom + 10) + 'px';
+                dd.style.right = Math.max(12, window.innerWidth - rect.right) + 'px';
+            }
             var bd = pflxEnsureWidgetBackdrop();
             window.pflxRenderProfileDropdown();
             dd.style.display = 'block';
