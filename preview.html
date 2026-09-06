@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 138;
+      window.PFLX_PATCH   = 139;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -20915,6 +20915,27 @@
         }
         window.pflxPlayerIsXLiveOnly = pflxPlayerIsXLiveOnly;
 
+        // ── X-Live Mode (only), per player RECORD -- v1.139 ──
+        // Companion to pflxPlayerIsXLiveOnly (which reads the CURRENT
+        // session) and hmcCohortIsXLiveOnly (v1.137, which takes a cohort
+        // NAME from the host admin panel). This one takes a raw PLAYER
+        // record directly, for the moment BEFORE a session exists --
+        // i.e. the login gate itself, which has to decide whether to
+        // allow the login at all. Host/admin/master accounts are never
+        // gated even if associated with a flagged cohort.
+        window.pflxPlayerRecordIsXLiveOnly = function (player) {
+            try {
+                if (!player) return false;
+                if (player.role && player.role !== 'player') return false;
+                var cohorts = Array.isArray(player.cohorts) ? player.cohorts.slice()
+                    : String(player.cohort || '').split(/[,;]/).map(function (s) { return s.trim(); }).filter(Boolean);
+                if (!cohorts.length) cohorts = ['PlayerPool'];
+                return cohorts.some(function (c) {
+                    return typeof hmcCohortIsXLiveOnly === 'function' && hmcCohortIsXLiveOnly(c);
+                });
+            } catch (e) { return false; }
+        };
+
         // ─────────────────────────────────────────────────────────────────
         // Access-Locked modal — shown when a player taps a toolbar app
         // their cohorts have disabled. Non-blocking — they dismiss and stay
@@ -21042,6 +21063,19 @@
                     if (!raw) return;
                     var saved = JSON.parse(raw);
                     if (!saved || !saved.brand) return;
+                    // X-Live Mode (only) defense-in-depth -- v1.139. Don't even
+                    // show the normal login screen prefilled for an account
+                    // that's been flagged X-Live-only -- send them straight to
+                    // /xlive instead of waiting for them to click LOGIN (which
+                    // loginUser()'s own gate would catch anyway, but this skips
+                    // the confusing detour through the normal screen first).
+                    try {
+                        var __xlRememberedPlayer = (typeof findPlayerByBrand === 'function') ? findPlayerByBrand(saved.brand) : null;
+                        if (__xlRememberedPlayer && typeof window.pflxPlayerRecordIsXLiveOnly === 'function' && window.pflxPlayerRecordIsXLiveOnly(__xlRememberedPlayer)) {
+                            window.location.href = '/xlive';
+                            return;
+                        }
+                    } catch (e) {}
                     var brandEl = document.getElementById('brand-select');
                     var pinEl = document.getElementById('pin-input');
                     if (brandEl) brandEl.value = saved.brand;
@@ -22462,6 +22496,21 @@
         }
 
         function loginUser(brandName) {
+            // ── X-Live Mode (only) defense-in-depth gate -- v1.139 ──
+            // A player whose cohort/org is flagged X-Live Mode (only) must
+            // never reach a normal Mission Control session, however they
+            // got here -- manual login, remember-me click-through, or the
+            // separate identity-based tryAutoLogin() silent auto-login.
+            // loginUser() is the one choke point all three funnel through.
+            try {
+                var __xlGatePlayer = (typeof findPlayerByBrand === 'function') ? findPlayerByBrand(brandName || '') : null;
+                if (__xlGatePlayer && typeof window.pflxPlayerRecordIsXLiveOnly === 'function' && window.pflxPlayerRecordIsXLiveOnly(__xlGatePlayer)) {
+                    try { if (typeof pflxToast === 'function') pflxToast('This account is X-Live only \u2014 redirecting you to /xlive', 'warn'); } catch (e) {}
+                    window.location.href = '/xlive';
+                    return;
+                }
+            } catch (e) {}
+
             pflxPlaySfx('login');
             // Any successful login invalidates a pending signup draft.
             try { if (window.pflxSignupDraftClear) window.pflxSignupDraftClear(); } catch (e) {}
