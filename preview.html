@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 149;
+      window.PFLX_PATCH   = 150;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -16025,7 +16025,7 @@
 
             // Rank
             const rankEl = document.getElementById('toolbar-rank');
-            if (rankEl) rankEl.textContent = rank.icon + ' ' + rank.name;
+            if (rankEl) rankEl.innerHTML = pflxRankIconHtml(rank) + ' ' + escapeHtml(rank.name);
             const rankBar = document.getElementById('toolbar-rank-bar');
             if (rankBar) rankBar.style.width = (rank.level * 10) + '%';
 
@@ -17293,7 +17293,7 @@
                         '<div style="font-size:13px;color:#e0e6ff;font-family:\'Rajdhani\',sans-serif;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(p.brand || p.name || '(unnamed)') + '</div>' +
                         '<div style="font-size:10px;color:rgba(255,255,255,0.35);">' + escapeHtml(playerCohorts(p).join(', ') || '—') + '</div>' +
                     '</div>' +
-                    (rank ? '<span style="font-size:9px;padding:3px 8px;border-radius:4px;background:' + rank.color + '18;border:1px solid ' + rank.color + '40;color:' + rank.color + ';font-family:\'Orbitron\',sans-serif;letter-spacing:0.05em;white-space:nowrap;">T' + rank.level + ' ' + escapeHtml(rank.name) + '</span>' : '') +
+                    (rank ? '<span style="font-size:9px;padding:3px 8px;border-radius:4px;background:' + rank.color + '18;border:1px solid ' + rank.color + '40;color:' + rank.color + ';font-family:\'Orbitron\',sans-serif;letter-spacing:0.05em;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;">' + pflxRankIconHtml(rank, 12) + ' T' + rank.level + ' ' + escapeHtml(rank.name) + '</span>' : '') +
                     '<span style="font-size:9px;padding:3px 8px;border-radius:4px;background:' + tierColor + '18;border:1px solid ' + tierColor + '40;color:' + tierColor + ';font-family:\'Share Tech Mono\',monospace;white-space:nowrap;">' + (tierMeta ? escapeHtml(tierMeta.label) : 'Player') + '</span>' +
                     (isEligible ? '<span style="font-size:9px;padding:3px 8px;border-radius:4px;background:rgba(0,212,255,0.12);border:1px solid rgba(0,212,255,0.4);color:var(--cyan);white-space:nowrap;">⭐ Eligible</span>' : '') +
                     actionHtml +
@@ -31402,6 +31402,12 @@
             var longestStreak = (myPlayer && myPlayer.longestStreak) || 0;
             var currentStreak = (myPlayer && myPlayer.streak) || 0;
             var badgeCount = (myPlayer && myPlayer.digitalBadges) || 0;
+            // Evolution Rank (icon-aware) -- v1.150: was raw myPlayer.rank
+            // text, which renders nothing whenever a player's tier is
+            // XC-derived rather than an explicit override. mcGetEvoRankObj is
+            // the same canonical lookup Player Management's table already
+            // uses (mcRenderPlayers).
+            var myPortfolioRank = myPlayer ? mcGetEvoRankObj(myPlayer) : null;
 
             // Approved tasks + completed projects for the active player.
             var approvedTasks = (typeof mcTasks !== 'undefined' ? mcTasks : []).filter(function (t) {
@@ -31434,7 +31440,7 @@
                     '<div style="flex:1;min-width:200px;">' +
                         '<div style="font-family:Orbitron,sans-serif;font-size:9px;color:rgba(255,255,255,0.4);letter-spacing:0.2em;font-weight:800;">PORTFOLIO</div>' +
                         '<div style="font-family:Orbitron,sans-serif;font-size:26px;font-weight:900;color:#f5c842;letter-spacing:0.02em;margin:4px 0 8px;">' + escapeHtml(displayName) + '</div>' +
-                        '<div style="font-size:12px;color:rgba(255,255,255,0.6);">' + (myPlayer && myPlayer.rank ? escapeHtml(String(myPlayer.rank)) + ' · ' : '') + xc.toLocaleString() + ' XC earned</div>' +
+                        '<div style="font-size:12px;color:rgba(255,255,255,0.6);">' + (myPortfolioRank ? pflxRankIconHtml(myPortfolioRank) + ' ' + escapeHtml(myPortfolioRank.name) + ' · ' : '') + xc.toLocaleString() + ' XC earned</div>' +
                     '</div>' +
                 '</div>' +
                 // Big stats row
@@ -31984,6 +31990,28 @@
             var r = mcPflxRanks.find(function(x) { return x.name === rankName; });
             return r ? (r.level || 0) : 0;
         }
+
+        // Evolution Rank icon/image renderer (v1.150) -- a rank tier can carry
+        // either a plain emoji `.icon` or a host-uploaded `.image` (mirrors the
+        // Settings tier editor's own imgBlock ternary in mcRenderRankings). Some
+        // call sites hold a rank-like object resolved through a path other than
+        // mcPflxRanks (e.g. the toolbar's legacy XC-fallback rank never carries
+        // `.image` at all) -- in that case, cross-reference the live canonical
+        // tier list by name so an uploaded image still surfaces wherever a rank
+        // is shown, instead of silently only ever showing the emoji.
+        function pflxRankIconHtml(rankLike, sizePx) {
+            sizePx = sizePx || 16;
+            if (!rankLike) return '';
+            var img = rankLike.image;
+            var icon = rankLike.icon;
+            if (!img && typeof mcPflxRanks !== 'undefined' && Array.isArray(mcPflxRanks) && rankLike.name) {
+                var t = mcPflxRanks.find(function (r) { return r.name === rankLike.name; });
+                if (t) { img = img || t.image; icon = icon || t.icon; }
+            }
+            if (img) return '<img src="' + escapeHtml(img) + '" style="width:' + sizePx + 'px;height:' + sizePx + 'px;border-radius:5px;object-fit:cover;vertical-align:middle;">';
+            return '<span style="vertical-align:middle;">' + escapeHtml(icon || '🏆') + '</span>';
+        }
+        window.pflxRankIconHtml = pflxRankIconHtml;
 
         // ─ Privileges derived from X-Coin tax/share/stake tables, keyed by level ─
         function mcGetRankTaxRate(level) {
