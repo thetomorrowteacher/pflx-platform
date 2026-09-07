@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 150;
+      window.PFLX_PATCH   = 151;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -8130,6 +8130,13 @@
                             <div class="mc-panel" id="mc-panel-calendar">
                                 <h1 class="mc-page-title">Calendar</h1>
                                 <p class="mc-page-desc">Every Season, Program, Checkpoint, Project, and Task with a date — one timeline.</p>
+                                <!-- View mode toggle — Year / Month / Week / Day (v1.151) -->
+                                <div id="mc-calendar-view-toggle" style="display:flex;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:3px;gap:2px;width:fit-content;margin-bottom:14px;">
+                                    <button onclick="mcSetCalendarView('year')" data-view="year" class="mc-cal-view-btn" title="Year view" style="padding:6px 12px;font-size:11px;font-weight:700;background:transparent;color:rgba(255,255,255,0.5);border:1px solid transparent;border-radius:6px;cursor:pointer;letter-spacing:0.06em;">YEAR</button>
+                                    <button onclick="mcSetCalendarView('month')" data-view="month" class="mc-cal-view-btn" title="Month view" style="padding:6px 12px;font-size:11px;font-weight:700;background:rgba(0,212,255,0.14);color:#00d4ff;border:1px solid rgba(0,212,255,0.35);border-radius:6px;cursor:pointer;letter-spacing:0.06em;">MONTH</button>
+                                    <button onclick="mcSetCalendarView('week')" data-view="week" class="mc-cal-view-btn" title="Week view" style="padding:6px 12px;font-size:11px;font-weight:700;background:transparent;color:rgba(255,255,255,0.5);border:1px solid transparent;border-radius:6px;cursor:pointer;letter-spacing:0.06em;">WEEK</button>
+                                    <button onclick="mcSetCalendarView('day')" data-view="day" class="mc-cal-view-btn" title="Day view" style="padding:6px 12px;font-size:11px;font-weight:700;background:transparent;color:rgba(255,255,255,0.5);border:1px solid transparent;border-radius:6px;cursor:pointer;letter-spacing:0.06em;">DAY</button>
+                                </div>
                                 <div id="mc-calendar-legend" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;"></div>
                                 <div id="mc-calendar-list"></div>
                             </div>
@@ -35678,46 +35685,91 @@
             }).join('');
         }
 
-        function mcRenderMasterCalendar() {
-            mcLoadData();
-            mcRenderCalendarLegend();
-            var list = document.getElementById('mc-calendar-list');
-            if (!list) return;
-            var year = _mcMasterCalMonth.y, month = _mcMasterCalMonth.m;
-            var monthName = new Date(year, month, 1).toLocaleString('default', { month: 'long' });
-            var firstDay = new Date(year, month, 1).getDay();
-            var daysInMonth = new Date(year, month + 1, 0).getDate();
-            var todayDay = null;
-            var now = new Date();
-            if (now.getFullYear() === year && now.getMonth() === month) todayDay = now.getDate();
+        // ── View mode: year / month / week / day (v1.151) ──────────────────
+        function _mcISODate(d) {
+            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        }
+        var _mcMasterCalView = (function () {
+            try {
+                var v = localStorage.getItem('pflx_mc_calendar_view');
+                if (['year', 'month', 'week', 'day'].indexOf(v) !== -1) return v;
+            } catch (e) {}
+            return 'month';
+        })();
+        // Anchor date (ISO 'YYYY-MM-DD') for the week/day views. Month/year
+        // views keep using the existing _mcMasterCalMonth {y,m} state.
+        var _mcMasterCalDay = _mcISODate(new Date());
+        function _mcMasterCalMoveDay(delta) {
+            var d = new Date(_mcMasterCalDay + 'T00:00:00');
+            d.setDate(d.getDate() + delta);
+            _mcMasterCalDay = _mcISODate(d);
+            mcRenderMasterCalendar();
+        }
+        window._mcMasterCalMoveDay = _mcMasterCalMoveDay;
+        function _mcMasterCalMoveWeek(delta) { _mcMasterCalMoveDay(delta * 7); }
+        window._mcMasterCalMoveWeek = _mcMasterCalMoveWeek;
+        function _mcMasterCalMoveYear(delta) {
+            _mcMasterCalMonth.y += delta;
+            mcRenderMasterCalendar();
+        }
+        window._mcMasterCalMoveYear = _mcMasterCalMoveYear;
+        function _mcJumpToCalMonth(y, m) {
+            _mcMasterCalMonth.y = y;
+            _mcMasterCalMonth.m = m;
+            mcSetCalendarView('month');
+        }
+        window._mcJumpToCalMonth = _mcJumpToCalMonth;
+        function _mcSyncCalViewButtons() {
+            document.querySelectorAll('.mc-cal-view-btn').forEach(function (b) {
+                var isSel = b.getAttribute('data-view') === _mcMasterCalView;
+                b.style.background = isSel ? 'rgba(0,212,255,0.14)' : 'transparent';
+                b.style.color = isSel ? '#00d4ff' : 'rgba(255,255,255,0.5)';
+                b.style.borderColor = isSel ? 'rgba(0,212,255,0.35)' : 'transparent';
+            });
+        }
+        function mcSetCalendarView(mode) {
+            if (['year', 'month', 'week', 'day'].indexOf(mode) === -1) return;
+            _mcMasterCalView = mode;
+            try { localStorage.setItem('pflx_mc_calendar_view', mode); } catch (e) {}
+            _mcSyncCalViewButtons();
+            mcRenderMasterCalendar();
+        }
+        window.mcSetCalendarView = mcSetCalendarView;
 
-            var buckets = {}, totalCount = 0;
-            function addToDay(dateStr, entry) {
+        // Shared data collector for every view -- the 5 source loops are
+        // identical across year/month/week/day; only the date RANGE each
+        // view cares about differs. Returns items keyed by ISO date string
+        // (not day-of-month int, since week/day views can span a month
+        // boundary). Extracted out of the old month-only addToDay() closure
+        // (pre-v1.151) so all 4 views share one implementation.
+        function _mcCollectCalendarItems(rangeStartISO, rangeEndISO) {
+            var byDate = {}, totalCount = 0;
+            function addItem(dateStr, entry) {
                 if (!dateStr) return;
                 var d = new Date(dateStr + 'T00:00:00');
-                if (isNaN(d.getTime()) || d.getFullYear() !== year || d.getMonth() !== month) return;
-                var day = d.getDate();
-                if (!buckets[day]) buckets[day] = [];
-                buckets[day].push(entry);
+                if (isNaN(d.getTime())) return;
+                var iso = _mcISODate(d);
+                if (iso < rangeStartISO || iso > rangeEndISO) return;
+                if (!byDate[iso]) byDate[iso] = [];
+                byDate[iso].push(entry);
                 totalCount++;
             }
-
             if (mcCalFilters.season !== false) {
                 (typeof mcSeasons !== 'undefined' ? mcSeasons : []).forEach(function (s) {
                     if (!s || !s.id) return;
                     var meta = MC_CAL_TYPE_META.season, label = s.name || 'Season';
-                    if (s.startDate) addToDay(s.startDate, { type: 'season', id: s.id, rgb: meta.rgb, label: label, edge: 'start' });
-                    if (s.endDate)   addToDay(s.endDate,   { type: 'season', id: s.id, rgb: meta.rgb, label: label, edge: 'end' });
+                    if (s.startDate) addItem(s.startDate, { type: 'season', id: s.id, rgb: meta.rgb, label: label, edge: 'start' });
+                    if (s.endDate)   addItem(s.endDate,   { type: 'season', id: s.id, rgb: meta.rgb, label: label, edge: 'end' });
                 });
             }
             if (mcCalFilters.program !== false) {
                 (typeof mcPrograms !== 'undefined' ? mcPrograms : []).forEach(function (pg) {
                     if (!pg || !pg.id || !pg.startDate) return;
                     var meta = MC_CAL_TYPE_META.program, label = pg.name || 'Program';
-                    addToDay(pg.startDate, { type: 'program', id: pg.id, rgb: meta.rgb, label: label, edge: 'start' });
+                    addItem(pg.startDate, { type: 'program', id: pg.id, rgb: meta.rgb, label: label, edge: 'start' });
                     if (pg.durationWeeks) {
                         var end = _mcAddDaysISO(pg.startDate, pg.durationWeeks * 7 - 1);
-                        addToDay(end, { type: 'program', id: pg.id, rgb: meta.rgb, label: label, edge: 'end' });
+                        addItem(end, { type: 'program', id: pg.id, rgb: meta.rgb, label: label, edge: 'end' });
                     }
                 });
             }
@@ -35725,8 +35777,8 @@
                 (typeof mcCheckpoints !== 'undefined' ? mcCheckpoints : []).forEach(function (cp) {
                     if (!cp || !cp.id) return;
                     var meta = MC_CAL_TYPE_META.checkpoint, label = cp.name || 'Checkpoint';
-                    if (cp.startDate) addToDay(cp.startDate, { type: 'checkpoint', id: cp.id, rgb: meta.rgb, label: label, edge: 'start' });
-                    if (cp.endDate)   addToDay(cp.endDate,   { type: 'checkpoint', id: cp.id, rgb: meta.rgb, label: label, edge: 'end' });
+                    if (cp.startDate) addItem(cp.startDate, { type: 'checkpoint', id: cp.id, rgb: meta.rgb, label: label, edge: 'start' });
+                    if (cp.endDate)   addItem(cp.endDate,   { type: 'checkpoint', id: cp.id, rgb: meta.rgb, label: label, edge: 'end' });
                 });
             }
             if (mcCalFilters.project !== false) {
@@ -35734,17 +35786,51 @@
                     if (!p || !p.id) return;
                     var meta = MC_CAL_TYPE_META.project, label = p.name || p.title || 'Project';
                     var due = p.dueDate || p.endDate || p.deadline;
-                    if (p.startedAt) addToDay(p.startedAt, { type: 'project', id: p.id, rgb: meta.rgb, label: label, edge: 'start' });
-                    if (due) addToDay(due, { type: 'project', id: p.id, rgb: meta.rgb, label: label, edge: p.startedAt ? 'end' : 'point' });
+                    if (p.startedAt) addItem(p.startedAt, { type: 'project', id: p.id, rgb: meta.rgb, label: label, edge: 'start' });
+                    if (due) addItem(due, { type: 'project', id: p.id, rgb: meta.rgb, label: label, edge: p.startedAt ? 'end' : 'point' });
                 });
             }
             if (mcCalFilters.task !== false) {
                 (typeof mcTasks !== 'undefined' ? mcTasks : []).forEach(function (t) {
                     if (!t || !t.id || !t.dueDate) return;
                     var pRgb = (MC_PRIORITY_META[t.priority || 'normal'] || MC_PRIORITY_META.normal).rgb;
-                    addToDay(t.dueDate, { type: 'task', id: t.id, rgb: pRgb, label: t.title || 'Task', edge: 'point' });
+                    addItem(t.dueDate, { type: 'task', id: t.id, rgb: pRgb, label: t.title || 'Task', edge: 'point' });
                 });
             }
+            return { byDate: byDate, totalCount: totalCount };
+        }
+
+        // One shared day-cell chip renderer (month/week views) so both grids
+        // render items identically.
+        function _mcCalDayChip(it) {
+            var arrow = it.edge === 'start' ? '▶ ' : (it.edge === 'end' ? '◀ ' : '');
+            return '<div ' + _mcJumpAttr(it.type, it.id) + ' style="padding:3px 6px;background:rgba(' + it.rgb + ',0.14);border:1px solid rgba(' + it.rgb + ',0.3);border-radius:4px;font-size:10px;color:#f0f0ff;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(it.label) + '">' + arrow + escapeHtml(it.label) + '</div>';
+        }
+
+        function mcRenderMasterCalendar() {
+            mcLoadData();
+            mcRenderCalendarLegend();
+            _mcSyncCalViewButtons();
+            var list = document.getElementById('mc-calendar-list');
+            if (!list) return;
+            if (_mcMasterCalView === 'day')  return _mcRenderCalDay(list);
+            if (_mcMasterCalView === 'week') return _mcRenderCalWeek(list);
+            if (_mcMasterCalView === 'year') return _mcRenderCalYear(list);
+            return _mcRenderCalMonth(list);
+        }
+        window.mcRenderMasterCalendar = mcRenderMasterCalendar;
+
+        function _mcRenderCalMonth(list) {
+            var year = _mcMasterCalMonth.y, month = _mcMasterCalMonth.m;
+            var monthName = new Date(year, month, 1).toLocaleString('default', { month: 'long' });
+            var firstDay = new Date(year, month, 1).getDay();
+            var daysInMonth = new Date(year, month + 1, 0).getDate();
+            var todayDay = null;
+            var now = new Date();
+            if (now.getFullYear() === year && now.getMonth() === month) todayDay = now.getDate();
+            var rangeStart = year + '-' + String(month + 1).padStart(2, '0') + '-01';
+            var rangeEnd = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(daysInMonth).padStart(2, '0');
+            var collected = _mcCollectCalendarItems(rangeStart, rangeEnd);
 
             var html = '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 4px 10px;">' +
                 '<div style="display:flex;gap:8px;align-items:center;">' +
@@ -35752,7 +35838,7 @@
                     '<div style="font-family:Orbitron,sans-serif;font-size:16px;font-weight:800;color:#f0f0ff;letter-spacing:0.06em;">' + monthName.toUpperCase() + ' ' + year + '</div>' +
                     '<button onclick="_mcMasterCalMoveMonth(1)" style="padding:6px 12px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;">NEXT →</button>' +
                 '</div>' +
-                '<div style="font-size:10px;color:rgba(255,255,255,0.4);font-family:monospace;">' + totalCount + ' scheduled item(s)</div>' +
+                '<div style="font-size:10px;color:rgba(255,255,255,0.4);font-family:monospace;">' + collected.totalCount + ' scheduled item(s)</div>' +
             '</div>';
             html += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px;">';
             ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(function (d) {
@@ -35762,7 +35848,8 @@
             html += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;">';
             for (var i = 0; i < firstDay; i++) html += '<div></div>';
             for (var day = 1; day <= daysInMonth; day++) {
-                var dayItems = buckets[day] || [];
+                var iso = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+                var dayItems = collected.byDate[iso] || [];
                 var isToday = day === todayDay;
                 var cellBorder = isToday ? '2px solid rgba(0,212,255,0.6)' : '1px solid rgba(255,255,255,0.06)';
                 var cellBg = isToday ? 'rgba(0,212,255,0.06)' : 'rgba(255,255,255,0.02)';
@@ -35771,17 +35858,121 @@
                         '<span style="font-size:12px;color:' + (isToday ? '#00d4ff' : 'rgba(255,255,255,0.6)') + ';font-weight:' + (isToday ? '800' : '600') + ';">' + day + '</span>' +
                         (dayItems.length > 0 ? '<span style="font-size:9px;color:rgba(255,255,255,0.4);font-family:monospace;">' + dayItems.length + '</span>' : '') +
                     '</div>';
-                dayItems.slice(0, 4).forEach(function (it) {
-                    var arrow = it.edge === 'start' ? '▶ ' : (it.edge === 'end' ? '◀ ' : '');
-                    html += '<div ' + _mcJumpAttr(it.type, it.id) + ' style="padding:3px 6px;background:rgba(' + it.rgb + ',0.14);border:1px solid rgba(' + it.rgb + ',0.3);border-radius:4px;font-size:10px;color:#f0f0ff;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(it.label) + '">' + arrow + escapeHtml(it.label) + '</div>';
-                });
+                dayItems.slice(0, 4).forEach(function (it) { html += _mcCalDayChip(it); });
                 if (dayItems.length > 4) html += '<div style="font-size:9px;color:rgba(255,255,255,0.4);text-align:center;padding-top:2px;">+ ' + (dayItems.length - 4) + ' more</div>';
                 html += '</div>';
             }
             html += '</div>';
             list.innerHTML = html;
         }
-        window.mcRenderMasterCalendar = mcRenderMasterCalendar;
+
+        function _mcRenderCalWeek(list) {
+            var anchor = new Date(_mcMasterCalDay + 'T00:00:00');
+            var weekStart = new Date(anchor);
+            weekStart.setDate(anchor.getDate() - anchor.getDay());
+            var days = [];
+            for (var i = 0; i < 7; i++) {
+                var d = new Date(weekStart);
+                d.setDate(weekStart.getDate() + i);
+                days.push(d);
+            }
+            var rangeStart = _mcISODate(days[0]), rangeEnd = _mcISODate(days[6]);
+            var collected = _mcCollectCalendarItems(rangeStart, rangeEnd);
+            var todayIso = _mcISODate(new Date());
+            var label = days[0].toLocaleString('default', { month: 'short', day: 'numeric' }) + ' – ' + days[6].toLocaleString('default', { month: 'short', day: 'numeric' }) + ', ' + days[6].getFullYear();
+
+            var html = '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 4px 10px;">' +
+                '<div style="display:flex;gap:8px;align-items:center;">' +
+                    '<button onclick="_mcMasterCalMoveWeek(-1)" style="padding:6px 12px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;">← PREV</button>' +
+                    '<div style="font-family:Orbitron,sans-serif;font-size:16px;font-weight:800;color:#f0f0ff;letter-spacing:0.06em;">' + label.toUpperCase() + '</div>' +
+                    '<button onclick="_mcMasterCalMoveWeek(1)" style="padding:6px 12px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;">NEXT →</button>' +
+                '</div>' +
+                '<div style="font-size:10px;color:rgba(255,255,255,0.4);font-family:monospace;">' + collected.totalCount + ' scheduled item(s)</div>' +
+            '</div>';
+            html += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;">';
+            days.forEach(function (d) {
+                var iso = _mcISODate(d);
+                var dayItems = collected.byDate[iso] || [];
+                var isToday = iso === todayIso;
+                var cellBorder = isToday ? '2px solid rgba(0,212,255,0.6)' : '1px solid rgba(255,255,255,0.06)';
+                var cellBg = isToday ? 'rgba(0,212,255,0.06)' : 'rgba(255,255,255,0.02)';
+                html += '<div style="min-height:220px;padding:8px;background:' + cellBg + ';border:' + cellBorder + ';border-radius:8px;display:flex;flex-direction:column;gap:4px;">' +
+                    '<div style="font-family:Orbitron,sans-serif;font-size:10px;color:rgba(255,255,255,0.35);letter-spacing:0.1em;font-weight:700;">' + ['SUN','MON','TUE','WED','THU','FRI','SAT'][d.getDay()] + '</div>' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
+                        '<span style="font-size:12px;color:' + (isToday ? '#00d4ff' : 'rgba(255,255,255,0.6)') + ';font-weight:' + (isToday ? '800' : '600') + ';">' + d.getDate() + '</span>' +
+                        (dayItems.length > 0 ? '<span style="font-size:9px;color:rgba(255,255,255,0.4);font-family:monospace;">' + dayItems.length + '</span>' : '') +
+                    '</div>';
+                dayItems.forEach(function (it) { html += _mcCalDayChip(it); });
+                html += '</div>';
+            });
+            html += '</div>';
+            list.innerHTML = html;
+        }
+
+        function _mcRenderCalDay(list) {
+            var iso = _mcMasterCalDay;
+            var d = new Date(iso + 'T00:00:00');
+            var collected = _mcCollectCalendarItems(iso, iso);
+            var dayItems = collected.byDate[iso] || [];
+            var isToday = iso === _mcISODate(new Date());
+            var label = d.toLocaleString('default', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+
+            var html = '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 4px 10px;">' +
+                '<div style="display:flex;gap:8px;align-items:center;">' +
+                    '<button onclick="_mcMasterCalMoveDay(-1)" style="padding:6px 12px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;">← PREV</button>' +
+                    '<div style="font-family:Orbitron,sans-serif;font-size:16px;font-weight:800;color:' + (isToday ? '#00d4ff' : '#f0f0ff') + ';letter-spacing:0.06em;">' + label.toUpperCase() + '</div>' +
+                    '<button onclick="_mcMasterCalMoveDay(1)" style="padding:6px 12px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;">NEXT →</button>' +
+                '</div>' +
+                '<div style="font-size:10px;color:rgba(255,255,255,0.4);font-family:monospace;">' + dayItems.length + ' scheduled item(s)</div>' +
+            '</div>';
+            if (!dayItems.length) {
+                html += '<div style="text-align:center;padding:40px 20px;color:rgba(255,255,255,0.3);font-size:13px;">Nothing scheduled this day.</div>';
+            } else {
+                html += '<div style="display:flex;flex-direction:column;gap:8px;">';
+                dayItems.forEach(function (it) {
+                    var arrow = it.edge === 'start' ? '▶ Starts: ' : (it.edge === 'end' ? '◀ Ends: ' : '');
+                    html += '<div ' + _mcJumpAttr(it.type, it.id) + ' style="padding:10px 14px;background:rgba(' + it.rgb + ',0.14);border:1px solid rgba(' + it.rgb + ',0.3);border-radius:8px;font-size:13px;color:#f0f0ff;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;">' +
+                        '<span>' + arrow + escapeHtml(it.label) + '</span>' +
+                        '<span style="font-size:9px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.08em;">' + it.type + '</span>' +
+                    '</div>';
+                });
+                html += '</div>';
+            }
+            list.innerHTML = html;
+        }
+
+        function _mcRenderCalYear(list) {
+            var year = _mcMasterCalMonth.y;
+            var rangeStart = year + '-01-01', rangeEnd = year + '-12-31';
+            var collected = _mcCollectCalendarItems(rangeStart, rangeEnd);
+            var monthCounts = new Array(12).fill(0);
+            Object.keys(collected.byDate).forEach(function (iso) {
+                var mIdx = parseInt(iso.slice(5, 7), 10) - 1;
+                if (mIdx >= 0 && mIdx < 12) monthCounts[mIdx] += collected.byDate[iso].length;
+            });
+            var now = new Date();
+
+            var html = '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 4px 10px;">' +
+                '<div style="display:flex;gap:8px;align-items:center;">' +
+                    '<button onclick="_mcMasterCalMoveYear(-1)" style="padding:6px 12px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;">← PREV</button>' +
+                    '<div style="font-family:Orbitron,sans-serif;font-size:16px;font-weight:800;color:#f0f0ff;letter-spacing:0.06em;">' + year + '</div>' +
+                    '<button onclick="_mcMasterCalMoveYear(1)" style="padding:6px 12px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;">NEXT →</button>' +
+                '</div>' +
+                '<div style="font-size:10px;color:rgba(255,255,255,0.4);font-family:monospace;">' + collected.totalCount + ' scheduled item(s)</div>' +
+            '</div>';
+            html += '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));gap:10px;">';
+            for (var m = 0; m < 12; m++) {
+                var isCurrentMonth = now.getFullYear() === year && now.getMonth() === m;
+                var mName = new Date(year, m, 1).toLocaleString('default', { month: 'long' });
+                html += '<div onclick="_mcJumpToCalMonth(' + year + ',' + m + ')" style="cursor:pointer;padding:16px;background:' + (isCurrentMonth ? 'rgba(0,212,255,0.06)' : 'rgba(255,255,255,0.02)') + ';border:' + (isCurrentMonth ? '2px solid rgba(0,212,255,0.6)' : '1px solid rgba(255,255,255,0.06)') + ';border-radius:10px;text-align:center;">' +
+                    '<div style="font-family:Orbitron,sans-serif;font-size:13px;font-weight:800;color:' + (isCurrentMonth ? '#00d4ff' : '#f0f0ff') + ';letter-spacing:0.06em;margin-bottom:6px;">' + mName.toUpperCase() + '</div>' +
+                    '<div style="font-size:20px;font-weight:900;color:rgba(255,255,255,0.8);">' + monthCounts[m] + '</div>' +
+                    '<div style="font-size:9px;color:rgba(255,255,255,0.35);letter-spacing:0.08em;">SCHEDULED</div>' +
+                '</div>';
+            }
+            html += '</div>';
+            list.innerHTML = html;
+        }
 
         // ── Table view (dense sortable columns) ──
         var _mcTableSort = { field: 'priority', dir: 'desc' };
