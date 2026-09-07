@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 158;
+      window.PFLX_PATCH   = 159;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -60120,7 +60120,17 @@ RESPONSE RULES:
             { id: 'wallet',      icon: '\uD83D\uDCB0', label: 'MY WALLET',   kind: 'rich', render: 'wallet',      defaultW: 2, defaultH: 1, action: 'pflxOpenWalletShortcut' },
             { id: 'tasks',       icon: '\uD83D\uDCCB', label: 'MY TASKS',    kind: 'rich',   render: 'tasks', defaultW: 2, defaultH: 3, action: 'pflxOpenTasksShortcut' },
             { id: 'leaderboard', icon: '\uD83C\uDFC6', label: 'LEADERBOARD', kind: 'rich', render: 'leaderboard', defaultW: 2, defaultH: 3, action: 'pflxOpenTierLeaderboard' },
-            { id: 'sound',       icon: '\u266B',  label: 'SOUND',       kind: 'rich', render: 'sound',       defaultW: 2, defaultH: 2, action: 'pflxWidgetOpenSound' }
+            { id: 'sound',       icon: '\u266B',  label: 'SOUND',       kind: 'rich', render: 'sound',       defaultW: 2, defaultH: 2, action: 'pflxWidgetOpenSound' },
+            // PATCH PLATFORM v1.159 -- Online (live roster), Job Board, and
+            // MC Projects. Same "rich" widget shape as above; each reuses an
+            // existing data/render path rather than a new system (Online:
+            // the existing pflx-presence Supabase Realtime channel; Job
+            // Board: the same ppGetJobs()+cohort filter the Home Base job
+            // board card already uses; Projects: ppGetProjects(), the
+            // player-filtered project list).
+            { id: 'online',      icon: '\uD83D\uDFE2', label: 'ONLINE NOW',  kind: 'rich', render: 'online',      defaultW: 1, defaultH: 2, action: 'pflxPresenceTogglePanel' },
+            { id: 'jobboard',    icon: '\uD83D\uDCBC', label: 'JOB BOARD',   kind: 'rich', render: 'jobboard',    defaultW: 2, defaultH: 2, action: 'pflxWidgetOpenJobBoard' },
+            { id: 'projects',    icon: '\uD83D\uDCC1', label: 'MY PROJECTS', kind: 'rich', render: 'projects',    defaultW: 2, defaultH: 2 }
         ];
         function pflxWidgetCatalogMeta(id) {
             for (var i = 0; i < PFLX_WIDGET_CATALOG.length; i++) if (PFLX_WIDGET_CATALOG[i].id === id) return PFLX_WIDGET_CATALOG[i];
@@ -60426,6 +60436,118 @@ RESPONSE RULES:
                 '<div class="pflx-widget-cal-grid">' + dow + cells + '</div>' +
                 selectedList;
         }
+        // PATCH PLATFORM v1.159 -- Online widget: reads the existing
+        // pflx-presence Supabase Realtime roster (window._prGetOnlineList,
+        // exported above) rather than a new presence system. Same list the
+        // toolbar's Live Roster panel already shows to every player.
+        function pflxWidgetOnlineHtml() {
+            var list = [];
+            try { list = (typeof window._prGetOnlineList === 'function') ? (window._prGetOnlineList() || []) : []; } catch (e) {}
+            var rows = list.length === 0
+                ? '<div style="text-align:center;color:rgba(255,255,255,0.3);font-size:9px;padding:6px;">Nobody else is online</div>'
+                : list.slice(0, 6).map(function (v) {
+                    var dotColor = (v.activity === 'in-call' || v.activity === 'sharing') ? '#00d4ff' : (v.activity === 'chatting' || v.activity === 'messaging') ? '#ff9a3c' : '#22c55e';
+                    return '<div class="pflx-widget-lb-row"><span class="rank" style="color:' + dotColor + ';">\u25CF</span><span class="name">' + escapeHtml(v.name || 'Player') + '</span></div>';
+                }).join('');
+            return '<div class="pflx-widget-label">' + list.length + ' ONLINE NOW</div>' +
+                '<div class="pflx-widget-lb-list">' + rows + '</div>';
+        }
+
+        // PATCH PLATFORM v1.159 -- Job Board widget: same open-jobs +
+        // cohort filter pflxRenderHomeJobBoard already uses for the Home
+        // Base job board card, just rendered as a widget-card string
+        // instead of appended DOM nodes.
+        function pflxWidgetJobBoardHtml() {
+            var jobs = [];
+            try { jobs = (typeof ppGetJobs === 'function') ? (ppGetJobs() || []) : []; } catch (e) {}
+            var _MOCK_TITLES = ['Class Social Media Manager', 'Peer Tutor \u2014 Adobe Creative Cloud'];
+            jobs = jobs.filter(function (j) {
+                if (!j) return false;
+                var title = String(j.title || j.name || '').trim();
+                var idStr = String(j.id || '');
+                var looksMock = _MOCK_TITLES.indexOf(title) !== -1 && (!j.createdAt || idStr.indexOf('job-demo') === 0 || idStr.indexOf('job-seed') === 0);
+                return !looksMock;
+            });
+            var openJobs = jobs.filter(function (j) {
+                if (!j) return false;
+                var st = String(j.status || 'open').toLowerCase();
+                return st === 'open' || st === 'posted' || st === 'available' || st === '';
+            });
+            try {
+                var s = window.activeSession || {};
+                var playerCohorts = Array.isArray(s.cohorts) ? s.cohorts : s.cohort ? String(s.cohort).split(/\s*,\s*/) : [];
+                openJobs = openJobs.filter(function (j) {
+                    if (!j.cohorts || !j.cohorts.length) return true;
+                    return j.cohorts.some(function (c) { return playerCohorts.indexOf(c) !== -1; });
+                });
+            } catch (e) {}
+            openJobs = openJobs.slice(0, 5);
+            var rows = openJobs.length === 0
+                ? '<div style="text-align:center;color:rgba(255,255,255,0.3);font-size:9px;padding:6px;">No open jobs right now</div>'
+                : openJobs.map(function (j) {
+                    var payout = (j.xcReward || j.xc || j.pay || 0);
+                    var payoutHtml = payout > 0 ? (Number(payout).toLocaleString() + ' XC') : 'OPEN';
+                    return '<div class="pflx-widget-lb-row pflx-widget-interactive" onpointerdown="event.stopPropagation()" onclick="pflxWidgetOpenJob(\'' + j.id + '\')"><span class="rank">\uD83D\uDCBC</span><span class="name">' + escapeHtml(j.title || j.name || 'Open Position') + '</span><span class="xc">' + payoutHtml + '</span></div>';
+                }).join('');
+            return '<div class="pflx-widget-lb-list">' + rows + '</div>';
+        }
+        // Deep-links to a specific job (row click) or just the job board
+        // (footer "VIEW ALL", jobId omitted) -- same navigateTo+role-aware
+        // ppNav/mcNav dance pflxRenderHomeJobBoard's row click already uses.
+        window.pflxWidgetOpenJob = function (jobId) {
+            try { pflxCloseProfileDropdown(); } catch (e) {}
+            try {
+                if (typeof navigateTo === 'function') navigateTo('mission-control');
+                var roleLc = String((window.activeSession || {}).role || '').toLowerCase();
+                var isStaff = /admin|host|teacher|instructor|master/.test(roleLc) || window.pflxRole === 'host';
+                setTimeout(function () {
+                    try {
+                        if (isStaff) { if (typeof mcNav === 'function') mcNav('jobboard'); }
+                        else if (typeof ppNav === 'function') { ppNav('jobs', jobId ? { id: jobId } : undefined); }
+                    } catch (e) {}
+                }, 80);
+            } catch (e) {}
+        };
+        window.pflxWidgetOpenJobBoard = function () { window.pflxWidgetOpenJob(null); };
+
+        // PATCH PLATFORM v1.159 -- MC Projects widget: the player's open
+        // assigned projects (ppGetProjects() + ppItemAssignedToActivePlayer,
+        // the same filter ppRenderHome uses elsewhere). Each row deep-links
+        // straight to that project's detail view -- there is no separate
+        // "all projects" Player Portal page to send a footer button to, so
+        // (per Ennis's answer) this stays a compact list widget with no
+        // VIEW ALL footer; the rows themselves are the access point.
+        function pflxWidgetProjectsHtml() {
+            var projects = [];
+            try {
+                projects = (typeof ppGetProjects === 'function') ? (ppGetProjects() || []) : [];
+                if (typeof ppItemAssignedToActivePlayer === 'function') projects = projects.filter(ppItemAssignedToActivePlayer);
+            } catch (e) {}
+            projects = projects.filter(function (p) { return p && p.status !== 'completed'; }).slice(0, 5);
+            var rows = projects.length === 0
+                ? '<div style="text-align:center;color:rgba(255,255,255,0.3);font-size:9px;padding:6px;">No open projects</div>'
+                : projects.map(function (p) {
+                    var phaseLabel = '';
+                    try {
+                        if (typeof pflxComputeFlpStatus === 'function' && p.flpTracking === 'monitoring' && p.startedAt) {
+                            var st = pflxComputeFlpStatus({ flpTracking: p.flpTracking, startedAt: p.startedAt, dueDate: p.dueDate || p.endDate || p.deadline });
+                            if (st && st.phaseName) phaseLabel = st.phaseName;
+                        }
+                    } catch (e) {}
+                    return '<div class="pflx-widget-lb-row pflx-widget-interactive" onpointerdown="event.stopPropagation()" onclick="pflxWidgetOpenProject(\'' + p.id + '\')"><span class="rank">\uD83D\uDCC1</span><span class="name">' + escapeHtml(p.title || p.name || 'Project') + '</span><span class="xc" style="color:rgba(255,255,255,0.4);font-weight:600;font-size:8px;">' + escapeHtml(phaseLabel) + '</span></div>';
+                }).join('');
+            return '<div class="pflx-widget-lb-list">' + rows + '</div>';
+        }
+        window.pflxWidgetOpenProject = function (projectId) {
+            try { pflxCloseProfileDropdown(); } catch (e) {}
+            try {
+                if (typeof navigateTo === 'function') navigateTo('mission-control');
+                setTimeout(function () {
+                    try { if (typeof ppNav === 'function') ppNav('project-detail', { id: projectId }); } catch (e) {}
+                }, 80);
+            } catch (e) {}
+        };
+
         function pflxWidgetTasksHtml() {
             var view = window._pflxWidgetTasksView || 'tasks';
             var tabsDef = [{ k: 'tasks', label: 'TASKS' }, { k: 'today', label: 'TODAY' }, { k: 'cal', label: 'CAL' }];
@@ -60497,6 +60619,9 @@ RESPONSE RULES:
                 else if (meta.render === 'wallet') inner = pflxWidgetWalletHtml();
                 else if (meta.render === 'sound') inner = pflxWidgetSoundHtml();
                 else if (meta.render === 'tasks') inner = pflxWidgetTasksHtml();
+                else if (meta.render === 'online') inner = pflxWidgetOnlineHtml();
+                else if (meta.render === 'jobboard') inner = pflxWidgetJobBoardHtml();
+                else if (meta.render === 'projects') inner = pflxWidgetProjectsHtml();
                 else inner = '<div class="pflx-widget-icon">' + meta.icon + '</div>';
             } else if (meta.kind === 'stat') {
                 inner = '<div class="pflx-widget-value" style="font-size:' + (entry.w >= 2 || entry.h >= 2 ? '22px' : '15px') + '">' + pflxWidgetStatValue(entry.id) + '</div>';
@@ -60505,7 +60630,7 @@ RESPONSE RULES:
             }
             var clickable = meta.kind !== 'rich' && meta.action;
             var richFooter = (meta.kind === 'rich' && meta.action && meta.render !== 'wallet')
-                ? '<div class="pflx-widget-wallet-open pflx-widget-interactive" onpointerdown="event.stopPropagation()" onclick="' + meta.action + '()">' + ((meta.render === 'leaderboard' || meta.render === 'tasks') ? 'VIEW ALL \u2192' : 'FULL MIXER \u2192') + '</div>'
+                ? '<div class="pflx-widget-wallet-open pflx-widget-interactive" onpointerdown="event.stopPropagation()" onclick="' + meta.action + '()">' + ((meta.render === 'leaderboard' || meta.render === 'tasks' || meta.render === 'online' || meta.render === 'jobboard') ? 'VIEW ALL \u2192' : 'FULL MIXER \u2192') + '</div>'
                 : '';
             return '<div class="pflx-widget' + (meta.kind === 'rich' ? ' pflx-widget-rich' : '') + (extraClass ? ' ' + extraClass : '') + '" data-widget-id="' + entry.id + '" style="' + posStyle + '"' +
                 (clickable ? ' onclick="if(!this._pflxDragged){' + meta.action + '()}"' : '') + '>' +
@@ -73001,6 +73126,10 @@ RESPONSE RULES:
             } catch (e) {}
         }
         window.pflxPresenceTouch = function () { _prTrack(); };
+        // PATCH PLATFORM v1.159 -- exposes the presence engine's live
+        // roster to the new Online widget (a different <script> block;
+        // _prState is otherwise closure-local to this IIFE).
+        window._prGetOnlineList = function () { return Object.values(_prState); };
         function _prToastIfNewCall(prev, cur) {
             if (!_prIsHostView()) return;
             Object.keys(cur).forEach(function (key) {
