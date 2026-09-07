@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 154;
+      window.PFLX_PATCH   = 155;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -35732,6 +35732,37 @@
             mcSetCalendarView('month');
         }
         window._mcJumpToCalMonth = _mcJumpToCalMonth;
+        // Jump straight to the Day view for one specific date -- used by
+        // the YEAR view's per-day cells (v1.155).
+        function _mcJumpToCalDay(iso) {
+            _mcMasterCalDay = iso;
+            mcSetCalendarView('day');
+        }
+        window._mcJumpToCalDay = _mcJumpToCalDay;
+        // Renders one month's mini day-grid (Sun-Sat columns, blank
+        // leading cells so day 1 lands under its real weekday) for the
+        // YEAR view. A day with any scheduled item gets a small dot;
+        // today gets a solid highlight. Each day is independently
+        // clickable (stopPropagation so it doesn't also trigger the
+        // month tile's own onclick, which jumps to Month view).
+        function _mcMiniMonthDaysHtml(year, m, byDate, todayIso) {
+            var firstDow = new Date(year, m, 1).getDay();
+            var daysInMonth = new Date(year, m + 1, 0).getDate();
+            var cells = '';
+            for (var i = 0; i < firstDow; i++) { cells += '<div></div>'; }
+            for (var day = 1; day <= daysInMonth; day++) {
+                var iso = year + '-' + String(m + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+                var hasItems = !!(byDate[iso] && byDate[iso].length);
+                var isToday = iso === todayIso;
+                cells += '<div onclick="event.stopPropagation();_mcJumpToCalDay(\'' + iso + '\')" style="cursor:pointer;position:relative;padding:2px 0 5px;border-radius:3px;font-size:9px;text-align:center;' +
+                    (isToday ? 'background:rgba(0,212,255,0.35);color:#001622;font-weight:800;' : 'color:rgba(255,255,255,0.65);') +
+                    '">' + day +
+                    (hasItems ? '<span style="position:absolute;bottom:1px;left:50%;transform:translateX(-50%);width:3px;height:3px;border-radius:50%;background:' + (isToday ? '#001622' : '#00d4ff') + ';"></span>' : '') +
+                    '</div>';
+            }
+            return '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;margin-top:8px;">' + cells + '</div>';
+        }
+        window._mcMiniMonthDaysHtml = _mcMiniMonthDaysHtml;
         function _mcSyncCalViewButtons() {
             document.querySelectorAll('.mc-cal-view-btn').forEach(function (b) {
                 var isSel = b.getAttribute('data-view') === _mcMasterCalView;
@@ -35964,6 +35995,7 @@
                 if (mIdx >= 0 && mIdx < 12) monthCounts[mIdx] += collected.byDate[iso].length;
             });
             var now = new Date();
+            var todayIso = _mcISODate(now);
 
             var html = '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 4px 10px;">' +
                 '<div style="display:flex;gap:8px;align-items:center;">' +
@@ -35973,7 +36005,7 @@
                 '</div>' +
                 '<div style="font-size:10px;color:rgba(255,255,255,0.4);font-family:monospace;">' + collected.totalCount + ' scheduled item(s)</div>' +
             '</div>';
-            html += '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));gap:10px;">';
+            html += '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(230px, 1fr));gap:10px;">';
             for (var m = 0; m < 12; m++) {
                 var isCurrentMonth = now.getFullYear() === year && now.getMonth() === m;
                 var mName = new Date(year, m, 1).toLocaleString('default', { month: 'long' });
@@ -35981,6 +36013,7 @@
                     '<div style="font-family:Orbitron,sans-serif;font-size:13px;font-weight:800;color:' + (isCurrentMonth ? '#00d4ff' : '#f0f0ff') + ';letter-spacing:0.06em;margin-bottom:6px;">' + mName.toUpperCase() + '</div>' +
                     '<div style="font-size:20px;font-weight:900;color:rgba(255,255,255,0.8);">' + monthCounts[m] + '</div>' +
                     '<div style="font-size:9px;color:rgba(255,255,255,0.35);letter-spacing:0.08em;">SCHEDULED</div>' +
+                    _mcMiniMonthDaysHtml(year, m, collected.byDate, todayIso) +
                 '</div>';
             }
             html += '</div>';
