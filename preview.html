@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 159;
+      window.PFLX_PATCH   = 160;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -27826,6 +27826,31 @@
         window.mcPushDCClose = mcPushDCClose;
         window.mcCanPushToDarkcampus = mcCanPushToDarkcampus;
 
+        // ── Single source of truth: "the currently live season" ────────
+        // Flagged active/enabled AND, when dates are set, today falls
+        // inside [startDate, endDate]. No fallback to a stale flag or
+        // mcSeasons[0] -- when nothing genuinely qualifies right now,
+        // there IS no active season. Every ACTIVE SEASON surface (the MC
+        // season bar, the Home Base season card, the player Season
+        // Portal) reads through this one function so a season that has
+        // ended stops showing everywhere at once, and a scheduled season
+        // starts showing everywhere at once the moment its window opens.
+        function pflxCurrentLiveSeason() {
+            if (typeof mcSeasons === 'undefined' || !Array.isArray(mcSeasons)) return null;
+            var now = Date.now();
+            function live(s) {
+                if (!s) return false;
+                var flagged = (s.status === 'active') || s.active === true;
+                if (!flagged) return false;
+                var st = s.startDate ? Date.parse(s.startDate) : -Infinity;
+                var en = s.endDate ? (Date.parse(s.endDate) + 86399999) : Infinity;
+                if (isNaN(st)) st = -Infinity; if (isNaN(en)) en = Infinity;
+                return now >= st && now <= en;
+            }
+            return mcSeasons.find(live) || null;
+        }
+        window.pflxCurrentLiveSeason = pflxCurrentLiveSeason;
+
         // ── Navigation ──────────────────────────────────────────────
         // ── Season Context Bar renderer ──
         // Season is the top of the hierarchy. This strip stays visible on every
@@ -27850,9 +27875,7 @@
                     if (isNaN(st)) st = -Infinity; if (isNaN(en)) en = Infinity;
                     return __now >= st && __now <= en;
                 }
-                var activeSeason = (mcSeasons || []).find(__seasonLive)
-                    || (mcSeasons || []).find(function (s) { return s && (s.status === 'active' || s.active === true); })
-                    || (mcSeasons || [])[0] || null;
+                var activeSeason = pflxCurrentLiveSeason();
                 // Season cohort scope — the form saves allCohorts (bool) + cohorts[]
                 var scopedCohorts = (activeSeason && activeSeason.allCohorts === false && Array.isArray(activeSeason.cohorts) && activeSeason.cohorts.length)
                     ? ((typeof pflxSeasonCohortNames === 'function') ? pflxSeasonCohortNames(activeSeason) : activeSeason.cohorts) : null;
@@ -27946,9 +27969,7 @@
                     if (isNaN(st)) st = -Infinity; if (isNaN(en)) en = Infinity;
                     return now >= st && now <= en;
                 }
-                var season = mcSeasons.find(live)
-                    || mcSeasons.find(function (x) { return x && (x.status === 'active' || x.active === true); })
-                    || null;
+                var season = pflxCurrentLiveSeason();
                 if (!season) return '';
                 var scope = (typeof pflxSeasonCohortNames === 'function') ? pflxSeasonCohortNames(season) : (Array.isArray(season.cohorts) ? season.cohorts : []);
                 if (season.allCohorts === false && scope.length && !opts.isHost) {
@@ -28494,9 +28515,23 @@
         // assigned" even when the host had created and assigned tasks.
         function ppGetSeason() {
             try {
-                if (typeof mcSeasons !== 'undefined' && Array.isArray(mcSeasons) && mcSeasons.length) return mcSeasons[0];
+                if (typeof mcSeasons !== 'undefined' && Array.isArray(mcSeasons)) return pflxCurrentLiveSeason();
+                // mcSeasons not loaded yet (very first render, before the boot
+                // pull lands) -- fall back to the localStorage cache, same
+                // live-window rule (flagged + inside start/end), not just
+                // "whichever one happens to be first."
                 var d = JSON.parse(localStorage.getItem('pflx_mc_seasons') || localStorage.getItem('pflx_seasons') || '[]');
-                return d[0] || null;
+                var now = Date.now();
+                var found = (Array.isArray(d) ? d : []).find(function (s) {
+                    if (!s) return false;
+                    var flagged = (s.status === 'active') || s.active === true;
+                    if (!flagged) return false;
+                    var st = s.startDate ? Date.parse(s.startDate) : -Infinity;
+                    var en = s.endDate ? (Date.parse(s.endDate) + 86399999) : Infinity;
+                    if (isNaN(st)) st = -Infinity; if (isNaN(en)) en = Infinity;
+                    return now >= st && now <= en;
+                });
+                return found || null;
             } catch(e) { return null; }
         }
         function ppGetCheckpoints() {
