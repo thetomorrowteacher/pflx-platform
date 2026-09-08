@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 160;
+      window.PFLX_PATCH   = 161;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -27921,7 +27921,7 @@
                             '<div>' +
                                 '<div style="font-family:Orbitron,sans-serif;font-size:9px;color:rgba(245,200,66,0.85);letter-spacing:0.14em;font-weight:800;">ACTIVE SEASON</div>' +
                                 '<div id="mc-season-bar-name" style="font-family:Orbitron,sans-serif;font-size:14px;color:#f5c842;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;text-shadow:0 1px 8px rgba(0,0,0,0.85);">' +
-                                    (activeSeason ? escapeHtml(activeSeason.name || 'Untitled Season') : 'No Season Set') + '</div>' +
+                                    (activeSeason ? escapeHtml(activeSeason.name || 'Untitled Season') : 'OFF-SEASON') + '</div>' +
                                 (activeSeason && (activeSeason.startDate || activeSeason.endDate)
                                     ? '<div style="font-family:\'Share Tech Mono\',monospace;font-size:9px;color:rgba(255,255,255,0.75);margin-top:1px;">' + escapeHtml((activeSeason.startDate || '') + (activeSeason.endDate ? ' → ' + activeSeason.endDate : '')) + '</div>'
                                     : '') +
@@ -34013,6 +34013,22 @@
         }
         function _mcTaskIsApproved(t) { return t && (t.status === 'approved' || t.completed === true); }
         function _mcTaskIsSubmitted(t) { return t && t.status === 'submitted'; }
+        // Sept 8, Ennis: "if a checkpoint/project includes a task that
+        // has been completed by a player then that task should remain
+        // and be credited as complete by that player." True when the
+        // shared single-track status is approved, OR (everyone-mode) at
+        // least one player's per-player submissions[] entry is approved
+        // -- either way real earned credit exists and must survive a
+        // checkpoint/project edit (see the save-time safety nets below).
+        function _mcTaskHasAnyCompletion(t) {
+            if (!t) return false;
+            if (_mcTaskIsApproved(t)) return true;
+            if (Array.isArray(t.submissions)) {
+                return t.submissions.some(function (s) { return s && s.status === 'approved'; });
+            }
+            return false;
+        }
+        window.mcTaskHasAnyCompletion = _mcTaskHasAnyCompletion;
         // Progress for a Project = fraction of its taskIds that are approved.
         function _mcProjectProgress(project) {
             var kids = mcChildTasksForProject(project);
@@ -34934,7 +34950,27 @@
                 if (cp && cp.taskIds) {
                     cp.taskIds.forEach(function(taskId) {
                         var cb = tasksDiv.querySelector('input[value="' + taskId + '"]');
-                        if (cb) cb.checked = true;
+                        if (cb) {
+                            cb.checked = true;
+                            // A task a player already completed can't be
+                            // unchecked out of this checkpoint from the
+                            // form -- that would silently drop their
+                            // earned credit on save (Sept 8, Ennis).
+                            // Locked, not hidden: Delete Task still works
+                            // if removing the task itself is truly meant.
+                            var _t = mcTasks.find(function (x) { return x && x.id === taskId; });
+                            if (_t && _mcTaskHasAnyCompletion(_t)) {
+                                cb.disabled = true;
+                                var _lbl = cb.closest('label');
+                                if (_lbl && !_lbl.querySelector('.mc-cp-task-locked-badge')) {
+                                    var _badge = document.createElement('span');
+                                    _badge.className = 'mc-cp-task-locked-badge';
+                                    _badge.style.cssText = 'color:#22c55e;font-weight:700;font-size:10px;margin-left:4px;';
+                                    _badge.textContent = '\uD83D\uDD12 completed \u2014 locked';
+                                    _lbl.appendChild(_badge);
+                                }
+                            }
+                        }
                     });
                 }
             }
@@ -35139,6 +35175,18 @@
 
             var taskIds = [];
             document.querySelectorAll('.mc-cp-task-cb:checked').forEach(function(cb) { taskIds.push(cb.value); });
+            // SAFETY NET (Sept 8, Ennis): a task with real earned player
+            // credit must never silently disappear from this checkpoint
+            // on save, even if its checkbox was somehow unchecked or
+            // missing -- the render above already locks/disables it, but
+            // this is what actually enforces it at save time.
+            if (mcCPEditIndex >= 0 && mcCheckpoints[mcCPEditIndex] && Array.isArray(mcCheckpoints[mcCPEditIndex].taskIds)) {
+                mcCheckpoints[mcCPEditIndex].taskIds.forEach(function (tid) {
+                    if (taskIds.indexOf(tid) !== -1) return;
+                    var t = mcTasks.find(function (x) { return x && x.id === tid; });
+                    if (t && _mcTaskHasAnyCompletion(t)) taskIds.push(tid);
+                });
+            }
 
             var projectIds = [];
             document.querySelectorAll('.mc-cp-proj-cb:checked').forEach(function(cb) { projectIds.push(cb.value); });
@@ -40356,6 +40404,17 @@
                     inProjs.length + ' project' + (inProjs.length === 1 ? '' : 's') + '.\n\n' +
                     'Deleting it will also remove it from them. Are you sure?';
             }
+            
+            // Sept 8, Ennis: never let a host delete a task with real
+            // earned player credit without being told plainly what that
+            // costs -- deletion itself is unchanged, just informed.
+            if (_mcTaskHasAnyCompletion(task)) {
+                var _completedCount = Array.isArray(task.submissions)
+                    ? task.submissions.filter(function (s) { return s && s.status === 'approved'; }).length
+                    : (_mcTaskIsApproved(task) ? 1 : 0);
+                msg += '\n\n\uD83C\uDFC6 ' + _completedCount + ' player' + (_completedCount === 1 ? ' has' : 's have') +
+                    ' already completed this task and earned credit for it. Deleting it will remove that credit permanently.';
+            }
             if (!confirm(msg)) return;
             pflxPlaySfx('delete');
             // Detach from every checkpoint / project (fixes "still in the
@@ -41075,7 +41134,23 @@
                 if (p && p.taskIds) {
                     p.taskIds.forEach(function(taskId) {
                         var cb = tasksDiv.querySelector('input[value="' + taskId + '"]');
-                        if (cb) cb.checked = true;
+                        if (cb) {
+                            cb.checked = true;
+                            // Same earned-credit lock as the Checkpoint
+                            // form (Sept 8, Ennis) -- see there for why.
+                            var _t = mcTasks.find(function (x) { return x && x.id === taskId; });
+                            if (_t && _mcTaskHasAnyCompletion(_t)) {
+                                cb.disabled = true;
+                                var _lbl = cb.closest('label');
+                                if (_lbl && !_lbl.querySelector('.mc-project-task-locked-badge')) {
+                                    var _badge = document.createElement('span');
+                                    _badge.className = 'mc-project-task-locked-badge';
+                                    _badge.style.cssText = 'color:#22c55e;font-weight:700;font-size:10px;margin-left:4px;';
+                                    _badge.textContent = '\uD83D\uDD12 completed \u2014 locked';
+                                    _lbl.appendChild(_badge);
+                                }
+                            }
+                        }
                     });
                 }
                 // Check reward badges
@@ -41278,6 +41353,14 @@
 
             var taskIds = [];
             document.querySelectorAll('.mc-project-task-cb:checked').forEach(function(cb) { taskIds.push(cb.value); });
+            // SAFETY NET -- same as mcSaveCPForm's, see there for why.
+            if (mcProjectEditIndex >= 0 && mcProjects[mcProjectEditIndex] && Array.isArray(mcProjects[mcProjectEditIndex].taskIds)) {
+                mcProjects[mcProjectEditIndex].taskIds.forEach(function (tid) {
+                    if (taskIds.indexOf(tid) !== -1) return;
+                    var t = mcTasks.find(function (x) { return x && x.id === tid; });
+                    if (t && _mcTaskHasAnyCompletion(t)) taskIds.push(tid);
+                });
+            }
 
             var rewardBadges = [];
             document.querySelectorAll('.mc-project-badge-cb:checked').forEach(function(cb) { rewardBadges.push(cb.value); });
