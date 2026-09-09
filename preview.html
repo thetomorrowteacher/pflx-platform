@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 164;
+      window.PFLX_PATCH   = 165;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -67843,10 +67843,66 @@ RESPONSE RULES:
             } catch (e) { console.warn('[PFLX] embed-identity auto-login failed', e); }
         }
 
+        // PATCH PLATFORM -- YouTube API relay handler (Sept 9, Ennis: "Both
+        // 1 and 2"). X-Live's Theater has no YouTube credentials of its own
+        // and never will -- Ennis authorized YouTube once, right here, in
+        // Settings -> YouTube API, and ytConfig.accessToken never leaves
+        // this origin. This handler answers a trusted, embedded X-Live
+        // frame's request by calling the SAME real ytApiFetch() the
+        // Settings page itself uses (see ytCreateBroadcast/ytStopBroadcast
+        // above) -- reused, not reimplemented -- just without depending on
+        // that page's own form <input> elements being mounted, since the
+        // relay runs in a hidden background frame that never opens that
+        // Settings tab.
+        function pflxYtRelayHandle(action, payload, cb) {
+            try {
+                if (typeof ytLoadConfig === 'function') ytLoadConfig();
+                if (action === 'status') {
+                    cb({ ok: true, connected: !!(typeof ytConfig !== 'undefined' && ytConfig.accessToken), channelId: (typeof ytConfig !== 'undefined' && ytConfig.channelId) || '' });
+                    return;
+                }
+                if (typeof ytConfig === 'undefined' || !ytConfig.accessToken) { cb({ ok: false, error: 'not_connected' }); return; }
+                if (action === 'createBroadcast') {
+                    var title = (payload && payload.title) || 'PFLX Live Session';
+                    var body = {
+                        snippet: { title: title, description: (payload && payload.description) || '', scheduledStartTime: new Date(Date.now() + 60000).toISOString() },
+                        status: { privacyStatus: 'unlisted' },
+                        contentDetails: { enableDvr: true, enableEmbed: true, enableAutoStart: true, enableAutoStop: true }
+                    };
+                    ytApiFetch('/liveBroadcasts?part=snippet,status,contentDetails', {}, function (data) {
+                        if (data.error) { cb({ ok: false, error: data.error.message || 'YouTube API error' }); return; }
+                        cb({ ok: true, videoId: data.id, watchUrl: 'https://www.youtube.com/watch?v=' + data.id });
+                        try { if (typeof ytRefreshBroadcasts === 'function') ytRefreshBroadcasts(); } catch (e) {}
+                    }, 'POST', body);
+                    return;
+                }
+                if (action === 'endBroadcast') {
+                    var videoId = payload && payload.videoId;
+                    if (!videoId) { cb({ ok: false, error: 'missing_videoId' }); return; }
+                    ytApiFetch('/liveBroadcasts/transition', { broadcastStatus: 'complete', id: videoId, part: 'status' }, function (data) {
+                        if (data.error) { cb({ ok: false, error: data.error.message || 'YouTube API error' }); return; }
+                        cb({ ok: true });
+                        try { if (typeof ytEndLive === 'function' && typeof ytActiveBroadcast !== 'undefined' && ytActiveBroadcast && ytActiveBroadcast.id === videoId) ytEndLive(); } catch (e) {}
+                    }, 'POST');
+                    return;
+                }
+                cb({ ok: false, error: 'unknown_action' });
+            } catch (e) { cb({ ok: false, error: String((e && e.message) || e) }); }
+        }
+
         window.addEventListener('message', function (ev) {
             try {
                 var msg = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
                 if (!msg || typeof msg !== 'object') return;
+                if (msg.type === 'pflx_yt_relay_request' && window.self !== window.top && PFLX_TRUSTED_EMBED_ORIGINS.indexOf(ev.origin) !== -1) {
+                    pflxYtRelayHandle(msg.action, msg.payload, function (result) {
+                        try {
+                            var resp = { type: 'pflx_yt_relay_response', requestId: msg.requestId, ok: result && result.ok };
+                            if (result) { for (var k in result) { if (k !== 'type') resp[k] = result[k]; } }
+                            ev.source.postMessage(JSON.stringify(resp), ev.origin);
+                        } catch (e) {}
+                    });
+                }
                 if (msg.type === 'pflx_xc_changed' && typeof msg.xc === 'number') {
                     if (window.activeSession && window.activeSession.xc !== msg.xc) {
                         window.pflxBroadcastXC(msg.xc, { reason: msg.reason || 'sync', toast: false });
