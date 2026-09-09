@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 163;
+      window.PFLX_PATCH   = 164;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -8049,6 +8049,7 @@
                                         <label style="display:block;font-size:11px;color:rgba(139,92,246,0.7);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">&#x1F5A5; Embed Cover (shows instead of the image)</label>
                                         <input type="url" id="mc-program-tab-embed" oninput="pflxEmbedHint(this,'mc-program-tab-embed-hint')" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(139,92,246,0.25);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="Paste a Canva design link (Share &rarr; Copy link) — also accepts Google Slides / YouTube. Blank = use the cover image.">
                                         <div id="mc-program-tab-embed-hint"></div>
+                                        <div style="margin-top:6px;"><label class="mc-btn" style="padding:4px 12px;font-size:10px;cursor:pointer;">&#x1F5CE; Upload Artifact HTML <input type="file" accept=".html,.htm,text/html" onchange="pflxUploadArtifactSnapshot(this.files[0], function(url){ var i=document.getElementById('mc-program-tab-embed'); if(i){ i.value=url; pflxEmbedHint(i,'mc-program-tab-embed-hint'); } }); this.value='';" style="display:none;"></label><div style="margin-top:4px;font-size:10px;color:rgba(255,255,255,0.35);">Have a Claude Artifact instead of a link? Download it as .html from Claude and upload it here.</div></div>
                                     </div>
                                     <!-- v1.105 (Ennis): same Locked Preview field as the Project form
                                          — see that comment for the full rationale. Only takes effect
@@ -8392,6 +8393,8 @@
                                         <div style="grid-column:1/-1;">
                                             <label style="display:block;font-size:11px;color:rgba(139,92,246,0.7);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">🖥 Embed (shows instead of the banner)</label>
                                             <input type="url" id="mc-cp-embed" oninput="pflxEmbedHint(this,'mc-cp-embed-hint')" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(139,92,246,0.25);color:#e0e6ff;padding:10px;border-radius:8px;font-size:13px;box-sizing:border-box;" placeholder="Paste a Canva design link (Share &rarr; Copy link) — also accepts Google Slides / YouTube. Blank = use the banner image.">
+                                        <div id="mc-cp-embed-hint"></div>
+                                        <div style="margin-top:6px;"><label class="mc-btn" style="padding:4px 12px;font-size:10px;cursor:pointer;">&#x1F5CE; Upload Artifact HTML <input type="file" accept=".html,.htm,text/html" onchange="pflxUploadArtifactSnapshot(this.files[0], function(url){ var i=document.getElementById('mc-cp-embed'); if(i){ i.value=url; pflxEmbedHint(i,'mc-cp-embed-hint'); } }); this.value='';" style="display:none;"></label><div style="margin-top:4px;font-size:10px;color:rgba(255,255,255,0.35);">Have a Claude Artifact instead of a link? Download it as .html from Claude and upload it here.</div></div>
                                             <div id="mc-cp-embed-hint"></div>
                                         </div>
                                     </div>
@@ -9246,6 +9249,7 @@
                                         <label style="display:block;font-size:11px;color:rgba(139,92,246,0.7);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">&#x1F5A5; Embed Cover (shows instead of the image)</label>
                                         <input type="url" id="mc-project-embed" oninput="pflxEmbedHint(this,'mc-project-embed-hint')" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(139,92,246,0.25);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="Paste a Canva design link (Share &rarr; Copy link) — also accepts Google Slides / YouTube. Blank = use the cover image.">
                                         <div id="mc-project-embed-hint"></div>
+                                        <div style="margin-top:6px;"><label class="mc-btn" style="padding:4px 12px;font-size:10px;cursor:pointer;">&#x1F5CE; Upload Artifact HTML <input type="file" accept=".html,.htm,text/html" onchange="pflxUploadArtifactSnapshot(this.files[0], function(url){ var i=document.getElementById('mc-project-embed'); if(i){ i.value=url; pflxEmbedHint(i,'mc-project-embed-hint'); } }); this.value='';" style="display:none;"></label><div style="margin-top:4px;font-size:10px;color:rgba(255,255,255,0.35);">Have a Claude Artifact instead of a link? Download it as .html from Claude and upload it here.</div></div>
                                     </div>
                                     <!-- v1.105 (Ennis): "lock the slideshow to the first 2 slides
                                          only if Apply to Join is active, until the player is
@@ -59430,6 +59434,10 @@ RESPONSE RULES:
             var box = document.getElementById(hintId); if (!box) return;
             var v = String((el && el.value) || '').trim();
             if (!v) { box.innerHTML = ''; return; }
+            if (pflxIsClaudeArtifactUrl(v) && !pflxIsArtifactSnapshotUrl(v)) {
+                box.innerHTML = '<div style="margin-top:6px;font-size:11px;color:#f5c842;line-height:1.5;">&#x26A0; Claude Artifact links can\'t be embedded directly (claude.ai blocks framing). Download the artifact as <code style="color:#e0e6ff;">.html</code> from Claude, then use the <strong>Upload Artifact HTML</strong> button below.</div>';
+                return;
+            }
             if (/canva\.link\//i.test(v)) {
                 box.innerHTML = '<div style="margin-top:6px;font-size:11px;color:#f5c842;line-height:1.5;">&#x26A0; Canva <strong>short links</strong> can\'t be embedded. Open it, then use Share &rarr; Copy link and paste the full <code style="color:#e0e6ff;">canva.com/design/&hellip;</code> URL here.</div>';
                 return;
@@ -59475,9 +59483,73 @@ RESPONSE RULES:
                 }
             } catch (e) { console.warn('[fs] embed toggle failed', e); }
         };
+        // ── CLAUDE ARTIFACT EMBEDS (self-hosted snapshot, Sept 9) ──────────
+        // See the Handoff entry for this patch for the full CSP/CORS finding.
+        // Short version: claude.ai artifact pages can't be framed (frame-
+        // ancestors 'self') and can't be fetched client-side either -- the
+        // only path in is a host-downloaded .html file, uploaded here and
+        // re-served from PFLX's own storage.
+        window.pflxIsClaudeArtifactUrl = function (url) {
+            return /^https:\/\/claude\.ai\//i.test(String(url || '').trim());
+        };
+        window.pflxIsArtifactSnapshotUrl = function (url) {
+            return /\/storage\/v1\/object\/public\/pflx-artifact-snapshots\//i.test(String(url || ''));
+        };
+        // Fetches the stored snapshot's HTML TEXT (the bucket sends
+        // access-control-allow-origin: *, confirmed) and assigns it via
+        // .srcdoc -- NOT a plain <iframe src>, which would inherit Supabase
+        // Storage's own strict default CSP on served objects and silently
+        // block the artifact's scripts from running. Fired off the (still-
+        // blank) iframe's own onload so no render-cycle wiring is needed at
+        // any of pflxCoverMediaEl's call sites.
+        window.pflxHydrateArtifactSnapshot = function (id, url) {
+            try {
+                fetch(url).then(function (r) { return r.text(); }).then(function (html) {
+                    var el = document.getElementById(id);
+                    if (el) el.srcdoc = html;
+                }).catch(function (e) { console.warn('[artifact-snapshot] fetch failed', e); });
+            } catch (e) { console.warn('[artifact-snapshot] hydrate failed', e); }
+        };
+        // Uploads a host-downloaded Artifact .html FILE (already in the
+        // browser -- no network fetch to claude.ai involved) to the public
+        // 'pflx-artifact-snapshots' bucket, same upload shape as the
+        // pre-existing pflxUploadBannerToStorage/pflxUploadSubmissionFile.
+        window.pflxUploadArtifactSnapshot = async function (file, onDone) {
+            try {
+                if (!file) return;
+                if (!/\.html?$/i.test(file.name || '')) {
+                    if (typeof pflxToast === 'function') pflxToast('Please choose the .html file downloaded from Claude.', 'error');
+                    return;
+                }
+                var text = await file.text();
+                if (!text) { if (typeof pflxToast === 'function') pflxToast('Could not read that file.', 'error'); return; }
+                if (text.length > 5000000) { if (typeof pflxToast === 'function') pflxToast('That file is too large (5MB max).', 'error'); return; }
+                var sb = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (!sb || !sb.storage) { if (typeof pflxToast === 'function') pflxToast('Storage unavailable \u2014 try again in a moment.', 'error'); return; }
+                var safe = String(file.name || 'artifact.html').replace(/[^A-Za-z0-9._-]/g, '_').slice(-60);
+                var path = 'mc/' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '-' + safe;
+                var blob = new Blob([text], { type: 'text/html' });
+                var res = await sb.storage.from('pflx-artifact-snapshots').upload(path, blob, { contentType: 'text/html', upsert: false });
+                if (res && res.error) { console.warn('[artifact-upload] failed', res.error.message); if (typeof pflxToast === 'function') pflxToast('Upload failed: ' + res.error.message, 'error'); return; }
+                var pub = sb.storage.from('pflx-artifact-snapshots').getPublicUrl(path);
+                var url = pub && pub.data && pub.data.publicUrl;
+                if (!url) { if (typeof pflxToast === 'function') pflxToast('Upload failed.', 'error'); return; }
+                if (typeof onDone === 'function') onDone(url);
+                if (typeof pflxToast === 'function') pflxToast('Artifact embedded.', 'success');
+            } catch (e) { console.warn('[artifact-upload] threw', e); if (typeof pflxToast === 'function') pflxToast('Upload failed.', 'error'); }
+        };
         // Media element for a cover: iframe (embedUrl) else image else ''.
         window.pflxCoverMediaEl = function (embedUrl, imgUrl) {
             if (embedUrl) {
+                if (pflxIsArtifactSnapshotUrl(embedUrl)) {
+                    var _asId = 'pflx-artifact-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+                    return '<div style="position:relative;width:100%;height:100%;">' +
+                        '<iframe id="' + _asId + '" sandbox="allow-scripts allow-popups allow-forms allow-modals allow-downloads" style="width:100%;height:100%;border:0;display:block;background:#fff;" onload="if(!this.dataset.h){this.dataset.h=&quot;1&quot;;pflxHydrateArtifactSnapshot(&quot;' + _asId + '&quot;,&quot;' + escapeHtml(embedUrl) + '&quot;)}"></iframe>' +
+                    '</div>';
+                }
+                if (pflxIsClaudeArtifactUrl(embedUrl)) {
+                    return '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#141b2e;color:#8b93b8;font-size:12px;text-align:center;padding:16px;box-sizing:border-box;line-height:1.5;">\uD83C\uDFA8 Claude Artifact links can\'t be embedded directly.<br>Download the artifact as .html from Claude and use "Upload Artifact HTML" instead.</div>';
+                }
                 // allow-popups-to-escape-sandbox: a link drawn inside the deck opens
                 // in a new tab, and WITHOUT this that tab inherits the sandbox and
                 // loads at a null origin — most destinations break. allow-forms lets
@@ -67723,6 +67795,54 @@ RESPONSE RULES:
             } catch (e) { console.warn('[xc] broadcast failed', e); }
         };
 
+        // PATCH PLATFORM -- Mission Control sub-app embed auto-login
+        // (Sept 9, Ennis: "I shouldn't have to login. This should open
+        // directly to MC when I choose Mission Control not the start
+        // screen."). When this Console instance is itself embedded as a
+        // child iframe -- X-Live's Theater/sub_app slide type loads the
+        // SAME full Console at this same origin -- the normal
+        // tryAutoLogin() silent-login path is unreliable here: it reads
+        // pflx_remember_v1 / the persisted identity from THIS iframe's own
+        // localStorage, which third-party storage partitioning (Chrome
+        // Storage Partitioning, Safari ITP) gives a separate, empty copy
+        // of vs. the user's real top-level session on the same origin --
+        // so a host who is very much already logged in (in X-Live, which
+        // itself received its own identity via the existing
+        // pflx_identity_broadcast bridge from a real, authenticated
+        // Console session) sees a fresh login screen inside the embed
+        // every time.
+        //
+        // Fix: X-Live posts a `pflx_xlive_embed_identity` message carrying
+        // just the BRAND of whoever is currently viewing (host or player)
+        // -- deliberately NOT a full session object or PIN, so the only
+        // thing this embedded Console instance trusts from its parent is
+        // "log in as this already-known roster brand"; it still re-derives
+        // the entire session (XC, badges, role, rank, hostTier/
+        // managedCohorts, etc.) itself from its OWN roster via the
+        // existing loginUser(brand) path -- zero new session-construction
+        // code, zero new trust in externally-supplied balances/roles.
+        // Origin-locked to X-Live's real deployed origin so no other
+        // embedder can trigger a PIN-free login.
+        var PFLX_TRUSTED_EMBED_ORIGINS = ['https://thetomorrowteacher.github.io'];
+        function pflxTryEmbedIdentityLogin(brand, attemptsLeft) {
+            try {
+                if (window.activeSession) return; // already logged in -- never clobber
+                if (!brand || typeof findPlayerByBrand !== 'function' || typeof loginUser !== 'function') return;
+                var player = findPlayerByBrand(brand);
+                if (!player) {
+                    // Roster may still be loading this early after boot --
+                    // retry a couple of times before giving up (fails open
+                    // to the normal login screen, never silently stuck).
+                    if (attemptsLeft > 0) setTimeout(function () { pflxTryEmbedIdentityLogin(brand, attemptsLeft - 1); }, 700);
+                    return;
+                }
+                loginUser(player.brand || brand);
+                setTimeout(function () {
+                    try { if (typeof navigateTo === 'function') navigateTo('mission-control'); } catch (e) {}
+                }, 700);
+            } catch (e) { console.warn('[PFLX] embed-identity auto-login failed', e); }
+        }
+
         window.addEventListener('message', function (ev) {
             try {
                 var msg = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
@@ -67734,6 +67854,9 @@ RESPONSE RULES:
                 }
                 if (msg.type === 'pflx_identity_request_sync') {
                     document.querySelectorAll('iframe').forEach(broadcastIdentityToFrame);
+                }
+                if (msg.type === 'pflx_xlive_embed_identity' && window.self !== window.top && PFLX_TRUSTED_EMBED_ORIGINS.indexOf(ev.origin) !== -1) {
+                    pflxTryEmbedIdentityLogin(msg.brand, 2);
                 }
             } catch (e) {}
         });
