@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 165;
+      window.PFLX_PATCH   = 166;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -13588,6 +13588,43 @@
                             <span style="font-size:18px;">&#x1F3B2;</span>
                             <div><div>Random Groups</div><div style="font-size:10px;color:#6a7290;font-weight:400;">Shuffle players into groups</div></div>
                         </button>
+                    </div>
+
+                    <!-- Cyber Timer -->
+                    <style>
+                        .xbot-timer-preset { padding:8px 4px;background:rgba(0,240,255,0.08);border:1px solid rgba(0,240,255,0.25);border-radius:6px;color:#00f0ff;font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:0.5px;cursor:pointer;transition:all 0.15s; }
+                        .xbot-timer-preset:hover { background:rgba(0,240,255,0.18); border-color:rgba(0,240,255,0.5); }
+                        @keyframes xbotTimerFlashRed { 0%, 100% { color:#ff0050; text-shadow:0 0 16px rgba(255,0,80,0.9); } 50% { color:#ff6b9d; text-shadow:0 0 24px rgba(255,0,80,1); } }
+                        @keyframes xbotTimerPulse { 0%, 100% { transform:scale(1); } 50% { transform:scale(1.06); } }
+                        .xbot-timer-alarm { animation: xbotTimerFlashRed 0.5s infinite, xbotTimerPulse 0.5s infinite; }
+                        .xbot-timer-pulse { animation: xbotTimerPulse 1s infinite; }
+                    </style>
+                    <div style="margin-bottom:18px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                            <div style="font-family:'Orbitron',sans-serif;font-size:10px;color:rgba(0,240,255,0.7);letter-spacing:2px;">CYBER TIMER</div>
+                            <button id="xbot-timer-sound-toggle" onclick="xbotTimerToggleSound()" style="background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-family:'Orbitron',sans-serif;font-size:9px;letter-spacing:1px;cursor:pointer;padding:4px 8px;">🔊 SOUND ON</button>
+                        </div>
+                        <div style="padding:14px;background:rgba(0,240,255,0.03);border:1px solid rgba(0,240,255,0.08);border-radius:10px;">
+                            <div id="xbot-timer-display" style="font-family:'Orbitron',sans-serif;font-size:42px;font-weight:900;text-align:center;color:#00f0ff;letter-spacing:4px;text-shadow:0 0 12px rgba(0,240,255,0.6);margin-bottom:10px;">00:00</div>
+                            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px;">
+                                <button class="xbot-timer-preset" onclick="xbotTimerStart(1)">1m</button>
+                                <button class="xbot-timer-preset" onclick="xbotTimerStart(3)">3m</button>
+                                <button class="xbot-timer-preset" onclick="xbotTimerStart(5)">5m</button>
+                                <button class="xbot-timer-preset" onclick="xbotTimerStart(7)">7m</button>
+                                <button class="xbot-timer-preset" onclick="xbotTimerStart(10)">10m</button>
+                                <button class="xbot-timer-preset" onclick="xbotTimerStart(15)">15m</button>
+                                <button class="xbot-timer-preset" onclick="xbotTimerStart(20)">20m</button>
+                                <button class="xbot-timer-preset" onclick="xbotTimerStart(30)">30m</button>
+                                <button class="xbot-timer-preset" onclick="xbotTimerStart(45)">45m</button>
+                                <button class="xbot-timer-preset" onclick="xbotTimerStart(60)">60m</button>
+                                <button class="xbot-timer-preset" onclick="xbotTimerStart(70)">70m</button>
+                                <button class="xbot-timer-preset" onclick="xbotTimerStart(80)">80m</button>
+                            </div>
+                            <div style="display:flex;gap:8px;">
+                                <button id="xbot-timer-pause-btn" onclick="xbotTimerPauseResume()" style="flex:1;padding:8px;background:rgba(255,214,0,0.1);border:1px solid rgba(255,214,0,0.3);border-radius:6px;color:#ffd600;font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1.5px;cursor:pointer;">PAUSE</button>
+                                <button onclick="xbotTimerStop()" style="flex:1;padding:8px;background:rgba(255,0,80,0.1);border:1px solid rgba(255,0,80,0.3);border-radius:6px;color:#ff0050;font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1.5px;cursor:pointer;">RESET</button>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Sound Equalizer -->
@@ -55829,6 +55866,154 @@
             if (typeof pflxToast === 'function') pflxToast('EQ reset to defaults', 'info');
         }
 
+        // ── Cyber Timer (X-Bot Host tab) ──
+        function pflxTimerDisplayState(remainingSeconds, totalSeconds) {
+            var r = Math.max(0, Math.ceil(remainingSeconds));
+            var state = 'normal';
+            if (r <= 0) state = 'alarm';
+            else if (r <= 10) state = 'critical';
+            else if (r <= 60) state = 'warning';
+            var mm = Math.floor(r / 60);
+            var ss = r % 60;
+            var pad = function(n) { return (n < 10 ? '0' : '') + n; };
+            return {
+                state: state,
+                color: state === 'alarm' ? 'red' : (state === 'critical' || state === 'warning' ? 'yellow' : 'cyan'),
+                countdownNum: state === 'critical' ? r : null,
+                display: pad(mm) + ':' + pad(ss),
+                remainingSeconds: r
+            };
+        }
+        window.pflxTimerDisplayState = pflxTimerDisplayState;
+
+        function pflxTimerShouldChime(remainingSeconds, totalSeconds) {
+            var r = Math.ceil(remainingSeconds);
+            var total = Math.ceil(totalSeconds);
+            if (r <= 0) return false;
+            if (r === total) return false;
+            return r % 60 === 0;
+        }
+        window.pflxTimerShouldChime = pflxTimerShouldChime;
+
+        var xbotTimer = {
+            totalSeconds: 0,
+            remainingSeconds: 0,
+            running: false,
+            paused: false,
+            intervalId: null,
+            lastSpokenNum: null,
+            soundOn: (function () {
+                try { return localStorage.getItem('pflx_xbot_timer_sound') !== '0'; } catch (e) { return true; }
+            })()
+        };
+        window.xbotTimer = xbotTimer;
+
+        function xbotTimerDraw() {
+            var el = document.getElementById('xbot-timer-display');
+            if (!el) return null;
+            var st = pflxTimerDisplayState(xbotTimer.remainingSeconds, xbotTimer.totalSeconds);
+            el.classList.remove('xbot-timer-alarm', 'xbot-timer-pulse');
+            if (st.state === 'critical') {
+                el.textContent = String(st.countdownNum);
+                el.style.color = '#ffd600';
+                el.style.textShadow = '0 0 16px rgba(255,214,0,0.8)';
+                el.classList.add('xbot-timer-pulse');
+            } else if (st.state === 'alarm') {
+                el.textContent = '00:00';
+                el.classList.add('xbot-timer-alarm');
+            } else if (st.state === 'warning') {
+                el.textContent = st.display;
+                el.style.color = '#ffd600';
+                el.style.textShadow = '0 0 12px rgba(255,214,0,0.6)';
+            } else {
+                el.textContent = st.display;
+                el.style.color = '#00f0ff';
+                el.style.textShadow = '0 0 12px rgba(0,240,255,0.6)';
+            }
+            return st;
+        }
+        window.xbotTimerDraw = xbotTimerDraw;
+
+        function xbotTimerSpeakIfCritical(st) {
+            if (!st || st.state !== 'critical') return;
+            if (!xbotTimer.soundOn) return;
+            if (xbotTimer.lastSpokenNum === st.countdownNum) return;
+            xbotTimer.lastSpokenNum = st.countdownNum;
+            if (typeof window.pflxSpeak === 'function') window.pflxSpeak(String(st.countdownNum));
+        }
+        window.xbotTimerSpeakIfCritical = xbotTimerSpeakIfCritical;
+
+        function xbotTimerFireAlarm() {
+            xbotTimer.running = false;
+            if (xbotTimer.intervalId) { clearInterval(xbotTimer.intervalId); xbotTimer.intervalId = null; }
+            xbotTimerDraw();
+            if (xbotTimer.soundOn && typeof window.pflxPlaySfx === 'function') window.pflxPlaySfx('alarm');
+            if (xbotTimer.soundOn && typeof window.pflxSpeak === 'function') window.pflxSpeak("Time's up");
+        }
+        window.xbotTimerFireAlarm = xbotTimerFireAlarm;
+
+        function xbotTimerTick() {
+            if (!xbotTimer.running || xbotTimer.paused) return;
+            xbotTimer.remainingSeconds -= 1;
+            var st = xbotTimerDraw();
+            if (!st) return;
+            if (xbotTimer.soundOn && pflxTimerShouldChime(xbotTimer.remainingSeconds, xbotTimer.totalSeconds)) {
+                if (typeof window.pflxPlaySfx === 'function') window.pflxPlaySfx('timerChime');
+            }
+            xbotTimerSpeakIfCritical(st);
+            if (xbotTimer.remainingSeconds <= 0) xbotTimerFireAlarm();
+        }
+        window.xbotTimerTick = xbotTimerTick;
+
+        function xbotTimerStart(minutes) {
+            if (xbotTimer.intervalId) { clearInterval(xbotTimer.intervalId); xbotTimer.intervalId = null; }
+            xbotTimer.totalSeconds = minutes * 60;
+            xbotTimer.remainingSeconds = minutes * 60;
+            xbotTimer.running = true;
+            xbotTimer.paused = false;
+            xbotTimer.lastSpokenNum = null;
+            var pauseBtn = document.getElementById('xbot-timer-pause-btn');
+            if (pauseBtn) pauseBtn.textContent = 'PAUSE';
+            xbotTimerDraw();
+            xbotTimer.intervalId = setInterval(xbotTimerTick, 1000);
+        }
+        window.xbotTimerStart = xbotTimerStart;
+
+        function xbotTimerPauseResume() {
+            if (!xbotTimer.running) return;
+            xbotTimer.paused = !xbotTimer.paused;
+            var pauseBtn = document.getElementById('xbot-timer-pause-btn');
+            if (pauseBtn) pauseBtn.textContent = xbotTimer.paused ? 'RESUME' : 'PAUSE';
+        }
+        window.xbotTimerPauseResume = xbotTimerPauseResume;
+
+        function xbotTimerStop() {
+            if (xbotTimer.intervalId) { clearInterval(xbotTimer.intervalId); xbotTimer.intervalId = null; }
+            xbotTimer.running = false;
+            xbotTimer.paused = false;
+            xbotTimer.totalSeconds = 0;
+            xbotTimer.remainingSeconds = 0;
+            xbotTimer.lastSpokenNum = null;
+            var pauseBtn = document.getElementById('xbot-timer-pause-btn');
+            if (pauseBtn) pauseBtn.textContent = 'PAUSE';
+            var el = document.getElementById('xbot-timer-display');
+            if (el) {
+                el.classList.remove('xbot-timer-alarm', 'xbot-timer-pulse');
+                el.textContent = '00:00';
+                el.style.color = '#00f0ff';
+                el.style.textShadow = '0 0 12px rgba(0,240,255,0.6)';
+            }
+        }
+        window.xbotTimerStop = xbotTimerStop;
+
+        function xbotTimerToggleSound() {
+            xbotTimer.soundOn = !xbotTimer.soundOn;
+            try { localStorage.setItem('pflx_xbot_timer_sound', xbotTimer.soundOn ? '1' : '0'); } catch (e) {}
+            var btn = document.getElementById('xbot-timer-sound-toggle');
+            if (btn) btn.textContent = xbotTimer.soundOn ? '🔊 SOUND ON' : '🔇 SOUND OFF';
+        }
+        window.xbotTimerToggleSound = xbotTimerToggleSound;
+
         // ── Engineering Portal ──
         function xbotEngRefreshDiag() {
             var el = document.getElementById('xbot-eng-diag');
@@ -62038,6 +62223,14 @@ RESPONSE RULES:
                         osc.frequency.setValueAtTime(880, ctx.currentTime + 0.45);
                         gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
                         osc.start(); osc.stop(ctx.currentTime + 0.6); break;
+                    case 'timerChime':
+                        // Cyber timer minute-chime — short two-tone digital blip
+                        osc.type = 'square';
+                        osc.frequency.setValueAtTime(1108, ctx.currentTime);
+                        osc.frequency.setValueAtTime(1568, ctx.currentTime + 0.08);
+                        gain.gain.setValueAtTime(vol * 0.22, ctx.currentTime);
+                        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+                        osc.start(); osc.stop(ctx.currentTime + 0.2); break;
                     case 'alarm':
                         // Descending siren — 3 sweeps
                         osc.type = 'sawtooth';
