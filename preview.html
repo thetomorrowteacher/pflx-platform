@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 166;
+      window.PFLX_PATCH   = 167;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -13458,17 +13458,20 @@
                     </div>
                 </div>
 
-                <!-- Host Broadcast Composer (host-only) — posts above the tabs -->
+                <!-- Host Broadcast Composer (host-only) — collapsed by default, no longer pinned open -->
                 <div id="xbot-broadcast-composer" style="display:none;padding:10px 12px;border-bottom:1px solid rgba(0,240,255,0.12);background:linear-gradient(180deg,rgba(0,240,255,0.05),transparent);">
-                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                    <div style="display:flex;align-items:center;gap:6px;">
                         <span style="font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1.5px;color:#00f0ff;">📡 HOST BROADCAST</span>
                         <span style="flex:1;"></span>
                         <button onclick="pflxBroadcastChannels()" title="Choose channels" style="background:rgba(139,92,246,0.14);border:1px solid rgba(139,92,246,0.4);color:#c4b5fd;border-radius:6px;font-size:10px;font-weight:700;padding:3px 8px;cursor:pointer;">🔗 Channels</button>
+                        <button id="xbot-broadcast-collapse-btn" onclick="pflxBroadcastToggleCollapse()" title="Expand / collapse" style="background:rgba(0,240,255,0.08);border:1px solid rgba(0,240,255,0.25);color:#00f0ff;border-radius:6px;font-size:11px;font-weight:700;padding:3px 8px;cursor:pointer;">▸</button>
                     </div>
-                    <textarea id="xbot-broadcast-text" rows="2" placeholder="Post a message to your cohort — appears in X-Bot + the ticker in real time..." style="width:100%;background:rgba(10,18,40,0.85);border:1px solid rgba(0,240,255,0.18);color:#e0e6ff;padding:8px 10px;border-radius:8px;font-family:'Rajdhani',sans-serif;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
-                    <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
-                        <span id="xbot-broadcast-targets" style="flex:1;font-size:9px;color:#6a7290;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">→ Mission Control General Chat</span>
-                        <button onclick="pflxBroadcastSendFromComposer()" style="background:linear-gradient(135deg,#00d4ff,#7c3aed);border:none;color:#fff;border-radius:7px;font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1.5px;font-weight:700;padding:7px 16px;cursor:pointer;">SEND</button>
+                    <div id="xbot-broadcast-body" style="display:none;margin-top:6px;">
+                        <textarea id="xbot-broadcast-text" rows="2" placeholder="Post a message to your cohort — appears in X-Bot + the ticker in real time..." style="width:100%;background:rgba(10,18,40,0.85);border:1px solid rgba(0,240,255,0.18);color:#e0e6ff;padding:8px 10px;border-radius:8px;font-family:'Rajdhani',sans-serif;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
+                        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+                            <span id="xbot-broadcast-targets" style="flex:1;font-size:9px;color:#6a7290;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">→ Mission Control General Chat</span>
+                            <button onclick="pflxBroadcastSendFromComposer()" style="background:linear-gradient(135deg,#00d4ff,#7c3aed);border:none;color:#fff;border-radius:7px;font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1.5px;font-weight:700;padding:7px 16px;cursor:pointer;">SEND</button>
+                        </div>
                     </div>
                 </div>
 
@@ -13598,13 +13601,21 @@
                         @keyframes xbotTimerPulse { 0%, 100% { transform:scale(1); } 50% { transform:scale(1.06); } }
                         .xbot-timer-alarm { animation: xbotTimerFlashRed 0.5s infinite, xbotTimerPulse 0.5s infinite; }
                         .xbot-timer-pulse { animation: xbotTimerPulse 1s infinite; }
+                        .xbot-timer-input { width:56px;background:rgba(10,18,40,0.85);border:1px solid rgba(0,240,255,0.25);color:#e0e6ff;padding:7px 6px;border-radius:6px;font-family:'Share Tech Mono',monospace;font-size:13px;text-align:center; }
+                        #xbot-timer-panel.xbot-timer-fs { position:absolute; inset:0; margin:0 !important; z-index:1; background:linear-gradient(180deg,rgba(10,15,30,0.99),rgba(8,12,24,0.99)); padding:18px; display:flex; flex-direction:column; overflow:auto; }
+                        #xbot-timer-panel.xbot-timer-fs #xbot-timer-box { flex:1; display:flex; flex-direction:column; justify-content:center; min-height:0; }
+                        #xbot-timer-panel.xbot-timer-fs #xbot-timer-display { margin-bottom:22px; }
+                        #xbot-timer-panel.xbot-timer-fs .xbot-timer-preset { font-size:12px; padding:10px 4px; }
                     </style>
-                    <div style="margin-bottom:18px;">
-                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                    <div id="xbot-timer-panel" style="margin-bottom:18px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:6px;">
                             <div style="font-family:'Orbitron',sans-serif;font-size:10px;color:rgba(0,240,255,0.7);letter-spacing:2px;">CYBER TIMER</div>
-                            <button id="xbot-timer-sound-toggle" onclick="xbotTimerToggleSound()" style="background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-family:'Orbitron',sans-serif;font-size:9px;letter-spacing:1px;cursor:pointer;padding:4px 8px;">🔊 SOUND ON</button>
+                            <div style="display:flex;gap:6px;">
+                                <button id="xbot-timer-fs-toggle" onclick="xbotTimerToggleFullscreen()" title="Project full screen inside X-Bot" style="background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-family:'Orbitron',sans-serif;font-size:9px;letter-spacing:1px;cursor:pointer;padding:4px 8px;">⛶</button>
+                                <button id="xbot-timer-sound-toggle" onclick="xbotTimerToggleSound()" style="background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-family:'Orbitron',sans-serif;font-size:9px;letter-spacing:1px;cursor:pointer;padding:4px 8px;">🔊 SOUND ON</button>
+                            </div>
                         </div>
-                        <div style="padding:14px;background:rgba(0,240,255,0.03);border:1px solid rgba(0,240,255,0.08);border-radius:10px;">
+                        <div id="xbot-timer-box" style="padding:14px;background:rgba(0,240,255,0.03);border:1px solid rgba(0,240,255,0.08);border-radius:10px;">
                             <div id="xbot-timer-display" style="font-family:'Orbitron',sans-serif;font-size:42px;font-weight:900;text-align:center;color:#00f0ff;letter-spacing:4px;text-shadow:0 0 12px rgba(0,240,255,0.6);margin-bottom:10px;">00:00</div>
                             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px;">
                                 <button class="xbot-timer-preset" onclick="xbotTimerStart(1)">1m</button>
@@ -13620,7 +13631,14 @@
                                 <button class="xbot-timer-preset" onclick="xbotTimerStart(70)">70m</button>
                                 <button class="xbot-timer-preset" onclick="xbotTimerStart(80)">80m</button>
                             </div>
+                            <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;">
+                                <input type="number" id="xbot-timer-manual-min" class="xbot-timer-input" min="0" placeholder="MM" value="0">
+                                <span style="color:#6a7290;font-family:'Share Tech Mono',monospace;">:</span>
+                                <input type="number" id="xbot-timer-manual-sec" class="xbot-timer-input" min="0" max="59" placeholder="SS" value="0">
+                                <button onclick="xbotTimerStartManual()" style="flex:1;padding:8px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.35);border-radius:6px;color:#22c55e;font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1.5px;cursor:pointer;">SET</button>
+                            </div>
                             <div style="display:flex;gap:8px;">
+                                <button onclick="xbotTimerAddMinute()" style="flex:1;padding:8px;background:rgba(0,240,255,0.08);border:1px solid rgba(0,240,255,0.28);border-radius:6px;color:#00f0ff;font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1.5px;cursor:pointer;">+1 MIN</button>
                                 <button id="xbot-timer-pause-btn" onclick="xbotTimerPauseResume()" style="flex:1;padding:8px;background:rgba(255,214,0,0.1);border:1px solid rgba(255,214,0,0.3);border-radius:6px;color:#ffd600;font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1.5px;cursor:pointer;">PAUSE</button>
                                 <button onclick="xbotTimerStop()" style="flex:1;padding:8px;background:rgba(255,0,80,0.1);border:1px solid rgba(255,0,80,0.3);border-radius:6px;color:#ff0050;font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1.5px;cursor:pointer;">RESET</button>
                             </div>
@@ -18697,6 +18715,29 @@
             });
         };
 
+        function pflxBroadcastNextCollapsedState(currentlyCollapsed, forceCollapsed) {
+            if (typeof forceCollapsed === 'boolean') return forceCollapsed;
+            return !currentlyCollapsed;
+        }
+        window.pflxBroadcastNextCollapsedState = pflxBroadcastNextCollapsedState;
+
+        function pflxBroadcastCollapsedPref() {
+            try { return localStorage.getItem('pflx_xbot_broadcast_collapsed') !== '0'; } catch (e) { return true; }
+        }
+        window.pflxBroadcastCollapsedPref = pflxBroadcastCollapsedPref;
+
+        function pflxBroadcastToggleCollapse(forceCollapsed) {
+            var body = document.getElementById('xbot-broadcast-body');
+            var btn = document.getElementById('xbot-broadcast-collapse-btn');
+            if (!body) return;
+            var currentlyCollapsed = body.style.display === 'none' || body.style.display === '';
+            var next = pflxBroadcastNextCollapsedState(currentlyCollapsed, forceCollapsed);
+            body.style.display = next ? 'none' : 'block';
+            if (btn) btn.textContent = next ? '▸' : '▾';
+            try { localStorage.setItem('pflx_xbot_broadcast_collapsed', next ? '1' : '0'); } catch (e) {}
+        }
+        window.pflxBroadcastToggleCollapse = pflxBroadcastToggleCollapse;
+
         // Show the composer for hosts; subscribe to cross-device broadcasts.
         function pflxBroadcastInit() {
             try {
@@ -18704,6 +18745,7 @@
                 var role = String((typeof activeSession !== 'undefined' && activeSession && activeSession.role) || '').toLowerCase();
                 var isHost = role === 'host' || role === 'admin' || role === 'instructor' || role === 'master';
                 if (box) box.style.display = isHost ? 'block' : 'none';
+                if (typeof pflxBroadcastToggleCollapse === 'function') pflxBroadcastToggleCollapse(pflxBroadcastCollapsedPref());
             } catch (e) {}
         }
         window.pflxBroadcastInit = pflxBroadcastInit;
@@ -55965,10 +56007,10 @@
         }
         window.xbotTimerTick = xbotTimerTick;
 
-        function xbotTimerStart(minutes) {
+        function xbotTimerStartSeconds(totalSeconds) {
             if (xbotTimer.intervalId) { clearInterval(xbotTimer.intervalId); xbotTimer.intervalId = null; }
-            xbotTimer.totalSeconds = minutes * 60;
-            xbotTimer.remainingSeconds = minutes * 60;
+            xbotTimer.totalSeconds = totalSeconds;
+            xbotTimer.remainingSeconds = totalSeconds;
             xbotTimer.running = true;
             xbotTimer.paused = false;
             xbotTimer.lastSpokenNum = null;
@@ -55977,7 +56019,109 @@
             xbotTimerDraw();
             xbotTimer.intervalId = setInterval(xbotTimerTick, 1000);
         }
+        window.xbotTimerStartSeconds = xbotTimerStartSeconds;
+
+        function xbotTimerStart(minutes) {
+            xbotTimerStartSeconds(minutes * 60);
+        }
         window.xbotTimerStart = xbotTimerStart;
+
+        function pflxParseManualDuration(minutesStr, secondsStr) {
+            var mmRaw = (minutesStr === '' || minutesStr === null || minutesStr === undefined) ? '0' : minutesStr;
+            var ssRaw = (secondsStr === '' || secondsStr === null || secondsStr === undefined) ? '0' : secondsStr;
+            var mm = Number(mmRaw);
+            var ss = Number(ssRaw);
+            if (!isFinite(mm) || isNaN(mm) || mm < 0 || Math.floor(mm) !== mm) return { ok: false, error: 'invalid_minutes' };
+            if (!isFinite(ss) || isNaN(ss) || ss < 0 || ss > 59 || Math.floor(ss) !== ss) return { ok: false, error: 'invalid_seconds' };
+            var total = mm * 60 + ss;
+            if (total <= 0) return { ok: false, error: 'zero_duration' };
+            if (total > 86400) return { ok: false, error: 'too_long' };
+            return { ok: true, totalSeconds: total };
+        }
+        window.pflxParseManualDuration = pflxParseManualDuration;
+
+        function xbotTimerStartManual() {
+            var minEl = document.getElementById('xbot-timer-manual-min');
+            var secEl = document.getElementById('xbot-timer-manual-sec');
+            var r = pflxParseManualDuration(minEl ? minEl.value : '0', secEl ? secEl.value : '0');
+            if (!r.ok) {
+                if (typeof pflxToast === 'function') pflxToast('Enter a valid time — minutes ≥ 0, seconds 0-59.', 'error');
+                return;
+            }
+            xbotTimerStartSeconds(r.totalSeconds);
+        }
+        window.xbotTimerStartManual = xbotTimerStartManual;
+
+        function pflxTimerAddMinute(remainingSeconds, totalSeconds, running) {
+            if (!running) return { remainingSeconds: 60, totalSeconds: 60 };
+            var r = (typeof remainingSeconds === 'number' && isFinite(remainingSeconds)) ? remainingSeconds : 0;
+            var t = (typeof totalSeconds === 'number' && isFinite(totalSeconds)) ? totalSeconds : 0;
+            return { remainingSeconds: r + 60, totalSeconds: t + 60 };
+        }
+        window.pflxTimerAddMinute = pflxTimerAddMinute;
+
+        function xbotTimerAddMinute() {
+            var result = pflxTimerAddMinute(xbotTimer.remainingSeconds, xbotTimer.totalSeconds, xbotTimer.running);
+            xbotTimer.remainingSeconds = result.remainingSeconds;
+            xbotTimer.totalSeconds = result.totalSeconds;
+            if (!xbotTimer.running) {
+                xbotTimer.running = true;
+                xbotTimer.paused = false;
+                xbotTimer.lastSpokenNum = null;
+                if (xbotTimer.intervalId) clearInterval(xbotTimer.intervalId);
+                xbotTimer.intervalId = setInterval(xbotTimerTick, 1000);
+                var pauseBtn = document.getElementById('xbot-timer-pause-btn');
+                if (pauseBtn) pauseBtn.textContent = 'PAUSE';
+            }
+            xbotTimerDraw();
+        }
+        window.xbotTimerAddMinute = xbotTimerAddMinute;
+
+        function pflxTimerFitFontSize(containerWidth, containerHeight) {
+            var w = Math.max(0, containerWidth || 0);
+            var h = Math.max(0, containerHeight || 0);
+            var byWidth = w / 4.6;
+            var byHeight = h * 0.5;
+            var size = Math.min(byWidth, byHeight);
+            if (!isFinite(size) || size <= 0) size = 42;
+            size = Math.max(28, Math.min(size, 320));
+            return Math.round(size);
+        }
+        window.pflxTimerFitFontSize = pflxTimerFitFontSize;
+
+        var xbotTimerFsObserver = null;
+        function xbotTimerFitDisplay() {
+            var box = document.getElementById('xbot-timer-box');
+            var el = document.getElementById('xbot-timer-display');
+            if (!box || !el) return;
+            var size = pflxTimerFitFontSize(box.clientWidth, box.clientHeight);
+            el.style.fontSize = size + 'px';
+        }
+        window.xbotTimerFitDisplay = xbotTimerFitDisplay;
+
+        function xbotTimerToggleFullscreen(forceState) {
+            var panel = document.getElementById('xbot-timer-panel');
+            var btn = document.getElementById('xbot-timer-fs-toggle');
+            if (!panel) return;
+            var next = (typeof forceState === 'boolean') ? forceState : !panel.classList.contains('xbot-timer-fs');
+            panel.classList.toggle('xbot-timer-fs', next);
+            if (btn) btn.textContent = next ? '✕ EXIT' : '⛶';
+            if (next) {
+                xbotTimerFitDisplay();
+                if (typeof ResizeObserver !== 'undefined' && !xbotTimerFsObserver) {
+                    var box = document.getElementById('xbot-timer-box');
+                    if (box) {
+                        xbotTimerFsObserver = new ResizeObserver(function () { xbotTimerFitDisplay(); });
+                        xbotTimerFsObserver.observe(box);
+                    }
+                }
+            } else {
+                if (xbotTimerFsObserver) { xbotTimerFsObserver.disconnect(); xbotTimerFsObserver = null; }
+                var el = document.getElementById('xbot-timer-display');
+                if (el) el.style.fontSize = '';
+            }
+        }
+        window.xbotTimerToggleFullscreen = xbotTimerToggleFullscreen;
 
         function xbotTimerPauseResume() {
             if (!xbotTimer.running) return;
