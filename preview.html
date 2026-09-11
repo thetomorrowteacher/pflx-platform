@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 169;
+      window.PFLX_PATCH   = 170;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -13702,6 +13702,12 @@
                     <div style="font-family:'Orbitron',sans-serif;font-size:10px;color:rgba(255,0,80,0.8);letter-spacing:2px;margin-bottom:10px;">X-LIVE SESSIONS</div>
                     <div style="font-size:10px;color:#6a7290;font-family:'Rajdhani',sans-serif;line-height:1.5;margin-bottom:12px;">
                         Sessions built in X-Live's dashboard. Go live, end, or check status without leaving X-Bot.
+                    </div>
+                    <div style="margin-bottom:12px;">
+                        <div style="font-family:'Orbitron',sans-serif;font-size:9px;color:#6a7290;letter-spacing:1px;margin-bottom:6px;">MY CLASS (COHORT FILTER)</div>
+                        <div id="xbot-live-cohort-chips" style="display:flex;flex-wrap:wrap;gap:6px;">
+                            <div style="color:#6a7290;font-size:10px;font-family:'Rajdhani',sans-serif;">Loading…</div>
+                        </div>
                     </div>
                     <div id="xbot-live-list" style="display:flex;flex-direction:column;gap:8px;">
                         <div style="color:#6a7290;font-size:11px;font-family:'Rajdhani',sans-serif;text-align:center;padding:12px;">Loading sessions…</div>
@@ -56439,12 +56445,76 @@
             } catch (e) { console.warn('[xbot-live] save session failed', e); }
             return savedSess;
         };
+        // xb-2: reads/writes the SAME 'pflx_lite_config' row X-Live's own
+        // Setup tab (pflxToggleCohort/L.cfg.cohorts) already owns. A plain
+        // upsert -- matching X-Live's own saveCfg() exactly -- because this
+        // is a single-row host preference, not a multi-writer synced
+        // collection like sessions (no merge layer needed here).
+        window.pflxXBotLoadCfg = async function () {
+            try {
+                var sb = window.pflxSupabase();
+                if (!sb) return { cohorts: [] };
+                var res = await sb.from('app_data').select('data').eq('key', 'pflx_lite_config').maybeSingle();
+                var cfg = (res && res.data && res.data.data) ? res.data.data : {};
+                cfg.cohorts = Array.isArray(cfg.cohorts) ? cfg.cohorts : [];
+                return cfg;
+            } catch (e) { console.warn('[xbot-live] load cfg failed', e); return { cohorts: [] }; }
+        };
+        window.pflxXBotSaveCfg = async function (cfg) {
+            cfg.updatedAt = Date.now();
+            var sb = window.pflxSupabase();
+            if (!sb) return;
+            try { await sb.from('app_data').upsert({ key: 'pflx_lite_config', data: cfg }, { onConflict: 'key' }); }
+            catch (e) { console.warn('[xbot-live] save cfg failed', e); }
+        };
+        window.pflxXBotCohortNames = function () {
+            try {
+                return (typeof mcCohortGroups !== 'undefined' ? mcCohortGroups : [])
+                    .map(function (g) { return g && g.name; })
+                    .filter(Boolean);
+            } catch (e) { return []; }
+        };
+        window.xbotLiveRenderCohortChips = async function () {
+            var box = document.getElementById('xbot-live-cohort-chips');
+            if (!box) return;
+            var names = window.pflxXBotCohortNames();
+            var cfg = await window.pflxXBotLoadCfg();
+            window._xbotLiveCfg = cfg;
+            if (!names.length) {
+                box.innerHTML = '<div style="color:#6a7290;font-size:10px;font-family:\'Rajdhani\',sans-serif;">No cohort groups configured yet.</div>';
+                return;
+            }
+            box.innerHTML = names.map(function (name) {
+                var on = cfg.cohorts.indexOf(name) !== -1;
+                var safe = String(name).replace(/'/g, "\\'");
+                return '<button onclick="xbotLiveToggleCohort(\'' + safe + '\')" style="padding:5px 10px;border-radius:14px;font-family:\'Rajdhani\',sans-serif;font-size:11px;cursor:pointer;border:1px solid ' + (on ? 'rgba(0,240,255,0.5)' : 'rgba(255,255,255,0.12)') + ';background:' + (on ? 'rgba(0,240,255,0.15)' : 'transparent') + ';color:' + (on ? '#00f0ff' : '#8a92b0') + ';">' + (on ? '✓ ' : '') + String(name).replace(/</g, '&lt;') + '</button>';
+            }).join('') + '<div style="width:100%;font-size:9px;color:#6a7290;font-family:\'Rajdhani\',sans-serif;margin-top:4px;">' + (cfg.cohorts.length ? cfg.cohorts.length + ' selected' : 'None selected — showing all players') + '</div>';
+        };
+        window.xbotLiveToggleCohort = async function (name) {
+            var cfg = window._xbotLiveCfg || await window.pflxXBotLoadCfg();
+            cfg.cohorts = Array.isArray(cfg.cohorts) ? cfg.cohorts : [];
+            var i = cfg.cohorts.indexOf(name);
+            if (i === -1) cfg.cohorts.push(name); else cfg.cohorts.splice(i, 1);
+            await window.pflxXBotSaveCfg(cfg);
+            window._xbotLiveCfg = cfg;
+            window.xbotLiveRenderCohortChips();
+            window.xbotLiveRenderSessions(true);
+        };
         window.xbotLiveRenderSessions = async function (forceReload) {
             var list = document.getElementById('xbot-live-list');
             if (!list) return;
             if (forceReload) list.innerHTML = '<div style="color:#6a7290;font-size:11px;font-family:\'Rajdhani\',sans-serif;text-align:center;padding:12px;">Loading sessions…</div>';
             var sessions = await window.pflxXBotLoadSessions();
-            var visible = sessions.filter(function (s) { return s.status === 'scheduled' || s.status === 'active'; });
+            var cfg = window._xbotLiveCfg || await window.pflxXBotLoadCfg();
+            window._xbotLiveCfg = cfg;
+            var myCohorts = (cfg.cohorts || []).map(function (c) { return String(c).toLowerCase(); });
+            var visible = sessions.filter(function (s) {
+                if (s.status !== 'scheduled' && s.status !== 'active') return false;
+                if (!myCohorts.length) return true;
+                if (s.allCohorts) return true;
+                var sc = (s.cohorts || []).map(function (c) { return String(c).toLowerCase(); });
+                return sc.some(function (c) { return myCohorts.indexOf(c) !== -1; });
+            });
             if (!visible.length) {
                 list.innerHTML = '<div style="color:#6a7290;font-size:11px;font-family:\'Rajdhani\',sans-serif;text-align:center;padding:12px;">No scheduled or live sessions. Build one in X-Live\'s dashboard.</div>';
                 return;
@@ -56527,6 +56597,7 @@
                 inputArea.style.display = 'none';
                 if (liveSection) {
                     liveSection.style.display = 'block';
+                    xbotLiveRenderCohortChips();
                     xbotLiveRenderSessions();
                 }
             } else if (mode === 'eng') {
