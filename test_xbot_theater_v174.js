@@ -57,6 +57,12 @@ function makeSandbox(sessions) {
   const win = {
     pflxXBotLoadSessions: async function () { return sessions; },
     pflxPipOpen: function (id) { pipOpenCalls.push(id); },
+    // v177 stub: xbotTheaterRenderList now also loads the saved-playlist
+    // cfg via this bridge. Harmless no-op here -- this test predates and
+    // doesn't exercise the playlist feature; its own dedicated test
+    // (test_xbot_theater_playlist_v177.js) covers that behavior for real.
+    pflxXBotLoadCfg: async function () { return { cohorts: [] }; },
+    pflxXBotSaveCfg: async function () {},
   };
 
   // The extracted block assigns every function as `window.xbotTheaterX =

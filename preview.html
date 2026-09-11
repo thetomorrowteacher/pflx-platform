@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 176;
+      window.PFLX_PATCH   = 177;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -56918,17 +56918,34 @@
         // #pip-sysevents/#pip-livesession already use (pflxPipOpen/
         // pflxPipClose), so this needed zero new drag/resize code.
         //
-        // NOT ported: X-Live's "saved YouTube playlist" -- a host-
-        // curated list of video IDs set from X-Live's own Setup tab.
-        // That feature does not exist ANYWHERE yet (X-Live included) --
-        // it's a genuinely new build, out of scope here, flagged in the
-        // Handoff for a later phase rather than guessed at.
+        // v177 -- the saved YouTube playlist promised above: a host-
+        // curated list of video IDs, stored via the SAME xb-2
+        // pflxXBotLoadCfg/pflxXBotSaveCfg bridge xc-2's Teams board
+        // already uses (cfg.theaterPlaylist) -- a saved item plays
+        // through the EXACT SAME watch/embed/PIP-popout code below as a
+        // live broadcast, just sourced from a playlist entry instead of
+        // a live session (watchingId prefixed 'saved:' to disambiguate,
+        // so the two id spaces can never collide).
         window._xbotTheaterCache = [];
+        window._xbotTheaterPlaylistCache = [];
         window._xbotTheaterWatchingId = null;
         window.xbotTheaterRender = function () {
             var body = document.getElementById('xbot-theater-content');
             if (!body) return;
             var watchId = window._xbotTheaterWatchingId;
+            if (watchId && String(watchId).indexOf('saved:') === 0) {
+                var pItem = (window._xbotTheaterPlaylistCache || []).find(function (x) { return ('saved:' + x.id) === watchId; });
+                if (!pItem) { window._xbotTheaterWatchingId = null; window.xbotTheaterRender(); return; }
+                var pTitle = escapeHtml(pItem.title || 'Saved Video');
+                body.innerHTML = '<div style="position:relative;padding-top:56.25%;border-radius:8px;overflow:hidden;margin-bottom:8px;">' +
+                    '<iframe src="https://www.youtube.com/embed/' + encodeURIComponent(pItem.videoId) + '?autoplay=1" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" allow="autoplay; encrypted-media" allowfullscreen></iframe></div>' +
+                    '<div style="font-family:\'Rajdhani\',sans-serif;font-size:13px;font-weight:600;color:#e0e6ff;">📺 ' + pTitle + '</div>' +
+                    '<div style="display:flex;gap:6px;margin-top:8px;">' +
+                    '<button onclick="xbotTheaterPopOut()" style="flex:1;padding:7px;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-family:\'Orbitron\',sans-serif;font-size:9px;letter-spacing:0.5px;cursor:pointer;">⧉ POP OUT (PIP)</button>' +
+                    '<button onclick="xbotTheaterStopWatching()" style="flex:1;padding:7px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.16);border-radius:6px;color:#c9cfe8;font-family:\'Orbitron\',sans-serif;font-size:9px;letter-spacing:0.5px;cursor:pointer;">← BACK</button>' +
+                    '</div>';
+                return;
+            }
             if (watchId) {
                 var s = window._xbotTheaterCache.find(function (x) { return x.id === watchId && x.status === 'active' && x.youtubeEmbedId; });
                 if (!s) { window._xbotTheaterWatchingId = null; window.xbotTheaterRender(); return; }
@@ -56943,24 +56960,40 @@
                 return;
             }
             var live = window._xbotTheaterCache.filter(function (x) { return x.status === 'active' && x.youtubeEmbedId; });
-            if (!live.length) {
-                body.innerHTML = '<div style="color:#6a7290;font-size:11px;font-family:\'Rajdhani\',sans-serif;text-align:center;padding:20px 12px;">Nothing streaming right now — check back when a host goes live with a YouTube/OBS broadcast.</div>';
-                return;
-            }
-            body.innerHTML = live.map(function (s) {
-                var title = escapeHtml(s.title || 'Untitled Session');
-                return '<div style="padding:10px;background:rgba(255,0,80,0.04);border:1px solid rgba(255,0,80,0.18);border-radius:8px;display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
-                    '<div style="flex:1;min-width:0;"><div style="font-family:\'Rajdhani\',sans-serif;font-size:12px;font-weight:600;color:#e0e6ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + title + '</div>' +
-                    '<div style="font-size:9px;font-family:\'Orbitron\',sans-serif;letter-spacing:1px;color:#ff0050;">● LIVE NOW</div></div>' +
-                    '<button onclick="xbotTheaterWatch(\'' + s.id + '\')" style="padding:7px 14px;background:rgba(255,0,80,0.12);border:1px solid rgba(255,0,80,0.4);border-radius:6px;color:#ff0050;font-family:\'Orbitron\',sans-serif;font-size:10px;letter-spacing:1px;cursor:pointer;white-space:nowrap;">▶ WATCH</button>' +
+            var liveHtml = !live.length
+                ? '<div style="color:#6a7290;font-size:11px;font-family:\'Rajdhani\',sans-serif;text-align:center;padding:20px 12px;">Nothing streaming right now — check back when a host goes live with a YouTube/OBS broadcast.</div>'
+                : live.map(function (s) {
+                    var title = escapeHtml(s.title || 'Untitled Session');
+                    return '<div style="padding:10px;background:rgba(255,0,80,0.04);border:1px solid rgba(255,0,80,0.18);border-radius:8px;display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
+                        '<div style="flex:1;min-width:0;"><div style="font-family:\'Rajdhani\',sans-serif;font-size:12px;font-weight:600;color:#e0e6ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + title + '</div>' +
+                        '<div style="font-size:9px;font-family:\'Orbitron\',sans-serif;letter-spacing:1px;color:#ff0050;">● LIVE NOW</div></div>' +
+                        '<button onclick="xbotTheaterWatch(\'' + s.id + '\')" style="padding:7px 14px;background:rgba(255,0,80,0.12);border:1px solid rgba(255,0,80,0.4);border-radius:6px;color:#ff0050;font-family:\'Orbitron\',sans-serif;font-size:10px;letter-spacing:1px;cursor:pointer;white-space:nowrap;">▶ WATCH</button>' +
+                        '</div>';
+                }).join('');
+            var pl = window._xbotTheaterPlaylistCache || [];
+            var plItemsHtml = pl.map(function (p) {
+                var pTitle = escapeHtml(p.title || p.videoId);
+                return '<div style="padding:8px 10px;background:rgba(0,240,255,0.04);border:1px solid rgba(0,240,255,0.16);border-radius:8px;display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
+                    '<div style="flex:1;min-width:0;font-family:\'Rajdhani\',sans-serif;font-size:12px;color:#c9cfe8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📺 ' + pTitle + '</div>' +
+                    '<button onclick="xbotTheaterWatchSaved(\'' + p.id + '\')" style="padding:5px 10px;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-family:\'Orbitron\',sans-serif;font-size:9px;letter-spacing:0.5px;cursor:pointer;white-space:nowrap;">▶</button>' +
+                    '<button onclick="xbotTheaterRemoveFromPlaylist(\'' + p.id + '\')" style="padding:5px 8px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.14);border-radius:6px;color:#8a92b0;font-family:\'Orbitron\',sans-serif;font-size:9px;cursor:pointer;">✕</button>' +
                     '</div>';
             }).join('');
+            var playlistHtml = '<div class="xbot-theater-playlist-section" style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.08);">' +
+                '<div style="font-family:\'Orbitron\',sans-serif;font-size:10px;letter-spacing:1px;color:#8a92b0;margin-bottom:8px;">📺 SAVED PLAYLIST</div>' +
+                (plItemsHtml || '<div style="color:#6a7290;font-size:10px;font-family:\'Rajdhani\',sans-serif;padding:4px 0 8px;">No saved videos yet.</div>') +
+                '<div style="display:flex;gap:6px;margin-top:6px;">' +
+                '<input id="xbot-theater-playlist-input" type="text" placeholder="Paste a YouTube URL or video ID" style="flex:1;padding:7px 9px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.14);border-radius:6px;color:#e0e6ff;font-family:\'Rajdhani\',sans-serif;font-size:11px;">' +
+                '<button onclick="xbotTheaterAddToPlaylistFromInput()" style="padding:7px 12px;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-family:\'Orbitron\',sans-serif;font-size:9px;letter-spacing:0.5px;cursor:pointer;white-space:nowrap;">+ ADD</button>' +
+                '</div></div>';
+            body.innerHTML = liveHtml + playlistHtml;
         };
         window.xbotTheaterRenderList = async function () {
             var body = document.getElementById('xbot-theater-content');
             if (body) body.innerHTML = '<div style="color:#6a7290;font-size:11px;font-family:\'Rajdhani\',sans-serif;text-align:center;padding:12px;">Loading…</div>';
             var sessions = await window.pflxXBotLoadSessions();
             window._xbotTheaterCache = sessions;
+            window._xbotTheaterPlaylistCache = await window.xbotTheaterLoadPlaylist();
             window.xbotTheaterRender();
         };
         window.xbotTheaterWatch = function (id) {
@@ -56971,14 +57004,79 @@
             window._xbotTheaterWatchingId = null;
             window.xbotTheaterRender();
         };
+        // v177 -- ported directly from X-Live's own pflxYouTubeExtractId
+        // (x-live-check/index.html), same regex logic, not reinvented:
+        // accepts a raw 11-char video ID, or a watch/live/embed/youtu.be
+        // URL, and extracts the ID; returns null on garbage input rather
+        // than embedding something broken.
+        window.xbotTheaterExtractYouTubeId = function (input) {
+            if (!input) return null;
+            var s = String(input).trim();
+            if (/^[A-Za-z0-9_-]{11}$/.test(s)) return s;
+            var m;
+            m = s.match(/[?&]v=([A-Za-z0-9_-]{11})/); if (m) return m[1];
+            m = s.match(/youtu\.be\/([A-Za-z0-9_-]{11})/); if (m) return m[1];
+            m = s.match(/youtube\.com\/live\/([A-Za-z0-9_-]{11})/); if (m) return m[1];
+            m = s.match(/youtube\.com\/embed\/([A-Za-z0-9_-]{11})/); if (m) return m[1];
+            return null;
+        };
+        window.xbotTheaterLoadPlaylist = async function () {
+            var cfg = window._xbotLiveCfg || await window.pflxXBotLoadCfg();
+            window._xbotLiveCfg = cfg;
+            return Array.isArray(cfg.theaterPlaylist) ? cfg.theaterPlaylist : [];
+        };
+        window.xbotTheaterAddToPlaylist = async function (input, title) {
+            var videoId = window.xbotTheaterExtractYouTubeId(input);
+            if (!videoId) return null;
+            var cfg = window._xbotLiveCfg || await window.pflxXBotLoadCfg();
+            cfg.theaterPlaylist = Array.isArray(cfg.theaterPlaylist) ? cfg.theaterPlaylist : [];
+            var item = { id: 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), videoId: videoId, title: title || videoId };
+            cfg.theaterPlaylist.push(item);
+            await window.pflxXBotSaveCfg(cfg);
+            window._xbotLiveCfg = cfg;
+            window._xbotTheaterPlaylistCache = cfg.theaterPlaylist;
+            return item;
+        };
+        window.xbotTheaterAddToPlaylistFromInput = async function () {
+            var el = document.getElementById('xbot-theater-playlist-input');
+            var val = el ? el.value : '';
+            var item = await window.xbotTheaterAddToPlaylist(val, '');
+            if (!item) {
+                if (el) el.style.borderColor = '#ff0050';
+                return;
+            }
+            window.xbotTheaterRender();
+        };
+        window.xbotTheaterRemoveFromPlaylist = async function (itemId) {
+            var cfg = window._xbotLiveCfg || await window.pflxXBotLoadCfg();
+            cfg.theaterPlaylist = (Array.isArray(cfg.theaterPlaylist) ? cfg.theaterPlaylist : []).filter(function (p) { return p.id !== itemId; });
+            await window.pflxXBotSaveCfg(cfg);
+            window._xbotLiveCfg = cfg;
+            window._xbotTheaterPlaylistCache = cfg.theaterPlaylist;
+            if (window._xbotTheaterWatchingId === 'saved:' + itemId) window._xbotTheaterWatchingId = null;
+            window.xbotTheaterRender();
+        };
+        window.xbotTheaterWatchSaved = function (itemId) {
+            window._xbotTheaterWatchingId = 'saved:' + itemId;
+            window.xbotTheaterRender();
+        };
         window.xbotTheaterPopOut = function () {
-            var s = window._xbotTheaterCache.find(function (x) { return x.id === window._xbotTheaterWatchingId; });
-            if (!s || !s.youtubeEmbedId) return;
+            var watchId = window._xbotTheaterWatchingId;
+            var videoId, popTitle;
+            if (watchId && String(watchId).indexOf('saved:') === 0) {
+                var pItem = (window._xbotTheaterPlaylistCache || []).find(function (x) { return ('saved:' + x.id) === watchId; });
+                if (!pItem) return;
+                videoId = pItem.videoId; popTitle = pItem.title || 'Saved Video';
+            } else {
+                var s = window._xbotTheaterCache.find(function (x) { return x.id === watchId; });
+                if (!s || !s.youtubeEmbedId) return;
+                videoId = s.youtubeEmbedId; popTitle = s.title || 'Live Stream';
+            }
             var pipBody = document.getElementById('pip-theater-body');
             if (pipBody) {
                 pipBody.innerHTML = '<div style="position:relative;padding-top:56.25%;">' +
-                    '<iframe src="https://www.youtube.com/embed/' + encodeURIComponent(s.youtubeEmbedId) + '?autoplay=1" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" allow="autoplay; encrypted-media" allowfullscreen></iframe></div>' +
-                    '<div style="font-size:10px;color:#c9cfe8;padding:6px;font-family:\'Rajdhani\',sans-serif;">' + escapeHtml(s.title || 'Live Stream') + '</div>';
+                    '<iframe src="https://www.youtube.com/embed/' + encodeURIComponent(videoId) + '?autoplay=1" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" allow="autoplay; encrypted-media" allowfullscreen></iframe></div>' +
+                    '<div style="font-size:10px;color:#c9cfe8;padding:6px;font-family:\'Rajdhani\',sans-serif;">' + escapeHtml(popTitle) + '</div>';
             }
             if (typeof window.pflxPipOpen === 'function') window.pflxPipOpen('pip-theater');
         };
