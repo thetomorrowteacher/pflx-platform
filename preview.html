@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 174;
+      window.PFLX_PATCH   = 175;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -5299,6 +5299,34 @@
         .xbot-theater-resize-hint { display: block; }
         #pflx-dock.pflx-band-studio .xbot-theater-content { display: block; }
         #pflx-dock.pflx-band-studio .xbot-theater-resize-hint { display: none; }
+        /* v175 -- xc-4: the Soundboard is Studio-only, matching v172's
+           own Studio preset copy ("soundboard, controller grid,
+           monitoring"). Same CSS-only band-gating principle as
+           Teams/Theater above -- no new resize-event JS wiring. */
+        .xbot-sound-content { display: none; }
+        .xbot-sound-resize-hint { display: block; }
+        #pflx-dock.pflx-band-studio .xbot-sound-content { display: block; }
+        #pflx-dock.pflx-band-studio .xbot-sound-resize-hint { display: none; }
+        .xbot-sound-grid {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+        }
+        .xbot-sound-pad {
+            position: relative; padding: 14px 6px; border-radius: 8px;
+            text-align: center; cursor: pointer; font-family: 'Rajdhani', sans-serif;
+            font-size: 11px; display: flex; align-items: center; justify-content: center;
+            min-height: 52px;
+        }
+        .xbot-sound-pad-filled {
+            background: rgba(255,0,80,0.1); border: 1px solid rgba(255,0,80,0.35); color: #ff0050;
+        }
+        .xbot-sound-pad-empty {
+            background: rgba(255,255,255,0.03); border: 1px dashed rgba(255,255,255,0.18); color: #6a7290;
+        }
+        .xbot-sound-pad-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+        .xbot-sound-pad-actions { position: absolute; top: 2px; right: 4px; }
+        .xbot-sound-pad-actions button {
+            background: transparent; border: none; color: #6a7290; cursor: pointer; font-size: 10px;
+        }
         .xbot-live-subtab {
             flex: 1; padding: 7px; background: transparent;
             border: 1px solid rgba(255,0,80,0.18); border-left: none;
@@ -13782,6 +13810,7 @@
                         <button class="xbot-live-subtab active" data-subtab="sessions" onclick="xbotLiveSwitchSubTab('sessions')">🔴 SESSIONS</button>
                         <button class="xbot-live-subtab" data-subtab="teams" onclick="xbotLiveSwitchSubTab('teams')">🏟️ TEAMS</button>
                         <button class="xbot-live-subtab" data-subtab="theater" onclick="xbotLiveSwitchSubTab('theater')">🎬 THEATER</button>
+                        <button class="xbot-live-subtab" data-subtab="sound" onclick="xbotLiveSwitchSubTab('sound')">🔊 SOUND</button>
                     </div>
                     <div id="xbot-live-sessions-panel">
                         <div style="font-size:10px;color:#6a7290;font-family:'Rajdhani',sans-serif;line-height:1.5;margin-bottom:12px;">
@@ -13827,6 +13856,29 @@
                         </div>
                         <div class="xbot-theater-content" id="xbot-theater-content">
                             <div style="color:#6a7290;font-size:11px;font-family:'Rajdhani',sans-serif;text-align:center;padding:12px;">Loading…</div>
+                        </div>
+                    </div>
+                    <!-- v175 -- xc-4: Soundboard for a Guest Host to DJ.
+                         Reuses the SAME IndexedDB audio storage the Sound
+                         Engine already proved out (pflxDBAudioSave/Load/
+                         Delete) -- only pad metadata lives in
+                         localStorage. HONEST CAVEAT surfaced directly in
+                         the panel below: plays through the host's own
+                         speakers only -- reaching a live broadcast needs
+                         OBS's own Desktop Audio Capture enabled
+                         separately, since X-Bot has no audio-mixing
+                         pipeline of its own. -->
+                    <div id="xbot-live-sound-panel" style="display:none;">
+                        <div class="xbot-sound-resize-hint" style="text-align:center;padding:22px 10px;background:rgba(255,0,80,0.04);border:1px solid rgba(255,0,80,0.18);border-radius:10px;">
+                            <div style="font-size:26px;margin-bottom:8px;">🔊</div>
+                            <div style="font-family:'Rajdhani',sans-serif;font-size:12px;color:#c9cfe8;margin-bottom:12px;">The Soundboard needs more room for its pad grid. Resize X-Bot to Studio.</div>
+                            <button onclick="window.pflxDockApplyPreset('studio')" style="padding:8px 16px;background:rgba(255,0,80,0.12);border:1px solid rgba(255,0,80,0.4);border-radius:6px;color:#ff0050;font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1px;cursor:pointer;">🖥 SWITCH TO STUDIO</button>
+                        </div>
+                        <div class="xbot-sound-content">
+                            <div style="font-size:10px;color:#6a7290;font-family:'Rajdhani',sans-serif;line-height:1.5;margin-bottom:10px;">
+                                🔊 Plays through YOUR speakers only. To include a clip in a live OBS/YouTube broadcast, enable OBS's Desktop Audio Capture separately.
+                            </div>
+                            <div class="xbot-sound-grid" id="xbot-sound-grid"></div>
                         </div>
                     </div>
                 </div>
@@ -56676,13 +56728,14 @@
             // v174 -- generalized to a panel-id map so a third (Theater)
             // sub-tab slots in without duplicating the sessions/teams
             // toggle logic; sessions/teams behavior is unchanged.
-            var panels = { sessions: 'xbot-live-sessions-panel', teams: 'xbot-live-teams-panel', theater: 'xbot-live-theater-panel' };
+            var panels = { sessions: 'xbot-live-sessions-panel', teams: 'xbot-live-teams-panel', theater: 'xbot-live-theater-panel', sound: 'xbot-live-sound-panel' };
             Object.keys(panels).forEach(function (key) {
                 var el = document.getElementById(panels[key]);
                 if (el) el.style.display = (key === tab) ? 'block' : 'none';
             });
             if (tab === 'teams') window.pflxXBotRenderTeams();
             if (tab === 'theater') window.xbotTheaterRenderList();
+            if (tab === 'sound') window.xbotSoundboardRenderGrid();
         };
         window.pflxXBotRenderTeams = async function () {
             var grid = document.getElementById('xbot-teams-grid');
@@ -56865,6 +56918,83 @@
             if (typeof window.pflxPipOpen === 'function') window.pflxPipOpen('pip-theater');
         };
 
+        // v175 -- xc-4: Soundboard for a Guest Host to DJ. Reuses the
+        // EXISTING IndexedDB audio-blob storage already proven by the
+        // Sound Engine (pflxDBAudioSave/pflxDBAudioLoad/pflxDBAudioDelete,
+        // database 'pflx_platform', store 'audio') rather than
+        // reinventing IndexedDB wiring -- only pad METADATA (slot -> clip
+        // name) lives in localStorage, the same metadata/blob split
+        // SE.config.tracks already uses.
+        // HONEST CAVEAT (flagged in the Sept 9 plan, not dropped): this
+        // only plays through the host's own speakers. To reach a live
+        // OBS/YouTube broadcast, the host must separately enable OBS's
+        // Desktop Audio Capture -- X-Bot has no audio-mixing pipeline of
+        // its own.
+        window.XBOT_SOUNDBOARD_SLOTS = 8;
+        window.xbotSoundboardLoadMeta = function () {
+            try {
+                var raw = localStorage.getItem('pflx_xbot_soundboard_meta');
+                var meta = raw ? JSON.parse(raw) : {};
+                return (meta && typeof meta === 'object') ? meta : {};
+            } catch (e) { return {}; }
+        };
+        window.xbotSoundboardSaveMeta = function (meta) {
+            try { localStorage.setItem('pflx_xbot_soundboard_meta', JSON.stringify(meta || {})); } catch (e) {}
+        };
+        window.xbotSoundboardRenderGrid = function () {
+            var grid = document.getElementById('xbot-sound-grid');
+            if (!grid) return;
+            var meta = window.xbotSoundboardLoadMeta();
+            var html = '';
+            for (var i = 1; i <= window.XBOT_SOUNDBOARD_SLOTS; i++) {
+                var pad = meta[i];
+                if (pad && pad.name) {
+                    html += '<div class="xbot-sound-pad xbot-sound-pad-filled" onclick="xbotSoundboardPlay(' + i + ')">' +
+                        '<div class="xbot-sound-pad-name">' + escapeHtml(pad.name) + '</div>' +
+                        '<div class="xbot-sound-pad-actions">' +
+                        '<button onclick="event.stopPropagation();xbotSoundboardClear(' + i + ')" title="Remove">✕</button>' +
+                        '</div></div>';
+                } else {
+                    html += '<label class="xbot-sound-pad xbot-sound-pad-empty">' +
+                        '<div>+ Add clip ' + i + '</div>' +
+                        '<input type="file" accept="audio/*" style="display:none;" onchange="xbotSoundboardUpload(' + i + ', this)">' +
+                        '</label>';
+                }
+            }
+            grid.innerHTML = html;
+        };
+        window.xbotSoundboardUpload = function (slot, input) {
+            if (!input || !input.files || !input.files[0]) return;
+            var file = input.files[0];
+            var reader = new FileReader();
+            reader.onload = function (e) {
+                window.pflxDBAudioSave('xbot_pad_' + slot, e.target.result).then(function () {
+                    var meta = window.xbotSoundboardLoadMeta();
+                    meta[slot] = { name: file.name };
+                    window.xbotSoundboardSaveMeta(meta);
+                    window.xbotSoundboardRenderGrid();
+                });
+            };
+            reader.readAsDataURL(file);
+            input.value = '';
+        };
+        window.xbotSoundboardPlay = function (slot) {
+            return window.pflxDBAudioLoad('xbot_pad_' + slot).then(function (dataUrl) {
+                if (!dataUrl) return false;
+                var audio = new Audio(dataUrl);
+                audio.play().catch(function () {});
+                return true;
+            });
+        };
+        window.xbotSoundboardClear = function (slot) {
+            return window.pflxDBAudioDelete('xbot_pad_' + slot).then(function () {
+                var meta = window.xbotSoundboardLoadMeta();
+                delete meta[slot];
+                window.xbotSoundboardSaveMeta(meta);
+                window.xbotSoundboardRenderGrid();
+            });
+        };
+
         function switchXBotMode(mode) {
             xbotCurrentMode = mode;
             document.querySelectorAll('.xbot-mode-tab').forEach(t => {
@@ -56920,6 +57050,7 @@
                     var activeSubtab = document.querySelector('.xbot-live-subtab.active');
                     if (activeSubtab && activeSubtab.getAttribute('data-subtab') === 'teams') window.pflxXBotRenderTeams();
                     if (activeSubtab && activeSubtab.getAttribute('data-subtab') === 'theater') window.xbotTheaterRenderList();
+                    if (activeSubtab && activeSubtab.getAttribute('data-subtab') === 'sound') window.xbotSoundboardRenderGrid();
                 }
             } else if (mode === 'eng') {
                 voiceSection.classList.add('hidden');
