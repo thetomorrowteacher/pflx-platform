@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 172;
+      window.PFLX_PATCH   = 173;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -5277,6 +5277,27 @@
             max-height: 42px;
             opacity: 1;
         }
+        /* v173 -- xc-2: the X-Bot Teams board (ported from X-Live's
+           rTeams()) only makes sense as a real multi-column grid once the
+           dock is wide enough; below that it shows a "resize me" hint
+           instead. Purely CSS-driven off the SAME #pflx-dock.pflx-band-*
+           classes v172's render() already maintains on every resize/
+           preset click -- no extra JS resize-event wiring needed. */
+        .xbot-teams-grid { display: none; }
+        .xbot-teams-resize-hint { display: block; }
+        #pflx-dock.pflx-band-wide .xbot-teams-grid,
+        #pflx-dock.pflx-band-studio .xbot-teams-grid { display: block; }
+        #pflx-dock.pflx-band-wide .xbot-teams-resize-hint,
+        #pflx-dock.pflx-band-studio .xbot-teams-resize-hint { display: none; }
+        .xbot-live-subtab {
+            flex: 1; padding: 7px; background: transparent;
+            border: 1px solid rgba(255,0,80,0.18); border-left: none;
+            color: #8a92b0; font-family: 'Orbitron', sans-serif;
+            font-size: 9px; letter-spacing: 1px; cursor: pointer;
+        }
+        .xbot-live-subtab:first-child { border-radius: 6px 0 0 6px; border-left: 1px solid rgba(255,0,80,0.18); }
+        .xbot-live-subtab:last-child { border-radius: 0 6px 6px 0; }
+        .xbot-live-subtab.active { background: rgba(255,0,80,0.12); border-color: rgba(255,0,80,0.4); color: #ff0050; }
         .xbot-mode-tab {
             flex: 1;
             padding: 10px;
@@ -13718,20 +13739,40 @@
 
                 <!-- ═══ X-LIVE CONTROL (X-Bot / X-Live session bridge, xb-1) ═══ -->
                 <div id="xbot-live-section" style="flex:1;overflow-y:auto;padding:16px;display:none;">
-                    <div style="font-family:'Orbitron',sans-serif;font-size:10px;color:rgba(255,0,80,0.8);letter-spacing:2px;margin-bottom:10px;">X-LIVE SESSIONS</div>
-                    <div style="font-size:10px;color:#6a7290;font-family:'Rajdhani',sans-serif;line-height:1.5;margin-bottom:12px;">
-                        Sessions built in X-Live's dashboard. Go live, end, or check status without leaving X-Bot.
+                    <div style="font-family:'Orbitron',sans-serif;font-size:10px;color:rgba(255,0,80,0.8);letter-spacing:2px;margin-bottom:10px;">X-LIVE CONTROL</div>
+                    <!-- v173 -- xc-2: SESSIONS / TEAMS sub-tabs inside the
+                         same Live tab. Teams is the first "some sizes work
+                         well for X" layout from Ennis's X-Bot Controller
+                         ask, ported from X-Live's own rTeams(). -->
+                    <div style="display:flex;margin-bottom:12px;">
+                        <button class="xbot-live-subtab active" data-subtab="sessions" onclick="xbotLiveSwitchSubTab('sessions')">🔴 SESSIONS</button>
+                        <button class="xbot-live-subtab" data-subtab="teams" onclick="xbotLiveSwitchSubTab('teams')">🏟️ TEAMS</button>
                     </div>
-                    <div style="margin-bottom:12px;">
-                        <div style="font-family:'Orbitron',sans-serif;font-size:9px;color:#6a7290;letter-spacing:1px;margin-bottom:6px;">MY CLASS (COHORT FILTER)</div>
-                        <div id="xbot-live-cohort-chips" style="display:flex;flex-wrap:wrap;gap:6px;">
-                            <div style="color:#6a7290;font-size:10px;font-family:'Rajdhani',sans-serif;">Loading…</div>
+                    <div id="xbot-live-sessions-panel">
+                        <div style="font-size:10px;color:#6a7290;font-family:'Rajdhani',sans-serif;line-height:1.5;margin-bottom:12px;">
+                            Sessions built in X-Live's dashboard. Go live, end, or check status without leaving X-Bot.
+                        </div>
+                        <div style="margin-bottom:12px;">
+                            <div style="font-family:'Orbitron',sans-serif;font-size:9px;color:#6a7290;letter-spacing:1px;margin-bottom:6px;">MY CLASS (COHORT FILTER)</div>
+                            <div id="xbot-live-cohort-chips" style="display:flex;flex-wrap:wrap;gap:6px;">
+                                <div style="color:#6a7290;font-size:10px;font-family:'Rajdhani',sans-serif;">Loading…</div>
+                            </div>
+                        </div>
+                        <div id="xbot-live-list" style="display:flex;flex-direction:column;gap:8px;">
+                            <div style="color:#6a7290;font-size:11px;font-family:'Rajdhani',sans-serif;text-align:center;padding:12px;">Loading sessions…</div>
+                        </div>
+                        <button onclick="xbotLiveRenderSessions(true)" style="margin-top:10px;width:100%;padding:8px;background:rgba(0,240,255,0.08);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1px;cursor:pointer;">↻ REFRESH</button>
+                    </div>
+                    <div id="xbot-live-teams-panel" style="display:none;">
+                        <div class="xbot-teams-resize-hint" style="text-align:center;padding:22px 10px;background:rgba(255,0,80,0.04);border:1px solid rgba(255,0,80,0.18);border-radius:10px;">
+                            <div style="font-size:26px;margin-bottom:8px;">🏟️</div>
+                            <div style="font-family:'Rajdhani',sans-serif;font-size:12px;color:#c9cfe8;margin-bottom:12px;">The team board needs more room to show its columns. Resize X-Bot to Wide or larger.</div>
+                            <button onclick="window.pflxDockApplyPreset('wide')" style="padding:8px 16px;background:rgba(255,0,80,0.12);border:1px solid rgba(255,0,80,0.4);border-radius:6px;color:#ff0050;font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1px;cursor:pointer;">▭ SWITCH TO WIDE</button>
+                        </div>
+                        <div class="xbot-teams-grid" id="xbot-teams-grid">
+                            <div style="color:#6a7290;font-size:11px;font-family:'Rajdhani',sans-serif;text-align:center;padding:12px;">Loading teams…</div>
                         </div>
                     </div>
-                    <div id="xbot-live-list" style="display:flex;flex-direction:column;gap:8px;">
-                        <div style="color:#6a7290;font-size:11px;font-family:'Rajdhani',sans-serif;text-align:center;padding:12px;">Loading sessions…</div>
-                    </div>
-                    <button onclick="xbotLiveRenderSessions(true)" style="margin-top:10px;width:100%;padding:8px;background:rgba(0,240,255,0.08);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1px;cursor:pointer;">↻ REFRESH</button>
                 </div>
 
                 <!-- ═══ ENGINEERING / DEV PORTAL (hidden by default) ═══ -->
@@ -56525,6 +56566,168 @@
             window.xbotLiveRenderSessions(true);
         };
 
+        // ══ PATCH PLATFORM v173 -- xc-2: Team-arrangement board, ported
+        // from x-live-check's rTeams()/makeTeams()/teamsShufflePlayers()/
+        // teamsRerollNames()/teamsMovePlayer()/clearTeams() into X-Bot's
+        // Live tab. Reads/writes the SAME Supabase 'pflx_lite_config' row
+        // (cfg.teams = {names, assign}) via the xb-2 pflxXBotLoadCfg/
+        // pflxXBotSaveCfg bridge established for cohorts -- teams drafted
+        // here show up in X-Live's own TEAMS tab and vice versa, nothing
+        // duplicated. Visible as a real grid only at the Wide/Studio size
+        // bands (CSS-gated, see .xbot-teams-grid/.xbot-teams-resize-hint
+        // above); Compact/Standard show a "resize me" hint instead, per
+        // Ennis's "some sizes...would work well for team arrangement
+        // layouts."
+        //
+        // NOT ported: X-Live's "weekly XC per team" stat -- sumActivity()
+        // there depends on X-Live's own loaded activity log, which isn't
+        // available in this Console context. Shows each team's current
+        // total X-Coin balance instead (mcPlayers[].xcoin, natively
+        // available here) -- a real number, just a different window than
+        // X-Live's "this week" figure. Documented in the Handoff, not
+        // silently dropped.
+        var PFLX_XBOT_TEAM_COLORS = ['#39c0ff', '#ff8ba0', '#7dffb8', '#ffd166', '#cbb8ff', '#ffb37d'];
+        var PFLX_XBOT_TEAM_NAME_BANK = [
+            'NOVA SYNDICATE', 'QUANTUM FORGE', 'HELIX DYNAMICS', 'VOLTEDGE LABS', 'CIPHER COLLECTIVE',
+            'ORBITAL WORKS', 'NEON VANGUARD', 'APEX PROTOCOL', 'FLUX CAPITAL', 'IONSTORM INC',
+            'PIXEL FOUNDRY', 'DEEPCORE SYSTEMS', 'HYPERDRIVE CO', 'STARFORGE GUILD', 'CIRCUIT ROYALS',
+            'ECHO INDUSTRIES', 'TITAN GRID', 'NEBULA NINE', 'PRIME AXIOM', 'SHADOWBYTE',
+            'TURBO NEXUS', 'CRYO DYNAMICS', 'VERTEX UNION', 'PULSEWAVE MEDIA', 'OMEGA CIRCUIT',
+            'DRIFTLINE CREW', 'SOLARFLARE CO', 'MAINFRAME MOB', 'ZENITH WORKS', 'GLITCHPROOF INC'
+        ];
+        function pflxXBotDrawTeamNames(n) {
+            return PFLX_XBOT_TEAM_NAME_BANK.slice().sort(function () { return Math.random() - 0.5; }).slice(0, n);
+        }
+        function pflxXBotTeamColor(name, names) {
+            var i = (names || []).indexOf(name);
+            return PFLX_XBOT_TEAM_COLORS[(i + PFLX_XBOT_TEAM_COLORS.length) % PFLX_XBOT_TEAM_COLORS.length];
+        }
+        window.pflxXBotTeamRoster = function () {
+            var cfg = window._xbotLiveCfg || {};
+            var cs = (Array.isArray(cfg.cohorts) ? cfg.cohorts : []).map(function (c) { return String(c).toLowerCase(); });
+            var pool = (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) ? mcPlayers : [];
+            pool = pool.filter(function (p) { return p && p.role !== 'admin'; });
+            if (!cs.length) return pool;
+            return pool.filter(function (p) {
+                var pc = String(p.cohort || '').split(/[,;]/).map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean);
+                return pc.some(function (c) { return cs.indexOf(c) !== -1; });
+            });
+        };
+        window.xbotLiveSwitchSubTab = function (tab) {
+            document.querySelectorAll('.xbot-live-subtab').forEach(function (b) {
+                b.classList.toggle('active', b.getAttribute('data-subtab') === tab);
+            });
+            var sp = document.getElementById('xbot-live-sessions-panel');
+            var tp = document.getElementById('xbot-live-teams-panel');
+            if (sp) sp.style.display = tab === 'sessions' ? 'block' : 'none';
+            if (tp) tp.style.display = tab === 'teams' ? 'block' : 'none';
+            if (tab === 'teams') window.pflxXBotRenderTeams();
+        };
+        window.pflxXBotRenderTeams = async function () {
+            var grid = document.getElementById('xbot-teams-grid');
+            if (!grid) return;
+            var cfg = window._xbotLiveCfg || await window.pflxXBotLoadCfg();
+            window._xbotLiveCfg = cfg;
+            cfg.teams = Object.assign({ names: [], assign: {} }, cfg.teams || {});
+            var names = cfg.teams.names || [];
+            if (!names.length) {
+                grid.innerHTML = '<div style="text-align:center;padding:20px;background:rgba(255,0,80,0.04);border:1px solid rgba(255,0,80,0.18);border-radius:10px;">' +
+                    '<div style="font-size:26px;margin-bottom:8px;">👥</div>' +
+                    '<div style="font-family:\'Orbitron\',sans-serif;font-size:11px;letter-spacing:1px;color:#c9cfe8;margin-bottom:10px;">NO TEAMS YET</div>' +
+                    '<div style="display:flex;gap:8px;justify-content:center;align-items:center;">' +
+                    '<span style="font-size:11px;color:#8a92b0;font-family:\'Rajdhani\',sans-serif;">Teams:</span>' +
+                    '<input id="xbot-team-n" type="number" min="2" max="6" value="2" style="width:56px;text-align:center;background:rgba(10,18,40,0.8);border:1px solid rgba(255,0,80,0.25);color:#e0e6ff;border-radius:6px;padding:5px;">' +
+                    '<button onclick="pflxXBotMakeTeams()" style="padding:7px 14px;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-family:\'Orbitron\',sans-serif;font-size:10px;letter-spacing:1px;cursor:pointer;">DRAFT TEAMS</button>' +
+                    '</div></div>';
+                return;
+            }
+            var roster = window.pflxXBotTeamRoster();
+            var cols = names.map(function (nm) {
+                var members = roster.filter(function (p) { return cfg.teams.assign[p.id] === nm; });
+                var totalXc = members.reduce(function (s, p) { return s + (p.xcoin || 0); }, 0);
+                var col = pflxXBotTeamColor(nm, names);
+                var rows = members.map(function (p) {
+                    var pname = p.brand || p.brandName || p.name || 'Player';
+                    return '<div onclick="pflxXBotTeamsMovePlayer(\'' + p.id + '\')" title="Tap to move to the next team" style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:5px 7px;border-radius:8px;background:rgba(255,255,255,0.04);border:1px solid ' + col + '33;margin-bottom:5px;">' +
+                        _pcAvatarHtml(p.image, pname, 26) +
+                        '<div style="font-family:\'Rajdhani\',sans-serif;font-size:11px;font-weight:600;color:#e0e6ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;">' + escapeHtml(pname) + '</div>' +
+                        '<div style="font-size:10px;color:#5c6488;">⇄</div></div>';
+                }).join('');
+                return '<div style="border-top:3px solid ' + col + ';background:rgba(255,255,255,0.02);border-radius:10px;padding:10px;min-width:0;">' +
+                    '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">' +
+                    '<div style="width:12px;height:12px;border-radius:4px;background:' + col + ';flex-shrink:0;"></div>' +
+                    '<div style="font-family:\'Orbitron\',sans-serif;font-size:10px;font-weight:700;color:#fff;letter-spacing:0.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(nm) + '</div>' +
+                    '<div style="font-family:\'Orbitron\',sans-serif;font-size:10px;font-weight:700;color:#ffd166;">' + totalXc.toLocaleString() + '</div>' +
+                    '</div>' + (rows || '<div style="font-size:10px;color:#5c6488;text-align:center;padding:8px;">empty</div>') + '</div>';
+            }).join('');
+            grid.innerHTML = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">' +
+                '<button onclick="pflxXBotTeamsShuffle()" style="flex:1;padding:7px;background:rgba(0,255,150,0.1);border:1px solid rgba(0,255,150,0.3);border-radius:6px;color:#00ff96;font-family:\'Orbitron\',sans-serif;font-size:9px;letter-spacing:0.5px;cursor:pointer;">🔀 SHUFFLE</button>' +
+                '<button onclick="pflxXBotTeamsRerollNames()" style="flex:1;padding:7px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.16);border-radius:6px;color:#c9cfe8;font-family:\'Orbitron\',sans-serif;font-size:9px;letter-spacing:0.5px;cursor:pointer;">🎲 NAMES</button>' +
+                '<button onclick="pflxXBotClearTeams()" style="flex:1;padding:7px;background:rgba(255,0,80,0.1);border:1px solid rgba(255,0,80,0.3);border-radius:6px;color:#ff0050;font-family:\'Orbitron\',sans-serif;font-size:9px;letter-spacing:0.5px;cursor:pointer;">CLEAR</button>' +
+                '</div>' +
+                '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;">' + cols + '</div>' +
+                '<div style="font-size:9px;color:#5c6488;margin-top:10px;font-family:\'Rajdhani\',sans-serif;">Tap a player to move them to the next team. Same teams shown in X-Live\'s dashboard. X-Coin shown is each team\'s current total balance.</div>';
+        };
+        window.pflxXBotMakeTeams = async function () {
+            var inp = document.getElementById('xbot-team-n');
+            var n = Math.max(2, Math.min(6, parseInt(inp ? inp.value : 2, 10) || 2));
+            var names = pflxXBotDrawTeamNames(n);
+            var roster = window.pflxXBotTeamRoster().slice().sort(function () { return Math.random() - 0.5; });
+            var assign = {};
+            roster.forEach(function (p, i) { assign[p.id] = names[i % n]; });
+            var cfg = window._xbotLiveCfg || await window.pflxXBotLoadCfg();
+            cfg.teams = { names: names, assign: assign };
+            await window.pflxXBotSaveCfg(cfg);
+            window._xbotLiveCfg = cfg;
+            window.pflxXBotRenderTeams();
+        };
+        window.pflxXBotTeamsShuffle = async function () {
+            var cfg = window._xbotLiveCfg || await window.pflxXBotLoadCfg();
+            var names = (cfg.teams && cfg.teams.names) || [];
+            if (!names.length) return;
+            var roster = window.pflxXBotTeamRoster().slice().sort(function () { return Math.random() - 0.5; });
+            var assign = {};
+            roster.forEach(function (p, i) { assign[p.id] = names[i % names.length]; });
+            cfg.teams.assign = assign;
+            await window.pflxXBotSaveCfg(cfg);
+            window._xbotLiveCfg = cfg;
+            window.pflxXBotRenderTeams();
+        };
+        window.pflxXBotTeamsRerollNames = async function () {
+            var cfg = window._xbotLiveCfg || await window.pflxXBotLoadCfg();
+            var old = (cfg.teams && cfg.teams.names) || [];
+            if (!old.length) return;
+            var fresh = pflxXBotDrawTeamNames(old.length);
+            var map = {};
+            old.forEach(function (o, i) { map[o] = fresh[i]; });
+            var assign = {};
+            Object.keys((cfg.teams && cfg.teams.assign) || {}).forEach(function (pid) {
+                assign[pid] = map[cfg.teams.assign[pid]] || fresh[0];
+            });
+            cfg.teams = { names: fresh, assign: assign };
+            await window.pflxXBotSaveCfg(cfg);
+            window._xbotLiveCfg = cfg;
+            window.pflxXBotRenderTeams();
+        };
+        window.pflxXBotTeamsMovePlayer = async function (pid) {
+            var cfg = window._xbotLiveCfg || await window.pflxXBotLoadCfg();
+            var names = (cfg.teams && cfg.teams.names) || [];
+            if (names.length < 2) return;
+            var cur = cfg.teams.assign[pid];
+            var idx = names.indexOf(cur);
+            cfg.teams.assign[pid] = names[(idx + 1) % names.length];
+            await window.pflxXBotSaveCfg(cfg);
+            window._xbotLiveCfg = cfg;
+            window.pflxXBotRenderTeams();
+        };
+        window.pflxXBotClearTeams = async function () {
+            var cfg = window._xbotLiveCfg || await window.pflxXBotLoadCfg();
+            cfg.teams = { names: [], assign: {} };
+            await window.pflxXBotSaveCfg(cfg);
+            window._xbotLiveCfg = cfg;
+            window.pflxXBotRenderTeams();
+        };
+
         function switchXBotMode(mode) {
             xbotCurrentMode = mode;
             document.querySelectorAll('.xbot-mode-tab').forEach(t => {
@@ -56573,6 +56776,12 @@
                     liveSection.style.display = 'block';
                     xbotLiveRenderCohortChips();
                     xbotLiveRenderSessions();
+                    // v173 -- xc-2: if the Teams sub-tab was already the
+                    // active one (host reopened the Live tab), refresh its
+                    // grid too -- otherwise it would show whatever it had
+                    // the last time this tab was open, which may be stale.
+                    var activeSubtab = document.querySelector('.xbot-live-subtab.active');
+                    if (activeSubtab && activeSubtab.getAttribute('data-subtab') === 'teams') window.pflxXBotRenderTeams();
                 }
             } else if (mode === 'eng') {
                 voiceSection.classList.add('hidden');
