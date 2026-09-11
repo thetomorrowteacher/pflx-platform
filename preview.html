@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 171;
+      window.PFLX_PATCH   = 172;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -5257,6 +5257,25 @@
             display: flex;
             border-bottom: 1px solid rgba(0, 240, 255, 0.08);
             flex-shrink: 0;
+            /* v172 (Ennis: "the pinned bar gets in the way" at small
+               sizes) -- collapses to a thin sliver ONLY when the dock is
+               in its Compact size band (#pflx-dock.pflx-band-compact
+               below, kept in sync by the dock's own render()); at every
+               other band this is a no-op and the bar looks exactly as
+               it always has. */
+            max-height: 42px;
+            overflow: hidden;
+            transition: max-height 0.22s ease, opacity 0.22s ease;
+        }
+        #pflx-dock.pflx-band-compact .xbot-mode-tabs:not(.xbot-tabs-peek) {
+            max-height: 7px;
+            opacity: 0.4;
+            cursor: pointer;
+        }
+        #pflx-dock.pflx-band-compact .xbot-mode-tabs:hover,
+        #pflx-dock.pflx-band-compact .xbot-mode-tabs.xbot-tabs-peek {
+            max-height: 42px;
+            opacity: 1;
         }
         .xbot-mode-tab {
             flex: 1;
@@ -74345,6 +74364,13 @@ RESPONSE RULES:
             font-size:15px; line-height:1; cursor:pointer; padding:3px 7px; border-radius:7px; }
         .pflx-dock-hbtn:hover { color:#fff; background:rgba(255,255,255,0.06); }
         .pflx-dock-hbtn.on { color:#00f0ff; background:rgba(0,240,255,0.12); }
+        /* v172 -- size-preset buttons (Compact/Standard/Wide/Studio) */
+        .pflx-dock-size-btns { display:flex; gap:2px; padding-right:4px; margin-right:2px;
+            border-right:1px solid rgba(255,255,255,0.08); }
+        .pflx-dock-size-btn { background:transparent; border:none; color:rgba(255,255,255,0.35);
+            font-size:11px; line-height:1; cursor:pointer; padding:4px 5px; border-radius:6px; }
+        .pflx-dock-size-btn:hover { color:#fff; background:rgba(255,255,255,0.06); }
+        .pflx-dock-size-btn.active { color:#00f0ff; background:rgba(0,240,255,0.14); }
         .pflx-dock-body { flex:1; position:relative; overflow:hidden; min-height:0; }
         .pflx-dock-rsz { position:absolute; width:18px; height:18px; z-index:6; touch-action:none; }
         .pflx-dock-rsz.nw { left:-2px; top:-2px; cursor:nwse-resize; }
@@ -74392,6 +74418,12 @@ RESPONSE RULES:
                 <button class="pflx-dock-tab" data-dtab="chat">👥 P2P CHAT</button>
             </div>
             <span style="flex:1;"></span>
+            <span class="pflx-dock-size-btns">
+                <button class="pflx-dock-size-btn" data-size="compact" title="Compact">▪</button>
+                <button class="pflx-dock-size-btn" data-size="standard" title="Standard">◻</button>
+                <button class="pflx-dock-size-btn" data-size="wide" title="Wide — team layouts">▭</button>
+                <button class="pflx-dock-size-btn" data-size="studio" title="Studio — soundboard, controller grid, monitoring">🖥</button>
+            </span>
             <button class="pflx-dock-hbtn" id="pflx-dock-auto" title="Auto read-aloud X-Bot replies">🔉</button>
             <button class="pflx-dock-hbtn" id="pflx-dock-speak" title="Read the last message aloud">🔊</button>
             <button class="pflx-dock-hbtn" id="pflx-dock-min" title="Minimize">–</button>
@@ -74490,6 +74522,41 @@ RESPONSE RULES:
             try { var t = localStorage.getItem(TABK); if (t) state.tab = t; } catch (e) {}
             try { state.autoSpeak = localStorage.getItem(SPEAKK) === '1'; } catch (e) {}
         }
+        // v172 -- X-Bot Controller foundation (xc-1): named size bands a
+        // later phase's tool layouts (team board, Theater+PIP, soundboard,
+        // MIDI grid) will key off of. sizeBand() is threshold-based on the
+        // CURRENT width, not just an exact preset match, so free-dragging
+        // into a range classifies the same as clicking that preset would --
+        // "presets you can also free-resize" (Ennis, confirmed).
+        var SIZE_PRESETS = {
+            compact:  { w: 340, h: 440 },
+            standard: { w: 420, h: 560 },
+            wide:     { w: 680, h: 600 },
+            studio:   { w: 920, h: 680 }
+        };
+        var SIZE_BAND_ORDER = ['compact', 'standard', 'wide', 'studio'];
+        function sizeBand(w) {
+            if (w < 420) return 'compact';
+            if (w < 680) return 'standard';
+            if (w < 920) return 'wide';
+            return 'studio';
+        }
+        window.pflxDockSizeBand = function () { return sizeBand(state.w); };
+        window.pflxDockApplyPreset = function (name) {
+            var p = SIZE_PRESETS[name];
+            if (!p) return;
+            // Keep the SE corner anchored (same "opposite corner fixed"
+            // convention makeResize() already uses for manual drag) so
+            // jumping to a preset doesn't fling the panel to a different
+            // part of the screen.
+            var right = state.x + state.w, bottom = state.y + state.h;
+            state.w = Math.max(MINW, p.w);
+            state.h = Math.max(MINH, p.h);
+            state.x = right - state.w;
+            state.y = bottom - state.h;
+            render();
+            persist();
+        };
         function render() {
             if (!dock) return;
             var signedIn = !!(window.activeSession && window.activeSession.id);
@@ -74511,6 +74578,19 @@ RESPONSE RULES:
             }
             var auto = document.getElementById('pflx-dock-auto');
             if (auto) auto.classList.toggle('on', state.autoSpeak);
+            // v172 -- keep the live size-band class + preset-button
+            // highlight in sync on EVERY render() call, so both a preset
+            // click and a manual drag (which also calls render()) update
+            // it identically -- one code path, not two.
+            if (dock) {
+                var band = sizeBand(state.w);
+                SIZE_BAND_ORDER.forEach(function (b) { dock.classList.toggle('pflx-band-' + b, b === band); });
+                if (header) {
+                    Array.prototype.forEach.call(header.querySelectorAll('.pflx-dock-size-btn'), function (b) {
+                        b.classList.toggle('active', b.getAttribute('data-size') === band);
+                    });
+                }
+            }
         }
 
         function dockify(el) {
@@ -74638,6 +74718,30 @@ RESPONSE RULES:
             Array.prototype.forEach.call(header.querySelectorAll('.pflx-dock-tab'), function (b) {
                 b.addEventListener('click', function () { showTab(b.getAttribute('data-dtab')); });
             });
+            // v172 -- size-preset buttons
+            Array.prototype.forEach.call(header.querySelectorAll('.pflx-dock-size-btn'), function (b) {
+                b.addEventListener('click', function () { window.pflxDockApplyPreset(b.getAttribute('data-size')); });
+            });
+            // v172 -- Compact-band mode-tabs bar: a tap reveals it (peek)
+            // for a few seconds on touch devices with no real :hover: the
+            // FIRST tap while collapsed only reveals (never also fires a
+            // tab switch -- the buttons are visually clipped to ~7px so a
+            // real click on one is not meaningfully possible yet); once
+            // peeking, taps pass through to the tab buttons normally.
+            (function () {
+                var modeTabsBar = document.querySelector('.xbot-mode-tabs');
+                if (!modeTabsBar) return;
+                var peekTimer = null;
+                modeTabsBar.addEventListener('click', function (e) {
+                    if (!modeTabsBar.classList.contains('xbot-tabs-peek')) {
+                        modeTabsBar.classList.add('xbot-tabs-peek');
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }
+                    if (peekTimer) clearTimeout(peekTimer);
+                    peekTimer = setTimeout(function () { modeTabsBar.classList.remove('xbot-tabs-peek'); }, 3000);
+                });
+            })();
             document.getElementById('pflx-dock-min').addEventListener('click', closeDock);
             document.getElementById('pflx-dock-speak').addEventListener('click', function () {
                 if ('speechSynthesis' in window && window.speechSynthesis.speaking) window.pflxSpeakStop(); else readLast();
