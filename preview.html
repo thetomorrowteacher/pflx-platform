@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 168;
+      window.PFLX_PATCH   = 169;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -13480,6 +13480,7 @@
                     <button class="xbot-mode-tab active" data-mode="chat" onclick="switchXBotMode('chat')">Chat</button>
                     <button class="xbot-mode-tab" data-mode="voice" onclick="switchXBotMode('voice')">Voice</button>
                     <button class="xbot-mode-tab" data-mode="host" onclick="switchXBotMode('host')" id="xbot-tab-host" style="display:none;">Host</button>
+                    <button class="xbot-mode-tab" data-mode="live" onclick="switchXBotMode('live')" id="xbot-tab-live" style="display:none;">🔴 Live</button>
                     <button class="xbot-mode-tab" data-mode="eng" onclick="switchXBotMode('eng')" id="xbot-tab-eng" style="display:none;">Dev</button>
                     <button class="xbot-mode-tab" data-mode="settings" onclick="switchXBotMode('settings')">⚙</button>
                 </div>
@@ -13694,6 +13695,18 @@
                             Mimic temporarily replaces your session with a chosen player's so you see their cohort, badges, X-Coin, and view filters. Your master-host session is stashed and restored on exit (or page reload).
                         </div>
                     </div>
+                </div>
+
+                <!-- ═══ X-LIVE CONTROL (X-Bot / X-Live session bridge, xb-1) ═══ -->
+                <div id="xbot-live-section" style="flex:1;overflow-y:auto;padding:16px;display:none;">
+                    <div style="font-family:'Orbitron',sans-serif;font-size:10px;color:rgba(255,0,80,0.8);letter-spacing:2px;margin-bottom:10px;">X-LIVE SESSIONS</div>
+                    <div style="font-size:10px;color:#6a7290;font-family:'Rajdhani',sans-serif;line-height:1.5;margin-bottom:12px;">
+                        Sessions built in X-Live's dashboard. Go live, end, or check status without leaving X-Bot.
+                    </div>
+                    <div id="xbot-live-list" style="display:flex;flex-direction:column;gap:8px;">
+                        <div style="color:#6a7290;font-size:11px;font-family:'Rajdhani',sans-serif;text-align:center;padding:12px;">Loading sessions…</div>
+                    </div>
+                    <button onclick="xbotLiveRenderSessions(true)" style="margin-top:10px;width:100%;padding:8px;background:rgba(0,240,255,0.08);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1px;cursor:pointer;">↻ REFRESH</button>
                 </div>
 
                 <!-- ═══ ENGINEERING / DEV PORTAL (hidden by default) ═══ -->
@@ -56330,6 +56343,144 @@
             }
         }
 
+        // ══ PATCH PLATFORM v169 — xb-1: X-Bot / X-Live session bridge ════════
+        // X-Bot reads/writes the SAME Supabase app_data 'sessions' key
+        // x-live-check/index.html's own loadSessions()/saveSession() own,
+        // using the IDENTICAL read-merge-write discipline (this is a
+        // faithful port of that file's mergeSession/mergeSessionList, not a
+        // reimplementation) so two independent writers on the same
+        // collection can never clobber each other -- per
+        // pflx-persistence-guardrail.
+        function pflxXBotMergeSession(local, incoming) {
+            if (!local) return incoming;
+            if (!incoming) return local;
+            var localNewer = (local.updatedAt || 0) >= (incoming.updatedAt || 0);
+            var merged = localNewer ? Object.assign({}, incoming, local) : Object.assign({}, local, incoming);
+
+            var partById = {};
+            (incoming.liveParticipants || []).forEach(function (p) { partById[p.id] = p; });
+            (local.liveParticipants || []).forEach(function (p) {
+                var existing = partById[p.id];
+                if (!existing || (p.joinedAt || 0) >= (existing.joinedAt || 0)) partById[p.id] = p;
+            });
+            merged.liveParticipants = Object.keys(partById).map(function (k) { return partById[k]; });
+
+            var localSlides = local.slides || [];
+            var incomingSlides = incoming.slides || [];
+            var maxLen = Math.max(localSlides.length, incomingSlides.length);
+            var mergedSlides = [];
+            for (var i = 0; i < maxLen; i++) {
+                var ls = localSlides[i], is = incomingSlides[i];
+                if (!ls) { mergedSlides.push(is); continue; }
+                if (!is) { mergedSlides.push(ls); continue; }
+                var slideMerged = localNewer ? Object.assign({}, is, ls) : Object.assign({}, ls, is);
+                slideMerged.responses = Object.assign({}, is.responses || {}, ls.responses || {});
+                mergedSlides.push(slideMerged);
+            }
+            merged.slides = mergedSlides;
+
+            if ((incoming.lastRandomPickAt || 0) > (local.lastRandomPickAt || 0)) {
+                merged.lastRandomPickId = incoming.lastRandomPickId; merged.lastRandomPickAt = incoming.lastRandomPickAt;
+            } else {
+                merged.lastRandomPickId = local.lastRandomPickId; merged.lastRandomPickAt = local.lastRandomPickAt;
+            }
+            if ((incoming.lastGroupPickAt || 0) > (local.lastGroupPickAt || 0)) {
+                merged.lastGroupPick = incoming.lastGroupPick; merged.lastGroupPickAt = incoming.lastGroupPickAt;
+            } else {
+                merged.lastGroupPick = local.lastGroupPick; merged.lastGroupPickAt = local.lastGroupPickAt;
+            }
+
+            var awardSet = {};
+            (incoming.awardedTo || []).forEach(function (id) { awardSet[id] = true; });
+            (local.awardedTo || []).forEach(function (id) { awardSet[id] = true; });
+            merged.awardedTo = Object.keys(awardSet);
+
+            var raceEventById = {};
+            (incoming.raceEvents || []).forEach(function (e) { raceEventById[e.id] = e; });
+            (local.raceEvents || []).forEach(function (e) { raceEventById[e.id] = e; });
+            merged.raceEvents = Object.keys(raceEventById).map(function (k) { return raceEventById[k]; });
+
+            var TERMINAL = { ended: 1, archived: 1 };
+            if (TERMINAL[incoming.status] && !TERMINAL[local.status]) merged.status = incoming.status;
+            else if (TERMINAL[local.status] && !TERMINAL[incoming.status]) merged.status = local.status;
+            else merged.status = localNewer ? local.status : incoming.status;
+
+            return merged;
+        }
+        function pflxXBotMergeSessionList(localList, incomingList) {
+            var byId = {};
+            (incomingList || []).forEach(function (s) { byId[s.id] = s; });
+            (localList || []).forEach(function (s) { byId[s.id] = pflxXBotMergeSession(s, byId[s.id]); });
+            return Object.keys(byId).map(function (k) { return byId[k]; });
+        }
+        window.pflxXBotLoadSessions = async function () {
+            try {
+                var sb = window.pflxSupabase();
+                if (!sb) return [];
+                var res = await sb.from('app_data').select('data').eq('key', 'sessions').maybeSingle();
+                if (res && res.data && Array.isArray(res.data.data)) return res.data.data;
+                return [];
+            } catch (e) { console.warn('[xbot-live] load sessions failed', e); return []; }
+        };
+        window.pflxXBotSaveSession = async function (sess) {
+            sess.updatedAt = Date.now();
+            var sb = window.pflxSupabase();
+            if (!sb) return sess;
+            var cloud = [];
+            try {
+                var res = await sb.from('app_data').select('data').eq('key', 'sessions').maybeSingle();
+                if (res && res.data && Array.isArray(res.data.data)) cloud = res.data.data;
+            } catch (e) {}
+            var idx = cloud.findIndex(function (s) { return s.id === sess.id; });
+            var savedSess = idx === -1 ? sess : pflxXBotMergeSession(sess, cloud[idx]);
+            if (idx === -1) cloud.push(savedSess); else cloud[idx] = savedSess;
+            try {
+                await sb.from('app_data').upsert({ key: 'sessions', data: cloud }, { onConflict: 'key' });
+            } catch (e) { console.warn('[xbot-live] save session failed', e); }
+            return savedSess;
+        };
+        window.xbotLiveRenderSessions = async function (forceReload) {
+            var list = document.getElementById('xbot-live-list');
+            if (!list) return;
+            if (forceReload) list.innerHTML = '<div style="color:#6a7290;font-size:11px;font-family:\'Rajdhani\',sans-serif;text-align:center;padding:12px;">Loading sessions…</div>';
+            var sessions = await window.pflxXBotLoadSessions();
+            var visible = sessions.filter(function (s) { return s.status === 'scheduled' || s.status === 'active'; });
+            if (!visible.length) {
+                list.innerHTML = '<div style="color:#6a7290;font-size:11px;font-family:\'Rajdhani\',sans-serif;text-align:center;padding:12px;">No scheduled or live sessions. Build one in X-Live\'s dashboard.</div>';
+                return;
+            }
+            visible.sort(function (a, b) { return (a.scheduledStart || 0) - (b.scheduledStart || 0); });
+            list.innerHTML = visible.map(function (s) {
+                var isLive = s.status === 'active';
+                var cohorts = (s.allCohorts ? 'All Cohorts' : (s.cohorts || []).join(', ')) || '—';
+                var title = (s.title || 'Untitled Session').replace(/</g, '&lt;');
+                return '<div style="padding:10px;background:rgba(255,0,80,0.04);border:1px solid rgba(255,0,80,0.18);border-radius:8px;">' +
+                    '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:4px;">' +
+                    '<div style="color:#e0e6ff;font-size:12px;font-weight:600;font-family:\'Rajdhani\',sans-serif;">' + title + '</div>' +
+                    '<div style="font-size:9px;font-family:\'Orbitron\',sans-serif;letter-spacing:1px;color:' + (isLive ? '#ff0050' : '#6a7290') + ';">' + (isLive ? '● LIVE' : 'SCHEDULED') + '</div>' +
+                    '</div>' +
+                    '<div style="font-size:10px;color:#8a92b0;font-family:\'Rajdhani\',sans-serif;margin-bottom:8px;">' + cohorts + '</div>' +
+                    '<button onclick="' + (isLive ? 'xbotLiveEndSession' : 'xbotLiveGoLive') + '(\'' + s.id + '\')" style="width:100%;padding:7px;background:' + (isLive ? 'rgba(255,0,80,0.12)' : 'rgba(0,240,255,0.1)') + ';border:1px solid ' + (isLive ? 'rgba(255,0,80,0.4)' : 'rgba(0,240,255,0.3)') + ';border-radius:6px;color:' + (isLive ? '#ff0050' : '#00f0ff') + ';font-family:\'Orbitron\',sans-serif;font-size:10px;letter-spacing:1px;cursor:pointer;">' + (isLive ? '⏹ END SESSION' : '▶ GO LIVE') + '</button>' +
+                    '</div>';
+            }).join('');
+        };
+        window.xbotLiveGoLive = async function (id) {
+            var sessions = await window.pflxXBotLoadSessions();
+            var s = sessions.find(function (x) { return x.id === id; });
+            if (!s) return;
+            s.status = 'active';
+            await window.pflxXBotSaveSession(s);
+            window.xbotLiveRenderSessions(true);
+        };
+        window.xbotLiveEndSession = async function (id) {
+            var sessions = await window.pflxXBotLoadSessions();
+            var s = sessions.find(function (x) { return x.id === id; });
+            if (!s) return;
+            s.status = 'ended';
+            await window.pflxXBotSaveSession(s);
+            window.xbotLiveRenderSessions(true);
+        };
+
         function switchXBotMode(mode) {
             xbotCurrentMode = mode;
             document.querySelectorAll('.xbot-mode-tab').forEach(t => {
@@ -56342,11 +56493,13 @@
             var settingsSection = document.getElementById('xbot-settings-section');
             var hostSection = document.getElementById('xbot-host-section');
             var engSection = document.getElementById('xbot-eng-section');
+            var liveSection = document.getElementById('xbot-live-section');
 
             // Hide all optional sections
             if (settingsSection) settingsSection.style.display = 'none';
             if (hostSection) hostSection.style.display = 'none';
             if (engSection) engSection.style.display = 'none';
+            if (liveSection) liveSection.style.display = 'none';
 
             if (mode === 'voice') {
                 voiceSection.classList.remove('hidden');
@@ -56366,6 +56519,15 @@
                 if (hostSection) {
                     hostSection.style.display = 'block';
                     xbotHostSyncEQ();
+                }
+            } else if (mode === 'live') {
+                voiceSection.classList.add('hidden');
+                chatMessages.style.display = 'none';
+                quickActions.style.display = 'none';
+                inputArea.style.display = 'none';
+                if (liveSection) {
+                    liveSection.style.display = 'block';
+                    xbotLiveRenderSessions();
                 }
             } else if (mode === 'eng') {
                 voiceSection.classList.add('hidden');
@@ -66208,8 +66370,10 @@ RESPONSE RULES:
                 // Show Host and Dev tabs in X-Bot panel for admins
                 var hostTab = document.getElementById('xbot-tab-host');
                 var engTab = document.getElementById('xbot-tab-eng');
+                var liveTab = document.getElementById('xbot-tab-live');
                 if (hostTab) hostTab.style.display = isAdmin ? '' : 'none';
                 if (engTab) engTab.style.display = isAdmin ? '' : 'none';
+                if (liveTab) liveTab.style.display = isAdmin ? '' : 'none';
                 var tbLbl = document.getElementById('tr-label-text');
                 if (tbLbl) tbLbl.textContent = window.pflxRole === 'host' ? 'HOST VIEW' : 'PLAYER VIEW';
                 // Apply initial body gating class
