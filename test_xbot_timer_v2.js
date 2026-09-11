@@ -140,7 +140,11 @@ const bsb = makeBroadcastSandbox();
 }
 {
   const size = sb.pflxTimerFitFontSize(50, 50);
-  check('fit font: a tiny dock is clamped at the 28px floor, never unreadably small', size === 28);
+  check('fit font: a tiny dock is clamped at the 16px floor, never unreadably small', size === 16);
+}
+{
+  const size = sb.pflxTimerFitFontSize(10, 10);
+  check('fit font: an extremely minimized dock still clamps at the 16px floor, never 0/negative', size === 16);
 }
 {
   const size = sb.pflxTimerFitFontSize(NaN, NaN);
