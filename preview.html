@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 175;
+      window.PFLX_PATCH   = 176;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -5326,6 +5326,36 @@
         .xbot-sound-pad-actions { position: absolute; top: 2px; right: 4px; }
         .xbot-sound-pad-actions button {
             background: transparent; border: none; color: #6a7290; cursor: pointer; font-size: 10px;
+        }
+        /* v176 -- xc-5/xc-6: the Controller Grid is Studio-only, same
+           principle as Theater/Soundboard above -- matches v172's own
+           Studio preset copy, which literally says "controller grid". */
+        .xbot-ctrl-content { display: none; }
+        .xbot-ctrl-resize-hint { display: block; }
+        #pflx-dock.pflx-band-studio .xbot-ctrl-content { display: block; }
+        #pflx-dock.pflx-band-studio .xbot-ctrl-resize-hint { display: none; }
+        .xbot-ctrl-grid {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+        }
+        .xbot-ctrl-pad {
+            padding: 8px 6px; border-radius: 8px; text-align: center;
+            background: rgba(255,255,255,0.03); border: 1px dashed rgba(255,255,255,0.18);
+        }
+        .xbot-ctrl-pad-assigned {
+            background: rgba(255,0,80,0.1); border: 1px solid rgba(255,0,80,0.35);
+        }
+        .xbot-ctrl-pad-learning { border-color: #00f0ff; }
+        .xbot-ctrl-pad-trigger {
+            font-family: 'Orbitron', sans-serif; font-size: 14px; color: #ff0050;
+            cursor: pointer; padding: 6px 0;
+        }
+        .xbot-ctrl-pad select {
+            width: 100%; font-size: 9px; margin-top: 4px; background: rgba(10,18,40,0.6);
+            border: 1px solid rgba(255,255,255,0.12); color: #c9cfe8; border-radius: 4px;
+        }
+        .xbot-ctrl-pad button {
+            width: 100%; font-size: 8px; margin-top: 3px; background: transparent;
+            border: 1px solid rgba(0,240,255,0.3); color: #00f0ff; border-radius: 4px; cursor: pointer;
         }
         .xbot-live-subtab {
             flex: 1; padding: 7px; background: transparent;
@@ -13811,6 +13841,7 @@
                         <button class="xbot-live-subtab" data-subtab="teams" onclick="xbotLiveSwitchSubTab('teams')">🏟️ TEAMS</button>
                         <button class="xbot-live-subtab" data-subtab="theater" onclick="xbotLiveSwitchSubTab('theater')">🎬 THEATER</button>
                         <button class="xbot-live-subtab" data-subtab="sound" onclick="xbotLiveSwitchSubTab('sound')">🔊 SOUND</button>
+                        <button class="xbot-live-subtab" data-subtab="controller" onclick="xbotLiveSwitchSubTab('controller')">🎛 CONTROLLER</button>
                     </div>
                     <div id="xbot-live-sessions-panel">
                         <div style="font-size:10px;color:#6a7290;font-family:'Rajdhani',sans-serif;line-height:1.5;margin-bottom:12px;">
@@ -13879,6 +13910,39 @@
                                 🔊 Plays through YOUR speakers only. To include a clip in a live OBS/YouTube broadcast, enable OBS's Desktop Audio Capture separately.
                             </div>
                             <div class="xbot-sound-grid" id="xbot-sound-grid"></div>
+                        </div>
+                    </div>
+                    <!-- v176 -- xc-5/xc-6: Controller Grid. "Both 1 and
+                         2" confirmed by Ennis: a software
+                         performance-pad grid (each pad assignable to a
+                         REAL, already-wired PFLX action -- a
+                         Soundboard pad from xc-4, or the existing
+                         Noise Meter toggle) AND real Web MIDI API
+                         hardware support (navigator.requestMIDIAccess,
+                         Chrome/Edge only, honestly feature-detected --
+                         no fake support claimed on unsupported
+                         browsers). -->
+                    <div id="xbot-live-controller-panel" style="display:none;">
+                        <div class="xbot-ctrl-resize-hint" style="text-align:center;padding:22px 10px;background:rgba(255,0,80,0.04);border:1px solid rgba(255,0,80,0.18);border-radius:10px;">
+                            <div style="font-size:26px;margin-bottom:8px;">🎛</div>
+                            <div style="font-family:'Rajdhani',sans-serif;font-size:12px;color:#c9cfe8;margin-bottom:12px;">The Controller Grid needs more room. Resize X-Bot to Studio.</div>
+                            <button onclick="window.pflxDockApplyPreset('studio')" style="padding:8px 16px;background:rgba(255,0,80,0.12);border:1px solid rgba(255,0,80,0.4);border-radius:6px;color:#ff0050;font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1px;cursor:pointer;">🖥 SWITCH TO STUDIO</button>
+                        </div>
+                        <div class="xbot-ctrl-content">
+                            <div style="font-size:10px;color:#6a7290;font-family:'Rajdhani',sans-serif;line-height:1.5;margin-bottom:10px;">
+                                🎛 Assign each pad a PFLX action, then tap to trigger it — or connect a real MIDI controller below and map physical pads.
+                            </div>
+                            <div class="xbot-ctrl-grid" id="xbot-controller-grid"></div>
+                            <div id="xbot-midi-section" style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.08);">
+                                <div style="font-family:'Orbitron',sans-serif;font-size:9px;color:#6a7290;letter-spacing:1px;margin-bottom:8px;">🎹 MIDI HARDWARE</div>
+                                <div id="xbot-midi-unsupported" style="display:none;font-size:10px;color:#6a7290;font-family:'Rajdhani',sans-serif;">MIDI hardware requires Chrome or Edge — not available in this browser.</div>
+                                <div id="xbot-midi-supported" style="display:none;">
+                                    <button onclick="xbotControllerConnectMidi()" style="width:100%;padding:8px;margin-bottom:8px;background:rgba(0,240,255,0.08);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1px;cursor:pointer;">🎹 CONNECT MIDI DEVICE</button>
+                                    <select id="xbot-midi-device-select" onchange="xbotControllerSelectMidiDevice(this.value)" style="width:100%;padding:6px;background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.12);color:#e0e6ff;border-radius:6px;font-family:'Jura',sans-serif;font-size:11px;">
+                                        <option value="">— Select a MIDI device —</option>
+                                    </select>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -56728,7 +56792,7 @@
             // v174 -- generalized to a panel-id map so a third (Theater)
             // sub-tab slots in without duplicating the sessions/teams
             // toggle logic; sessions/teams behavior is unchanged.
-            var panels = { sessions: 'xbot-live-sessions-panel', teams: 'xbot-live-teams-panel', theater: 'xbot-live-theater-panel', sound: 'xbot-live-sound-panel' };
+            var panels = { sessions: 'xbot-live-sessions-panel', teams: 'xbot-live-teams-panel', theater: 'xbot-live-theater-panel', sound: 'xbot-live-sound-panel', controller: 'xbot-live-controller-panel' };
             Object.keys(panels).forEach(function (key) {
                 var el = document.getElementById(panels[key]);
                 if (el) el.style.display = (key === tab) ? 'block' : 'none';
@@ -56736,6 +56800,7 @@
             if (tab === 'teams') window.pflxXBotRenderTeams();
             if (tab === 'theater') window.xbotTheaterRenderList();
             if (tab === 'sound') window.xbotSoundboardRenderGrid();
+            if (tab === 'controller') window.xbotControllerRenderGrid();
         };
         window.pflxXBotRenderTeams = async function () {
             var grid = document.getElementById('xbot-teams-grid');
@@ -56995,6 +57060,168 @@
             });
         };
 
+        // v176 -- xc-5/xc-6: Controller Grid. "Both 1 and 2" confirmed
+        // by Ennis: (1) a software performance-pad grid dispatching to
+        // a small, HONEST action registry of things that are already
+        // real and wired (xc-4's Soundboard pads, the existing Noise
+        // Meter toggle) -- not fabricated actions for tools that don't
+        // exist yet -- and (2) real Web MIDI API hardware support,
+        // honestly feature-detected (Chrome/Edge only).
+        window.XBOT_CONTROLLER_SLOTS = 8;
+        window.XBOT_CONTROLLER_ACTIONS = [
+            { value: '', label: '— Unassigned —' },
+            { value: 'sound:1', label: '🔊 Soundboard Pad 1' },
+            { value: 'sound:2', label: '🔊 Soundboard Pad 2' },
+            { value: 'sound:3', label: '🔊 Soundboard Pad 3' },
+            { value: 'sound:4', label: '🔊 Soundboard Pad 4' },
+            { value: 'sound:5', label: '🔊 Soundboard Pad 5' },
+            { value: 'sound:6', label: '🔊 Soundboard Pad 6' },
+            { value: 'sound:7', label: '🔊 Soundboard Pad 7' },
+            { value: 'sound:8', label: '🔊 Soundboard Pad 8' },
+            { value: 'noise', label: '🎙 Toggle Noise Meter' },
+        ];
+        window.xbotControllerLoadMap = function () {
+            try {
+                var raw = localStorage.getItem('pflx_xbot_controller_map');
+                var map = raw ? JSON.parse(raw) : {};
+                return (map && typeof map === 'object') ? map : {};
+            } catch (e) { return {}; }
+        };
+        window.xbotControllerSaveMap = function (map) {
+            try { localStorage.setItem('pflx_xbot_controller_map', JSON.stringify(map || {})); } catch (e) {}
+        };
+        window.xbotControllerSetPadAction = function (slot, action) {
+            var map = window.xbotControllerLoadMap();
+            if (action) map[slot] = action; else delete map[slot];
+            window.xbotControllerSaveMap(map);
+        };
+        window.xbotControllerFirePad = function (slot) {
+            var map = window.xbotControllerLoadMap();
+            var action = map[slot];
+            if (!action) return false;
+            if (action.indexOf('sound:') === 0) {
+                var padNum = parseInt(action.split(':')[1], 10);
+                if (typeof window.xbotSoundboardPlay === 'function') window.xbotSoundboardPlay(padNum);
+                return true;
+            }
+            if (action === 'noise') {
+                if (typeof window.mcToggleNoiseMeter === 'function') window.mcToggleNoiseMeter();
+                return true;
+            }
+            return false;
+        };
+        window.xbotControllerRenderGrid = function () {
+            var grid = document.getElementById('xbot-controller-grid');
+            var supported = window.xbotControllerMidiSupported();
+            var supEl = document.getElementById('xbot-midi-supported');
+            var unsupEl = document.getElementById('xbot-midi-unsupported');
+            if (supEl) supEl.style.display = supported ? 'block' : 'none';
+            if (unsupEl) unsupEl.style.display = supported ? 'none' : 'block';
+            if (!grid) return;
+            var map = window.xbotControllerLoadMap();
+            var html = '';
+            for (var i = 1; i <= window.XBOT_CONTROLLER_SLOTS; i++) {
+                var action = map[i] || '';
+                var learning = window._xbotMidiLearnSlot === i;
+                var optHtml = window.XBOT_CONTROLLER_ACTIONS.map(function (a) {
+                    return '<option value="' + a.value + '"' + (a.value === action ? ' selected' : '') + '>' + escapeHtml(a.label) + '</option>';
+                }).join('');
+                html += '<div class="xbot-ctrl-pad' + (action ? ' xbot-ctrl-pad-assigned' : '') + (learning ? ' xbot-ctrl-pad-learning' : '') + '">' +
+                    '<div class="xbot-ctrl-pad-trigger" onclick="xbotControllerFirePad(' + i + ')">' + i + '</div>' +
+                    '<select onchange="xbotControllerSetPadAction(' + i + ', this.value); xbotControllerRenderGrid();" onclick="event.stopPropagation();">' + optHtml + '</select>' +
+                    (supported ? '<button onclick="event.stopPropagation();xbotControllerStartLearn(' + i + ')">' + (learning ? '… listening' : '🎹 Learn') + '</button>' : '') +
+                    '</div>';
+            }
+            grid.innerHTML = html;
+        };
+
+        // ── Real Web MIDI API hardware support ──────────────────────
+        window._xbotMidiAccess = null;
+        window._xbotMidiDeviceId = null;
+        window._xbotMidiLearnSlot = null;
+        window.xbotControllerMidiSupported = function () {
+            return typeof navigator !== 'undefined' && !!navigator.requestMIDIAccess;
+        };
+        window.xbotControllerConnectMidi = function () {
+            if (!window.xbotControllerMidiSupported()) return Promise.resolve(null);
+            return navigator.requestMIDIAccess().then(function (access) {
+                window._xbotMidiAccess = access;
+                window.xbotControllerRenderMidiDevices();
+                return access;
+            }).catch(function () { return null; });
+        };
+        window.xbotControllerRenderMidiDevices = function () {
+            var sel = document.getElementById('xbot-midi-device-select');
+            if (!sel || !window._xbotMidiAccess) return;
+            var html = '<option value="">— Select a MIDI device —</option>';
+            window._xbotMidiAccess.inputs.forEach(function (input) {
+                html += '<option value="' + input.id + '"' + (input.id === window._xbotMidiDeviceId ? ' selected' : '') + '>' + escapeHtml(input.name || input.id) + '</option>';
+            });
+            sel.innerHTML = html;
+        };
+        window.xbotControllerSelectMidiDevice = function (deviceId) {
+            if (!window._xbotMidiAccess) return;
+            window._xbotMidiAccess.inputs.forEach(function (input) {
+                input.onmidimessage = null;
+            });
+            window._xbotMidiDeviceId = deviceId || null;
+            if (!deviceId) return;
+            var input = window._xbotMidiAccess.inputs.get(deviceId);
+            if (input) {
+                input.onmidimessage = function (msg) {
+                    window.xbotControllerHandleMidiMessage(deviceId, msg.data);
+                };
+            }
+        };
+        window.xbotControllerStartLearn = function (slot) {
+            window._xbotMidiLearnSlot = slot;
+            window.xbotControllerRenderGrid();
+        };
+        window.xbotControllerCancelLearn = function () {
+            window._xbotMidiLearnSlot = null;
+            window.xbotControllerRenderGrid();
+        };
+        window.xbotControllerLoadMidiMap = function () {
+            try {
+                var raw = localStorage.getItem('pflx_xbot_midi_map');
+                var map = raw ? JSON.parse(raw) : {};
+                return (map && typeof map === 'object') ? map : {};
+            } catch (e) { return {}; }
+        };
+        window.xbotControllerSaveMidiMap = function (map) {
+            try { localStorage.setItem('pflx_xbot_midi_map', JSON.stringify(map || {})); } catch (e) {}
+        };
+        // Pure MIDI message parser/dispatcher -- takes the raw 3-byte
+        // MIDI data array (status, note, velocity), the same shape the
+        // browser's real MIDIMessageEvent.data delivers. In learn mode,
+        // maps the received note to the learning pad (persisted per
+        // device id, since the same note number can mean different
+        // things on different controllers); otherwise dispatches a
+        // mapped note straight to xbotControllerFirePad, same as a
+        // click. Deliberately pure and hardware-independent so it is
+        // fully unit-testable without a real MIDI device.
+        window.xbotControllerHandleMidiMessage = function (deviceId, data) {
+            if (!data || data.length < 3) return false;
+            var status = data[0] & 0xF0;
+            var note = data[1];
+            var velocity = data[2];
+            if (status !== 0x90 || velocity === 0) return false; // only real note-ON events
+            if (window._xbotMidiLearnSlot != null) {
+                var midiMap = window.xbotControllerLoadMidiMap();
+                midiMap[deviceId] = midiMap[deviceId] || {};
+                midiMap[deviceId][note] = window._xbotMidiLearnSlot;
+                window.xbotControllerSaveMidiMap(midiMap);
+                window._xbotMidiLearnSlot = null;
+                window.xbotControllerRenderGrid();
+                return true;
+            }
+            var midiMap2 = window.xbotControllerLoadMidiMap();
+            var deviceMap = midiMap2[deviceId] || {};
+            var slot = deviceMap[note];
+            if (slot == null) return false;
+            return window.xbotControllerFirePad(slot);
+        };
+
         function switchXBotMode(mode) {
             xbotCurrentMode = mode;
             document.querySelectorAll('.xbot-mode-tab').forEach(t => {
@@ -57051,6 +57278,7 @@
                     if (activeSubtab && activeSubtab.getAttribute('data-subtab') === 'teams') window.pflxXBotRenderTeams();
                     if (activeSubtab && activeSubtab.getAttribute('data-subtab') === 'theater') window.xbotTheaterRenderList();
                     if (activeSubtab && activeSubtab.getAttribute('data-subtab') === 'sound') window.xbotSoundboardRenderGrid();
+                    if (activeSubtab && activeSubtab.getAttribute('data-subtab') === 'controller') window.xbotControllerRenderGrid();
                 }
             } else if (mode === 'eng') {
                 voiceSection.classList.add('hidden');
