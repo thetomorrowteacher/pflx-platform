@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 173;
+      window.PFLX_PATCH   = 174;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -5289,6 +5289,16 @@
         #pflx-dock.pflx-band-studio .xbot-teams-grid { display: block; }
         #pflx-dock.pflx-band-wide .xbot-teams-resize-hint,
         #pflx-dock.pflx-band-studio .xbot-teams-resize-hint { display: none; }
+        /* v174 -- xc-3: the Theater watch panel is Studio-only (matches
+           the Studio preset button's own "soundboard, controller grid,
+           monitoring" title from v172) -- Compact/Standard/Wide show a
+           "resize me" hint instead. Same CSS-only gating principle as
+           the Teams grid above, extended to a third band-specific
+           layout. */
+        .xbot-theater-content { display: none; }
+        .xbot-theater-resize-hint { display: block; }
+        #pflx-dock.pflx-band-studio .xbot-theater-content { display: block; }
+        #pflx-dock.pflx-band-studio .xbot-theater-resize-hint { display: none; }
         .xbot-live-subtab {
             flex: 1; padding: 7px; background: transparent;
             border: 1px solid rgba(255,0,80,0.18); border-left: none;
@@ -7161,6 +7171,30 @@
             <div class="pip-rz pip-rz-nw" data-pip-dir="nw" data-pip-id="pip-livesession"></div>
             <div class="pip-rz pip-rz-se" data-pip-dir="se" data-pip-id="pip-livesession"></div>
             <div class="pip-rz pip-rz-sw" data-pip-dir="sw" data-pip-id="pip-livesession"></div>
+        </div>
+
+        <!-- ═══ X-BOT THEATER PIP REMOTE (v174 -- xc-3, Ennis: "popout
+             video ... in PIP to allow for multi-task") ═══ -->
+        <div class="pflx-pip-widget" id="pip-theater" style="display:none;width:380px;min-width:280px;min-height:160px;bottom:24px;left:1090px;">
+            <div class="pflx-pip-titlebar" data-pip-drag="pip-theater">
+                <span class="pflx-pip-title" style="color:#ff3b3b;">&#x1F3AC; THEATER</span>
+                <div class="pflx-pip-controls">
+                    <button class="pflx-pip-ctrl-btn" data-pip-preset="small" data-pip-id="pip-theater" title="Small">S</button>
+                    <button class="pflx-pip-ctrl-btn active" data-pip-preset="medium" data-pip-id="pip-theater" title="Medium">M</button>
+                    <button class="pflx-pip-ctrl-btn" data-pip-preset="large" data-pip-id="pip-theater" title="Large">L</button>
+                    <button class="pflx-pip-ctrl-btn" onclick="pflxPipMinimize('pip-theater')" title="Minimize">&#x2500;</button>
+                    <button class="pflx-pip-close" onclick="pflxPipClose('pip-theater')" title="Close">&#x2715;</button>
+                </div>
+            </div>
+            <div class="pflx-pip-body" id="pip-theater-body"></div>
+            <div class="pip-rz pip-rz-n" data-pip-dir="n" data-pip-id="pip-theater"></div>
+            <div class="pip-rz pip-rz-s" data-pip-dir="s" data-pip-id="pip-theater"></div>
+            <div class="pip-rz pip-rz-e" data-pip-dir="e" data-pip-id="pip-theater"></div>
+            <div class="pip-rz pip-rz-w" data-pip-dir="w" data-pip-id="pip-theater"></div>
+            <div class="pip-rz pip-rz-ne" data-pip-dir="ne" data-pip-id="pip-theater"></div>
+            <div class="pip-rz pip-rz-nw" data-pip-dir="nw" data-pip-id="pip-theater"></div>
+            <div class="pip-rz pip-rz-se" data-pip-dir="se" data-pip-id="pip-theater"></div>
+            <div class="pip-rz pip-rz-sw" data-pip-dir="sw" data-pip-id="pip-theater"></div>
         </div>
 
         <!-- ═══ PFLX MOBILE CONTROLLER VIEW ═══ -->
@@ -13747,6 +13781,7 @@
                     <div style="display:flex;margin-bottom:12px;">
                         <button class="xbot-live-subtab active" data-subtab="sessions" onclick="xbotLiveSwitchSubTab('sessions')">🔴 SESSIONS</button>
                         <button class="xbot-live-subtab" data-subtab="teams" onclick="xbotLiveSwitchSubTab('teams')">🏟️ TEAMS</button>
+                        <button class="xbot-live-subtab" data-subtab="theater" onclick="xbotLiveSwitchSubTab('theater')">🎬 THEATER</button>
                     </div>
                     <div id="xbot-live-sessions-panel">
                         <div style="font-size:10px;color:#6a7290;font-family:'Rajdhani',sans-serif;line-height:1.5;margin-bottom:12px;">
@@ -13771,6 +13806,27 @@
                         </div>
                         <div class="xbot-teams-grid" id="xbot-teams-grid">
                             <div style="color:#6a7290;font-size:11px;font-family:'Rajdhani',sans-serif;text-align:center;padding:12px;">Loading teams…</div>
+                        </div>
+                    </div>
+                    <!-- v174 -- xc-3: Theater watch panel. Ported from
+                         X-Live's own rTheater() -- any currently-live
+                         YouTube/OBS broadcast (session.status==='active'
+                         && session.youtubeEmbedId) can be watched here,
+                         with a PIP popout for multi-tasking. NOT ported:
+                         X-Live's "saved YouTube playlist" -- that's a
+                         genuinely new feature (a host-curated list of
+                         video IDs, set from X-Live's own Setup tab) that
+                         doesn't exist ANYWHERE yet, X-Live included --
+                         out of scope for this patch, flagged in the
+                         Handoff for a later phase. -->
+                    <div id="xbot-live-theater-panel" style="display:none;">
+                        <div class="xbot-theater-resize-hint" style="text-align:center;padding:22px 10px;background:rgba(255,0,80,0.04);border:1px solid rgba(255,0,80,0.18);border-radius:10px;">
+                            <div style="font-size:26px;margin-bottom:8px;">🎬</div>
+                            <div style="font-family:'Rajdhani',sans-serif;font-size:12px;color:#c9cfe8;margin-bottom:12px;">The Theater needs more room for video. Resize X-Bot to Studio.</div>
+                            <button onclick="window.pflxDockApplyPreset('studio')" style="padding:8px 16px;background:rgba(255,0,80,0.12);border:1px solid rgba(255,0,80,0.4);border-radius:6px;color:#ff0050;font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1px;cursor:pointer;">🖥 SWITCH TO STUDIO</button>
+                        </div>
+                        <div class="xbot-theater-content" id="xbot-theater-content">
+                            <div style="color:#6a7290;font-size:11px;font-family:'Rajdhani',sans-serif;text-align:center;padding:12px;">Loading…</div>
                         </div>
                     </div>
                 </div>
@@ -56617,11 +56673,16 @@
             document.querySelectorAll('.xbot-live-subtab').forEach(function (b) {
                 b.classList.toggle('active', b.getAttribute('data-subtab') === tab);
             });
-            var sp = document.getElementById('xbot-live-sessions-panel');
-            var tp = document.getElementById('xbot-live-teams-panel');
-            if (sp) sp.style.display = tab === 'sessions' ? 'block' : 'none';
-            if (tp) tp.style.display = tab === 'teams' ? 'block' : 'none';
+            // v174 -- generalized to a panel-id map so a third (Theater)
+            // sub-tab slots in without duplicating the sessions/teams
+            // toggle logic; sessions/teams behavior is unchanged.
+            var panels = { sessions: 'xbot-live-sessions-panel', teams: 'xbot-live-teams-panel', theater: 'xbot-live-theater-panel' };
+            Object.keys(panels).forEach(function (key) {
+                var el = document.getElementById(panels[key]);
+                if (el) el.style.display = (key === tab) ? 'block' : 'none';
+            });
             if (tab === 'teams') window.pflxXBotRenderTeams();
+            if (tab === 'theater') window.xbotTheaterRenderList();
         };
         window.pflxXBotRenderTeams = async function () {
             var grid = document.getElementById('xbot-teams-grid');
@@ -56728,6 +56789,82 @@
             window.pflxXBotRenderTeams();
         };
 
+        // ══ PATCH PLATFORM v174 -- xc-3: Theater watch panel, ported from
+        // X-Live's own rTheater()/theaterWatch()/theaterStopWatching().
+        // Reads the SAME 'sessions' Supabase collection the xb-1 bridge
+        // already loads (pflxXBotLoadSessions -- no new data path), shows
+        // any currently-live YouTube/OBS broadcast
+        // (status==='active' && youtubeEmbedId), and can pop the same
+        // embed out into #pip-theater -- the SAME generic
+        // pflx-pip-widget drag/resize/preset framework #pip-xcoin/
+        // #pip-sysevents/#pip-livesession already use (pflxPipOpen/
+        // pflxPipClose), so this needed zero new drag/resize code.
+        //
+        // NOT ported: X-Live's "saved YouTube playlist" -- a host-
+        // curated list of video IDs set from X-Live's own Setup tab.
+        // That feature does not exist ANYWHERE yet (X-Live included) --
+        // it's a genuinely new build, out of scope here, flagged in the
+        // Handoff for a later phase rather than guessed at.
+        window._xbotTheaterCache = [];
+        window._xbotTheaterWatchingId = null;
+        window.xbotTheaterRender = function () {
+            var body = document.getElementById('xbot-theater-content');
+            if (!body) return;
+            var watchId = window._xbotTheaterWatchingId;
+            if (watchId) {
+                var s = window._xbotTheaterCache.find(function (x) { return x.id === watchId && x.status === 'active' && x.youtubeEmbedId; });
+                if (!s) { window._xbotTheaterWatchingId = null; window.xbotTheaterRender(); return; }
+                var title = escapeHtml(s.title || 'Live Stream');
+                body.innerHTML = '<div style="position:relative;padding-top:56.25%;border-radius:8px;overflow:hidden;margin-bottom:8px;">' +
+                    '<iframe src="https://www.youtube.com/embed/' + encodeURIComponent(s.youtubeEmbedId) + '?autoplay=1" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" allow="autoplay; encrypted-media" allowfullscreen></iframe></div>' +
+                    '<div style="font-family:\'Rajdhani\',sans-serif;font-size:13px;font-weight:600;color:#e0e6ff;">' + title + '</div>' +
+                    '<div style="display:flex;gap:6px;margin-top:8px;">' +
+                    '<button onclick="xbotTheaterPopOut()" style="flex:1;padding:7px;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-family:\'Orbitron\',sans-serif;font-size:9px;letter-spacing:0.5px;cursor:pointer;">⧉ POP OUT (PIP)</button>' +
+                    '<button onclick="xbotTheaterStopWatching()" style="flex:1;padding:7px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.16);border-radius:6px;color:#c9cfe8;font-family:\'Orbitron\',sans-serif;font-size:9px;letter-spacing:0.5px;cursor:pointer;">← BACK</button>' +
+                    '</div>';
+                return;
+            }
+            var live = window._xbotTheaterCache.filter(function (x) { return x.status === 'active' && x.youtubeEmbedId; });
+            if (!live.length) {
+                body.innerHTML = '<div style="color:#6a7290;font-size:11px;font-family:\'Rajdhani\',sans-serif;text-align:center;padding:20px 12px;">Nothing streaming right now — check back when a host goes live with a YouTube/OBS broadcast.</div>';
+                return;
+            }
+            body.innerHTML = live.map(function (s) {
+                var title = escapeHtml(s.title || 'Untitled Session');
+                return '<div style="padding:10px;background:rgba(255,0,80,0.04);border:1px solid rgba(255,0,80,0.18);border-radius:8px;display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
+                    '<div style="flex:1;min-width:0;"><div style="font-family:\'Rajdhani\',sans-serif;font-size:12px;font-weight:600;color:#e0e6ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + title + '</div>' +
+                    '<div style="font-size:9px;font-family:\'Orbitron\',sans-serif;letter-spacing:1px;color:#ff0050;">● LIVE NOW</div></div>' +
+                    '<button onclick="xbotTheaterWatch(\'' + s.id + '\')" style="padding:7px 14px;background:rgba(255,0,80,0.12);border:1px solid rgba(255,0,80,0.4);border-radius:6px;color:#ff0050;font-family:\'Orbitron\',sans-serif;font-size:10px;letter-spacing:1px;cursor:pointer;white-space:nowrap;">▶ WATCH</button>' +
+                    '</div>';
+            }).join('');
+        };
+        window.xbotTheaterRenderList = async function () {
+            var body = document.getElementById('xbot-theater-content');
+            if (body) body.innerHTML = '<div style="color:#6a7290;font-size:11px;font-family:\'Rajdhani\',sans-serif;text-align:center;padding:12px;">Loading…</div>';
+            var sessions = await window.pflxXBotLoadSessions();
+            window._xbotTheaterCache = sessions;
+            window.xbotTheaterRender();
+        };
+        window.xbotTheaterWatch = function (id) {
+            window._xbotTheaterWatchingId = id;
+            window.xbotTheaterRender();
+        };
+        window.xbotTheaterStopWatching = function () {
+            window._xbotTheaterWatchingId = null;
+            window.xbotTheaterRender();
+        };
+        window.xbotTheaterPopOut = function () {
+            var s = window._xbotTheaterCache.find(function (x) { return x.id === window._xbotTheaterWatchingId; });
+            if (!s || !s.youtubeEmbedId) return;
+            var pipBody = document.getElementById('pip-theater-body');
+            if (pipBody) {
+                pipBody.innerHTML = '<div style="position:relative;padding-top:56.25%;">' +
+                    '<iframe src="https://www.youtube.com/embed/' + encodeURIComponent(s.youtubeEmbedId) + '?autoplay=1" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" allow="autoplay; encrypted-media" allowfullscreen></iframe></div>' +
+                    '<div style="font-size:10px;color:#c9cfe8;padding:6px;font-family:\'Rajdhani\',sans-serif;">' + escapeHtml(s.title || 'Live Stream') + '</div>';
+            }
+            if (typeof window.pflxPipOpen === 'function') window.pflxPipOpen('pip-theater');
+        };
+
         function switchXBotMode(mode) {
             xbotCurrentMode = mode;
             document.querySelectorAll('.xbot-mode-tab').forEach(t => {
@@ -56782,6 +56919,7 @@
                     // the last time this tab was open, which may be stale.
                     var activeSubtab = document.querySelector('.xbot-live-subtab.active');
                     if (activeSubtab && activeSubtab.getAttribute('data-subtab') === 'teams') window.pflxXBotRenderTeams();
+                    if (activeSubtab && activeSubtab.getAttribute('data-subtab') === 'theater') window.xbotTheaterRenderList();
                 }
             } else if (mode === 'eng') {
                 voiceSection.classList.add('hidden');
