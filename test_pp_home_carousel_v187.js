@@ -188,8 +188,8 @@ function makeHomeCpCardSandbox(opts) {
 function makeHomeProjCardSandbox(opts) {
   opts = opts || {};
   const body = extractBetween('function ppHomeProjectCardHtml(proj) {', 'window.ppHomeProjectCardHtml = ppHomeProjectCardHtml;');
-  const fn = new Function('escapeHtml', 'ppProjectStatsHtml', 'pflxPlayerCanEnterItem', 'window', body + '\nreturn ppHomeProjectCardHtml;');
-  return fn(escapeHtml, opts.ppProjectStatsHtml || function () { return '<div>pstats</div>'; }, opts.pflxPlayerCanEnterItem, {});
+  const fn = new Function('escapeHtml', 'ppProjectStatsHtml', 'pflxPlayerCanEnterItem', 'window', 'ppGetCheckpoints', 'pflxFindCheckpoint', '_mcUrgencyForDueDate', 'pflxProjectCompletion', 'ppProgressBar', body + '\nreturn ppHomeProjectCardHtml;');
+  return fn(escapeHtml, opts.ppProjectStatsHtml || function () { return '<div>pstats</div>'; }, opts.pflxPlayerCanEnterItem, {}, opts.ppGetCheckpoints || function () { return []; }, opts.pflxFindCheckpoint || function () { return null; }, opts._mcUrgencyForDueDate || function () { return null; }, opts.pflxProjectCompletion || function () { return { pct: 0, done: 0, total: 0 }; }, opts.ppProgressBar || function () { return '<div>bar</div>'; });
 }
 
 (function () {
@@ -212,8 +212,8 @@ function makeHomeProjCardSandbox(opts) {
 function makeHomeProgramCardSandbox(opts) {
   opts = opts || {};
   const body = extractBetween('function ppHomeProgramCardHtml(pg) {', 'window.ppHomeProgramCardHtml = ppHomeProgramCardHtml;');
-  const fn = new Function('escapeHtml', 'pflxPlayerCanEnterItem', 'window', body + '\nreturn ppHomeProgramCardHtml;');
-  return fn(escapeHtml, opts.pflxPlayerCanEnterItem, {});
+  const fn = new Function('escapeHtml', 'pflxPlayerCanEnterItem', 'window', 'pflxPlayerApplicationState', 'mcCheckpoints', 'pflxEntryCtaLabel', body + '\nreturn ppHomeProgramCardHtml;');
+  return fn(escapeHtml, opts.pflxPlayerCanEnterItem, {}, opts.pflxPlayerApplicationState || function () { return 'none'; }, opts.mcCheckpoints || [], opts.pflxEntryCtaLabel || function () { return 'Start'; });
 }
 
 (function () {
@@ -228,15 +228,15 @@ function makeHomeProgramCardSandbox(opts) {
 (function () {
   const ppHomeProgramCardHtml = makeHomeProgramCardSandbox({ pflxPlayerCanEnterItem: function () { return false; } });
   const html = ppHomeProgramCardHtml({ id: 'pg1', name: 'Hoop Club Thailand' });
-  check('ppHomeProgramCardHtml: a locked program shows LOCKED state', html.indexOf('LOCKED') !== -1);
+  check('ppHomeProgramCardHtml: a locked program (no applyEnabled) shows the COHORT REQUIRED status pill -- Sept 12 v188 ported the richer real OPEN/LOCKED/PENDING/PAY status logic from ppRenderPrograms, which uses the lock icon + lockMessage rather than a bare LOCKED literal', html.indexOf('COHORT REQUIRED') !== -1);
 })();
 
 // ── 8. ppHomeTaskCardHtml sandbox ──
 function makeHomeTaskCardSandbox(opts) {
   opts = opts || {};
   const body = extractBetween('function ppHomeTaskCardHtml(t) {', 'window.ppHomeTaskCardHtml = ppHomeTaskCardHtml;');
-  const fn = new Function('window', 'escapeHtml', 'pflxTaskStateForPlayer', body + '\nreturn ppHomeTaskCardHtml;');
-  return fn(opts.window || { activeSession: { id: 'p1' } }, escapeHtml, opts.pflxTaskStateForPlayer || function () { return 'open'; });
+  const fn = new Function('window', 'escapeHtml', 'pflxTaskStateForPlayer', 'ppGetCheckpoints', 'ppGetProjects', 'pflxFindProject', 'pflxFindCheckpoint', 'ppProgressBar', body + '\nreturn ppHomeTaskCardHtml;');
+  return fn(opts.window || { activeSession: { id: 'p1' } }, escapeHtml, opts.pflxTaskStateForPlayer || function () { return 'open'; }, opts.ppGetCheckpoints || function () { return []; }, opts.ppGetProjects || function () { return []; }, opts.pflxFindProject || function () { return null; }, opts.pflxFindCheckpoint || function () { return null; }, opts.ppProgressBar || function () { return '<div>bar</div>'; });
 }
 
 (function () {

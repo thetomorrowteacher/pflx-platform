@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 187;
+      window.PFLX_PATCH   = 188;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -30168,57 +30168,160 @@
         }
         window.ppHomeCheckpointCardHtml = ppHomeCheckpointCardHtml;
 
+        // Sept 12 correction (Ennis: "the Netflix-style scrollable
+        // Programs/Projects does not directly follow my design and
+        // sizes") -- enlarged to ~340px/2-per-row and given the SAME
+        // banner+status+progress+reward-chip content ppRenderProjects
+        // (the full Projects list page) already shows, ported directly
+        // rather than reinvented. Keeps the same dropdown "More info &
+        // stats" toggle (home-pj- key prefix) as the player-safe action
+        // already shipped Sept 12 sub-patch 2 -- no host-only Edit/
+        // Delete surfaced (matches Ennis's own "player version of what
+        // the host sees" principle for dropdowns).
         function ppHomeProjectCardHtml(proj) {
+            var comp = (typeof pflxProjectCompletion === 'function') ? pflxProjectCompletion(proj) : { pct: proj.progress || 0, done: 0, total: 0 };
             var canEnter = (typeof pflxPlayerCanEnterItem === 'function') ? pflxPlayerCanEnterItem(proj, 'project') : true;
+            var cps = ppGetCheckpoints();
+            var parentCp = (typeof pflxFindCheckpoint === 'function') ? pflxFindCheckpoint(cps, proj.checkpointId || proj.roundId) : null;
+            var urg = (typeof _mcUrgencyForDueDate === 'function') ? _mcUrgencyForDueDate(proj.dueDate || proj.endDate || proj.deadline) : null;
             var key = 'home-pj-' + escapeHtml(String(proj.id || ''));
-            return '<div style="flex:0 0 200px;scroll-snap-align:start;background:rgba(255,255,255,0.02);border:1px solid rgba(167,139,250,0.22);border-radius:12px;overflow:hidden;cursor:pointer;" onclick="ppNav(\'project-detail\',{id:\'' + escapeHtml(String(proj.id || '')) + '\'})">' +
-                (proj.bannerImage
-                    ? '<div style="height:90px;overflow:hidden;position:relative;"><img src="' + escapeHtml(proj.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;" draggable="false">' +
-                      (!canEnter ? '<div style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,0.6);color:#fff;font-size:9px;padding:2px 6px;border-radius:8px;">\u{1F512}</div>' : '') + '</div>'
-                    : '<div style="height:90px;background:linear-gradient(135deg,rgba(167,139,250,0.22),rgba(167,139,250,0.05));display:flex;align-items:center;justify-content:center;font-size:26px;">\u{1F3AC}</div>') +
-                '<div style="padding:10px 12px;">' +
-                    '<div style="font-size:12px;font-weight:800;color:#e0e6ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(proj.name || proj.title || 'Project') + (!canEnter && !proj.bannerImage ? ' \u{1F512}' : '') + '</div>' +
-                    '<div style="display:flex;justify-content:flex-end;margin-top:4px;">' +
-                        '<button onclick="event.stopPropagation();ppToggleDropdown(event,\'' + key + '\')" style="background:none;border:none;color:rgba(255,255,255,0.45);font-size:10px;cursor:pointer;padding:2px 0;">' +
-                        '<span id="pp-arrow-' + key + '">\u25BE</span></button>' +
-                    '</div>' +
-                '</div>' +
+            var html = '<div style="flex:0 0 340px;scroll-snap-align:start;background:rgba(255,255,255,0.02);border:1px solid rgba(167,139,250,0.22);border-radius:14px;overflow:hidden;cursor:pointer;" onclick="ppNav(\'project-detail\',{id:\'' + escapeHtml(String(proj.id || '')) + '\'})">';
+            if (proj.bannerImage) {
+                html += '<div style="position:relative;height:120px;overflow:hidden;"><img src="' + escapeHtml(proj.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;" draggable="false">' +
+                    '<div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(10,10,15,0) 40%, rgba(22,22,31,0.9) 100%);"></div>' +
+                    '<div style="position:absolute;left:14px;right:14px;bottom:8px;display:flex;justify-content:space-between;align-items:flex-end;gap:8px;">' +
+                        '<span style="font-size:14px;font-weight:900;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,0.8);">' + escapeHtml(proj.name || proj.title || 'Project') + '</span>' +
+                        (!canEnter ? '<span style="background:rgba(0,0,0,0.55);color:#fff;padding:3px 9px;border-radius:10px;font-size:9px;font-weight:700;white-space:nowrap;">\u{1F512} LOCKED</span>' : '') +
+                    '</div></div>';
+            } else {
+                html += '<div style="height:120px;background:linear-gradient(135deg,rgba(167,139,250,0.22),rgba(167,139,250,0.05));display:flex;align-items:center;justify-content:center;font-size:32px;">\u{1F3AC}</div>';
+            }
+            html += '<div style="padding:12px 14px;">';
+            if (!proj.bannerImage) {
+                html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">' +
+                    '<span style="font-size:14px;font-weight:900;color:#e0e6ff;">' + escapeHtml(proj.name || proj.title || 'Project') + '</span>' +
+                    (!canEnter ? '<span style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);padding:2px 8px;border-radius:10px;font-size:9px;font-weight:700;white-space:nowrap;">\u{1F512} LOCKED</span>' : '') +
+                '</div>';
+            }
+            if (parentCp) { html += '<div style="font-size:10px;color:rgba(255,255,255,0.35);margin-top:4px;">↪ ' + escapeHtml(parentCp.name || 'Checkpoint') + '</div>'; }
+            if (proj.description) { html += '<div style="font-size:11px;color:#8a92b0;margin-top:6px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + escapeHtml(String(proj.description).substring(0, 120)) + '</div>'; }
+            html += '<div style="display:flex;align-items:center;gap:8px;margin-top:10px;">' +
+                '<div style="flex:1;">' + ppProgressBar(comp.pct, comp.pct === 100 ? '#22c55e' : '#a78bfa') + '</div>' +
+                '<span style="font-size:10px;color:rgba(255,255,255,0.4);white-space:nowrap;">' + comp.pct + '%' + (comp.total ? ' · ' + comp.done + '/' + comp.total : '') + '</span></div>';
+            var chips = '';
+            if (proj.xcRewardPool || proj.xcReward) chips += '<span style="font-family:monospace;font-size:11px;color:#f5c842;font-weight:700;">⚡ ' + (proj.xcRewardPool || proj.xcReward) + ' XC</span>';
+            if (urg && urg.label) chips += '<span style="font-size:10px;color:rgba(' + urg.rgb + ',1);">' + escapeHtml(urg.label) + '</span>';
+            if (chips) html += '<div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;">' + chips + '</div>';
+            html += '<div style="display:flex;justify-content:flex-end;margin-top:4px;">' +
+                '<button onclick="event.stopPropagation();ppToggleDropdown(event,\'' + key + '\')" style="background:none;border:none;color:rgba(255,255,255,0.45);font-size:10px;cursor:pointer;padding:2px 0;">' +
+                '<span id="pp-arrow-' + key + '">▾</span> More info &amp; stats</button>' +
+            '</div>';
+            html += '</div>' +
                 '<div id="pp-drop-' + key + '" style="display:none;position:relative;z-index:5;" onclick="event.stopPropagation()">' + ppProjectStatsHtml(proj) + '</div>' +
             '</div>';
+            return html;
         }
         window.ppHomeProjectCardHtml = ppHomeProjectCardHtml;
-
-        // Programs are deliberately card-only, no dropdown -- Ennis asked
-        // for "dropdown arrows for Checkpoints, Projects" specifically, not
-        // Programs. Mirrors ppRenderPrograms's own OPEN/LOCKED language.
+        // Sept 12 correction -- enlarged to ~340px/2-per-row with the SAME
+        // status/CTA logic ppRenderPrograms (the full Programs list page)
+        // already computes (OPEN/LOCKED/PENDING/PAY $ pill, Apply button,
+        // Start/Continue button) -- these two buttons ARE the genuine
+        // player-safe actions Ennis asked for in place of the mockup's
+        // host-only Generate Checkpoints/Edit/Delete controls: Apply and
+        // Start/Continue are real actions a player can already take on a
+        // Program elsewhere in the portal, ported here rather than any
+        // new/invented affordance. Still deliberately no dropdown (Ennis
+        // asked for dropdown arrows on "Checkpoints, Projects" specifically,
+        // not Programs).
         function ppHomeProgramCardHtml(pg) {
             var canEnter = (typeof pflxPlayerCanEnterItem === 'function') ? pflxPlayerCanEnterItem(pg, 'program') : true;
-            return '<div style="flex:0 0 240px;scroll-snap-align:start;background:rgba(255,255,255,0.02);border:1px solid rgba(0,212,255,0.22);border-radius:12px;overflow:hidden;cursor:pointer;" onclick="ppNav(\'program-detail\',{id:\'' + escapeHtml(String(pg.id || '')) + '\'})">' +
-                (pg.bannerImage
-                    ? '<div style="height:110px;overflow:hidden;"><img src="' + escapeHtml(pg.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;" draggable="false"></div>'
-                    : '<div style="height:110px;background:linear-gradient(135deg,rgba(0,212,255,0.22),rgba(0,212,255,0.05));display:flex;align-items:center;justify-content:center;font-size:30px;">\u{1F4D0}</div>') +
-                '<div style="padding:10px 12px;">' +
-                    '<div style="font-size:12px;font-weight:800;color:#e0e6ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(pg.name || 'Program') + '</div>' +
-                    '<div style="font-size:10px;margin-top:4px;color:' + (canEnter ? '#22c55e' : '#f5c842') + ';font-weight:700;">' + (canEnter ? '\u2713 OPEN' : '\u{1F512} LOCKED') + '</div>' +
-                '</div>' +
-            '</div>';
+            var appState = (typeof pflxPlayerApplicationState === 'function') ? pflxPlayerApplicationState(pg, 'program') : 'none';
+            var cpCount = (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) ? mcCheckpoints.filter(function (c) { return c && c.programId === pg.id; }).length : 0;
+            var html = '<div style="flex:0 0 340px;scroll-snap-align:start;background:rgba(255,255,255,0.02);border:1px solid rgba(0,212,255,0.22);border-radius:14px;overflow:hidden;cursor:pointer;" onclick="ppNav(\'program-detail\',{id:\'' + escapeHtml(String(pg.id || '')) + '\'})">';
+            html += (pg.bannerImage
+                ? '<div style="height:120px;overflow:hidden;"><img src="' + escapeHtml(pg.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;" draggable="false"></div>'
+                : '<div style="height:120px;background:linear-gradient(135deg,rgba(0,212,255,0.22),rgba(0,212,255,0.05));display:flex;align-items:center;justify-content:center;font-size:32px;">\u{1F4D0}</div>');
+            html += '<div style="padding:12px 14px;">' +
+                '<div style="font-size:14px;font-weight:900;color:#e0e6ff;">' + escapeHtml(pg.name || 'Program') + '</div>';
+            if (pg.description) html += '<div style="font-size:11px;color:#8a92b0;margin-top:6px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + escapeHtml(String(pg.description).substring(0, 120)) + '</div>';
+            html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;flex-wrap:wrap;gap:6px;">' +
+                '<span style="font-size:10px;color:rgba(255,255,255,0.35);">' + cpCount + ' checkpoint' + (cpCount === 1 ? '' : 's') + '</span>';
+            if (canEnter) {
+                html += '<span style="font-size:10px;font-weight:800;color:#22c55e;letter-spacing:0.06em;">✓ OPEN</span>';
+            } else if (!pg.applyEnabled) {
+                html += '<span style="font-size:10px;font-weight:800;color:#ef4444;letter-spacing:0.04em;">\u{1F512} ' + escapeHtml((pg.lockMessage || 'COHORT REQUIRED').substring(0, 30)) + '</span>';
+            } else if (appState === 'pending') {
+                html += '<span style="font-size:10px;font-weight:800;color:#f5c842;letter-spacing:0.06em;">⏳ PENDING</span>';
+            } else if (appState === 'approved-unpaid') {
+                html += '<span style="font-size:10px;font-weight:800;color:#22d3ee;letter-spacing:0.06em;">\u{1F4B3} PAY $' + (Number(pg.price) || 0) + '</span>';
+            }
+            html += '</div>';
+            if (!canEnter && pg.applyEnabled && appState !== 'pending' && appState !== 'approved-unpaid') {
+                var label = pg.price > 0 ? ('Apply to Join — $' + pg.price) : 'Apply to Join — Free';
+                html += '<button class="mc-btn" style="margin-top:10px;font-size:10px;padding:6px 12px;width:100%;" onclick="event.stopPropagation();mcApplyToProgramOrProject(\'program\',\'' + escapeHtml(String(pg.id || '')) + '\');ppNav(\'home\');">' + escapeHtml(label) + '</button>';
+            }
+            if (canEnter) {
+                var __pgCta = (typeof pflxEntryCtaLabel === 'function') ? pflxEntryCtaLabel(pg) : 'Start';
+                html += '<button class="mc-btn mc-btn-green" style="margin-top:10px;font-size:10px;padding:6px 12px;width:100%;" onclick="event.stopPropagation();ppNav(\'program-detail\',{id:\'' + escapeHtml(String(pg.id || '')) + '\'});">▶ ' + escapeHtml(__pgCta) + '</button>';
+            }
+            html += '</div></div>';
+            return html;
         }
         window.ppHomeProgramCardHtml = ppHomeProgramCardHtml;
-
-        // Task cards mirror the same per-player state check the rest of the
-        // player portal already uses (pflxTaskStateForPlayer) -- same
-        // three-state icon as the checkpoint/project dropdown rows above.
+        // Sept 12 correction -- rebuilt as a full task-management-style
+        // card: status tag, linked checkpoint/project tag, description
+        // snippet, a real checklist-progress bar (same task.checklist /
+        // per-player submission.checklist data + percentage math
+        // ppRenderTaskDetail already computes -- read-only preview here;
+        // the actual check-off interaction still lives on the full Task
+        // Detail page via its existing submission flow, since building a
+        // second, standalone checklist-persistence path independent of
+        // that submission flow is genuinely new scope, deliberately not
+        // rushed into this sizing/content-density fix -- logged in the
+        // Handoff backlog), XC chip, and badge chips -- replacing the
+        // previous simple icon+title+XC-chip card.
         function ppHomeTaskCardHtml(t) {
             var pid = (window.activeSession || {}).id || null;
+            var sess = window.activeSession || {};
+            var myKeys = {};
+            if (pid) myKeys[pid] = 1;
+            if (sess.brand) myKeys[sess.brand] = 1;
+            if (sess.name) myKeys[sess.name] = 1;
+            function isMine(s) { return !!(s && (myKeys[s.playerId] || myKeys[s.submittedBy] || myKeys[s.submittedById])); }
+            var mySub = null;
+            if (Array.isArray(t.submissions) && t.submissions.length) mySub = t.submissions.find(isMine) || null;
+            if (!mySub && isMine(t.submission)) mySub = t.submission;
             var state = 'open';
             try { state = pflxTaskStateForPlayer(t, pid); } catch (e) {}
             var done = state === 'approved';
-            var icon = done ? '\u2705' : state === 'submitted' ? '\u23F3' : '\u2B1C';
-            return '<div onclick="ppNav(\'task-detail\',{id:\'' + escapeHtml(String(t.id || '')) + '\'})" style="flex:0 0 200px;scroll-snap-align:start;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px 14px;cursor:pointer;">' +
-                '<div style="font-size:18px;margin-bottom:6px;">' + icon + '</div>' +
-                '<div style="font-size:12px;font-weight:700;color:#e0e6ff;' + (done ? 'text-decoration:line-through;opacity:0.6;' : '') + '">' + escapeHtml(String(t.title || t.name || 'Task').substring(0, 60)) + '</div>' +
-                ((t.xcReward || t.xc) ? '<div style="font-size:10px;color:#f5c842;margin-top:6px;font-family:monospace;">' + (t.xcReward || t.xc) + ' XC</div>' : '') +
+            var icon = done ? '✅' : state === 'submitted' ? '⏳' : '⬜';
+            var stateLabel = done ? 'APPROVED' : state === 'submitted' ? 'SUBMITTED' : 'OPEN';
+            var stateColor = done ? '#22c55e' : state === 'submitted' ? '#f5c842' : 'rgba(255,255,255,0.4)';
+            var checklist = Array.isArray(t.checklist) ? t.checklist : [];
+            var savedChecks = (mySub && Array.isArray(mySub.checklist)) ? mySub.checklist : [];
+            var checked = savedChecks.filter(Boolean).length;
+            var pct = checklist.length ? Math.round((checked / checklist.length) * 100) : (done ? 100 : state === 'submitted' ? 60 : 0);
+            var cps = ppGetCheckpoints();
+            var projs = ppGetProjects();
+            var parentProj = (typeof pflxFindProject === 'function') ? pflxFindProject(projs, t.projectId) : null;
+            var parentCp = (!parentProj && typeof pflxFindCheckpoint === 'function') ? pflxFindCheckpoint(cps, t.roundId || t.checkpointId) : null;
+            var linkTag = parentProj ? ('\u{1F3AC} ' + (parentProj.name || parentProj.title || 'Project'))
+                        : parentCp ? ('\u{1F3C1} ' + (parentCp.name || 'Checkpoint')) : '';
+            var html = '<div onclick="ppNav(\'task-detail\',{id:\'' + escapeHtml(String(t.id || '')) + '\'})" style="flex:0 0 260px;scroll-snap-align:start;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:14px 16px;cursor:pointer;display:flex;flex-direction:column;">' +
+                '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+                    '<span style="font-size:18px;">' + icon + '</span>' +
+                    '<span style="font-size:9px;font-weight:800;letter-spacing:0.06em;color:' + stateColor + ';">' + stateLabel + '</span>' +
+                '</div>' +
+                '<div style="font-size:13px;font-weight:800;color:#e0e6ff;margin-top:8px;' + (done ? 'text-decoration:line-through;opacity:0.6;' : '') + '">' + escapeHtml(String(t.title || t.name || 'Task').substring(0, 60)) + '</div>' +
+                (linkTag ? '<div style="font-size:10px;color:rgba(255,255,255,0.35);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(linkTag) + '</div>' : '') +
+                (t.description ? '<div style="font-size:10px;color:#8a92b0;margin-top:6px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + escapeHtml(String(t.description).substring(0, 90)) + '</div>' : '') +
+                (checklist.length ? '<div style="margin-top:8px;">' + ppProgressBar(pct, done ? '#22c55e' : '#00d4ff') + '<div style="font-size:9px;color:rgba(255,255,255,0.4);margin-top:4px;">' + checked + '/' + checklist.length + ' checked</div></div>' : '') +
+                '<div style="display:flex;gap:6px;margin-top:auto;padding-top:10px;flex-wrap:wrap;">' +
+                    ((t.xcReward || t.xc) ? '<span style="font-size:10px;color:#f5c842;font-family:monospace;font-weight:700;">⚡ ' + (t.xcReward || t.xc) + ' XC</span>' : '') +
+                    ((Array.isArray(t.rewardBadges) && t.rewardBadges.length) ? t.rewardBadges.slice(0, 2).map(function (b) { var bn = typeof b === 'string' ? b : (b && (b.name || b.id)) || 'Badge'; return '<span style="font-size:9px;background:rgba(167,139,250,0.1);border:1px solid rgba(167,139,250,0.3);color:#a78bfa;padding:2px 7px;border-radius:6px;font-weight:700;">\u{1F3C5} ' + escapeHtml(String(bn)) + '</span>'; }).join('') : '') +
+                '</div>' +
             '</div>';
+            return html;
         }
         window.ppHomeTaskCardHtml = ppHomeTaskCardHtml;
 
