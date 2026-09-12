@@ -69,10 +69,17 @@ check('the monkey-patch still calls the original briefing fn (origBrief.call) --
 const autoOpenSrc = extractBetween(
   src,
   '(function pflxXBotAutoOpenOnLogin() {',
-  '\n                })();'
+  '\n                    })();'
 );
-check('the auto-open helper is inserted right after initPlatform(displayName) in loginUser()\'s post-login block',
-  src.indexOf('initPlatform(displayName);\n                // v171 (Ennis): "Always automatically open') !== -1);
+// v182 (Ennis): moved this helper from right after initPlatform() into
+// playMotionIntro().then(), after navigateTo('home') -- so X-Bot's
+// auto-open fires once the intro video has finished playing instead of
+// on top of it. See test_xbot_intro_timing_v182.js for the full
+// before/after ordering proof; this check just confirms the helper now
+// lives in its new home rather than its original one.
+check('the auto-open helper now lives inside playMotionIntro().then(), after navigateTo(\'home\') (moved by v182)',
+  src.indexOf("playMotionIntro().then(() => {") !== -1 &&
+  src.indexOf('(function pflxXBotAutoOpenOnLogin() {') > src.indexOf("navigateTo('home');", src.indexOf("playMotionIntro().then(() => {")));
 
 {
   // pflxDock already exists on the very first check -- opens immediately,

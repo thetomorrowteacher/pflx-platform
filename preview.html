@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 181;
+      window.PFLX_PATCH   = 182;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -22173,32 +22173,16 @@
                 document.querySelector('.toolbar').style.display = 'flex'; window.activeSession = activeSession; if (typeof pflxHeartbeat === 'function') pflxHeartbeat(); if (typeof pflxAnalyticsRecordSignup === 'function') pflxAnalyticsRecordSignup(activeSession); if (typeof pflxAnalyticsTouchSession === 'function') pflxAnalyticsTouchSession(); if (typeof pflxInjectRolePill === 'function') pflxInjectRolePill();
                 updateToolbarStatus();
                 initPlatform(displayName);
-                // v171 (Ennis): "Always automatically open upon login or
-                // new app load." loginUser() is the one choke point both
-                // the manual-login-form path AND tryAutoLogin()'s
-                // persisted-session restore path ("new app load") funnel
-                // through -- tryAutoLogin() calls loginUser(u.brand)
-                // directly -- so a single hook here covers both. Retries
-                // briefly because on the auto-login path this fires
-                // ~660ms after DOMContentLoaded, while #pflx-dock's own
-                // init() doesn't run until ~1000ms -- window.pflxDock may
-                // not exist yet the instant this line runs.
-                (function pflxXBotAutoOpenOnLogin() {
-                    var tries = 0;
-                    (function attempt() {
-                        tries++;
-                        if (window.pflxDock && typeof window.pflxDock.open === 'function') {
-                            try { window.pflxDock.open('xbot'); } catch (e) {}
-                            return;
-                        }
-                        if (tries < 40) setTimeout(attempt, 250);
-                    })();
-                })();
-                // v179 -- xb-9: a genuinely date-gated once-per-day "Today's
-                // Briefing" card, separate from v171's auto-open-every-login
-                // fix directly above. Fire-and-forget (async, own try/catch)
-                // so a slow/failed cloud check can never block login.
-                try { if (typeof window.pflxXBotDailyBriefingCheck === 'function') window.pflxXBotDailyBriefingCheck(); } catch (e) {}
+                // v182 (Ennis): X-Bot's auto-open (v171) and its daily
+                // briefing check (v179) used to fire right here --
+                // immediately after login, while the PFLX Motion Graphic
+                // intro video below (playMotionIntro(), #pflx-motion-intro)
+                // was still starting up or playing. Because that intro
+                // overlay is z-index 600 and #pflx-dock is z-index 100000,
+                // the X-Bot chat window rendered ON TOP of the intro video
+                // instead of after it finished. Moved both calls into
+                // playMotionIntro()'s .then() callback below, right after
+                // navigateTo('home') -- see the comment there.
                 // Sound: fade the login music out as the intro/platform takes
                 // over (then it's fully off), reinit with player prefs, start home music.
                 (window.seFadeOutLoginMusic ? window.seFadeOutLoginMusic(1200) : seStopLoginMusic());
@@ -22220,6 +22204,25 @@
                 // Play PFLX Motion Graphic intro (3-5s), then navigate to home
                 playMotionIntro().then(() => {
                     navigateTo('home');
+                    // v182 (Ennis): X-Bot's auto-open (originally v171) and
+                    // its date-gated daily briefing check (originally v179)
+                    // moved here from right after login, so the dock pops
+                    // up AFTER the intro video has fully played and faded
+                    // out instead of on top of it. Same functions, same
+                    // fail-safe/retry logic as before -- only the timing
+                    // changed.
+                    (function pflxXBotAutoOpenOnLogin() {
+                        var tries = 0;
+                        (function attempt() {
+                            tries++;
+                            if (window.pflxDock && typeof window.pflxDock.open === 'function') {
+                                try { window.pflxDock.open('xbot'); } catch (e) {}
+                                return;
+                            }
+                            if (tries < 40) setTimeout(attempt, 250);
+                        })();
+                    })();
+                    try { if (typeof window.pflxXBotDailyBriefingCheck === 'function') window.pflxXBotDailyBriefingCheck(); } catch (e) {}
                     // Check if first login — trigger tutorial
                     if (typeof pflxTutCheckFirstLogin === 'function') {
                         setTimeout(pflxTutCheckFirstLogin, 600);
