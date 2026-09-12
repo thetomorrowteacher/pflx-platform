@@ -62,7 +62,7 @@ function makeSandbox() {
   };
   const fab = { style: {}, classList: { toggle: function () {} } };
   const header = { querySelectorAll: function () { return []; } };
-  const stubDocument = { querySelectorAll: function () { return []; }, getElementById: function () { return null; } };
+  const stubDocument = { querySelectorAll: function () { return []; }, getElementById: function () { return null; }, querySelector: function () { return null; } };
 
   // `sandbox` is what the extracted code's `window.pflxDockSizeBand = ...`
   // etc. assignments land on (it's the `window` argument below); the

@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 182;
+      window.PFLX_PATCH   = 184;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -5276,6 +5276,17 @@
         #pflx-dock.pflx-band-compact .xbot-mode-tabs.xbot-tabs-peek {
             max-height: 42px;
             opacity: 1;
+        }
+        /* v183 (Ennis: "hiding the toolbar") -- an explicit, band-
+           independent hide/show for the mode-tabs bar, distinct from the
+           v172 Compact-band auto-collapse above. Toggled by the new
+           #pflx-dock-tabs-toggle header button; persists across reloads.
+           Clicking the collapsed sliver itself also un-hides it, the same
+           discoverability pattern as the Compact-band peek above. */
+        .xbot-mode-tabs.xbot-tabs-hidden {
+            max-height: 7px !important;
+            opacity: 0.35 !important;
+            cursor: pointer;
         }
         /* v173 -- xc-2: the X-Bot Teams board (ported from X-Live's
            rTeams()) only makes sense as a real multi-column grid once the
@@ -13575,21 +13586,6 @@
                     </div>
                 </div>
 
-                <!-- Voice Chat Section -->
-                <div class="xbot-voice-section" id="xbot-voice-section">
-                    <div class="xbot-voice-orb" id="xbot-voice-orb" onclick="xbotToggleVoice()">
-                        <div class="xbot-voice-ring"></div>
-                        <div class="xbot-voice-ring xbot-voice-ring-2"></div>
-                        <img src="public/X Official for PFLX.png" alt="X" style="width:36px;height:36px;object-fit:contain;z-index:2;position:relative;">
-                    </div>
-                    <div class="xbot-voice-status" id="xbot-voice-status">Tap to talk</div>
-                    <div class="xbot-voice-waveform" id="xbot-voice-waveform" style="display:none;">
-                        <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
-                        <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
-                        <div class="wave-bar"></div>
-                    </div>
-                </div>
-
                 <!-- Host Broadcast Composer (host-only) — collapsed by default, no longer pinned open -->
                 <div id="xbot-broadcast-composer" style="display:none;padding:10px 12px;border-bottom:1px solid rgba(0,240,255,0.12);background:linear-gradient(180deg,rgba(0,240,255,0.05),transparent);">
                     <div style="display:flex;align-items:center;gap:6px;">
@@ -13616,6 +13612,25 @@
                     <button class="xbot-mode-tab" data-mode="live" onclick="switchXBotMode('live')" id="xbot-tab-live" style="display:none;">🔴 Live</button>
                     <button class="xbot-mode-tab" data-mode="eng" onclick="switchXBotMode('eng')" id="xbot-tab-eng" style="display:none;">Dev</button>
                     <button class="xbot-mode-tab" data-mode="settings" onclick="switchXBotMode('settings')">⚙</button>
+                </div>
+
+                <!-- Voice Chat Section -- v183 (Ennis): moved from before
+                     the Mode Tabs (where it rendered ABOVE the tab bar in
+                     Voice mode) to here, alongside every other mode's
+                     section -- the tab bar now renders in the exact same
+                     position in every mode, consistently. -->
+                <div class="xbot-voice-section" id="xbot-voice-section">
+                    <div class="xbot-voice-orb" id="xbot-voice-orb" onclick="xbotToggleVoice()">
+                        <div class="xbot-voice-ring"></div>
+                        <div class="xbot-voice-ring xbot-voice-ring-2"></div>
+                        <img src="public/X Official for PFLX.png" alt="X" style="width:36px;height:36px;object-fit:contain;z-index:2;position:relative;">
+                    </div>
+                    <div class="xbot-voice-status" id="xbot-voice-status">Tap to talk</div>
+                    <div class="xbot-voice-waveform" id="xbot-voice-waveform" style="display:none;">
+                        <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
+                        <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                    </div>
                 </div>
 
                 <!-- Chat Messages -->
@@ -57155,13 +57170,16 @@
             setTimeout(function () { if (typeof window.xbotLiveRenderYtStatus === 'function') window.xbotLiveRenderYtStatus(); }, 300);
         };
 
-        // ══ PATCH PLATFORM v181 -- xb-10: private, per-user per-session
-        // Notes panel. The cloud key mirrors the file's own existing
-        // single-writer per-entity-row convention (pflx_player_<id>,
-        // pflx_xbot_briefing_<id> from v179) -- exactly one writer (the
-        // note's owner) ever touches this row, so no merge design is
-        // needed beyond a normal read-then-write.
-        window.pflxXBotNotesCloudKey = function (session) {
+        // ══ PATCH PLATFORM v184 -- xb-10: private, per-user per-session
+        // Notes panel, SIMPLIFIED to plain localStorage (Ennis: "Notes
+        // should save in the simplist way possible without causing any
+        // Supabase additions or issues"). v181 shipped this Supabase-
+        // backed (app_data row per session); this replaces that entirely
+        // -- no cloud round-trip, no new Supabase key, nothing to merge or
+        // conflict. Notes now live only on this device/browser, still
+        // keyed per session so they don't bleed across different logins
+        // on a shared device.
+        window.pflxXBotNotesLocalKey = function (session) {
             if (!session || !session.id) return null;
             return 'pflx_xbot_notes_' + session.id;
         };
@@ -57178,13 +57196,13 @@
         };
         var xbotNotesSaveTimer = null;
         var xbotNotesLoadedKey = null;
-        window.xbotNotesLoad = async function () {
+        window.xbotNotesLoad = function () {
             var ta = document.getElementById('xbot-notes-textarea');
             var status = document.getElementById('xbot-notes-status');
             if (!ta) return;
             try {
                 var session = window.activeSession;
-                var key = window.pflxXBotNotesCloudKey(session);
+                var key = window.pflxXBotNotesLocalKey(session);
                 if (!key) {
                     ta.value = '';
                     ta.disabled = true;
@@ -57196,17 +57214,9 @@
                 // Don't clobber in-progress typing if this tab is reopened
                 // for the SAME session it already loaded notes for.
                 if (xbotNotesLoadedKey === key) return;
-                if (status) status.textContent = 'Loading…';
                 var text = '';
-                try {
-                    var sb = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
-                    if (sb) {
-                        var res = await sb.from('app_data').select('data').eq('key', key).maybeSingle();
-                        if (res && res.data && res.data.data && typeof res.data.data.text === 'string') {
-                            text = res.data.data.text;
-                        }
-                    }
-                } catch (e) { console.warn('[xbot-notes] load failed', e); }
+                try { text = window.localStorage.getItem(key) || ''; }
+                catch (e) { console.warn('[xbot-notes] local read failed', e); }
                 ta.value = text;
                 xbotNotesLoadedKey = key;
                 if (status) status.textContent = text ? window.xbotNotesFormatSavedTime() : '';
@@ -57218,26 +57228,20 @@
             if (xbotNotesSaveTimer) clearTimeout(xbotNotesSaveTimer);
             xbotNotesSaveTimer = setTimeout(function () { window.xbotNotesSaveNow(); }, 900);
         };
-        window.xbotNotesSaveNow = async function () {
+        window.xbotNotesSaveNow = function () {
             var ta = document.getElementById('xbot-notes-textarea');
             var status = document.getElementById('xbot-notes-status');
             if (!ta) return;
             try {
                 var session = window.activeSession;
-                var key = window.pflxXBotNotesCloudKey(session);
+                var key = window.pflxXBotNotesLocalKey(session);
                 if (!key) return;
-                if (status) status.textContent = 'Saving…';
-                var sb = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
-                if (!sb) { if (status) status.textContent = 'Not saved (offline)'; return; }
-                await sb.from('app_data').upsert(
-                    { key: key, data: { text: ta.value }, updated_at: new Date().toISOString() },
-                    { onConflict: 'key' }
-                );
+                window.localStorage.setItem(key, ta.value);
                 xbotNotesLoadedKey = key;
                 if (status) status.textContent = window.xbotNotesFormatSavedTime();
             } catch (e) {
-                console.warn('[xbot-notes] save failed', e);
-                if (status) status.textContent = 'Not saved (error) — will retry on next edit';
+                console.warn('[xbot-notes] local save failed', e);
+                if (status) status.textContent = 'Not saved (storage full or blocked)';
             }
         };
 
@@ -75573,6 +75577,7 @@ RESPONSE RULES:
                 <button class="pflx-dock-size-btn" data-size="wide" title="Wide — team layouts">▭</button>
                 <button class="pflx-dock-size-btn" data-size="studio" title="Studio — soundboard, controller grid, monitoring">🖥</button>
             </span>
+            <button class="pflx-dock-hbtn" id="pflx-dock-tabs-toggle" title="Hide/show the tab bar">☰</button>
             <button class="pflx-dock-hbtn" id="pflx-dock-auto" title="Auto read-aloud X-Bot replies">🔉</button>
             <button class="pflx-dock-hbtn" id="pflx-dock-speak" title="Read the last message aloud">🔊</button>
             <button class="pflx-dock-hbtn" id="pflx-dock-min" title="Minimize">–</button>
@@ -75586,12 +75591,12 @@ RESPONSE RULES:
     <script>
     (function () {
         'use strict';
-        var RECTK = 'pflx_dock_rect', ICONK = 'pflx_dock_icon', TABK = 'pflx_dock_tab', SPEAKK = 'pflx_dock_autospeak';
+        var RECTK = 'pflx_dock_rect', ICONK = 'pflx_dock_icon', TABK = 'pflx_dock_tab', SPEAKK = 'pflx_dock_autospeak', TABSHIDEK = 'pflx_dock_tabshidden';
         var ICON = 66, MINW = 320, MINH = 300, COFF = 40;  // COFF: icon overlap at dock SE corner
         var dock, fab, body, header;
         var reparented = false, _observer = null;
         var _origChatToggle = (typeof window.pflxChatToggle === 'function') ? window.pflxChatToggle : null;
-        var state = { x: 0, y: 0, w: 420, h: 560, open: false, tab: 'xbot', autoSpeak: false };
+        var state = { x: 0, y: 0, w: 420, h: 560, open: false, tab: 'xbot', autoSpeak: false, tabsHidden: false };
         var icon = { x: 0, y: 0 };
 
         // ── Read-aloud (Web Speech — free, offline, works for every user) ──
@@ -75664,12 +75669,14 @@ RESPONSE RULES:
             try { localStorage.setItem(ICONK, JSON.stringify(icon)); } catch (e) {}
             try { localStorage.setItem(TABK, state.tab); } catch (e) {}
             try { localStorage.setItem(SPEAKK, state.autoSpeak ? '1' : '0'); } catch (e) {}
+            try { localStorage.setItem(TABSHIDEK, state.tabsHidden ? '1' : '0'); } catch (e) {}
         }
         function restore() {
             try { var r = JSON.parse(localStorage.getItem(RECTK) || 'null'); if (r) { state.x = r.x; state.y = r.y; state.w = r.w; state.h = r.h; } } catch (e) {}
             try { var ic = JSON.parse(localStorage.getItem(ICONK) || 'null'); if (ic) { icon.x = ic.x; icon.y = ic.y; } else { icon.x = window.innerWidth - ICON - 24; icon.y = window.innerHeight - ICON - 70; } } catch (e) {}
             try { var t = localStorage.getItem(TABK); if (t) state.tab = t; } catch (e) {}
             try { state.autoSpeak = localStorage.getItem(SPEAKK) === '1'; } catch (e) {}
+            try { state.tabsHidden = localStorage.getItem(TABSHIDEK) === '1'; } catch (e) {}
         }
         // v172 -- X-Bot Controller foundation (xc-1): named size bands a
         // later phase's tool layouts (team board, Theater+PIP, soundboard,
@@ -75727,6 +75734,11 @@ RESPONSE RULES:
             }
             var auto = document.getElementById('pflx-dock-auto');
             if (auto) auto.classList.toggle('on', state.autoSpeak);
+            // v183 -- explicit tab-bar hide/show, independent of size band.
+            var tabsToggleBtn = document.getElementById('pflx-dock-tabs-toggle');
+            if (tabsToggleBtn) tabsToggleBtn.classList.toggle('on', state.tabsHidden);
+            var modeTabsEl = document.querySelector('.xbot-mode-tabs');
+            if (modeTabsEl) modeTabsEl.classList.toggle('xbot-tabs-hidden', state.tabsHidden);
             // v172 -- keep the live size-band class + preset-button
             // highlight in sync on EVERY render() call, so both a preset
             // click and a manual drag (which also calls render()) update
@@ -75806,7 +75818,7 @@ RESPONSE RULES:
         function makeDrag(el, isIcon) {
             if (!el) return;
             el.addEventListener('pointerdown', function (e) {
-                if (e.target && (e.target.classList.contains('pflx-dock-tab') || e.target.classList.contains('pflx-dock-hbtn') || (e.target.className && String(e.target.className).indexOf('pflx-dock-rsz') >= 0))) return;
+                if (e.target && (e.target.classList.contains('pflx-dock-tab') || e.target.classList.contains('pflx-dock-hbtn') || e.target.classList.contains('pflx-dock-size-btn') || (e.target.className && String(e.target.className).indexOf('pflx-dock-rsz') >= 0))) return;
                 e.preventDefault();
                 var sx = e.clientX, sy = e.clientY, moved = false;
                 var ox = state.x, oy = state.y, oix = icon.x, oiy = icon.y;
@@ -75882,6 +75894,17 @@ RESPONSE RULES:
                 if (!modeTabsBar) return;
                 var peekTimer = null;
                 modeTabsBar.addEventListener('click', function (e) {
+                    // v183 -- if the bar is explicitly hidden (not just
+                    // Compact-band collapsed), a click on the sliver turns
+                    // hiding OFF entirely -- same discoverability as peek.
+                    if (state.tabsHidden) {
+                        state.tabsHidden = false;
+                        render();
+                        persist();
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return;
+                    }
                     if (!modeTabsBar.classList.contains('xbot-tabs-peek')) {
                         modeTabsBar.classList.add('xbot-tabs-peek');
                         e.preventDefault();
@@ -75891,6 +75914,12 @@ RESPONSE RULES:
                     peekTimer = setTimeout(function () { modeTabsBar.classList.remove('xbot-tabs-peek'); }, 3000);
                 });
             })();
+            var tabsToggleBtn = document.getElementById('pflx-dock-tabs-toggle');
+            if (tabsToggleBtn) tabsToggleBtn.addEventListener('click', function () {
+                state.tabsHidden = !state.tabsHidden;
+                render();
+                persist();
+            });
             document.getElementById('pflx-dock-min').addEventListener('click', closeDock);
             document.getElementById('pflx-dock-speak').addEventListener('click', function () {
                 if ('speechSynthesis' in window && window.speechSynthesis.speaking) window.pflxSpeakStop(); else readLast();
