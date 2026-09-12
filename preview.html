@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 191;
+      window.PFLX_PATCH   = 192;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -32468,9 +32468,37 @@ function ppRenderCheckpoints(el) {
         // ── MY TASKS (flat list across all checkpoints) ──
         // Filter to ONLY tasks the active player is actually assigned to —
         // directly or via the parent checkpoint's cohort.
+        
+        // Player-facing FLP-phase bucketing for the dedicated My Tasks tab
+        // (PATCH PLATFORM v192). Reuses the SAME PP_FLP_BUCKET_META /
+        // PP_FLP_BUCKET_ORDER / ppBucketedSectionsHtml built for Projects in
+        // v190 -- confirmed via direct grep that the host's own
+        // _mcFlpBucketForTask uses the EXACT SAME BUCKET_META/BUCKET_ORDER
+        // as _mcFlpBucketForProject, so Tasks share Projects' 7-phase
+        // taxonomy, not a new one. The one real difference: completion here
+        // must be PER-PLAYER, never the task's global .status field --
+        // reusing ppFlpBucketFor as-is would reintroduce the exact "0/0
+        // tasks" class of bug the Sept 4 fix already closed for this same
+        // tab (a shared task's global status leaking onto every OTHER
+        // assigned player's row). So this is its own small classifier, not
+        // a call to ppFlpBucketFor.
+        function ppTaskFlpBucketFor(t, pid) {
+            var isDone = (typeof pflxTaskStateForPlayer === 'function') ? (pflxTaskStateForPlayer(t, pid) === 'approved') : (t.completed || t.status === 'approved');
+            if (isDone) return 'completed';
+            if (t.flpTracking !== 'monitoring') return 'bypass';
+            if (!t.startedAt) return 'not-started';
+            try {
+                var st = (typeof pflxComputeFlpStatus === 'function') ? pflxComputeFlpStatus({ flpTracking: t.flpTracking, startedAt: t.startedAt, dueDate: t.dueDate || t.endDate || t.deadline }) : null;
+                if (st && st.phase) return st.phase;
+            } catch (e) {}
+            return 'engagement';
+        }
+        window.ppTaskFlpBucketFor = ppTaskFlpBucketFor;
         function ppRenderMyTasks(el) {
             var tasks = ppGetTasks().filter(ppItemAssignedToActivePlayer);
             var html = ppBreadcrumb([{ label: 'Home', view: 'home' }, { label: 'My Tasks', view: 'tasks' }]);
+            try { if (typeof pflxApplyCardSize === 'function') pflxApplyCardSize('pptasks'); } catch (e) {}
+            html += (typeof pflxCardSizeSliderHtml === 'function') ? pflxCardSizeSliderHtml('pptasks', 'Task') : '';
 
             // Per-player split (July 15): "done" means MY submission is approved,
             // never that some other player finished the shared task.
@@ -32508,8 +32536,9 @@ function ppRenderCheckpoints(el) {
                     var db = b.dueDate ? (typeof _mcUrgencyForDueDate === 'function' ? _mcUrgencyForDueDate(b.dueDate).days : 999) : 999;
                     return da - db;
                 });
-                html += '<div style="font-family:\'Orbitron\',sans-serif;font-size:11px;color:rgba(255,255,255,0.4);letter-spacing:1.5px;margin-bottom:10px;">📋 PENDING (' + pending.length + ')</div>';
-                pending.forEach(function(t) {
+                
+                var __taskCardsPending = pending.map(function(t) {
+                var cardHtml = '';
                     var priorityFlag = (typeof _mcPriorityFlag === 'function') ? _mcPriorityFlag(t.priority || 'normal') : '';
                     var urgency = (typeof _mcUrgencyForDueDate === 'function') ? _mcUrgencyForDueDate(t.dueDate) : null;
                     var dueChip = (t.dueDate && urgency)
@@ -32529,7 +32558,7 @@ function ppRenderCheckpoints(el) {
                     var statusChip = (pflxTaskStateForPlayer(t, __mtPid) === 'submitted')
                         ? '<span style="display:inline-block;background:rgba(245,165,0,0.14);color:#f5a500;font-size:9px;font-weight:800;padding:3px 8px;border-radius:5px;text-transform:uppercase;letter-spacing:0.06em;">◐ SUBMITTED</span>'
                         : '';
-                    html += '<div onclick="ppNav(\'task-detail\',{id:\'' + (t.id || '') + '\'})" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px;margin-bottom:8px;cursor:pointer;transition:background 0.15s ease;" onmouseover="this.style.background=\'rgba(30,30,42,0.7)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.02)\'">' +
+                    cardHtml += '<div onclick="ppNav(\'task-detail\',{id:\'' + (t.id || '') + '\'})" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px;margin-bottom:8px;cursor:pointer;transition:background 0.15s ease;" onmouseover="this.style.background=\'rgba(30,30,42,0.7)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.02)\'">' +
                         // Left: empty-outline checkbox + priority dot
                         '<div style="width:22px;height:22px;border-radius:6px;background:rgba(255,255,255,0.02);border:2px solid rgba(255,255,255,0.15);flex-shrink:0;"></div>' +
                         priorityFlag +
@@ -32546,20 +32575,31 @@ function ppRenderCheckpoints(el) {
                             dueChip + xcChip +
                         '</div>' +
                     '</div>';
-                });
+                
+                return cardHtml;
+            });
             }
 
             // Completed tasks — also clickable to view submission details
             if (done.length) {
-                html += '<div style="font-family:\'Orbitron\',sans-serif;font-size:11px;color:rgba(255,255,255,0.25);letter-spacing:1.5px;margin:16px 0 10px;">✅ COMPLETED (' + done.length + ')</div>';
-                done.forEach(function(t) {
-                    html += '<div onclick="ppNav(\'task-detail\',{id:\'' + (t.id || '') + '\'})" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(255,255,255,0.01);border:1px solid rgba(255,255,255,0.04);border-radius:10px;margin-bottom:4px;opacity:0.7;cursor:pointer;">' +
+                
+                var __taskCardsDone = done.map(function(t) {
+                var cardHtml = '';
+                    cardHtml += '<div onclick="ppNav(\'task-detail\',{id:\'' + (t.id || '') + '\'})" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(255,255,255,0.01);border:1px solid rgba(255,255,255,0.04);border-radius:10px;margin-bottom:4px;opacity:0.7;cursor:pointer;">' +
                         '<span style="font-size:14px;">✅</span>' +
                         '<span style="flex:1;font-size:12px;color:rgba(255,255,255,0.4);text-decoration:line-through;">' + escapeHtml(t.title || t.name || 'Task') + '</span>' +
                         (t.xcReward || t.xc ? '<span style="font-size:11px;color:rgba(245,200,66,0.5);font-family:\'Share Tech Mono\',monospace;">+' + (t.xcReward || t.xc) + ' XC</span>' : '') + '</div>';
-                });
+                
+                return cardHtml;
+            });
             }
 
+            var __allTasksOrdered = pending.concat(done);
+            var __allCardsOrdered = (typeof __taskCardsPending !== 'undefined' ? __taskCardsPending : []).concat(typeof __taskCardsDone !== 'undefined' ? __taskCardsDone : []);
+            var __taskSections = (typeof ppBucketedSectionsHtml === 'function')
+                ? ppBucketedSectionsHtml(__allTasksOrdered.map(function (t, i) { return { item: t, html: __allCardsOrdered[i] }; }), function (t) { return ppTaskFlpBucketFor(t, __mtPid); }, PP_FLP_BUCKET_META, PP_FLP_BUCKET_ORDER, 'task', 'tasks')
+                : __allCardsOrdered.join('');
+            html += '<div id="ppmc-tasks-list">' + __taskSections + '</div>';
             el.innerHTML = html;
         }
 
