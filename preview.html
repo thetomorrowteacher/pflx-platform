@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 178;
+      window.PFLX_PATCH   = 179;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -22165,6 +22165,11 @@
                         if (tries < 40) setTimeout(attempt, 250);
                     })();
                 })();
+                // v179 -- xb-9: a genuinely date-gated once-per-day "Today's
+                // Briefing" card, separate from v171's auto-open-every-login
+                // fix directly above. Fire-and-forget (async, own try/catch)
+                // so a slow/failed cloud check can never block login.
+                try { if (typeof window.pflxXBotDailyBriefingCheck === 'function') window.pflxXBotDailyBriefingCheck(); } catch (e) {}
                 // Sound: fade the login music out as the intro/platform takes
                 // over (then it's fully off), reinit with player prefs, start home music.
                 (window.seFadeOutLoginMusic ? window.seFadeOutLoginMusic(1200) : seStopLoginMusic());
@@ -52693,6 +52698,121 @@
             }
           };
           window.pflxXBotBriefReset = function () { visitedTabs = {}; };
+
+          // v179 -- xb-9: date-gated once-per-day "Today's Briefing" card.
+          // Every piece below is a small, individually pure/testable
+          // function on purpose -- the orchestrator (pflxXBotDailyBriefingCheck)
+          // is the only one that touches the network/DOM, everything else
+          // is extracted so it can be unit-tested without a browser.
+          window.pflxXBotBriefingDateStr = function (d) {
+              d = d || new Date();
+              var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
+              return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+          };
+          // PURE date-gate: same day -> not due; different day, or a
+          // missing/malformed stored value -> due. Never throws.
+          window.pflxXBotDailyBriefingDue = function (lastDateStr, todayStr) {
+              if (!todayStr) return false;
+              if (!lastDateStr || typeof lastDateStr !== 'string') return true;
+              return lastDateStr !== todayStr;
+          };
+          window.pflxXBotDailyBriefingCloudKey = function (session) {
+              if (!session || !session.id) return null;
+              // Per-user, single-writer row -- same shape as the file's own
+              // 'pflx_player_' + id convention (each user's own row), so no
+              // cross-user merge conflict is possible (unlike a shared map
+              // keyed by every user's id in one row).
+              return 'pflx_xbot_briefing_' + session.id;
+          };
+          window.pflxXBotDailyBriefingLiveSessionCount = function (sessions) {
+              if (!Array.isArray(sessions)) return 0;
+              return sessions.filter(function (s) { return s && s.status === 'active'; }).length;
+          };
+          // Reuses the EXACT same two pending-item sources
+          // renderApprovalsCard() already aggregates (reward requests +
+          // mcTasks submissions) -- a count only, not a rebuilt approvals
+          // system.
+          window.pflxXBotDailyBriefingPendingApprovals = function () {
+              var n = 0;
+              try {
+                  var reqs = (typeof _pflxLoadRewardRequests === 'function') ? _pflxLoadRewardRequests() : [];
+                  reqs.forEach(function (r) { if (r && r.status === 'pending') n++; });
+              } catch (e) {}
+              try {
+                  if (typeof mcTasks !== 'undefined' && Array.isArray(mcTasks)) {
+                      mcTasks.forEach(function (t) {
+                          if (!t) return;
+                          if (Array.isArray(t.submissions) && t.submissions.length) {
+                              t.submissions.forEach(function (s) { if (s && (s.status || 'pending') === 'pending') n++; });
+                          } else if (t.status === 'submitted') {
+                              n++;
+                          }
+                      });
+                  }
+              } catch (e) {}
+              return n;
+          };
+          window.pflxXBotDailyBriefingMessage = function (liveCount, approvalsCount, isHost) {
+              var parts = [];
+              parts.push(liveCount > 0
+                  ? ('🔴 ' + liveCount + ' live session' + (liveCount === 1 ? '' : 's') + ' right now.')
+                  : 'No live sessions right now.');
+              if (isHost) {
+                  parts.push(approvalsCount > 0
+                      ? ('📋 ' + approvalsCount + ' item' + (approvalsCount === 1 ? '' : 's') + ' waiting in Approvals.')
+                      : 'Approvals queue is clear.');
+              }
+              return "📅 Today's Briefing — " + parts.join(' ');
+          };
+          window.pflxXBotDailyBriefingIsHost = function (session) {
+              if (!session) return false;
+              var r = (session.role || '').toLowerCase();
+              return r === 'admin' || r === 'host' || r === 'teacher' || r === 'instructor';
+          };
+          // Orchestrator -- the one piece that touches the network/DOM.
+          // Fails safe at every step (a cloud read/write error just skips
+          // the briefing rather than blocking login or throwing).
+          window.pflxXBotDailyBriefingCheck = async function () {
+              try {
+                  var session = window.activeSession;
+                  if (!session) return;
+                  var key = window.pflxXBotDailyBriefingCloudKey(session);
+                  if (!key) return;
+                  var today = window.pflxXBotBriefingDateStr();
+                  var lastDate = null;
+                  try {
+                      var sb = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                      if (sb) {
+                          var res = await sb.from('app_data').select('data').eq('key', key).maybeSingle();
+                          if (res && res.data && res.data.data && typeof res.data.data.lastDate === 'string') {
+                              lastDate = res.data.data.lastDate;
+                          }
+                      }
+                  } catch (e) { console.warn('[xbot-briefing] load failed', e); }
+                  if (!window.pflxXBotDailyBriefingDue(lastDate, today)) return;
+
+                  var isHost = window.pflxXBotDailyBriefingIsHost(session);
+                  var liveCount = 0, approvalsCount = 0;
+                  try {
+                      var sessions = (typeof window.pflxXBotLoadSessions === 'function') ? await window.pflxXBotLoadSessions() : [];
+                      liveCount = window.pflxXBotDailyBriefingLiveSessionCount(sessions);
+                  } catch (e) {}
+                  if (isHost) {
+                      try { approvalsCount = window.pflxXBotDailyBriefingPendingApprovals(); } catch (e) {}
+                  }
+                  var msg = window.pflxXBotDailyBriefingMessage(liveCount, approvalsCount, isHost);
+                  try { if (typeof xbotAddMessage === 'function') xbotAddMessage(msg, false, 'briefing'); } catch (e) {}
+                  try {
+                      var sb2 = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                      if (sb2) {
+                          await sb2.from('app_data').upsert(
+                              { key: key, data: { lastDate: today }, updated_at: new Date().toISOString() },
+                              { onConflict: 'key' }
+                          );
+                      }
+                  } catch (e) { console.warn('[xbot-briefing] save failed', e); }
+              } catch (e) { console.warn('[xbot-briefing] check failed', e); }
+          };
           console.log('[PFLX] X-Bot Contextual Briefings loaded');
         })();
 
