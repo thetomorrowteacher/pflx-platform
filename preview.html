@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 190;
+      window.PFLX_PATCH   = 191;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -31128,9 +31128,38 @@
             '</div>';
         }
 
-        function ppRenderCheckpoints(el) {
+                // Player-facing status-bucket grouping for the dedicated Checkpoints
+        // tab (PATCH PLATFORM v191). Checkpoints do NOT use the host's FLP
+        // phase model (confirmed: no _mcFlpBucketForCheckpoint exists anywhere
+        // in mcRenderCheckpoints) -- they use a simpler 4-state lifecycle
+        // (upcoming/active/open/completed; 'inactive' is host-only and never
+        // reaches ppGetCheckpoints()). Reuses the SAME generic
+        // ppBucketedSectionsHtml helper built for Projects in v190, just with
+        // a different bucket meta/order/classifier.
+        var PP_CP_STATUS_BUCKET_META = {
+            active:    { label: 'Active Now', emoji: '●', rgb: '34,197,94',   desc: 'Happening now -- jump in.' },
+            open:      { label: 'Open',       emoji: '🔓', rgb: '79,142,247',  desc: 'Open enrollment -- join anytime.' },
+            upcoming:  { label: 'Upcoming',   emoji: '⏳',  rgb: '167,139,250', desc: 'Starting soon.' },
+            completed: { label: 'Completed',  emoji: '✓',   rgb: '156,163,175', desc: 'Wrapped up and closed out.' }
+        };
+        var PP_CP_STATUS_BUCKET_ORDER = ['active', 'open', 'upcoming', 'completed'];
+        function ppCheckpointStatusBucketFor(cp) {
+            var s = cp && cp.status;
+            if (s === 'completed') return 'completed';
+            if (s === 'open') return 'open';
+            if (s === 'upcoming') return 'upcoming';
+            // 'active' / legacy 'current' / any unrecognized status defaults
+            // to Active Now -- matches the existing isActive check already in
+            // ppRenderCheckpoints (cp.status === 'active' || cp.status === 'current').
+            return 'active';
+        }
+        window.ppCheckpointStatusBucketFor = ppCheckpointStatusBucketFor;
+
+function ppRenderCheckpoints(el) {
             var checkpoints = ppGetCheckpoints();
             var html = ppBreadcrumb([{ label: 'Home', view: 'home' }, { label: 'Checkpoints', view: 'checkpoints' }]);
+            try { if (typeof pflxApplyCardSize === 'function') pflxApplyCardSize('ppcheckpoints'); } catch (e) {}
+            html += (typeof pflxCardSizeSliderHtml === 'function') ? pflxCardSizeSliderHtml('ppcheckpoints', 'Checkpoint') : '';
 
             if (!checkpoints.length) {
                 html += '<div class="mc-card" style="text-align:center;padding:40px;">' +
@@ -31147,7 +31176,8 @@
             // OWN progress; hosts keep the aggregate.
             var __cpsPid = (window.activeSession || {}).id || null;
             var __cpsIsHost = (typeof window.pflxRole !== 'undefined' && window.pflxRole === 'host');
-            checkpoints.forEach(function(cp) {
+            var __cpCards = checkpoints.map(function(cp) {
+                var cardHtml = '';
                 var isActive = cp.status === 'active' || cp.status === 'current';
                 var statusColor = isActive ? '#22c55e' : cp.status === 'completed' ? 'var(--cyan)' : 'rgba(255,255,255,0.3)';
                 var borderColor = isActive ? 'rgba(34,197,94,0.25)' : 'rgba(255,255,255,0.06)';
@@ -31173,14 +31203,14 @@
 
                 // Outer card. overflow:hidden so the banner image can be flush
                 // against the top-left/top-right corners.
-                html += '<div style="background:' + bgGrad + ';border:1px solid ' + borderColor + ';border-radius:14px;padding:0;margin-bottom:12px;cursor:pointer;transition:all 0.2s;overflow:hidden;" onclick="ppNav(\'checkpoint-detail\',{id:\'' + (cp.id || '') + '\'})" onmouseenter="this.style.transform=\'translateY(-2px)\'" onmouseleave="this.style.transform=\'\'">';
+                cardHtml += '<div style="background:' + bgGrad + ';border:1px solid ' + borderColor + ';border-radius:14px;padding:0;margin-bottom:12px;cursor:pointer;transition:all 0.2s;overflow:hidden;" onclick="ppNav(\'checkpoint-detail\',{id:\'' + (cp.id || '') + '\'})" onmouseenter="this.style.transform=\'translateY(-2px)\'" onmouseleave="this.style.transform=\'\'">';
 
                 // Banner image (same source field as the host card). Falls back
                 // to a plain title header when no banner is set so legacy
                 // checkpoints don't render as a blank gradient block.
                 var ppAccentRgb = isActive ? '34,197,94' : cp.status === 'upcoming' ? '79,142,247' : '167,139,250';
                 if (cp.bannerImage) {
-                    html += '<div style="position:relative;height:130px;overflow:hidden;">' +
+                    cardHtml += '<div style="position:relative;height:130px;overflow:hidden;">' +
                         '<img src="' + escapeHtml(cp.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;display:block;filter:saturate(1.15) brightness(1.05);">' +
                         '<div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(10,10,15,0) 0%, rgba(22,22,31,0.45) 55%, rgba(22,22,31,0.95) 100%);"></div>' +
                         '<div style="position:absolute;inset:0;box-shadow:inset 0 0 60px rgba(' + ppAccentRgb + ',0.22);pointer-events:none;"></div>' +
@@ -31195,11 +31225,11 @@
 
                 // Card body — padded. Skip the redundant title when the banner
                 // already shows it.
-                html += '<div style="padding:18px;">';
+                cardHtml += '<div style="padding:18px;">';
 
-                if (!cp.bannerImage && isActive) html += '<div style="display:inline-block;background:rgba(34,197,94,0.15);color:#22c55e;font-size:9px;font-weight:700;padding:3px 8px;border-radius:6px;letter-spacing:1px;margin-bottom:10px;">● ACTIVE NOW</div>';
+                if (!cp.bannerImage && isActive) cardHtml += '<div style="display:inline-block;background:rgba(34,197,94,0.15);color:#22c55e;font-size:9px;font-weight:700;padding:3px 8px;border-radius:6px;letter-spacing:1px;margin-bottom:10px;">● ACTIVE NOW</div>';
 
-                html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">' +
+                cardHtml += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">' +
                     '<div>' +
                     (cp.bannerImage
                         ? ''
@@ -31210,12 +31240,12 @@
                     (daysText ? '<div style="font-size:10px;color:' + (daysText === 'PAST DUE' ? '#ef4444' : 'rgba(255,255,255,0.4)') + ';margin-top:2px;">' + daysText + '</div>' : '') +
                     '</div></div>';
 
-                html += '<div style="display:flex;align-items:center;gap:10px;">' +
+                cardHtml += '<div style="display:flex;align-items:center;gap:10px;">' +
                     '<div style="flex:1;">' + ppProgressBar(pct, statusColor) + '</div>' +
                     '<span style="font-size:11px;color:rgba(255,255,255,0.4);white-space:nowrap;">' + pct + '% · ' + cpDone + '/' + cpTasks.length + ' tasks</span></div>';
 
                 if (cp.startDate || cp.endDate) {
-                    html += '<div style="display:flex;gap:16px;margin-top:8px;font-size:10px;color:rgba(255,255,255,0.3);">' +
+                    cardHtml += '<div style="display:flex;gap:16px;margin-top:8px;font-size:10px;color:rgba(255,255,255,0.3);">' +
                         (cp.startDate ? '<span>Start: ' + escapeHtml(cp.startDate) + '</span>' : '') +
                         (cp.endDate ? '<span>End: ' + escapeHtml(cp.endDate) + '</span>' : '') + '</div>';
                 }
@@ -31225,12 +31255,18 @@
                 // to see more info and stats" -- the player version of what
                 // the host already sees on their own cards). Collapsed by
                 // default; expanding never navigates away from the list.
-                html += '<div style="display:flex;justify-content:flex-end;margin-top:6px;">' +
+                cardHtml += '<div style="display:flex;justify-content:flex-end;margin-top:6px;">' +
                     '<button onclick="ppToggleDropdown(event,\'cp-' + escapeHtml(String(cp.id || '')) + '\')" style="background:none;border:none;color:rgba(255,255,255,0.45);font-size:11px;cursor:pointer;padding:4px 8px;display:flex;align-items:center;gap:4px;">' +
                     '<span id="pp-arrow-cp-' + escapeHtml(String(cp.id || '')) + '">\u25BE</span> More info &amp; stats</button></div>';
-                html += '<div id="pp-drop-cp-' + escapeHtml(String(cp.id || '')) + '" style="display:none;" onclick="event.stopPropagation()">' + ppCheckpointStatsHtml(cp) + '</div>';
-                html += '</div></div>';
+                cardHtml += '<div id="pp-drop-cp-' + escapeHtml(String(cp.id || '')) + '" style="display:none;" onclick="event.stopPropagation()">' + ppCheckpointStatsHtml(cp) + '</div>';
+                cardHtml += '</div></div>';
+            
+                return cardHtml;
             });
+            var __cpSections = (typeof ppBucketedSectionsHtml === 'function')
+                ? ppBucketedSectionsHtml(checkpoints.map(function (cp, i) { return { item: cp, html: __cpCards[i] }; }), ppCheckpointStatusBucketFor, PP_CP_STATUS_BUCKET_META, PP_CP_STATUS_BUCKET_ORDER, 'checkpoint', 'checkpoints')
+                : __cpCards.join('');
+            html += '<div id="ppmc-checkpoints-list">' + __cpSections + '</div>';
 
             el.innerHTML = html;
         }
