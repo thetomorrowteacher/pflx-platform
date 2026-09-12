@@ -105,7 +105,7 @@ function runProject(proj, opts) {
     check('project: banner image used when present', html.indexOf('https://x/y.png') !== -1);
 })();
 
-// ── PROGRAM CARD ─────────────────────────────────────────────────
+// ── PROGRAM CARD ────────────────────────────────────────────────
 const progSrc = extractFn('ppHomeProgramCardHtml');
 check('program fn found', progSrc.length > 100);
 check('program card 340px/2-per-row', /flex:0 0 340px/.test(progSrc));
@@ -174,7 +174,7 @@ function runProgram(pg, opts) {
 // ── TASK CARD ─────────────────────────────────────────────────────
 const taskSrc = extractFn('ppHomeTaskCardHtml');
 check('task fn found', taskSrc.length > 100);
-check('task card widened to 260px', /flex:0 0 260px/.test(taskSrc));
+check('task card widened to 340px (v189: matches Programs/Projects row)', /flex:0 0 340px/.test(taskSrc));
 check('task card shows linked checkpoint/project tag', /linkTag/.test(taskSrc));
 check('task card shows checklist progress', /checklist\.length/.test(taskSrc));
 check('task card shows badge chips', /rewardBadges/.test(taskSrc));
@@ -212,7 +212,8 @@ function runTask(t, opts) {
     check('task: description rendered', html.indexOf('Draft the intro scene') !== -1);
     check('task: XC chip rendered', html.indexOf('15 XC') !== -1);
     check('task: SUBMITTED state label', html.indexOf('SUBMITTED') !== -1);
-    check('task: checklist progress 2/3 checked', html.indexOf('2/3 checked') !== -1);
+    check('task: checklist items rendered individually (v189)', html.indexOf('step1') !== -1 && html.indexOf('step2') !== -1 && html.indexOf('step3') !== -1);
+    check('task: checked/unchecked item icons both present (v189)', html.indexOf('✅') !== -1 && html.indexOf('⬜') !== -1);
 })();
 
 (function () {
