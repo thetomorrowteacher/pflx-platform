@@ -218,7 +218,7 @@ function makeProjectsSandbox(opts) {
   const fn = new Function(
     'ppGetProjects', 'ppItemAssignedToActivePlayer', 'ppBreadcrumb', 'ppGetCheckpoints',
     'pflxProjectCompletion', 'pflxPlayerCanEnterItem', 'pflxFindCheckpoint', '_mcUrgencyForDueDate',
-    'escapeHtml', 'ppProgressBar', 'ppNav',
+    'escapeHtml', 'ppProgressBar', 'ppNav', 'ppToggleDropdown', 'ppProjectStatsHtml',
     fnBody
   );
   const escapeHtml = function (s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
@@ -233,7 +233,9 @@ function makeProjectsSandbox(opts) {
     opts._mcUrgencyForDueDate || function () { return null; },
     escapeHtml,
     function (pct, color) { return '<bar pct="' + pct + '" color="' + color + '"></bar>'; },
-    function () {}
+    function () {},
+    opts.ppToggleDropdown || function () {},
+    opts.ppProjectStatsHtml || function () { return ''; }
   );
   return ppRenderProjects;
 }

@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 186;
+      window.PFLX_PATCH   = 187;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -30076,6 +30076,201 @@
         }
 
         // ── HOME VIEW — main card-based dashboard ──
+        // -- NETFLIX-STYLE DASHBOARD CAROUSEL ROWS -- (Sept 12, Ennis: "This
+        // UI design functions much like Netflix... Please design the MC
+        // Player Dash exactly like this... There are symbols showing that
+        // there should be sliding effects." Corrected follow-up: "this
+        // should be designed on the dashboard page and scrollable exactly
+        // how I designed it in the picture with scroll effects" -- the
+        // whole redesign lives on the player HOME dashboard itself, not
+        // spread across separate dedicated pages.) A single reusable
+        // horizontally-scrolling row: native overflow-x:auto + scroll-snap
+        // gives free touch/trackpad drag-scroll, a right-edge chevron
+        // button advances the track like a real streaming-service row, and
+        // a small mouse click-drag handler adds the same "grab and drag"
+        // affordance for desktop mice (matching the drag-hand icons in the
+        // mockup). No new library -- CSS scroll-snap + native scrollBy.
+        function ppCarouselRowHtml(opts) {
+            opts = opts || {};
+            var cards = opts.cardsHtml || '';
+            if (!cards) return '';
+            var rowId = 'pp-row-' + (opts.rowId || Math.random().toString(36).slice(2));
+            return '<div style="margin-bottom:26px;">' +
+                '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;flex-wrap:wrap;gap:4px;">' +
+                    '<span style="font-family:Orbitron,sans-serif;font-size:13px;font-weight:900;color:#e0e6ff;letter-spacing:0.1em;">' + (opts.icon ? opts.icon + ' ' : '') + escapeHtml(opts.title || '') + '</span>' +
+                    (opts.subtitle ? '<span style="font-size:10px;color:rgba(255,255,255,0.35);">' + escapeHtml(opts.subtitle) + '</span>' : '') +
+                '</div>' +
+                '<div style="position:relative;">' +
+                    '<div id="' + rowId + '" style="display:flex;gap:14px;overflow-x:auto;scroll-snap-type:x proximity;scroll-behavior:smooth;-webkit-overflow-scrolling:touch;padding:2px 40px 8px 2px;cursor:grab;" onmousedown="pflxCarouselDragStart(event,\'' + rowId + '\')">' +
+                        cards +
+                    '</div>' +
+                    '<button onclick="pflxCarouselScroll(\'' + rowId + '\',1)" style="position:absolute;right:0;top:0;bottom:8px;width:34px;border:none;border-radius:8px;background:linear-gradient(90deg, rgba(10,10,15,0), rgba(10,10,15,0.9) 55%);color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;">&#8250;</button>' +
+                '</div>' +
+            '</div>';
+        }
+        window.ppCarouselRowHtml = ppCarouselRowHtml;
+
+        window.pflxCarouselScroll = function (rowId, dir) {
+            var el = document.getElementById(rowId);
+            if (!el) return;
+            var amount = Math.max(240, Math.round(el.clientWidth * 0.85)) * dir;
+            el.scrollBy({ left: amount, behavior: 'smooth' });
+        };
+
+        // Desktop mouse click-drag-to-scroll. Native overflow-x:auto already
+        // gives touch/trackpad swipe for free -- this only adds the same
+        // grab-and-drag affordance for a mouse. No preventDefault, so a
+        // plain click (zero movement) still fires a card's own onclick
+        // normally on mouseup.
+        window.pflxCarouselDragStart = function (ev, rowId) {
+            var el = document.getElementById(rowId);
+            if (!el) return;
+            var startX = ev.pageX - el.offsetLeft;
+            var startScroll = el.scrollLeft;
+            el.style.cursor = 'grabbing';
+            function onMove(e) {
+                var x = e.pageX - el.offsetLeft;
+                el.scrollLeft = startScroll - (x - startX);
+            }
+            function onUp() {
+                el.style.cursor = 'grab';
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+            }
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        };
+
+        // Compact carousel cards. Checkpoint/Project cards reuse the SAME
+        // ppCheckpointStatsHtml/ppProjectStatsHtml/ppToggleDropdown wired up
+        // for the list-page dropdowns (Sept 12 sub-patch 2) -- same data,
+        // same toggle mechanism, just a smaller card and a distinct DOM-id
+        // prefix (home-cp-/home-pj-) so a checkpoint's home-row card and its
+        // list-page card never collide on id even though only one view is
+        // ever mounted in the DOM at a time.
+        function ppHomeCheckpointCardHtml(cp) {
+            var isActive = cp.status === 'active' || cp.status === 'current';
+            var accentRgb = isActive ? '34,197,94' : cp.status === 'upcoming' ? '79,142,247' : '167,139,250';
+            var key = 'home-cp-' + escapeHtml(String(cp.id || ''));
+            return '<div style="flex:0 0 200px;scroll-snap-align:start;background:rgba(255,255,255,0.02);border:1px solid rgba(' + accentRgb + ',0.25);border-radius:12px;overflow:hidden;cursor:pointer;" onclick="ppNav(\'checkpoint-detail\',{id:\'' + escapeHtml(String(cp.id || '')) + '\'})">' +
+                (cp.bannerImage
+                    ? '<div style="height:90px;overflow:hidden;"><img src="' + escapeHtml(cp.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;" draggable="false"></div>'
+                    : '<div style="height:90px;background:linear-gradient(135deg,rgba(' + accentRgb + ',0.25),rgba(' + accentRgb + ',0.06));display:flex;align-items:center;justify-content:center;font-size:26px;">\u{1F3C1}</div>') +
+                '<div style="padding:10px 12px;">' +
+                    '<div style="font-size:12px;font-weight:800;color:#e0e6ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(cp.name || 'Checkpoint') + '</div>' +
+                    '<div style="display:flex;justify-content:flex-end;margin-top:4px;">' +
+                        '<button onclick="event.stopPropagation();ppToggleDropdown(event,\'' + key + '\')" style="background:none;border:none;color:rgba(255,255,255,0.45);font-size:10px;cursor:pointer;padding:2px 0;">' +
+                        '<span id="pp-arrow-' + key + '">\u25BE</span></button>' +
+                    '</div>' +
+                '</div>' +
+                '<div id="pp-drop-' + key + '" style="display:none;position:relative;z-index:5;" onclick="event.stopPropagation()">' + ppCheckpointStatsHtml(cp) + '</div>' +
+            '</div>';
+        }
+        window.ppHomeCheckpointCardHtml = ppHomeCheckpointCardHtml;
+
+        function ppHomeProjectCardHtml(proj) {
+            var canEnter = (typeof pflxPlayerCanEnterItem === 'function') ? pflxPlayerCanEnterItem(proj, 'project') : true;
+            var key = 'home-pj-' + escapeHtml(String(proj.id || ''));
+            return '<div style="flex:0 0 200px;scroll-snap-align:start;background:rgba(255,255,255,0.02);border:1px solid rgba(167,139,250,0.22);border-radius:12px;overflow:hidden;cursor:pointer;" onclick="ppNav(\'project-detail\',{id:\'' + escapeHtml(String(proj.id || '')) + '\'})">' +
+                (proj.bannerImage
+                    ? '<div style="height:90px;overflow:hidden;position:relative;"><img src="' + escapeHtml(proj.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;" draggable="false">' +
+                      (!canEnter ? '<div style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,0.6);color:#fff;font-size:9px;padding:2px 6px;border-radius:8px;">\u{1F512}</div>' : '') + '</div>'
+                    : '<div style="height:90px;background:linear-gradient(135deg,rgba(167,139,250,0.22),rgba(167,139,250,0.05));display:flex;align-items:center;justify-content:center;font-size:26px;">\u{1F3AC}</div>') +
+                '<div style="padding:10px 12px;">' +
+                    '<div style="font-size:12px;font-weight:800;color:#e0e6ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(proj.name || proj.title || 'Project') + (!canEnter && !proj.bannerImage ? ' \u{1F512}' : '') + '</div>' +
+                    '<div style="display:flex;justify-content:flex-end;margin-top:4px;">' +
+                        '<button onclick="event.stopPropagation();ppToggleDropdown(event,\'' + key + '\')" style="background:none;border:none;color:rgba(255,255,255,0.45);font-size:10px;cursor:pointer;padding:2px 0;">' +
+                        '<span id="pp-arrow-' + key + '">\u25BE</span></button>' +
+                    '</div>' +
+                '</div>' +
+                '<div id="pp-drop-' + key + '" style="display:none;position:relative;z-index:5;" onclick="event.stopPropagation()">' + ppProjectStatsHtml(proj) + '</div>' +
+            '</div>';
+        }
+        window.ppHomeProjectCardHtml = ppHomeProjectCardHtml;
+
+        // Programs are deliberately card-only, no dropdown -- Ennis asked
+        // for "dropdown arrows for Checkpoints, Projects" specifically, not
+        // Programs. Mirrors ppRenderPrograms's own OPEN/LOCKED language.
+        function ppHomeProgramCardHtml(pg) {
+            var canEnter = (typeof pflxPlayerCanEnterItem === 'function') ? pflxPlayerCanEnterItem(pg, 'program') : true;
+            return '<div style="flex:0 0 240px;scroll-snap-align:start;background:rgba(255,255,255,0.02);border:1px solid rgba(0,212,255,0.22);border-radius:12px;overflow:hidden;cursor:pointer;" onclick="ppNav(\'program-detail\',{id:\'' + escapeHtml(String(pg.id || '')) + '\'})">' +
+                (pg.bannerImage
+                    ? '<div style="height:110px;overflow:hidden;"><img src="' + escapeHtml(pg.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;" draggable="false"></div>'
+                    : '<div style="height:110px;background:linear-gradient(135deg,rgba(0,212,255,0.22),rgba(0,212,255,0.05));display:flex;align-items:center;justify-content:center;font-size:30px;">\u{1F4D0}</div>') +
+                '<div style="padding:10px 12px;">' +
+                    '<div style="font-size:12px;font-weight:800;color:#e0e6ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(pg.name || 'Program') + '</div>' +
+                    '<div style="font-size:10px;margin-top:4px;color:' + (canEnter ? '#22c55e' : '#f5c842') + ';font-weight:700;">' + (canEnter ? '\u2713 OPEN' : '\u{1F512} LOCKED') + '</div>' +
+                '</div>' +
+            '</div>';
+        }
+        window.ppHomeProgramCardHtml = ppHomeProgramCardHtml;
+
+        // Task cards mirror the same per-player state check the rest of the
+        // player portal already uses (pflxTaskStateForPlayer) -- same
+        // three-state icon as the checkpoint/project dropdown rows above.
+        function ppHomeTaskCardHtml(t) {
+            var pid = (window.activeSession || {}).id || null;
+            var state = 'open';
+            try { state = pflxTaskStateForPlayer(t, pid); } catch (e) {}
+            var done = state === 'approved';
+            var icon = done ? '\u2705' : state === 'submitted' ? '\u23F3' : '\u2B1C';
+            return '<div onclick="ppNav(\'task-detail\',{id:\'' + escapeHtml(String(t.id || '')) + '\'})" style="flex:0 0 200px;scroll-snap-align:start;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px 14px;cursor:pointer;">' +
+                '<div style="font-size:18px;margin-bottom:6px;">' + icon + '</div>' +
+                '<div style="font-size:12px;font-weight:700;color:#e0e6ff;' + (done ? 'text-decoration:line-through;opacity:0.6;' : '') + '">' + escapeHtml(String(t.title || t.name || 'Task').substring(0, 60)) + '</div>' +
+                ((t.xcReward || t.xc) ? '<div style="font-size:10px;color:#f5c842;margin-top:6px;font-family:monospace;">' + (t.xcReward || t.xc) + ' XC</div>' : '') +
+            '</div>';
+        }
+        window.ppHomeTaskCardHtml = ppHomeTaskCardHtml;
+
+        // Cohort/org info card (Sept 12 mockup: "American School of Dubai /
+        // ASD - falconstudios@asdubai.org / COHORT: Falcon Studios"). Ports
+        // the REAL org data model host admins already manage in
+        // hmcRenderOrgs (ORGANIZATIONS[key] = {name, shortName, contact,
+        // logo, subscription, cohorts, active, ...}), not a fabricated
+        // card -- looks up the org whose cohorts[] contains the active
+        // player's own cohort, the same lookup hmcRenderOrgs itself uses
+        // for its player-count tally. Read-only (no EDIT/DELETE/ROSTER
+        // actions -- those are host-admin tools). Silently omitted when no
+        // matching org exists so a platform not using multi-org tenancy
+        // sees no change.
+        function ppHomeOrgCardHtml() {
+            if (typeof ORGANIZATIONS === 'undefined') return '';
+            var s = window.activeSession || {};
+            var cohort = s.cohort || '';
+            if (!cohort) return '';
+            var org = null;
+            try {
+                var keys = Object.keys(ORGANIZATIONS);
+                for (var i = 0; i < keys.length; i++) {
+                    var candidate = ORGANIZATIONS[keys[i]];
+                    if (candidate && Array.isArray(candidate.cohorts) && candidate.cohorts.indexOf(cohort) !== -1) { org = candidate; break; }
+                }
+            } catch (e) {}
+            if (!org) return '';
+            var tierMeta = (typeof ORG_TIER_META !== 'undefined' ? ORG_TIER_META : {})[org.subscription] || null;
+            var tierColor = tierMeta ? tierMeta.color : '#8a92b0';
+            var tierLabel = tierMeta ? tierMeta.label : String(org.subscription || '').toUpperCase();
+            var orgInitials = (escapeHtml(org.shortName || org.name || '?').replace(/[^A-Za-z0-9]/g, '').slice(0, 3).toUpperCase() || '?');
+            var logoHtml = org.logo
+                ? '<img src="' + escapeHtml(org.logo) + '" alt="" style="width:44px;height:44px;border-radius:10px;object-fit:contain;background:rgba(255,255,255,0.04);border:1px solid ' + tierColor + '40;flex:none;">'
+                : '<div style="width:44px;height:44px;border-radius:10px;background:' + tierColor + '18;border:1px solid ' + tierColor + '40;color:' + tierColor + ';display:flex;align-items:center;justify-content:center;font-family:Orbitron,sans-serif;font-size:13px;flex:none;">' + orgInitials + '</div>';
+            return '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;background:linear-gradient(135deg,rgba(139,92,246,0.08),rgba(0,212,255,0.04));border:1px solid rgba(139,92,246,0.22);border-radius:14px;padding:14px 18px;margin-bottom:22px;flex-wrap:wrap;">' +
+                '<div style="display:flex;align-items:center;gap:12px;min-width:0;">' +
+                    logoHtml +
+                    '<div style="min-width:0;">' +
+                        '<div style="font-family:Orbitron,sans-serif;font-size:13px;color:#e0e6ff;">' + escapeHtml(org.name || '') + '</div>' +
+                        '<div style="font-size:11px;color:#6a7290;">' + escapeHtml(org.shortName || '') + (org.contact ? ' \u00B7 ' + escapeHtml(org.contact) : '') + '</div>' +
+                        '<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:2px;">COHORT: <span style="color:#c4b5fd;font-weight:700;">' + escapeHtml(cohort) + '</span></div>' +
+                    '</div>' +
+                '</div>' +
+                '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' +
+                    '<span style="font-size:9px;padding:3px 10px;border-radius:4px;font-family:Orbitron,sans-serif;letter-spacing:1px;background:' + tierColor + '18;border:1px solid ' + tierColor + '40;color:' + tierColor + ';">' + escapeHtml(tierLabel.toUpperCase()) + '</span>' +
+                    '<span style="font-size:10px;padding:3px 8px;border-radius:4px;background:' + (org.active ? 'rgba(52,211,153,0.1)' : 'rgba(255,51,85,0.1)') + ';color:' + (org.active ? '#34d399' : '#ff3355') + ';border:1px solid ' + (org.active ? 'rgba(52,211,153,0.2)' : 'rgba(255,51,85,0.2)') + ';">' + (org.active ? 'ACTIVE' : 'INACTIVE') + '</span>' +
+                '</div>' +
+            '</div>';
+        }
+        window.ppHomeOrgCardHtml = ppHomeOrgCardHtml;
+
         function ppRenderHome(el) {
             var s = window.activeSession || {};
             var displayName = s.username || s.name || s.brand || 'Player';
@@ -30361,6 +30556,40 @@
                 ppProgressBar(taskPct, '#22c55e') + '</div>';
 
             html += '</div>'; // close grid
+
+            // -- NETFLIX-STYLE DASHBOARD ROWS -- (Sept 12, Ennis: build this
+            // directly on the Dashboard page itself, not as separate pages).
+            html += ppHomeOrgCardHtml();
+            var __homePrograms = (typeof mcPrograms !== 'undefined' && Array.isArray(mcPrograms)) ? mcPrograms : [];
+            if (__homePrograms.length) {
+                html += ppCarouselRowHtml({
+                    rowId: 'programs', icon: '\u{1F4D0}', title: 'PROGRAMS',
+                    subtitle: 'Multi-week runs that generate their own Checkpoints',
+                    cardsHtml: __homePrograms.map(ppHomeProgramCardHtml).join('')
+                });
+            }
+            if (checkpoints.length) {
+                html += ppCarouselRowHtml({
+                    rowId: 'checkpoints', icon: '\u{1F3C1}', title: 'CHECKPOINTS',
+                    subtitle: 'Manage rounds, milestones, and checkpoint schedules.',
+                    cardsHtml: checkpoints.map(ppHomeCheckpointCardHtml).join('')
+                });
+            }
+            var __homeProjects = ppGetProjects().filter(ppItemAssignedToActivePlayer);
+            if (__homeProjects.length) {
+                html += ppCarouselRowHtml({
+                    rowId: 'projects', icon: '\u{1F3AC}', title: 'PROJECTS',
+                    subtitle: 'Manage and complete your Tasks',
+                    cardsHtml: __homeProjects.map(ppHomeProjectCardHtml).join('')
+                });
+            }
+            if (tasks.length) {
+                html += ppCarouselRowHtml({
+                    rowId: 'tasks', icon: '\u2705', title: 'TASKS',
+                    subtitle: 'Manage and complete your Tasks',
+                    cardsHtml: tasks.map(ppHomeTaskCardHtml).join('')
+                });
+            }
 
             // ── Upcoming Deadlines ──
             var deadlines = checkpoints.filter(function(c) { return c.endDate; }).sort(function(a, b) {
