@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 185;
+      window.PFLX_PATCH   = 186;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -29811,6 +29811,137 @@
                 '<div style="height:100%;width:' + Math.min(100, Math.max(0, pct)) + '%;background:' + color + ';border-radius:4px;transition:width 0.5s ease;"></div></div>';
         }
 
+        // -- LIST-CARD DROPDOWNS -- "more info & stats" (Sept 12, Ennis:
+        // "Those dropdowns should be the player version of what the host
+        // sees in the Projects, Checkpoints, etc."). The host's own
+        // Checkpoint/Project cards already show a MISSION CONTENTS /
+        // CHECKPOINT PROGRESS panel inline in the list (mcRenderCheckpoints/
+        // mcRenderProjects) rather than requiring a click into a separate
+        // detail page. These two functions give the player's list cards the
+        // same category of inline info -- their own progress stats plus a
+        // Projects/Tasks contents breakdown -- reusing the exact same data
+        // helpers the player detail pages already use
+        // (pflxPlayerCheckpointProgress, pflxProjectCompletion,
+        // pflxTaskStateForPlayer, ppItemInCheckpoint,
+        // ppItemAssignedToActivePlayer, pflxPlayerCanEnterItem,
+        // _mcUrgencyForDueDate) so the numbers can never drift from what the
+        // full detail page shows -- just a smaller-footprint layout suited
+        // to an inline dropdown instead of a full-page hero. Collapsed by
+        // default (window.ppToggleDropdown below); a row click inside the
+        // panel still navigates to that item's own detail via ppNav, with
+        // stopPropagation so it never double-fires the outer card's own
+        // click-through.
+        function ppCheckpointStatsHtml(cp) {
+            if (!cp) return '';
+            var pid = (window.activeSession || {}).id || null;
+            var prog = null;
+            try {
+                prog = pflxPlayerCheckpointProgress(cp, { id: pid, cohort: (window.activeSession || {}).cohort, cohorts: (window.activeSession || {}).cohorts });
+            } catch (e) {}
+            prog = prog || { approved: 0, total: 0, pct: cp.progress || 0 };
+            var urg = (typeof _mcUrgencyForDueDate === 'function') ? _mcUrgencyForDueDate(cp.endDate || cp.dueDate) : null;
+
+            var html = '<div style="padding:14px 16px;background:rgba(255,255,255,0.02);border-top:1px solid rgba(255,255,255,0.08);">';
+            html += '<div style="margin-bottom:12px;">' +
+                '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">' +
+                '<span style="font-family:Orbitron,sans-serif;font-size:10px;color:rgba(255,255,255,0.5);letter-spacing:0.1em;">YOUR PROGRESS</span>' +
+                '<span style="font-size:13px;color:' + (prog.pct === 100 ? '#22c55e' : '#ffffff') + ';font-weight:900;font-family:monospace;">' + prog.pct + '%</span></div>' +
+                ppProgressBar(prog.pct, prog.pct === 100 ? '#22c55e' : '#00d4ff') +
+                '<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:6px;">' + prog.approved + ' of ' + prog.total + ' of your tasks approved' +
+                (urg && urg.label ? ' &middot; <span style="color:rgba(' + urg.rgb + ',1);">' + escapeHtml(urg.label) + '</span>' : '') + '</div></div>';
+
+            var allTasks = ppGetTasks().filter(function (t) { return ppItemInCheckpoint(t, cp.id) && ppItemAssignedToActivePlayer(t); });
+            var projects = ppGetProjects().filter(function (p) { return ppItemInCheckpoint(p, cp.id); });
+            var standaloneTasks = allTasks.filter(function (t) { return !t.projectId; });
+
+            function rowState(t) { try { return pflxTaskStateForPlayer(t, pid); } catch (e) { return 'open'; } }
+            function statusIcon(t) {
+                var st = rowState(t);
+                if (st === 'approved') return '\u2705';
+                if (st === 'submitted') return '\u23F3';
+                return '\u2B1C';
+            }
+
+            if (projects.length || standaloneTasks.length) {
+                html += '<div style="font-family:Orbitron,sans-serif;font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:0.1em;margin-bottom:8px;">CONTENTS</div>';
+                projects.forEach(function (proj) {
+                    var canEnter = (typeof pflxPlayerCanEnterItem === 'function') ? pflxPlayerCanEnterItem(proj, 'project') : true;
+                    var projTasks = allTasks.filter(function (t) { return t.projectId === proj.id; });
+                    var projDone = projTasks.filter(function (t) { return rowState(t) === 'approved'; }).length;
+                    html += '<div onclick="event.stopPropagation();ppNav(\'project-detail\',{id:\'' + escapeHtml(String(proj.id || '')) + '\'})" style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:rgba(139,92,246,0.06);border:1px solid rgba(139,92,246,0.2);border-radius:8px;margin-bottom:6px;cursor:pointer;">' +
+                        '<span style="font-size:12px;color:#c4b5fd;">' + escapeHtml(proj.name || proj.title || 'Project') + (!canEnter ? ' \u{1F512}' : '') + '</span>' +
+                        '<span style="font-size:10px;color:rgba(255,255,255,0.4);font-family:monospace;">' + projDone + '/' + projTasks.length + '</span></div>';
+                });
+                standaloneTasks.forEach(function (t) {
+                    html += '<div onclick="event.stopPropagation();ppNav(\'task-detail\',{id:\'' + escapeHtml(String(t.id || '')) + '\'})" style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:rgba(79,142,247,0.05);border:1px solid rgba(79,142,247,0.18);border-radius:8px;margin-bottom:6px;cursor:pointer;">' +
+                        '<span style="font-size:12px;color:#c9d6ff;">' + statusIcon(t) + ' ' + escapeHtml(t.title || t.name || 'Task') + '</span>' +
+                        ((t.xcReward || t.xc) ? '<span style="font-size:10px;color:#f5c842;font-family:monospace;">' + (t.xcReward || t.xc) + ' XC</span>' : '') + '</div>';
+                });
+            } else {
+                html += '<div style="font-size:11px;color:rgba(255,255,255,0.3);text-align:center;padding:10px;">No tasks or projects yet.</div>';
+            }
+            html += '</div>';
+            return html;
+        }
+        window.ppCheckpointStatsHtml = ppCheckpointStatsHtml;
+
+        function ppProjectStatsHtml(proj) {
+            if (!proj) return '';
+            var comp = (typeof pflxProjectCompletion === 'function') ? pflxProjectCompletion(proj) : { pct: proj.progress || 0, done: 0, total: 0, tasks: [] };
+            var urg = (typeof _mcUrgencyForDueDate === 'function') ? _mcUrgencyForDueDate(proj.dueDate || proj.endDate || proj.deadline) : null;
+            var pid = (window.activeSession || {}).id || null;
+
+            var html = '<div style="padding:14px 16px;background:rgba(255,255,255,0.02);border-top:1px solid rgba(255,255,255,0.08);">';
+            html += '<div style="margin-bottom:12px;">' +
+                '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">' +
+                '<span style="font-family:Orbitron,sans-serif;font-size:10px;color:rgba(255,255,255,0.5);letter-spacing:0.1em;">YOUR PROGRESS</span>' +
+                '<span style="font-size:13px;color:' + (comp.pct === 100 ? '#22c55e' : '#ffffff') + ';font-weight:900;font-family:monospace;">' + comp.pct + '%</span></div>' +
+                ppProgressBar(comp.pct, comp.pct === 100 ? '#22c55e' : '#a78bfa') +
+                '<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:6px;">' + comp.done + ' of ' + comp.total + ' assignments completed' +
+                (urg && urg.label ? ' &middot; <span style="color:rgba(' + urg.rgb + ',1);">' + escapeHtml(urg.label) + '</span>' : '') + '</div></div>';
+
+            var projTaskIds = Array.isArray(proj.taskIds) ? proj.taskIds : [];
+            var tasks = ppGetTasks().filter(function (t) {
+                if (!t) return false;
+                var linked = t.projectId === proj.id || projTaskIds.indexOf(t.id) !== -1;
+                return linked && ppItemAssignedToActivePlayer(t);
+            });
+
+            function rowState(t) { try { return pflxTaskStateForPlayer(t, pid); } catch (e) { return 'open'; } }
+            function statusIcon(t) {
+                var st = rowState(t);
+                if (st === 'approved') return '\u2705';
+                if (st === 'submitted') return '\u23F3';
+                return '\u2B1C';
+            }
+
+            if (tasks.length) {
+                html += '<div style="font-family:Orbitron,sans-serif;font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:0.1em;margin-bottom:8px;">TASKS</div>';
+                tasks.forEach(function (t) {
+                    html += '<div onclick="event.stopPropagation();ppNav(\'task-detail\',{id:\'' + escapeHtml(String(t.id || '')) + '\'})" style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:rgba(79,142,247,0.05);border:1px solid rgba(79,142,247,0.18);border-radius:8px;margin-bottom:6px;cursor:pointer;">' +
+                        '<span style="font-size:12px;color:#c9d6ff;">' + statusIcon(t) + ' ' + escapeHtml(t.title || t.name || 'Task') + '</span>' +
+                        ((t.xcReward || t.xc) ? '<span style="font-size:10px;color:#f5c842;font-family:monospace;">' + (t.xcReward || t.xc) + ' XC</span>' : '') + '</div>';
+                });
+            } else {
+                html += '<div style="font-size:11px;color:rgba(255,255,255,0.3);text-align:center;padding:10px;">No tasks yet.</div>';
+            }
+            html += '</div>';
+            return html;
+        }
+        window.ppProjectStatsHtml = ppProjectStatsHtml;
+
+        // Collapsed by default; toggling never triggers the outer card's own
+        // onclick (ppNav to the full detail page) via stopPropagation.
+        window.ppToggleDropdown = function (ev, key) {
+            if (ev && ev.stopPropagation) ev.stopPropagation();
+            var panel = document.getElementById('pp-drop-' + key);
+            var arrow = document.getElementById('pp-arrow-' + key);
+            if (!panel) return;
+            var isOpen = panel.style.display === 'block';
+            panel.style.display = isOpen ? 'none' : 'block';
+            if (arrow) arrow.innerHTML = isOpen ? '\u25BE' : '\u25B4';
+        };
+
 
         // -- PLAYER CALENDAR -- read-only view of the player's own scheduled
         // items (Sept 12, Ennis's MC Player Dashboard redesign mockup shows
@@ -30702,6 +30833,14 @@
                 }
 
                 // Close padded body, then the outer card.
+                // Sept 12 (Ennis: "dropdown arrows for Checkpoints, Projects,
+                // to see more info and stats" -- the player version of what
+                // the host already sees on their own cards). Collapsed by
+                // default; expanding never navigates away from the list.
+                html += '<div style="display:flex;justify-content:flex-end;margin-top:6px;">' +
+                    '<button onclick="ppToggleDropdown(event,\'cp-' + escapeHtml(String(cp.id || '')) + '\')" style="background:none;border:none;color:rgba(255,255,255,0.45);font-size:11px;cursor:pointer;padding:4px 8px;display:flex;align-items:center;gap:4px;">' +
+                    '<span id="pp-arrow-cp-' + escapeHtml(String(cp.id || '')) + '">\u25BE</span> More info &amp; stats</button></div>';
+                html += '<div id="pp-drop-cp-' + escapeHtml(String(cp.id || '')) + '" style="display:none;" onclick="event.stopPropagation()">' + ppCheckpointStatsHtml(cp) + '</div>';
                 html += '</div></div>';
             });
 
@@ -30772,6 +30911,14 @@
                     ((proj.xcRewardPool || proj.xcReward) ? '<span style="font-family:\'Share Tech Mono\',monospace;font-size:12px;color:#f5c842;font-weight:700;">' + (proj.xcRewardPool || proj.xcReward) + ' XC</span>' : '') +
                     (urg && urg.label ? '<span style="font-size:10px;color:rgba(' + urg.rgb + ',1);">' + escapeHtml(urg.label) + '</span>' : '') +
                     '</div>';
+                // Sept 12 (Ennis: dropdown arrows for Checkpoints/Projects to
+                // see more info and stats -- the player version of what the
+                // host already sees on their own cards). Collapsed by
+                // default; expanding never navigates away from the list.
+                html += '<div style="display:flex;justify-content:flex-end;margin-top:6px;">' +
+                    '<button onclick="ppToggleDropdown(event,\'pj-' + escapeHtml(String(proj.id || '')) + '\')" style="background:none;border:none;color:rgba(255,255,255,0.45);font-size:11px;cursor:pointer;padding:4px 8px;display:flex;align-items:center;gap:4px;">' +
+                    '<span id="pp-arrow-pj-' + escapeHtml(String(proj.id || '')) + '">\u25BE</span> More info &amp; stats</button></div>';
+                html += '<div id="pp-drop-pj-' + escapeHtml(String(proj.id || '')) + '" style="display:none;" onclick="event.stopPropagation()">' + ppProjectStatsHtml(proj) + '</div>';
                 html += '</div></div>';
             });
 
