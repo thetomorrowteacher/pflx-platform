@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 180;
+      window.PFLX_PATCH   = 181;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -13611,6 +13611,7 @@
                 <div class="xbot-mode-tabs">
                     <button class="xbot-mode-tab active" data-mode="chat" onclick="switchXBotMode('chat')">Chat</button>
                     <button class="xbot-mode-tab" data-mode="voice" onclick="switchXBotMode('voice')">Voice</button>
+                    <button class="xbot-mode-tab" data-mode="notes" onclick="switchXBotMode('notes')">📝 Notes</button>
                     <button class="xbot-mode-tab" data-mode="host" onclick="switchXBotMode('host')" id="xbot-tab-host" style="display:none;">Host</button>
                     <button class="xbot-mode-tab" data-mode="live" onclick="switchXBotMode('live')" id="xbot-tab-live" style="display:none;">🔴 Live</button>
                     <button class="xbot-mode-tab" data-mode="eng" onclick="switchXBotMode('eng')" id="xbot-tab-eng" style="display:none;">Dev</button>
@@ -14023,6 +14024,17 @@
                     <div id="xbot-eng-errors" style="max-height:200px;overflow-y:auto;padding:8px;background:rgba(239,68,68,0.03);border:1px solid rgba(239,68,68,0.1);border-radius:8px;font-family:'Share Tech Mono',monospace;font-size:10px;color:#6a7290;">
                         No errors logged.
                     </div>
+                </div>
+
+                <!-- v181 -- xb-10: private, per-user per-session Notes.
+                     Autosaves to Supabase (pflx_xbot_notes_<sessionId>),
+                     same single-writer per-entity-row convention as
+                     pflx_player_<id>/pflx_xbot_briefing_<id>. -->
+                <div id="xbot-notes-section" style="flex:1;overflow-y:auto;padding:16px;display:none;">
+                    <div style="font-family:'Orbitron',sans-serif;font-size:10px;color:rgba(0,240,255,0.7);letter-spacing:2px;margin-bottom:10px;">MY NOTES</div>
+                    <div style="font-size:11px;color:#6a7290;margin-bottom:10px;">Private to you for this session — nobody else can see these, including the host.</div>
+                    <textarea id="xbot-notes-textarea" oninput="window.xbotNotesScheduleSave()" placeholder="Jot down anything you want to remember..." style="width:100%;min-height:200px;padding:10px;background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.12);border-radius:8px;color:#e0e6ff;font-family:'Rajdhani',sans-serif;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
+                    <div id="xbot-notes-status" style="margin-top:8px;font-size:10px;color:#6a7290;"></div>
                 </div>
 
                 <!-- Input Area -->
@@ -57140,6 +57152,92 @@
             setTimeout(function () { if (typeof window.xbotLiveRenderYtStatus === 'function') window.xbotLiveRenderYtStatus(); }, 300);
         };
 
+        // ══ PATCH PLATFORM v181 -- xb-10: private, per-user per-session
+        // Notes panel. The cloud key mirrors the file's own existing
+        // single-writer per-entity-row convention (pflx_player_<id>,
+        // pflx_xbot_briefing_<id> from v179) -- exactly one writer (the
+        // note's owner) ever touches this row, so no merge design is
+        // needed beyond a normal read-then-write.
+        window.pflxXBotNotesCloudKey = function (session) {
+            if (!session || !session.id) return null;
+            return 'pflx_xbot_notes_' + session.id;
+        };
+        // Pure formatter -- extracted so the "last saved" label is
+        // testable without mocking the DOM or the system clock's effect
+        // on rendering.
+        window.xbotNotesFormatSavedTime = function (d) {
+            d = d || new Date();
+            var h = d.getHours(), m = d.getMinutes();
+            var ampm = h >= 12 ? 'PM' : 'AM';
+            var h12 = h % 12; if (h12 === 0) h12 = 12;
+            var mm = m < 10 ? '0' + m : '' + m;
+            return 'Saved ' + h12 + ':' + mm + ' ' + ampm;
+        };
+        var xbotNotesSaveTimer = null;
+        var xbotNotesLoadedKey = null;
+        window.xbotNotesLoad = async function () {
+            var ta = document.getElementById('xbot-notes-textarea');
+            var status = document.getElementById('xbot-notes-status');
+            if (!ta) return;
+            try {
+                var session = window.activeSession;
+                var key = window.pflxXBotNotesCloudKey(session);
+                if (!key) {
+                    ta.value = '';
+                    ta.disabled = true;
+                    xbotNotesLoadedKey = null;
+                    if (status) status.textContent = 'Log in to keep notes.';
+                    return;
+                }
+                ta.disabled = false;
+                // Don't clobber in-progress typing if this tab is reopened
+                // for the SAME session it already loaded notes for.
+                if (xbotNotesLoadedKey === key) return;
+                if (status) status.textContent = 'Loading…';
+                var text = '';
+                try {
+                    var sb = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                    if (sb) {
+                        var res = await sb.from('app_data').select('data').eq('key', key).maybeSingle();
+                        if (res && res.data && res.data.data && typeof res.data.data.text === 'string') {
+                            text = res.data.data.text;
+                        }
+                    }
+                } catch (e) { console.warn('[xbot-notes] load failed', e); }
+                ta.value = text;
+                xbotNotesLoadedKey = key;
+                if (status) status.textContent = text ? window.xbotNotesFormatSavedTime() : '';
+            } catch (e) { console.warn('[xbot-notes] load orchestrator failed', e); }
+        };
+        window.xbotNotesScheduleSave = function () {
+            var status = document.getElementById('xbot-notes-status');
+            if (status) status.textContent = 'Typing…';
+            if (xbotNotesSaveTimer) clearTimeout(xbotNotesSaveTimer);
+            xbotNotesSaveTimer = setTimeout(function () { window.xbotNotesSaveNow(); }, 900);
+        };
+        window.xbotNotesSaveNow = async function () {
+            var ta = document.getElementById('xbot-notes-textarea');
+            var status = document.getElementById('xbot-notes-status');
+            if (!ta) return;
+            try {
+                var session = window.activeSession;
+                var key = window.pflxXBotNotesCloudKey(session);
+                if (!key) return;
+                if (status) status.textContent = 'Saving…';
+                var sb = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (!sb) { if (status) status.textContent = 'Not saved (offline)'; return; }
+                await sb.from('app_data').upsert(
+                    { key: key, data: { text: ta.value }, updated_at: new Date().toISOString() },
+                    { onConflict: 'key' }
+                );
+                xbotNotesLoadedKey = key;
+                if (status) status.textContent = window.xbotNotesFormatSavedTime();
+            } catch (e) {
+                console.warn('[xbot-notes] save failed', e);
+                if (status) status.textContent = 'Not saved (error) — will retry on next edit';
+            }
+        };
+
         // ══ PATCH PLATFORM v174 -- xc-3: Theater watch panel, ported from
         // X-Live's own rTheater()/theaterWatch()/theaterStopWatching().
         // Reads the SAME 'sessions' Supabase collection the xb-1 bridge
@@ -57566,12 +57664,14 @@
             var hostSection = document.getElementById('xbot-host-section');
             var engSection = document.getElementById('xbot-eng-section');
             var liveSection = document.getElementById('xbot-live-section');
+            var notesSection = document.getElementById('xbot-notes-section');
 
             // Hide all optional sections
             if (settingsSection) settingsSection.style.display = 'none';
             if (hostSection) hostSection.style.display = 'none';
             if (engSection) engSection.style.display = 'none';
             if (liveSection) liveSection.style.display = 'none';
+            if (notesSection) notesSection.style.display = 'none';
 
             if (mode === 'voice') {
                 voiceSection.classList.remove('hidden');
@@ -57591,6 +57691,15 @@
                 if (hostSection) {
                     hostSection.style.display = 'block';
                     xbotHostSyncEQ();
+                }
+            } else if (mode === 'notes') {
+                voiceSection.classList.add('hidden');
+                chatMessages.style.display = 'none';
+                quickActions.style.display = 'none';
+                inputArea.style.display = 'none';
+                if (notesSection) {
+                    notesSection.style.display = 'block';
+                    if (typeof window.xbotNotesLoad === 'function') window.xbotNotesLoad();
                 }
             } else if (mode === 'live') {
                 voiceSection.classList.add('hidden');
