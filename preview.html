@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 179;
+      window.PFLX_PATCH   = 180;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -13973,6 +13973,23 @@
                             <span style="font-size:20px;">🔊</span>
                             <div><div>Noise Meter</div><div style="font-size:10px;color:#6a7290;font-weight:400;">Toggle the classroom noise-level monitor</div></div>
                         </button>
+                        <!-- v180 -- xb-5: screen share via the ALREADY-WORKING
+                             OBS/YouTube relay (ytCreateBroadcast/ytStartBroadcastById/
+                             ytStopBroadcast -- all real, all live in Mission
+                             Control's own Settings -> YouTube API panel).
+                             Broadcast CREATION is intentionally NOT
+                             reimplemented here -- see xbotLiveRenderYtStatus
+                             below for why. -->
+                        <div style="margin-top:8px;padding:12px 14px;background:rgba(255,0,80,0.05);border:1px solid rgba(255,0,80,0.18);border-radius:8px;">
+                            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                                <span style="font-size:20px;">📡</span>
+                                <div style="font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:600;color:#ff8fb3;">Go Live (Screen) — via OBS/YouTube</div>
+                            </div>
+                            <div id="xbot-yt-live-status" style="font-size:11px;color:#c9cfe8;line-height:1.5;"></div>
+                            <div style="font-size:10px;color:#6a7290;line-height:1.5;margin-top:8px;">
+                                Honest limits: one-way only (no player mic/camera back), typically 10-30s of delay, and you still start the stream in OBS yourself — X-Live doesn't control OBS.
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -45032,6 +45049,17 @@
             window.ytOpenInYouTube = ytOpenInYouTube;
             window.ytInitPanel = ytInitPanel;
             window.ytLoadSettingsUI = ytLoadSettingsUI;
+            // v180 -- xb-5 (X-Bot Live Tools "Go Live (Screen)" card): a
+            // pure READ-ONLY status getter, added so X-Bot can show real
+            // connection/broadcast state without exposing or duplicating
+            // any of the OAuth/API logic above.
+            window.ytGetLiveStatus = function () {
+                return {
+                    connected: !!(ytConfig.apiKey && ytConfig.channelId),
+                    authorized: !!ytConfig.accessToken,
+                    activeBroadcast: ytActiveBroadcast ? { id: ytActiveBroadcast.id, title: ytActiveBroadcast.title } : null
+                };
+            };
         })();
 
         // ═══════════════════════════════════════════════════════════
@@ -56950,6 +56978,7 @@
             if (tab === 'theater') window.xbotTheaterRenderList();
             if (tab === 'sound') window.xbotSoundboardRenderGrid();
             if (tab === 'controller') window.xbotControllerRenderGrid();
+            if (tab === 'tools') window.xbotLiveRenderYtStatus();
         };
         window.pflxXBotRenderTeams = async function () {
             var grid = document.getElementById('xbot-teams-grid');
@@ -57066,6 +57095,49 @@
         };
         window.xbotLiveOpenNoiseTool = function () {
             if (typeof window.mcToggleNoiseMeter === 'function') window.mcToggleNoiseMeter();
+        };
+
+        // v180 -- xb-5: screen share via the already-working OBS/YouTube
+        // relay. Reads real state through the new read-only
+        // ytGetLiveStatus() getter (added to the YouTube Live API Engine
+        // IIFE further down) rather than duplicating ytConfig/
+        // ytActiveBroadcast, which are private to that closure.
+        // Broadcast CREATION is intentionally NOT reimplemented here --
+        // ytCreateBroadcast() reads specific Settings-page DOM inputs
+        // (#yt-broadcast-title etc.), so this deep-links to that real,
+        // already-built flow instead of forking a second, DOM-independent
+        // creation path that could drift from it. Only ytStopBroadcast()
+        // (a clean, ID-free, already-active-broadcast call) is invoked
+        // directly, matching the pure-delegation pattern above.
+        window.xbotLiveRenderYtStatus = function () {
+            var el = document.getElementById('xbot-yt-live-status');
+            if (!el) return;
+            var status = (typeof window.ytGetLiveStatus === 'function')
+                ? window.ytGetLiveStatus()
+                : { connected: false, authorized: false, activeBroadcast: null };
+            if (status.activeBroadcast) {
+                el.innerHTML = '🔴 <strong>LIVE:</strong> ' + escapeHtml(status.activeBroadcast.title) +
+                    '<button onclick="xbotLiveEndYouTubeStream()" style="display:block;margin-top:8px;width:100%;padding:8px;background:rgba(255,0,80,0.15);border:1px solid rgba(255,0,80,0.4);border-radius:6px;color:#ff5588;font-family:\'Orbitron\',sans-serif;font-size:10px;letter-spacing:1px;cursor:pointer;">⏹ END STREAM</button>';
+            } else if (status.authorized) {
+                el.innerHTML = 'Connected, no broadcast running yet.' +
+                    '<button onclick="xbotLiveOpenYouTubeSetup()" style="display:block;margin-top:8px;width:100%;padding:8px;background:rgba(0,240,255,0.08);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-family:\'Orbitron\',sans-serif;font-size:10px;letter-spacing:1px;cursor:pointer;">⚙ OPEN YOUTUBE SETUP →</button>';
+            } else {
+                el.innerHTML = 'Not connected to YouTube yet.' +
+                    '<button onclick="xbotLiveOpenYouTubeSetup()" style="display:block;margin-top:8px;width:100%;padding:8px;background:rgba(0,240,255,0.08);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-family:\'Orbitron\',sans-serif;font-size:10px;letter-spacing:1px;cursor:pointer;">⚙ OPEN YOUTUBE SETUP →</button>';
+            }
+        };
+        window.xbotLiveOpenYouTubeSetup = function () {
+            if (typeof navigateTo === 'function') navigateTo('mission-control');
+            setTimeout(function () {
+                if (typeof mcNav === 'function') mcNav('mcsettings');
+                setTimeout(function () {
+                    if (typeof mcSettingsTab === 'function') mcSettingsTab('youtube');
+                }, 120);
+            }, 120);
+        };
+        window.xbotLiveEndYouTubeStream = function () {
+            if (typeof window.ytStopBroadcast === 'function') window.ytStopBroadcast();
+            setTimeout(function () { if (typeof window.xbotLiveRenderYtStatus === 'function') window.xbotLiveRenderYtStatus(); }, 300);
         };
 
         // ══ PATCH PLATFORM v174 -- xc-3: Theater watch panel, ported from
