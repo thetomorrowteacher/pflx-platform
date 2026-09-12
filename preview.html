@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 177;
+      window.PFLX_PATCH   = 178;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -13842,6 +13842,7 @@
                         <button class="xbot-live-subtab" data-subtab="theater" onclick="xbotLiveSwitchSubTab('theater')">🎬 THEATER</button>
                         <button class="xbot-live-subtab" data-subtab="sound" onclick="xbotLiveSwitchSubTab('sound')">🔊 SOUND</button>
                         <button class="xbot-live-subtab" data-subtab="controller" onclick="xbotLiveSwitchSubTab('controller')">🎛 CONTROLLER</button>
+                        <button class="xbot-live-subtab" data-subtab="tools" onclick="xbotLiveSwitchSubTab('tools')">🛠 TOOLS</button>
                     </div>
                     <div id="xbot-live-sessions-panel">
                         <div style="font-size:10px;color:#6a7290;font-family:'Rajdhani',sans-serif;line-height:1.5;margin-bottom:12px;">
@@ -13944,6 +13945,34 @@
                                 </div>
                             </div>
                         </div>
+                    </div>
+                    <!-- v178 -- xb-4: consolidated Live Tools launcher.
+                         BOTH pieces already exist as real, working PFLX
+                         features -- this adds zero new award/noise
+                         logic, just one-tap launchers from the Live tab
+                         instead of requiring a trip to the Host tab
+                         (Award/Fine/Badges) or Mission Control (Noise
+                         Meter). Confirmed via grep before building:
+                         #pip-xcoin (opened by pflxXcPipOpen()) already
+                         has a full player-target picker, Give/Fine XC
+                         amounts, custom amounts, and 4 badge quick-
+                         awards, writing through the real mcPlayers +
+                         mcSaveData()/mcBroadcastToApps() path -- and
+                         mcToggleNoiseMeter() is the same real function
+                         the Controller Grid's 'noise' action (v176)
+                         already dispatches to. -->
+                    <div id="xbot-live-tools-panel" style="display:none;">
+                        <div style="font-size:10px;color:#6a7290;font-family:'Rajdhani',sans-serif;line-height:1.5;margin-bottom:12px;">
+                            🛠 One-tap access to tools that already exist elsewhere in PFLX -- nothing new is happening behind these, just a shortcut from the Live tab.
+                        </div>
+                        <button onclick="xbotLiveOpenAwardTool()" style="width:100%;display:flex;align-items:center;gap:10px;padding:12px 14px;background:rgba(167,139,250,0.08);border:1px solid rgba(167,139,250,0.25);border-radius:8px;color:#a78bfa;cursor:pointer;font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:600;text-align:left;margin-bottom:8px;">
+                            <span style="font-size:20px;">🪙</span>
+                            <div><div>Award / Fine XC + Badges</div><div style="font-size:10px;color:#6a7290;font-weight:400;">Opens the X-Coin quick-award remote</div></div>
+                        </button>
+                        <button onclick="xbotLiveOpenNoiseTool()" style="width:100%;display:flex;align-items:center;gap:10px;padding:12px 14px;background:rgba(0,240,255,0.06);border:1px solid rgba(0,240,255,0.15);border-radius:8px;color:#e0e6ff;cursor:pointer;font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:600;text-align:left;">
+                            <span style="font-size:20px;">🔊</span>
+                            <div><div>Noise Meter</div><div style="font-size:10px;color:#6a7290;font-weight:400;">Toggle the classroom noise-level monitor</div></div>
+                        </button>
                     </div>
                 </div>
 
@@ -56792,7 +56821,7 @@
             // v174 -- generalized to a panel-id map so a third (Theater)
             // sub-tab slots in without duplicating the sessions/teams
             // toggle logic; sessions/teams behavior is unchanged.
-            var panels = { sessions: 'xbot-live-sessions-panel', teams: 'xbot-live-teams-panel', theater: 'xbot-live-theater-panel', sound: 'xbot-live-sound-panel', controller: 'xbot-live-controller-panel' };
+            var panels = { sessions: 'xbot-live-sessions-panel', teams: 'xbot-live-teams-panel', theater: 'xbot-live-theater-panel', sound: 'xbot-live-sound-panel', controller: 'xbot-live-controller-panel', tools: 'xbot-live-tools-panel' };
             Object.keys(panels).forEach(function (key) {
                 var el = document.getElementById(panels[key]);
                 if (el) el.style.display = (key === tab) ? 'block' : 'none';
@@ -56905,6 +56934,18 @@
             await window.pflxXBotSaveCfg(cfg);
             window._xbotLiveCfg = cfg;
             window.pflxXBotRenderTeams();
+        };
+
+        // v178 -- xb-4: Live Tools launchers. Pure delegation, no new
+        // award/noise logic -- pflxXcPipOpen and mcToggleNoiseMeter are
+        // both real, already-shipped functions used elsewhere in the
+        // platform (the Host tab's Widget Remotes row, and the
+        // Controller Grid's 'noise' action respectively).
+        window.xbotLiveOpenAwardTool = function () {
+            if (typeof window.pflxXcPipOpen === 'function') window.pflxXcPipOpen();
+        };
+        window.xbotLiveOpenNoiseTool = function () {
+            if (typeof window.mcToggleNoiseMeter === 'function') window.mcToggleNoiseMeter();
         };
 
         // ══ PATCH PLATFORM v174 -- xc-3: Theater watch panel, ported from
