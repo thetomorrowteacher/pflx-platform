@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 184;
+      window.PFLX_PATCH   = 185;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -7659,7 +7659,7 @@
                                      Checkpoint, Project, and Task with a date, on one
                                      month grid. Deliberately sits above Checkpoints since
                                      it spans the whole hierarchy, not just one level. -->
-                                <button class="mc-nav-btn mc-host-only" data-mc="calendar" onclick="mcNav('calendar')">
+                                <button class="mc-nav-btn" data-mc="calendar" onclick="mcNav('calendar')">
                                     <span class="mc-icon">&#x1F4C5;</span> Calendar
                                 </button>
                                 <!-- v1.47 (Ennis) — hierarchy order in the sidebar now
@@ -7700,6 +7700,16 @@
                                      label changes here. -->
                                 <button class="mc-nav-btn" data-mc="pitches" onclick="mcNav('pitches')">
                                     <span class="mc-icon">&#x1F4A1;</span> Proposals
+                                </button>
+                                <!-- Sept 12 (Ennis, MC Player Dashboard redesign mockup) --
+                                     real account Settings, reachable from the sidebar like
+                                     every other item in the mockup. Reuses the SAME
+                                     navigateTo('settings') the profile dropdown already
+                                     calls -- not the host-only mcsettings config panel
+                                     below, which is platform administration, not a
+                                     player/host's own account settings. -->
+                                <button class="mc-nav-btn" data-mc="acctsettings" onclick="if(typeof navigateTo==='function'){navigateTo('settings');}">
+                                    <span class="mc-icon">&#x2699;</span> Settings
                                 </button>
                                 <button class="mc-nav-btn mc-host-only" data-mc="cohortgroups" onclick="mcNav('cohortgroups')">
                                     <span class="mc-icon">&#x1F465;</span> Cohort Groups
@@ -28661,11 +28671,20 @@
             if (window.pflxRole === 'player') {
                 var playerRoutes = {
                     'dashboard': 'home', 'checkpoints': 'checkpoints', 'tasks': 'tasks',
-                    'jobboard': 'jobs', 'projects': 'checkpoints', 'pitches': 'home',
+                    'jobboard': 'jobs',
+                    // Sept 12 fix (MC Player Dashboard redesign) -- this used
+                    // to alias 'projects' to the Checkpoints view because no
+                    // top-level Projects list existed yet; ppRenderProjects
+                    // now gives it a real page of its own.
+                    'projects': 'projects', 'pitches': 'home',
                     'studios': 'season', 'sessions': 'home', 'media': 'home', 'announcements': 'home',
                     // v1.71 — Season/Program tabs now visible to every player
                     // (see the nav buttons below, which lost mc-host-only).
-                    'seasons': 'season', 'programs': 'programs'
+                    'seasons': 'season', 'programs': 'programs',
+                    // Sept 12 (MC Player Dashboard redesign) -- Calendar is
+                    // now a real player-safe view (ppRenderCalendar), not
+                    // host-only.
+                    'calendar': 'calendar'
                 };
                 if (playerRoutes[tab] !== undefined) {
                     // Highlight sidebar button
@@ -28938,11 +28957,13 @@
                 case 'program-detail': ppRenderProgramDetail(container); break;
                 case 'checkpoints': ppRenderCheckpoints(container); break;
                 case 'checkpoint-detail': ppRenderCheckpointDetail(container); break;
+                case 'projects': ppRenderProjects(container); break;
                 case 'project-detail':    ppRenderProjectDetail(container); break;
                 case 'task-detail':       ppRenderTaskDetail(container); break;
                 case 'jobs': ppRenderJobBoard(container); break;
                 case 'tasks': ppRenderMyTasks(container); break;
                 case 'portfolio': ppRenderPortfolio(container); break;
+                case 'calendar': ppRenderCalendar(container); break;
                 default: ppRenderHome(container);
             }
         }
@@ -29790,6 +29811,139 @@
                 '<div style="height:100%;width:' + Math.min(100, Math.max(0, pct)) + '%;background:' + color + ';border-radius:4px;transition:width 0.5s ease;"></div></div>';
         }
 
+
+        // -- PLAYER CALENDAR -- read-only view of the player's own scheduled
+        // items (Sept 12, Ennis's MC Player Dashboard redesign mockup shows
+        // Calendar as a real player sidebar tab; it was mc-host-only before
+        // this patch with no player-scoped equivalent at all). Deliberately
+        // NOT a reuse of the host's mcRenderMasterCalendar/
+        // _mcCollectCalendarItems (those read every Season/Program/
+        // Checkpoint/Project/Task platform-wide with no player filtering,
+        // and jump-click through mcJumpToItem into host-only management
+        // panels) -- this is a parallel, smaller, player-safe implementation:
+        // only the player's active Season plus whatever Checkpoints/
+        // Projects/Tasks they can actually see (ppItemAssignedToActivePlayer,
+        // the same "can SEE" rule every other Player Portal view already
+        // uses), and every chip jumps through ppNav to the same detail
+        // views the rest of the portal uses. Programs are deliberately left
+        // out of v1 -- Programs use a different "every player sees every
+        // Program" visibility rule (see pflxPlayerCanEnterItem's note
+        // above) and folding that in cleanly needs its own pass; a
+        // documented simplification, not a fake result.
+        var _ppCalMonth = (function () { var d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; })();
+
+        function ppCollectCalendarItems(rangeStartISO, rangeEndISO) {
+            var byDate = {}, totalCount = 0;
+            function addItem(dateStr, entry) {
+                if (!dateStr) return;
+                var d = new Date(dateStr + 'T00:00:00');
+                if (isNaN(d.getTime())) return;
+                var iso = _mcISODate(d);
+                if (iso < rangeStartISO || iso > rangeEndISO) return;
+                if (!byDate[iso]) byDate[iso] = [];
+                byDate[iso].push(entry);
+                totalCount++;
+            }
+            var season = ppGetSeason();
+            if (season) {
+                var sMeta = MC_CAL_TYPE_META.season;
+                if (season.startDate) addItem(season.startDate, { type: 'season', id: season.id, rgb: sMeta.rgb, label: season.name || 'Season', edge: 'start' });
+                if (season.endDate) addItem(season.endDate, { type: 'season', id: season.id, rgb: sMeta.rgb, label: season.name || 'Season', edge: 'end' });
+            }
+            ppGetCheckpoints().filter(ppItemAssignedToActivePlayer).forEach(function (cp) {
+                var meta = MC_CAL_TYPE_META.checkpoint, label = cp.name || 'Checkpoint';
+                if (cp.startDate) addItem(cp.startDate, { type: 'checkpoint', id: cp.id, rgb: meta.rgb, label: label, edge: 'start' });
+                if (cp.endDate) addItem(cp.endDate, { type: 'checkpoint', id: cp.id, rgb: meta.rgb, label: label, edge: 'end' });
+            });
+            ppGetProjects().filter(ppItemAssignedToActivePlayer).forEach(function (p) {
+                var meta = MC_CAL_TYPE_META.project, label = p.name || p.title || 'Project';
+                var due = p.dueDate || p.endDate || p.deadline;
+                if (p.startedAt) addItem(p.startedAt, { type: 'project', id: p.id, rgb: meta.rgb, label: label, edge: 'start' });
+                if (due) addItem(due, { type: 'project', id: p.id, rgb: meta.rgb, label: label, edge: p.startedAt ? 'end' : 'point' });
+            });
+            ppGetTasks().filter(ppItemAssignedToActivePlayer).forEach(function (t) {
+                if (!t || !t.dueDate) return;
+                var pRgb = (MC_PRIORITY_META[t.priority || 'normal'] || MC_PRIORITY_META.normal).rgb;
+                addItem(t.dueDate, { type: 'task', id: t.id, rgb: pRgb, label: t.title || 'Task', edge: 'point' });
+            });
+            return { byDate: byDate, totalCount: totalCount };
+        }
+        window.ppCollectCalendarItems = ppCollectCalendarItems;
+
+        function ppCalJump(type, id) {
+            var safeId = String(id == null ? '' : id);
+            if (type === 'checkpoint') ppNav('checkpoint-detail', { id: safeId });
+            else if (type === 'project') ppNav('project-detail', { id: safeId });
+            else if (type === 'task') ppNav('task-detail', { id: safeId });
+            else ppNav('season');
+        }
+        window.ppCalJump = ppCalJump;
+
+        function ppCalDayChip(it) {
+            var arrow = it.edge === 'start' ? String.fromCharCode(9654) + ' ' : (it.edge === 'end' ? String.fromCharCode(9664) + ' ' : '');
+            var safeId = String(it.id == null ? '' : it.id).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            return '<div onclick="event.stopPropagation();ppCalJump(&quot;' + it.type + '&quot;,&quot;' + safeId + '&quot;)" style="padding:3px 6px;background:rgba(' + it.rgb + ',0.14);border:1px solid rgba(' + it.rgb + ',0.3);border-radius:4px;font-size:10px;color:#f0f0ff;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(it.label) + '">' + arrow + escapeHtml(it.label) + '</div>';
+        }
+
+        function ppCalMoveMonth(dir) {
+            _ppCalMonth.m += dir;
+            if (_ppCalMonth.m < 0) { _ppCalMonth.m = 11; _ppCalMonth.y--; }
+            if (_ppCalMonth.m > 11) { _ppCalMonth.m = 0; _ppCalMonth.y++; }
+            var c = document.getElementById('mc-dash-player-content');
+            if (c) ppRenderCalendar(c);
+        }
+        window.ppCalMoveMonth = ppCalMoveMonth;
+
+        function ppRenderCalendar(el) {
+            var year = _ppCalMonth.y, month = _ppCalMonth.m;
+            var monthName = new Date(year, month, 1).toLocaleString('default', { month: 'long' });
+            var firstDay = new Date(year, month, 1).getDay();
+            var daysInMonth = new Date(year, month + 1, 0).getDate();
+            var todayDay = null;
+            var now = new Date();
+            if (now.getFullYear() === year && now.getMonth() === month) todayDay = now.getDate();
+            var rangeStart = year + '-' + String(month + 1).padStart(2, '0') + '-01';
+            var rangeEnd = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(daysInMonth).padStart(2, '0');
+            var collected = ppCollectCalendarItems(rangeStart, rangeEnd);
+
+            var html = ppBreadcrumb([{ label: 'Home', view: 'home' }, { label: 'Calendar', view: 'calendar' }]);
+            html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 4px 14px;flex-wrap:wrap;gap:10px;">' +
+                '<div style="display:flex;gap:8px;align-items:center;">' +
+                    '<button onclick="ppCalMoveMonth(-1)" style="padding:6px 12px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;">&larr; PREV</button>' +
+                    '<div style="font-family:Orbitron,sans-serif;font-size:16px;font-weight:800;color:#f0f0ff;letter-spacing:0.06em;">' + monthName.toUpperCase() + ' ' + year + '</div>' +
+                    '<button onclick="ppCalMoveMonth(1)" style="padding:6px 12px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;">NEXT &rarr;</button>' +
+                '</div>' +
+                '<div style="font-size:10px;color:rgba(255,255,255,0.4);font-family:monospace;">' + collected.totalCount + ' scheduled item(s)</div>' +
+            '</div>';
+            html += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px;">';
+            ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].forEach(function (d) {
+                html += '<div style="text-align:center;padding:6px;font-family:Orbitron,sans-serif;font-size:10px;color:rgba(255,255,255,0.35);letter-spacing:0.12em;font-weight:700;">' + d + '</div>';
+            });
+            html += '</div>';
+            html += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;">';
+            for (var i = 0; i < firstDay; i++) html += '<div></div>';
+            for (var day = 1; day <= daysInMonth; day++) {
+                var iso = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+                var dayItems = collected.byDate[iso] || [];
+                var isToday = day === todayDay;
+                var cellBorder = isToday ? '2px solid rgba(0,212,255,0.6)' : '1px solid rgba(255,255,255,0.06)';
+                var cellBg = isToday ? 'rgba(0,212,255,0.06)' : 'rgba(255,255,255,0.02)';
+                html += '<div style="min-height:88px;padding:8px;background:' + cellBg + ';border:' + cellBorder + ';border-radius:8px;display:flex;flex-direction:column;gap:4px;">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
+                        '<span style="font-size:12px;color:' + (isToday ? '#00d4ff' : 'rgba(255,255,255,0.6)') + ';font-weight:' + (isToday ? '800' : '600') + ';">' + day + '</span>' +
+                        (dayItems.length > 0 ? '<span style="font-size:9px;color:rgba(255,255,255,0.4);font-family:monospace;">' + dayItems.length + '</span>' : '') +
+                    '</div>';
+                dayItems.slice(0, 3).forEach(function (it) { html += ppCalDayChip(it); });
+                if (dayItems.length > 3) html += '<div style="font-size:9px;color:rgba(255,255,255,0.4);text-align:center;padding-top:2px;">+ ' + (dayItems.length - 3) + ' more</div>';
+                html += '</div>';
+            }
+            html += '</div>';
+            if (!collected.totalCount) {
+                html += '<div style="text-align:center;padding:24px;color:rgba(255,255,255,0.3);font-size:12px;">Nothing scheduled for you this month.</div>';
+            }
+            el.innerHTML = html;
+        }
+
         // ── HOME VIEW — main card-based dashboard ──
         function ppRenderHome(el) {
             var s = window.activeSession || {};
@@ -30548,6 +30702,76 @@
                 }
 
                 // Close padded body, then the outer card.
+                html += '</div></div>';
+            });
+
+            el.innerHTML = html;
+        }
+
+
+        // -- PROJECTS -- top-level list (Sept 12, Ennis's MC Player Dashboard
+        // redesign mockup shows Projects as its own sidebar tab, not just
+        // reachable via a Checkpoint's detail view -- mcNav's playerRoutes
+        // used to silently alias a Projects click to this same Checkpoints
+        // view; see the playerRoutes fix alongside this patch). Mirrors
+        // ppRenderCheckpoints's list-card pattern; each card's own entry
+        // gate (apply/locked/enter) already lives in ppRenderProjectDetail
+        // unchanged -- this list only adds a lock hint via the same
+        // pflxPlayerCanEnterItem check already used there.
+        function ppRenderProjects(el) {
+            var projects = ppGetProjects().filter(ppItemAssignedToActivePlayer);
+            var html = ppBreadcrumb([{ label: 'Home', view: 'home' }, { label: 'Projects', view: 'projects' }]);
+
+            if (!projects.length) {
+                html += '<div class="mc-card" style="text-align:center;padding:40px;">' +
+                    '<div style="font-size:48px;margin-bottom:12px;">' + String.fromCodePoint(127916) + '</div>' +
+                    '<div style="font-family:\'Orbitron\',sans-serif;font-size:14px;color:rgba(255,255,255,0.4);letter-spacing:2px;">NO PROJECTS AVAILABLE</div>' +
+                    '<div style="font-size:12px;color:rgba(255,255,255,0.25);margin-top:8px;">Projects will appear here when your host creates them.</div></div>';
+                el.innerHTML = html;
+                return;
+            }
+
+            var cps = ppGetCheckpoints();
+            projects.forEach(function (proj) {
+                var comp = (typeof pflxProjectCompletion === 'function') ? pflxProjectCompletion(proj) : { pct: proj.progress || 0, done: 0, total: 0 };
+                var canEnter = (typeof pflxPlayerCanEnterItem === 'function') ? pflxPlayerCanEnterItem(proj, 'project') : true;
+                var parentCp = (typeof pflxFindCheckpoint === 'function') ? pflxFindCheckpoint(cps, proj.checkpointId || proj.roundId) : null;
+                var urg = (typeof _mcUrgencyForDueDate === 'function') ? _mcUrgencyForDueDate(proj.dueDate || proj.endDate || proj.deadline) : null;
+                var lockIcon = String.fromCodePoint(128274);
+                var filmIcon = String.fromCodePoint(127916);
+
+                html += '<div style="background:rgba(255,255,255,0.015);border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:0;margin-bottom:12px;cursor:pointer;transition:all 0.2s;overflow:hidden;" onclick="ppNav(\'project-detail\',{id:\'' + escapeHtml(String(proj.id || '')) + '\'})" onmouseenter="this.style.transform=\'translateY(-2px)\'" onmouseleave="this.style.transform=\'\'">';
+
+                if (proj.bannerImage) {
+                    html += '<div style="position:relative;height:110px;overflow:hidden;">' +
+                        '<img src="' + escapeHtml(proj.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;display:block;filter:saturate(1.15) brightness(1.05);">' +
+                        '<div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(10,10,15,0) 0%, rgba(22,22,31,0.45) 55%, rgba(22,22,31,0.95) 100%);"></div>' +
+                        '<div style="position:absolute;left:16px;right:16px;bottom:10px;display:flex;justify-content:space-between;align-items:flex-end;gap:12px;">' +
+                            '<div style="font-family:\'Rajdhani\',sans-serif;font-size:16px;font-weight:900;color:#ffffff;text-shadow:0 2px 12px rgba(0,0,0,0.9);">' + escapeHtml(proj.name || proj.title || 'Project') + '</div>' +
+                            (!canEnter ? '<span style="background:rgba(0,0,0,0.5);color:#fff;padding:4px 10px;border-radius:12px;font-size:10px;font-weight:700;backdrop-filter:blur(8px);">' + lockIcon + ' LOCKED</span>' : '') +
+                        '</div></div>';
+                }
+
+                html += '<div style="padding:16px;">';
+                if (!proj.bannerImage) {
+                    html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">' +
+                        '<div style="font-family:\'Rajdhani\',sans-serif;font-size:16px;font-weight:900;color:#e0e6ff;">' + filmIcon + ' ' + escapeHtml(proj.name || proj.title || 'Project') + '</div>' +
+                        (!canEnter ? '<span style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);padding:3px 9px;border-radius:10px;font-size:10px;font-weight:700;white-space:nowrap;">' + lockIcon + ' Locked</span>' : '') +
+                    '</div>';
+                }
+                if (parentCp) {
+                    html += '<div style="font-size:10px;color:rgba(255,255,255,0.35);margin-top:4px;">' + String.fromCharCode(8618) + ' ' + escapeHtml(parentCp.name || 'Checkpoint') + '</div>';
+                }
+                if (proj.description) {
+                    html += '<div style="font-size:12px;color:#8a92b0;margin-top:6px;max-width:480px;">' + escapeHtml(proj.description).substring(0, 100) + '</div>';
+                }
+                html += '<div style="display:flex;align-items:center;gap:10px;margin-top:10px;">' +
+                    '<div style="flex:1;">' + ppProgressBar(comp.pct, comp.pct === 100 ? '#22c55e' : '#a78bfa') + '</div>' +
+                    '<span style="font-size:11px;color:rgba(255,255,255,0.4);white-space:nowrap;">' + comp.pct + '%' + (comp.total ? ' ' + String.fromCharCode(183) + ' ' + comp.done + '/' + comp.total : '') + '</span></div>';
+                html += '<div style="display:flex;gap:12px;margin-top:8px;flex-wrap:wrap;">' +
+                    ((proj.xcRewardPool || proj.xcReward) ? '<span style="font-family:\'Share Tech Mono\',monospace;font-size:12px;color:#f5c842;font-weight:700;">' + (proj.xcRewardPool || proj.xcReward) + ' XC</span>' : '') +
+                    (urg && urg.label ? '<span style="font-size:10px;color:rgba(' + urg.rgb + ',1);">' + escapeHtml(urg.label) + '</span>' : '') +
+                    '</div>';
                 html += '</div></div>';
             });
 
