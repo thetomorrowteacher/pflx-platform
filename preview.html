@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 189;
+      window.PFLX_PATCH   = 190;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -31245,9 +31245,64 @@
         // gate (apply/locked/enter) already lives in ppRenderProjectDetail
         // unchanged -- this list only adds a lock hint via the same
         // pflxPlayerCanEnterItem check already used there.
+                // ── Player dedicated-tab status-bucket banners + card grid (Sept 12, Ennis:
+        // "each dedicated tab needs to get updated to look much more like the uploads") ──
+        // Ports the host's Projects/Tasks FLP-phase bucket-banner pattern (see mcRenderProjects/
+        // mcRenderTasks) into the player's own dedicated tabs — same Engagement/Development/
+        // Enhancement/Fulfillment/Not Started/Bypass/Completed section banners, plus the same
+        // shared card-size slider system (new ppprojects/ppcheckpoints/pptasks/ppprograms keys
+        // on the existing PFLX_CARD_SIZE_* maps above). Read-only for the player — no
+        // drag-reorder, that stays host-only.
+        var PP_FLP_BUCKET_META = {
+            engagement:    { label: 'Engagement',  emoji: '🎯', rgb: '34,197,94',   desc: 'Onboarding, context, planning. Should be moving briskly.' },
+            development:   { label: 'Development', emoji: '🛠',  rgb: '0,212,255',   desc: 'Core build phase. Most time lives here.' },
+            enhancement:   { label: 'Enhancement', emoji: '🪶', rgb: '245,200,66',  desc: 'Peer review, polish, iteration on feedback.' },
+            fulfillment:   { label: 'Fulfillment', emoji: '🏁', rgb: '239,68,68',   desc: 'Final submission window — wrap and ship.' },
+            'not-started': { label: 'Not Started', emoji: '⏱',   rgb: '167,139,250', desc: 'Monitored projects awaiting player start.' },
+            bypass:        { label: 'Bypass',      emoji: '📂',  rgb: '156,163,175', desc: 'Simple projects without phase tracking.' },
+            completed:     { label: 'Completed',   emoji: '✓',   rgb: '34,197,94',   desc: 'Completed and closed out.' }
+        };
+        var PP_FLP_BUCKET_ORDER = ['engagement','development','enhancement','fulfillment','not-started','bypass','completed'];
+        function ppFlpBucketFor(p) {
+            if (p.status === 'completed') return 'completed';
+            if (p.flpTracking !== 'monitoring') return 'bypass';
+            if (!p.startedAt) return 'not-started';
+            try {
+                var st = (typeof pflxComputeFlpStatus === 'function') ? pflxComputeFlpStatus({ flpTracking: p.flpTracking, startedAt: p.startedAt, dueDate: p.dueDate || p.endDate || p.deadline }) : null;
+                if (st && st.phase) return st.phase;
+            } catch (e) {}
+            return 'engagement';
+        }
+        function ppBucketedSectionsHtml(entries, bucketOfFn, bucketMeta, bucketOrder, singular, plural) {
+            var buckets = {};
+            bucketOrder.forEach(function (k) { buckets[k] = []; });
+            entries.forEach(function (entry) {
+                var b = bucketOfFn(entry.item);
+                (buckets[b] || buckets[bucketOrder[bucketOrder.length - 1]]).push(entry.html);
+            });
+            var out = '';
+            bucketOrder.forEach(function (k) {
+                var arr = buckets[k];
+                if (!arr || !arr.length) return;
+                var meta = bucketMeta[k];
+                if (!meta) return;
+                out += '<div style="margin:14px 0 12px 0;display:flex;align-items:center;gap:12px;padding:10px 14px;background:linear-gradient(90deg, rgba(' + meta.rgb + ',0.12), rgba(' + meta.rgb + ',0.02));border-left:3px solid rgba(' + meta.rgb + ',0.85);border-radius:8px;flex-wrap:wrap;">' +
+                    '<div style="display:flex;align-items:baseline;gap:10px;">' +
+                        '<span style="font-family:Orbitron,sans-serif;font-size:12px;font-weight:800;color:rgba(' + meta.rgb + ',1);letter-spacing:0.1em;text-transform:uppercase;">' + meta.emoji + ' ' + meta.label + '</span>' +
+                        '<span style="font-family:monospace;font-size:10px;color:rgba(255,255,255,0.45);">' + arr.length + ' ' + (arr.length === 1 ? singular : plural) + '</span>' +
+                    '</div>' +
+                    (meta.desc ? '<div style="flex:1;font-size:10px;color:rgba(255,255,255,0.4);line-height:1.4;">' + escapeHtml(meta.desc) + '</div>' : '') +
+                '</div>' +
+                '<div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(var(--pflx-card-min, 340px), 1fr));gap:16px;margin-bottom:20px;">' + arr.join('') + '</div>';
+            });
+            return out;
+        }
+        window.ppBucketedSectionsHtml = ppBucketedSectionsHtml;
+        window.ppFlpBucketFor = ppFlpBucketFor;
+
         function ppRenderProjects(el) {
             var projects = ppGetProjects().filter(ppItemAssignedToActivePlayer);
-            var html = ppBreadcrumb([{ label: 'Home', view: 'home' }, { label: 'Projects', view: 'projects' }]);
+            var html = ppBreadcrumb([{ label: 'Home', view: 'home' }, { label: 'Projects', view: 'projects' }]);            try { if (typeof pflxApplyCardSize === 'function') pflxApplyCardSize('ppprojects'); } catch (e) {}            html += (typeof pflxCardSizeSliderHtml === 'function') ? pflxCardSizeSliderHtml('ppprojects', 'Project') : '';
 
             if (!projects.length) {
                 html += '<div class="mc-card" style="text-align:center;padding:40px;">' +
@@ -31259,7 +31314,7 @@
             }
 
             var cps = ppGetCheckpoints();
-            projects.forEach(function (proj) {
+            var __ppProjCards = projects.map(function (proj) {                var cardHtml = '';
                 var comp = (typeof pflxProjectCompletion === 'function') ? pflxProjectCompletion(proj) : { pct: proj.progress || 0, done: 0, total: 0 };
                 var canEnter = (typeof pflxPlayerCanEnterItem === 'function') ? pflxPlayerCanEnterItem(proj, 'project') : true;
                 var parentCp = (typeof pflxFindCheckpoint === 'function') ? pflxFindCheckpoint(cps, proj.checkpointId || proj.roundId) : null;
@@ -31267,10 +31322,10 @@
                 var lockIcon = String.fromCodePoint(128274);
                 var filmIcon = String.fromCodePoint(127916);
 
-                html += '<div style="background:rgba(255,255,255,0.015);border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:0;margin-bottom:12px;cursor:pointer;transition:all 0.2s;overflow:hidden;" onclick="ppNav(\'project-detail\',{id:\'' + escapeHtml(String(proj.id || '')) + '\'})" onmouseenter="this.style.transform=\'translateY(-2px)\'" onmouseleave="this.style.transform=\'\'">';
+                cardHtml += '<div style="background:rgba(255,255,255,0.015);border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:0;margin-bottom:12px;cursor:pointer;transition:all 0.2s;overflow:hidden;" onclick="ppNav(\'project-detail\',{id:\'' + escapeHtml(String(proj.id || '')) + '\'})" onmouseenter="this.style.transform=\'translateY(-2px)\'" onmouseleave="this.style.transform=\'\'">';
 
                 if (proj.bannerImage) {
-                    html += '<div style="position:relative;height:110px;overflow:hidden;">' +
+                    cardHtml += '<div style="position:relative;height:110px;overflow:hidden;">' +
                         '<img src="' + escapeHtml(proj.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;display:block;filter:saturate(1.15) brightness(1.05);">' +
                         '<div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(10,10,15,0) 0%, rgba(22,22,31,0.45) 55%, rgba(22,22,31,0.95) 100%);"></div>' +
                         '<div style="position:absolute;left:16px;right:16px;bottom:10px;display:flex;justify-content:space-between;align-items:flex-end;gap:12px;">' +
@@ -31279,23 +31334,23 @@
                         '</div></div>';
                 }
 
-                html += '<div style="padding:16px;">';
+                cardHtml += '<div style="padding:16px;">';
                 if (!proj.bannerImage) {
-                    html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">' +
+                    cardHtml += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">' +
                         '<div style="font-family:\'Rajdhani\',sans-serif;font-size:16px;font-weight:900;color:#e0e6ff;">' + filmIcon + ' ' + escapeHtml(proj.name || proj.title || 'Project') + '</div>' +
                         (!canEnter ? '<span style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);padding:3px 9px;border-radius:10px;font-size:10px;font-weight:700;white-space:nowrap;">' + lockIcon + ' Locked</span>' : '') +
                     '</div>';
                 }
                 if (parentCp) {
-                    html += '<div style="font-size:10px;color:rgba(255,255,255,0.35);margin-top:4px;">' + String.fromCharCode(8618) + ' ' + escapeHtml(parentCp.name || 'Checkpoint') + '</div>';
+                    cardHtml += '<div style="font-size:10px;color:rgba(255,255,255,0.35);margin-top:4px;">' + String.fromCharCode(8618) + ' ' + escapeHtml(parentCp.name || 'Checkpoint') + '</div>';
                 }
                 if (proj.description) {
-                    html += '<div style="font-size:12px;color:#8a92b0;margin-top:6px;max-width:480px;">' + escapeHtml(proj.description).substring(0, 100) + '</div>';
+                    cardHtml += '<div style="font-size:12px;color:#8a92b0;margin-top:6px;max-width:480px;">' + escapeHtml(proj.description).substring(0, 100) + '</div>';
                 }
-                html += '<div style="display:flex;align-items:center;gap:10px;margin-top:10px;">' +
+                cardHtml += '<div style="display:flex;align-items:center;gap:10px;margin-top:10px;">' +
                     '<div style="flex:1;">' + ppProgressBar(comp.pct, comp.pct === 100 ? '#22c55e' : '#a78bfa') + '</div>' +
                     '<span style="font-size:11px;color:rgba(255,255,255,0.4);white-space:nowrap;">' + comp.pct + '%' + (comp.total ? ' ' + String.fromCharCode(183) + ' ' + comp.done + '/' + comp.total : '') + '</span></div>';
-                html += '<div style="display:flex;gap:12px;margin-top:8px;flex-wrap:wrap;">' +
+                cardHtml += '<div style="display:flex;gap:12px;margin-top:8px;flex-wrap:wrap;">' +
                     ((proj.xcRewardPool || proj.xcReward) ? '<span style="font-family:\'Share Tech Mono\',monospace;font-size:12px;color:#f5c842;font-weight:700;">' + (proj.xcRewardPool || proj.xcReward) + ' XC</span>' : '') +
                     (urg && urg.label ? '<span style="font-size:10px;color:rgba(' + urg.rgb + ',1);">' + escapeHtml(urg.label) + '</span>' : '') +
                     '</div>';
@@ -31303,12 +31358,17 @@
                 // see more info and stats -- the player version of what the
                 // host already sees on their own cards). Collapsed by
                 // default; expanding never navigates away from the list.
-                html += '<div style="display:flex;justify-content:flex-end;margin-top:6px;">' +
+                cardHtml += '<div style="display:flex;justify-content:flex-end;margin-top:6px;">' +
                     '<button onclick="ppToggleDropdown(event,\'pj-' + escapeHtml(String(proj.id || '')) + '\')" style="background:none;border:none;color:rgba(255,255,255,0.45);font-size:11px;cursor:pointer;padding:4px 8px;display:flex;align-items:center;gap:4px;">' +
                     '<span id="pp-arrow-pj-' + escapeHtml(String(proj.id || '')) + '">\u25BE</span> More info &amp; stats</button></div>';
-                html += '<div id="pp-drop-pj-' + escapeHtml(String(proj.id || '')) + '" style="display:none;" onclick="event.stopPropagation()">' + ppProjectStatsHtml(proj) + '</div>';
-                html += '</div></div>';
+                cardHtml += '<div id="pp-drop-pj-' + escapeHtml(String(proj.id || '')) + '" style="display:none;" onclick="event.stopPropagation()">' + ppProjectStatsHtml(proj) + '</div>';
+                cardHtml += '</div></div>';
+                return cardHtml;
             });
+            var __ppProjSections = (typeof ppBucketedSectionsHtml === 'function')
+                ? ppBucketedSectionsHtml(projects.map(function (p, i) { return { item: p, html: __ppProjCards[i] }; }), ppFlpBucketFor, PP_FLP_BUCKET_META, PP_FLP_BUCKET_ORDER, 'project', 'projects')
+                : __ppProjCards.join('');
+            html += '<div id="ppmc-projects-list">' + __ppProjSections + '</div>';
 
             el.innerHTML = html;
         }
@@ -34540,9 +34600,9 @@
         // pushed on every 'input' tick via pflxLiveResizeCards (cheap — one
         // style write); the chosen size is only written to localStorage on
         // 'change' (drag release) via pflxSetCardSize.
-        var PFLX_CARD_SIZE_DEFAULTS = { seasons: 900, programs: 520, checkpoints: 560, projects: 380, tasks: 900 };
-        var PFLX_CARD_SIZE_RANGE    = { seasons: [420, 1400], programs: [320, 900], checkpoints: [380, 900], projects: [260, 1400], tasks: [420, 1400] };
-        var PFLX_CARD_SIZE_LIST_ID  = { seasons: 'mc-seasons-list', programs: 'mc-programs-tab-list', checkpoints: 'mc-checkpoints-list', projects: 'mc-projects-list', tasks: 'mc-tasks-list' };
+        var PFLX_CARD_SIZE_DEFAULTS = { seasons: 900, programs: 520, checkpoints: 560, projects: 380, tasks: 900, ppprojects: 380, ppcheckpoints: 380, pptasks: 340, ppprograms: 380 };
+        var PFLX_CARD_SIZE_RANGE    = { seasons: [420, 1400], programs: [320, 900], checkpoints: [380, 900], projects: [260, 1400], tasks: [420, 1400], ppprojects: [260, 900], ppcheckpoints: [260, 900], pptasks: [220, 700], ppprograms: [260, 900] };
+        var PFLX_CARD_SIZE_LIST_ID  = { seasons: 'mc-seasons-list', programs: 'mc-programs-tab-list', checkpoints: 'mc-checkpoints-list', projects: 'mc-projects-list', tasks: 'mc-tasks-list', ppprojects: 'ppmc-projects-list', ppcheckpoints: 'ppmc-checkpoints-list', pptasks: 'ppmc-tasks-list', ppprograms: 'ppmc-programs-list' };
         function pflxCardSizes() {
             try { return Object.assign({}, PFLX_CARD_SIZE_DEFAULTS, JSON.parse(localStorage.getItem('pflx_mc_card_sizes') || '{}')); }
             catch (e) { return Object.assign({}, PFLX_CARD_SIZE_DEFAULTS); }
