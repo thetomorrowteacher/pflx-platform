@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 192;
+      window.PFLX_PATCH   = 193;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -30852,9 +30852,46 @@
         // Whether they can OPEN it follows pflxPlayerCanEnterItem — cohort
         // match grants direct entry; otherwise Apply-to-Join (when the host
         // turned it on) is the alternate path in.
-        function ppRenderPrograms(el) {
+        // Player-facing access-status bucket banners for the dedicated Programs
+// tab (PATCH PLATFORM v193). Programs use neither the FLP-phase model
+// (Projects/Tasks) nor the Checkpoints 4-state model -- confirmed via
+// direct grep that the host's own Program status field is a simple
+// draft/active/completed lifecycle enum, grouped by Season on the host
+// side, not by an FLP or status-bucket-banner model at all. Building
+// player-facing banners on that host lifecycle status would be useless
+// to a player (a "draft" program shouldn't even be player-visible, and
+// "active" vs "completed" says nothing about whether THIS player can
+// get in). The real, already-shipped player-facing signal is an ACCESS
+// state -- can I enter now, and if not, why -- built from the very same
+// pflxPlayerCanEnterItem/pflxPlayerApplicationState calls the pre-v193
+// ppRenderPrograms already used to render its OPEN/LOCKED/PENDING/PAY
+// badges. This classifier just turns that existing state model into
+// bucket banners, it does not invent a new one.
+var PP_PROGRAM_STATUS_BUCKET_META = {
+    open:    { label: 'Open',              emoji: '\u2705', rgb: '34,197,94',   desc: 'You can enter now' },
+    apply:   { label: 'Application Open',  emoji: '\uD83D\uDCDD', rgb: '0,212,255',   desc: 'Apply to join' },
+    pending: { label: 'Pending Approval',  emoji: '\u23F3', rgb: '245,200,66',  desc: 'Waiting on your host' },
+    payment: { label: 'Payment Required',  emoji: '\uD83D\uDCB3', rgb: '34,211,238',  desc: 'Approved -- payment due' },
+    locked:  { label: 'Locked',            emoji: '\uD83D\uDD12', rgb: '239,68,68',   desc: 'Cohort required' }
+};
+var PP_PROGRAM_STATUS_BUCKET_ORDER = ['open', 'apply', 'pending', 'payment', 'locked'];
+
+function ppProgramStatusBucketFor(pg) {
+    var canEnter = (typeof pflxPlayerCanEnterItem === 'function') ? pflxPlayerCanEnterItem(pg, 'program') : true;
+    if (canEnter) return 'open';
+    if (!pg || !pg.applyEnabled) return 'locked';
+    var appState = (typeof pflxPlayerApplicationState === 'function') ? pflxPlayerApplicationState(pg, 'program') : 'none';
+    if (appState === 'pending') return 'pending';
+    if (appState === 'approved-unpaid') return 'payment';
+    return 'apply';
+}
+window.ppProgramStatusBucketFor = ppProgramStatusBucketFor;
+
+function ppRenderPrograms(el) {
             var programs = (typeof mcPrograms !== 'undefined' && Array.isArray(mcPrograms)) ? mcPrograms.slice() : [];
             var html = ppBreadcrumb([{ label: 'Home', view: 'home' }, { label: 'Programs', view: 'programs' }]);
+            try { if (typeof pflxApplyCardSize === 'function') pflxApplyCardSize('ppprograms'); } catch (e) {}
+            html += (typeof pflxCardSizeSliderHtml === 'function') ? pflxCardSizeSliderHtml('ppprograms', 'Program') : '';
 
             if (!programs.length) {
                 html += '<div class="mc-card" style="text-align:center;padding:40px;">' +
@@ -30865,38 +30902,57 @@
                 return;
             }
 
-            programs.forEach(function (pg) {
+            var __programCards = programs.map(function (pg) {
+                var cardHtml = '';
+
                 var canEnter = (typeof pflxPlayerCanEnterItem === 'function') ? pflxPlayerCanEnterItem(pg, 'program') : true;
                 var appState = (typeof pflxPlayerApplicationState === 'function') ? pflxPlayerApplicationState(pg, 'program') : 'none';
                 var cpCount = (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) ? mcCheckpoints.filter(function (c) { return c && c.programId === pg.id; }).length : 0;
                 var accent = canEnter ? '0,212,255' : '245,200,66';
-                html += '<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(' + accent + ',0.2);border-radius:14px;padding:16px;margin-bottom:10px;' + (canEnter ? 'cursor:pointer;' : '') + '"' +
+                cardHtml += '<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(' + accent + ',0.2);border-radius:14px;padding:16px;margin-bottom:10px;' + (canEnter ? 'cursor:pointer;' : '') + '"' +
                     (canEnter ? ' onclick="ppNav(\'program-detail\',{id:\'' + escapeHtml(String(pg.id || '')) + '\'})"' : '') + '>' +
                     '<div style="display:flex;justify-content:space-between;align-items:center;">' +
                     '<div><div style="font-size:14px;font-weight:700;color:#e0e6ff;">📐 ' + escapeHtml(pg.name || 'Program') + '</div>' +
                     (pg.description ? '<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:4px;">' + escapeHtml(String(pg.description).substring(0, 100)) + '</div>' : '') +
                     '<div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:6px;">' + cpCount + ' checkpoint' + (cpCount === 1 ? '' : 's') + '</div></div>';
+                var __pgRoll = (typeof _pflxProgramRollup === 'function') ? _pflxProgramRollup(pg) : { taskTotal: 0, taskDone: 0, taskPct: 0 };
+                var __pgBarCol = __pgRoll.taskPct === 100 ? '#22c55e' : __pgRoll.taskPct >= 66 ? '#4ade80' : __pgRoll.taskPct >= 33 ? '#f5c842' : __pgRoll.taskPct > 0 ? '#ff9f40' : 'rgba(255,255,255,0.15)';
+                var __pgProgressHtml = __pgRoll.taskTotal > 0
+                    ? '<div style="margin-top:10px;">' +
+                        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
+                            '<span style="font-size:10px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.06em;">\uD83D\uDCCB Tasks</span>' +
+                            '<span style="font-size:10px;color:' + __pgBarCol + ';font-family:monospace;font-weight:700;">' + __pgRoll.taskDone + ' / ' + __pgRoll.taskTotal + ' (' + __pgRoll.taskPct + '%)</span>' +
+                        '</div>' +
+                        ppProgressBar(__pgRoll.taskPct, __pgBarCol) +
+                      '</div>'
+                    : '';
                 if (canEnter) {
-                    html += '<span style="font-size:10px;font-weight:800;color:#22c55e;letter-spacing:0.08em;">&#x2713; OPEN</span>';
+                    cardHtml += '<span style="font-size:10px;font-weight:800;color:#22c55e;letter-spacing:0.08em;">&#x2713; OPEN</span>';
                 } else if (!pg.applyEnabled) {
-                    html += '<span style="font-size:10px;font-weight:800;color:#ef4444;letter-spacing:0.08em;">&#x1F512; ' + escapeHtml((pg.lockMessage || 'COHORT REQUIRED').substring(0, 40)) + '</span>';
+                    cardHtml += '<span style="font-size:10px;font-weight:800;color:#ef4444;letter-spacing:0.08em;">&#x1F512; ' + escapeHtml((pg.lockMessage || 'COHORT REQUIRED').substring(0, 40)) + '</span>';
                 } else if (appState === 'pending') {
-                    html += '<span style="font-size:10px;font-weight:800;color:#f5c842;letter-spacing:0.08em;">&#x23F3; PENDING</span>';
+                    cardHtml += '<span style="font-size:10px;font-weight:800;color:#f5c842;letter-spacing:0.08em;">&#x23F3; PENDING</span>';
                 } else if (appState === 'approved-unpaid') {
-                    html += '<span style="font-size:10px;font-weight:800;color:#22d3ee;letter-spacing:0.08em;">&#x1F4B3; PAY $' + (Number(pg.price) || 0) + '</span>';
+                    cardHtml += '<span style="font-size:10px;font-weight:800;color:#22d3ee;letter-spacing:0.08em;">&#x1F4B3; PAY $' + (Number(pg.price) || 0) + '</span>';
                 }
-                html += '</div>';
+                cardHtml += __pgProgressHtml + '</div>';
                 if (!canEnter && pg.applyEnabled && appState !== 'pending' && appState !== 'approved-unpaid') {
                     var label = pg.price > 0 ? ('Apply to Join — $' + pg.price) : 'Apply to Join — Free';
-                    html += '<button class="mc-btn" style="margin-top:10px;font-size:10px;padding:6px 12px;" onclick="event.stopPropagation();mcApplyToProgramOrProject(\'program\',\'' + escapeHtml(String(pg.id || '')) + '\');ppRenderPrograms(document.getElementById(\'mc-dash-player-content\'));">' + escapeHtml(label) + '</button>';
+                    cardHtml += '<button class="mc-btn" style="margin-top:10px;font-size:10px;padding:6px 12px;" onclick="event.stopPropagation();mcApplyToProgramOrProject(\'program\',\'' + escapeHtml(String(pg.id || '')) + '\');ppRenderPrograms(document.getElementById(\'mc-dash-player-content\'));">' + escapeHtml(label) + '</button>';
                 }
                 if (canEnter) {
                     var __pgCta = (typeof pflxEntryCtaLabel === 'function') ? pflxEntryCtaLabel(pg) : 'Start';
-                    html += '<button class="mc-btn mc-btn-green" style="margin-top:10px;font-size:10px;padding:6px 12px;" onclick="event.stopPropagation();ppNav(\'program-detail\',{id:\'' + escapeHtml(String(pg.id || '')) + '\'});">&#x25B6; ' + escapeHtml(__pgCta) + '</button>';
+                    cardHtml += '<button class="mc-btn mc-btn-green" style="margin-top:10px;font-size:10px;padding:6px 12px;" onclick="event.stopPropagation();ppNav(\'program-detail\',{id:\'' + escapeHtml(String(pg.id || '')) + '\'});">&#x25B6; ' + escapeHtml(__pgCta) + '</button>';
                 }
-                html += '</div>';
+                cardHtml += '</div>';
+            
+                return cardHtml;
             });
 
+            var __programSections = (typeof ppBucketedSectionsHtml === 'function')
+                ? ppBucketedSectionsHtml(programs.map(function (pg, i) { return { item: pg, html: __programCards[i] }; }), ppProgramStatusBucketFor, PP_PROGRAM_STATUS_BUCKET_META, PP_PROGRAM_STATUS_BUCKET_ORDER, 'program', 'programs')
+                : __programCards.join('');
+            html += '<div id="ppmc-programs-list">' + __programSections + '</div>';
             el.innerHTML = html;
         }
         window.ppRenderPrograms = ppRenderPrograms;
