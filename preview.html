@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 196;
+      window.PFLX_PATCH   = 197;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -14329,6 +14329,28 @@
                     events.push({ icon: '🔴', color: '#ff3355', text: 'LIVE NOW — ' + (stream.title || 'X-Live Stream'), source: 'mc', date: now });
                 }
             } catch(e) {}
+
+            // Now Playing — whatever's currently playing in the host/player's own
+            // X-Bot Theater tab (live broadcast OR a saved playlist item), resolved
+            // the SAME way xbotTheaterPopOut() resolves it. This is a per-viewer
+            // state, not a global "someone is live" flag (that's the Live stream
+            // status block above).
+            try {
+                var twId = window._xbotTheaterWatchingId;
+                if (twId) {
+                    var twTitle = null;
+                    if (String(twId).indexOf('saved:') === 0) {
+                        var twItem = (window._xbotTheaterPlaylistCache || []).find(function (x) { return ('saved:' + x.id) === twId; });
+                        twTitle = twItem ? (twItem.title || 'Saved Video') : null;
+                    } else {
+                        var twSess = (window._xbotTheaterCache || []).find(function (x) { return x.id === twId; });
+                        twTitle = twSess ? (twSess.title || 'Live Stream') : null;
+                    }
+                    if (twTitle) {
+                        events.push({ icon: '▶️', color: '#ff0050', text: 'NOW PLAYING — ' + twTitle, source: 'theater', date: now });
+                    }
+                }
+            } catch (e) {}
 
             // Leaderboard #1 — only when somebody has actually earned XC
             // (a "#1 with 0 XC" line is noise, not news)
@@ -58314,6 +58336,8 @@ function ppRenderCheckpoints(el) {
                 '</div>';
         };
         window.xbotTheaterRender = function () {
+            if (typeof window.pflxDockSetTheaterPlaying === 'function') window.pflxDockSetTheaterPlaying(!!window._xbotTheaterWatchingId);
+            if (typeof window.pflxRenderTicker === 'function') window.pflxRenderTicker();
             var body = document.getElementById('xbot-theater-content');
             if (!body) return;
             var watchId = window._xbotTheaterWatchingId;
@@ -76592,6 +76616,12 @@ RESPONSE RULES:
             100% { box-shadow:0 6px 22px rgba(34,197,94,0.5),0 0 0 0 rgba(34,197,94,0); }
         }
         @keyframes pflxFabBobBig { 0%,100% { transform:scale(1.02); } 50% { transform:scale(1.16); } }
+        /* Theater-playing state — red aura, mirrors .newmsg's shape exactly, reuses pflxFabBobBig */
+        @keyframes pflxFabPlaying {
+            0%   { box-shadow:0 6px 22px rgba(255,0,80,0.5),0 0 0 0 rgba(255,0,80,0.6); }
+            70%  { box-shadow:0 8px 34px rgba(255,0,80,0.7),0 0 0 26px rgba(255,0,80,0); }
+            100% { box-shadow:0 6px 22px rgba(255,0,80,0.5),0 0 0 0 rgba(255,0,80,0); }
+        }
         #pflx-dock-fab { position:fixed; z-index:99999; width:66px; height:66px; border-radius:50%;
             cursor:grab; background:radial-gradient(circle at 30% 30%,rgba(0,240,255,0.32),rgba(10,15,30,0.98));
             border:1px solid rgba(0,240,255,0.55); display:none; align-items:center; justify-content:center;
@@ -76603,6 +76633,9 @@ RESPONSE RULES:
         #pflx-dock-fab .pflx-fab-dot { position:absolute; top:0; right:0; width:16px; height:16px; border-radius:50%;
             background:#22c55e; border:2px solid #061018; display:none; box-shadow:0 0 10px rgba(34,197,94,0.9); }
         #pflx-dock-fab.newmsg .pflx-fab-dot { display:block; }
+        #pflx-dock-fab.playing { border-color:rgba(255,0,80,0.85);
+            background:radial-gradient(circle at 30% 30%,rgba(255,0,80,0.4),rgba(20,8,10,0.98));
+            animation:pflxFabPlaying 1.3s ease-out infinite, pflxFabBobBig 1.8s ease-in-out infinite; }
         #pflx-dock-fab:active { cursor:grabbing; }
         #pflx-dock-fab img { transition:transform 0.2s ease; }
         #pflx-dock-fab:hover img { transform:scale(1.12) rotate(-4deg); }
@@ -76990,7 +77023,12 @@ RESPONSE RULES:
                 var glow = (n > 0) && !(state.open && state.tab === 'chat');
                 fab.classList.toggle('newmsg', glow);
             };
-            window.pflxDock = { open: openDock, close: closeDock, showTab: showTab, readLast: readLast, setUnread: window.pflxDockSetUnread, state: state };
+            // Theater-playing glow: red aura while X-Bot Theater has a video playing.
+            window.pflxDockSetTheaterPlaying = function (isPlaying) {
+                if (!fab) return;
+                fab.classList.toggle('playing', !!isPlaying);
+            };
+            window.pflxDock = { open: openDock, close: closeDock, showTab: showTab, readLast: readLast, setUnread: window.pflxDockSetUnread, setTheaterPlaying: window.pflxDockSetTheaterPlaying, state: state };
             state.open = false; render();
             setInterval(function () { if (!state.open) render(); }, 2000);
         }
