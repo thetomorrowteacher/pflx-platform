@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 195;
+      window.PFLX_PATCH   = 196;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -7277,7 +7277,7 @@
                     <button class="pflx-pip-ctrl-btn active" data-pip-preset="medium" data-pip-id="pip-theater" title="Medium">M</button>
                     <button class="pflx-pip-ctrl-btn" data-pip-preset="large" data-pip-id="pip-theater" title="Large">L</button>
                     <button class="pflx-pip-ctrl-btn" onclick="pflxPipMinimize('pip-theater')" title="Minimize">&#x2500;</button>
-                    <button class="pflx-pip-close" onclick="pflxPipClose('pip-theater')" title="Close">&#x2715;</button>
+                    <button class="pflx-pip-close" onclick="xbotTheaterPopIn()" title="Close">&#x2715;</button>
                 </div>
             </div>
             <div class="pflx-pip-body" id="pip-theater-body"></div>
@@ -58286,6 +58286,33 @@ function ppRenderCheckpoints(el) {
         window._xbotTheaterCache = [];
         window._xbotTheaterPlaylistCache = [];
         window._xbotTheaterWatchingId = null;
+        // v196 (Ennis: "When PIP is active then the video should only
+        // show in PIP. Not in both.") -- shared by both the live-session
+        // and saved-playlist watch branches below, so the "don't
+        // duplicate the video" rule lives in exactly one place. Checks
+        // the REAL generic pflxPipIsOpen('pip-theater') on every render
+        // -- a pure function of current state, not a one-time flag --
+        // so it stays correct no matter how the PIP got opened/closed
+        // (the POP OUT button, the PIP's own titlebar close button, or
+        // switching away from and back to the Theater tab).
+        window.xbotTheaterWatchBodyHtml = function (videoId, title) {
+            var poppedOut = (typeof window.pflxPipIsOpen === 'function') && window.pflxPipIsOpen('pip-theater');
+            var mediaHtml = poppedOut
+                ? '<div style="padding:26px 10px;text-align:center;background:rgba(0,240,255,0.04);border:1px solid rgba(0,240,255,0.18);border-radius:8px;margin-bottom:8px;">' +
+                    '<div style="font-size:22px;margin-bottom:6px;">⧉</div>' +
+                    '<div style="font-family:\'Rajdhani\',sans-serif;font-size:12px;color:#c9cfe8;">Playing in the pop-out window.</div>' +
+                    '</div>'
+                : '<div style="position:relative;padding-top:56.25%;border-radius:8px;overflow:hidden;margin-bottom:8px;">' +
+                    '<iframe src="https://www.youtube.com/embed/' + encodeURIComponent(videoId) + '?autoplay=1" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" allow="autoplay; encrypted-media" allowfullscreen></iframe></div>';
+            var popBtn = poppedOut
+                ? '<button onclick="xbotTheaterPopIn()" style="flex:1;padding:7px;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-family:\'Orbitron\',sans-serif;font-size:9px;letter-spacing:0.5px;cursor:pointer;">⧉ RETURN HERE</button>'
+                : '<button onclick="xbotTheaterPopOut()" style="flex:1;padding:7px;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-family:\'Orbitron\',sans-serif;font-size:9px;letter-spacing:0.5px;cursor:pointer;">⧉ POP OUT (PIP)</button>';
+            return mediaHtml +
+                '<div style="font-family:\'Rajdhani\',sans-serif;font-size:13px;font-weight:600;color:#e0e6ff;">' + title + '</div>' +
+                '<div style="display:flex;gap:6px;margin-top:8px;">' + popBtn +
+                '<button onclick="xbotTheaterStopWatching()" style="flex:1;padding:7px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.16);border-radius:6px;color:#c9cfe8;font-family:\'Orbitron\',sans-serif;font-size:9px;letter-spacing:0.5px;cursor:pointer;">← BACK</button>' +
+                '</div>';
+        };
         window.xbotTheaterRender = function () {
             var body = document.getElementById('xbot-theater-content');
             if (!body) return;
@@ -58294,26 +58321,14 @@ function ppRenderCheckpoints(el) {
                 var pItem = (window._xbotTheaterPlaylistCache || []).find(function (x) { return ('saved:' + x.id) === watchId; });
                 if (!pItem) { window._xbotTheaterWatchingId = null; window.xbotTheaterRender(); return; }
                 var pTitle = escapeHtml(pItem.title || 'Saved Video');
-                body.innerHTML = '<div style="position:relative;padding-top:56.25%;border-radius:8px;overflow:hidden;margin-bottom:8px;">' +
-                    '<iframe src="https://www.youtube.com/embed/' + encodeURIComponent(pItem.videoId) + '?autoplay=1" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" allow="autoplay; encrypted-media" allowfullscreen></iframe></div>' +
-                    '<div style="font-family:\'Rajdhani\',sans-serif;font-size:13px;font-weight:600;color:#e0e6ff;">📺 ' + pTitle + '</div>' +
-                    '<div style="display:flex;gap:6px;margin-top:8px;">' +
-                    '<button onclick="xbotTheaterPopOut()" style="flex:1;padding:7px;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-family:\'Orbitron\',sans-serif;font-size:9px;letter-spacing:0.5px;cursor:pointer;">⧉ POP OUT (PIP)</button>' +
-                    '<button onclick="xbotTheaterStopWatching()" style="flex:1;padding:7px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.16);border-radius:6px;color:#c9cfe8;font-family:\'Orbitron\',sans-serif;font-size:9px;letter-spacing:0.5px;cursor:pointer;">← BACK</button>' +
-                    '</div>';
+                body.innerHTML = window.xbotTheaterWatchBodyHtml(pItem.videoId, '📺 ' + pTitle);
                 return;
             }
             if (watchId) {
                 var s = window._xbotTheaterCache.find(function (x) { return x.id === watchId && x.status === 'active' && x.youtubeEmbedId; });
                 if (!s) { window._xbotTheaterWatchingId = null; window.xbotTheaterRender(); return; }
                 var title = escapeHtml(s.title || 'Live Stream');
-                body.innerHTML = '<div style="position:relative;padding-top:56.25%;border-radius:8px;overflow:hidden;margin-bottom:8px;">' +
-                    '<iframe src="https://www.youtube.com/embed/' + encodeURIComponent(s.youtubeEmbedId) + '?autoplay=1" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" allow="autoplay; encrypted-media" allowfullscreen></iframe></div>' +
-                    '<div style="font-family:\'Rajdhani\',sans-serif;font-size:13px;font-weight:600;color:#e0e6ff;">' + title + '</div>' +
-                    '<div style="display:flex;gap:6px;margin-top:8px;">' +
-                    '<button onclick="xbotTheaterPopOut()" style="flex:1;padding:7px;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-family:\'Orbitron\',sans-serif;font-size:9px;letter-spacing:0.5px;cursor:pointer;">⧉ POP OUT (PIP)</button>' +
-                    '<button onclick="xbotTheaterStopWatching()" style="flex:1;padding:7px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.16);border-radius:6px;color:#c9cfe8;font-family:\'Orbitron\',sans-serif;font-size:9px;letter-spacing:0.5px;cursor:pointer;">← BACK</button>' +
-                    '</div>';
+                body.innerHTML = window.xbotTheaterWatchBodyHtml(s.youtubeEmbedId, title);
                 return;
             }
             var live = window._xbotTheaterCache.filter(function (x) { return x.status === 'active' && x.youtubeEmbedId; });
@@ -58436,6 +58451,20 @@ function ppRenderCheckpoints(el) {
                     '<div style="font-size:10px;color:#c9cfe8;padding:6px;font-family:\'Rajdhani\',sans-serif;">' + escapeHtml(popTitle) + '</div>';
             }
             if (typeof window.pflxPipOpen === 'function') window.pflxPipOpen('pip-theater');
+            // v196 -- immediately swap the main panel to the "playing in
+            // pop-out" notice (see xbotTheaterWatchBodyHtml above) rather
+            // than leaving the duplicate iframe visible until some other,
+            // unrelated render happens to fire.
+            window.xbotTheaterRender();
+        };
+        // v196 -- the inverse of POP OUT: close the PIP and hand the
+        // video back to the inline panel. Wired into #pip-theater's OWN
+        // titlebar close button (not the generic pflxPipClose call sites
+        // used by the other three PIP remotes) so closing it from either
+        // side re-syncs the main panel the same way.
+        window.xbotTheaterPopIn = function () {
+            if (typeof window.pflxPipClose === 'function') window.pflxPipClose('pip-theater');
+            window.xbotTheaterRender();
         };
 
         // v175 -- xc-4: Soundboard for a Guest Host to DJ. Reuses the
