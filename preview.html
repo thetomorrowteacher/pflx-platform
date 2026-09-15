@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 193;
+      window.PFLX_PATCH   = 194;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -5300,16 +5300,20 @@
         #pflx-dock.pflx-band-studio .xbot-teams-grid { display: block; }
         #pflx-dock.pflx-band-wide .xbot-teams-resize-hint,
         #pflx-dock.pflx-band-studio .xbot-teams-resize-hint { display: none; }
-        /* v174 -- xc-3: the Theater watch panel is Studio-only (matches
-           the Studio preset button's own "soundboard, controller grid,
-           monitoring" title from v172) -- Compact/Standard/Wide show a
-           "resize me" hint instead. Same CSS-only gating principle as
-           the Teams grid above, extended to a third band-specific
-           layout. */
-        .xbot-theater-content { display: none; }
-        .xbot-theater-resize-hint { display: block; }
-        #pflx-dock.pflx-band-studio .xbot-theater-content { display: block; }
-        #pflx-dock.pflx-band-studio .xbot-theater-resize-hint { display: none; }
+        /* v194 -- Ennis: "the video should be able to work in any
+           size" -- unlike Teams/Sound/Controller (genuine multi-column
+           pad/roster GRIDS that need real width to be usable), the
+           Theater's video already renders through a responsive 16:9
+           aspect-ratio box (padding-top:56.25% + an absolutely
+           positioned iframe at width:100%/height:100%) that scales to
+           whatever width its container has -- there was never a real
+           layout reason to gate it behind Studio like the grids. Now
+           always visible, at every #pflx-dock band; the resize-hint
+           markup stays in the DOM (harmless, unreachable) rather than
+           being ripped out. Teams/Sound/Controller keep their existing
+           Studio-only gates below -- those genuinely need the room. */
+        .xbot-theater-content { display: block; }
+        .xbot-theater-resize-hint { display: none; }
         /* v175 -- xc-4: the Soundboard is Studio-only, matching v172's
            own Studio preset copy ("soundboard, controller grid,
            monitoring"). Same CSS-only band-gating principle as
@@ -50733,6 +50737,48 @@ function ppRenderCheckpoints(el) {
 
             // ── Show / Hide / Minimize ──────────────────────────────
 
+            // v194 -- Ennis: "the PIP is not working". Root cause: every
+            // .pflx-pip-widget ships a fixed pixel left/bottom in its
+            // markup (#pip-xcoin left:24, #pip-sysevents left:370,
+            // #pip-livesession left:730, #pip-theater left:1090) with
+            // no viewport check on open -- #pip-theater (380px wide) is
+            // fully off-screen (invisible, not clipped-with-scrollbar,
+            // since it's position:fixed) on any browser window narrower
+            // than ~1470px, which is a completely ordinary width for a
+            // non-maximized window. The widget WAS opening correctly
+            // (display:block, active:true) -- it just rendered outside
+            // the visible viewport, which looks identical to "does
+            // nothing" from the user's side. Fix: clamp into the real
+            // viewport, using the widget's actual rendered rect, right
+            // when it opens. Applies to every pip widget, not just the
+            // Theater one, since all four share this same markup
+            // pattern and the same latent bug.
+            function pipClampToViewport(el) {
+                var rect = el.getBoundingClientRect();
+                var vw = window.innerWidth, vh = window.innerHeight;
+                var margin = 8;
+                if (rect.width > vw - margin * 2) {
+                    el.style.left = margin + 'px';
+                    el.style.right = 'auto';
+                } else if (rect.right > vw - margin) {
+                    el.style.left = Math.max(margin, vw - margin - rect.width) + 'px';
+                    el.style.right = 'auto';
+                } else if (rect.left < margin) {
+                    el.style.left = margin + 'px';
+                    el.style.right = 'auto';
+                }
+                if (rect.height > vh - margin * 2) {
+                    el.style.top = margin + 'px';
+                    el.style.bottom = 'auto';
+                } else if (rect.bottom > vh - margin) {
+                    el.style.top = 'auto';
+                    el.style.bottom = margin + 'px';
+                } else if (rect.top < margin) {
+                    el.style.top = margin + 'px';
+                    el.style.bottom = 'auto';
+                }
+            }
+
             function pipOpen(id, renderFn) {
                 var w = getWidget(id);
                 if (!w) return;
@@ -50741,6 +50787,7 @@ function ppRenderCheckpoints(el) {
                 w.active = true;
                 w.minimized = false;
                 w.el.classList.remove('pip-minimized');
+                pipClampToViewport(w.el);
                 setTimeout(function() { w.el.classList.remove('pip-entering'); }, 350);
                 if (typeof renderFn === 'function') renderFn();
             }
