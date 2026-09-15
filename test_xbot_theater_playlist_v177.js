@@ -71,9 +71,9 @@ function makeSandbox(sessions, opts) {
     pflxPipOpen: function (id) { pipOpenCalls.push(id); },
   };
 
-  const fn = new Function('sandbox', 'window', 'document', 'escapeHtml', block);
+  const fn = new Function('sandbox', 'window', 'document', 'escapeHtml', 'location', block);
   const sandbox = { window: win };
-  fn(sandbox, win, stubDocument, escapeHtmlStub);
+  fn(sandbox, win, stubDocument, escapeHtmlStub, { origin: 'https://www.prototypeflx.com' });
 
   return {
     win: win,

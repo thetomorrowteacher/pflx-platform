@@ -69,9 +69,9 @@ function makeSandbox(sessions) {
   // function () {...}` -- there is no bare `xbotTheaterX` identifier to
   // close over, so read the results back off the `win` stub (the object
   // passed in as the `window` param) rather than referencing bare names.
-  const fn = new Function('sandbox', 'window', 'document', 'escapeHtml', block);
+  const fn = new Function('sandbox', 'window', 'document', 'escapeHtml', 'location', block);
   const sandbox = { window: win };
-  fn(sandbox, win, stubDocument, escapeHtmlStub);
+  fn(sandbox, win, stubDocument, escapeHtmlStub, { origin: 'https://www.prototypeflx.com' });
 
   return {
     win: win,

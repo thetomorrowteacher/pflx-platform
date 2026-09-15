@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 197;
+      window.PFLX_PATCH   = 198;
       window.PFLX_BUILD   = '2026.09';
       window.pflxVersionShort = function () { return 'v' + window.PFLX_VERSION + ' · patch ' + window.PFLX_PATCH; };
       window.pflxVersionLong  = function () { return 'v' + window.PFLX_VERSION + '-BETA · patch ' + window.PFLX_PATCH + ' · ' + window.PFLX_BUILD; };
@@ -3048,7 +3048,10 @@
         .pflx-loading-screen {
             position: fixed;
             inset: 0;
-            z-index: 500;
+            z-index: 150000; /* v198: above #pflx-dock (100000), #pflx-dock-fab (99999),
+               .pflx-pip-widget (10060) -- Ennis: the video should never play OVER
+               a loading screen. Still below the 999995+ tier reserved for
+               critical/urgent overlays (confirm dialogs, error banners, toasts). */
             display: none;
             align-items: center;
             justify-content: center;
@@ -24271,22 +24274,33 @@
 
         // ══════════════════════════════════════════════════════════════════
         //  PFLX_AUDIO — Central audio priority/ducking manager
-        //  Default: Live Feed is the primary audio source (100% volume).
-        //  When a higher-priority source is active, Live Feed ducks or mutes.
-        //    • 'intro'    → Live Feed fully muted (intro video has its own audio)
-        //    • 'briefing' → Live Feed ducks to 20% (X-Bot TTS becomes leading)
-        //    • 'loading'  → Live Feed ducks to host-configured level while loading music plays
+        //  Default: whatever's playing in X-Bot Theater is the primary
+        //  audio source (100% volume). When a higher-priority source is
+        //  active, Theater ducks or mutes -- smoothly faded, not snapped.
+        //    • 'intro'    → Theater fully muted (intro video has its own audio)
+        //    • 'briefing' → Theater ducks to 20% (X-Bot TTS becomes leading)
+        //    • 'loading'  → Theater fully muted (v198, was a 15% duck) --
+        //                   Ennis: "All video and sounds should mute during
+        //                   Loading screens as loading screens will have
+        //                   its own sound" (see PFLX_LOADING.playLoadingSfx/
+        //                   stopLoadingSfx below). Applies to EVERY loading
+        //                   screen (any navigation), not just the first.
+        //  Targets #xbot-theater-video-iframe (X-Bot Theater's live/saved-
+        //  playlist YouTube embed). Originally wired to a planned
+        //  'mc-live-stream-iframe' Live Feed that was never actually built
+        //  anywhere -- repointed (v198) to the real video that exists.
         //  Uses YouTube IFrame API via postMessage (requires enablejsapi=1).
         // ══════════════════════════════════════════════════════════════════
         window.PFLX_AUDIO = {
             stack: [],              // active priority sources (top = leading)
-            liveFeedBase: 100,      // normal level when Live Feed is leading
+            liveFeedBase: 100,      // normal level when Theater is leading
             duckLevels: {
                 intro: 0,
                 briefing: 20,
-                loading: 15
+                loading: 0
             },
             _lastApplied: -1,
+            _fadeTimer: null,
 
             start: function(source) {
                 // Remove duplicates, push to top
@@ -24299,8 +24313,8 @@
                 this.apply();
             },
             apply: function() {
-                var leading = this.stack[this.stack.length - 1]; // undefined => liveFeed
-                var iframe = document.getElementById('mc-live-stream-iframe');
+                var leading = this.stack[this.stack.length - 1]; // undefined => Theater
+                var iframe = document.getElementById('xbot-theater-video-iframe');
                 if (!iframe || !iframe.contentWindow) return;
                 // If player has explicitly muted the live stream, honor that.
                 if (SE && SE.playerPrefs && SE.playerPrefs.liveStreamMuted) {
@@ -24316,15 +24330,37 @@
                     targetVol = this.liveFeedBase;
                 }
                 if (targetVol === this._lastApplied) return;
+                // v198: fade smoothly between the previous and new level
+                // instead of snapping -- Ennis: "the sound should fade out
+                // when loading screens are activated and then... fade back
+                // in." A fresh/never-applied iframe (_lastApplied === -1)
+                // snaps straight to the correct starting level -- nothing
+                // to fade FROM yet.
+                var fromVol = (this._lastApplied === -1) ? targetVol : this._lastApplied;
                 this._lastApplied = targetVol;
-                try {
-                    iframe.contentWindow.postMessage(JSON.stringify({event:'command',func:'setVolume',args:[targetVol]}), '*');
-                    if (targetVol === 0) {
-                        iframe.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*');
-                    } else {
-                        iframe.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*');
-                    }
-                } catch(e) {}
+                this._fadeVolume(iframe, fromVol, targetVol);
+            },
+            _fadeVolume: function(iframe, fromVol, toVol) {
+                if (this._fadeTimer) { clearInterval(this._fadeTimer); this._fadeTimer = null; }
+                function post(vol) {
+                    try {
+                        iframe.contentWindow.postMessage(JSON.stringify({event:'command',func:'setVolume',args:[vol]}), '*');
+                        if (vol <= 0) {
+                            iframe.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*');
+                        } else {
+                            iframe.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*');
+                        }
+                    } catch(e) {}
+                }
+                if (fromVol === toVol) { post(toVol); return; }
+                var steps = 10, stepDur = 40, i = 0;
+                var self = this;
+                this._fadeTimer = setInterval(function() {
+                    i++;
+                    var v = Math.round(fromVol + (toVol - fromVol) * (i / steps));
+                    post(v);
+                    if (i >= steps) { clearInterval(self._fadeTimer); self._fadeTimer = null; }
+                }, stepDur);
             },
             // Re-apply (useful after iframe reload or view change)
             refresh: function() { this._lastApplied = -1; this.apply(); }
@@ -53737,6 +53773,7 @@ function ppRenderCheckpoints(el) {
               if (!window.pflxInitialLoadingDone) {
                 window.pflxInitialLoadingDone = true;
                 console.log('[PFLX] Initial loading complete — briefing audio unlocked');
+                try { if (typeof window.pflxXBotAutoStartTheaterOnLogin === 'function') window.pflxXBotAutoStartTheaterOnLogin(); } catch (e) {}
               }
               playGlitchTransition(function () {
                 origHide.call(window.PFLX_LOADING);
@@ -58325,7 +58362,7 @@ function ppRenderCheckpoints(el) {
                     '<div style="font-family:\'Rajdhani\',sans-serif;font-size:12px;color:#c9cfe8;">Playing in the pop-out window.</div>' +
                     '</div>'
                 : '<div style="position:relative;padding-top:56.25%;border-radius:8px;overflow:hidden;margin-bottom:8px;">' +
-                    '<iframe src="https://www.youtube.com/embed/' + encodeURIComponent(videoId) + '?autoplay=1" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" allow="autoplay; encrypted-media" allowfullscreen></iframe></div>';
+                    '<iframe id="xbot-theater-video-iframe" src="https://www.youtube.com/embed/' + encodeURIComponent(videoId) + '?autoplay=1&enablejsapi=1&origin=' + encodeURIComponent(location.origin) + '" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" allow="autoplay; encrypted-media" allowfullscreen></iframe></div>';
             var popBtn = poppedOut
                 ? '<button onclick="xbotTheaterPopIn()" style="flex:1;padding:7px;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-family:\'Orbitron\',sans-serif;font-size:9px;letter-spacing:0.5px;cursor:pointer;">⧉ RETURN HERE</button>'
                 : '<button onclick="xbotTheaterPopOut()" style="flex:1;padding:7px;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-family:\'Orbitron\',sans-serif;font-size:9px;letter-spacing:0.5px;cursor:pointer;">⧉ POP OUT (PIP)</button>';
@@ -58346,6 +58383,7 @@ function ppRenderCheckpoints(el) {
                 if (!pItem) { window._xbotTheaterWatchingId = null; window.xbotTheaterRender(); return; }
                 var pTitle = escapeHtml(pItem.title || 'Saved Video');
                 body.innerHTML = window.xbotTheaterWatchBodyHtml(pItem.videoId, '📺 ' + pTitle);
+                try { if (window.PFLX_AUDIO && window.PFLX_AUDIO.refresh) window.PFLX_AUDIO.refresh(); } catch (e) {}
                 return;
             }
             if (watchId) {
@@ -58353,6 +58391,7 @@ function ppRenderCheckpoints(el) {
                 if (!s) { window._xbotTheaterWatchingId = null; window.xbotTheaterRender(); return; }
                 var title = escapeHtml(s.title || 'Live Stream');
                 body.innerHTML = window.xbotTheaterWatchBodyHtml(s.youtubeEmbedId, title);
+                try { if (window.PFLX_AUDIO && window.PFLX_AUDIO.refresh) window.PFLX_AUDIO.refresh(); } catch (e) {}
                 return;
             }
             var live = window._xbotTheaterCache.filter(function (x) { return x.status === 'active' && x.youtubeEmbedId; });
@@ -58399,6 +58438,31 @@ function ppRenderCheckpoints(el) {
         window.xbotTheaterStopWatching = function () {
             window._xbotTheaterWatchingId = null;
             window.xbotTheaterRender();
+        };
+        // v198 -- Ennis: "make the theater feed (either video playlist or
+        // live stream) automatically play on startup after the intro video
+        // and first loading screen." Prefers a currently-live broadcast;
+        // falls back to the first saved playlist item; a genuine no-op if
+        // neither exists yet (nothing to auto-play). Fires exactly once per
+        // page load -- wired from PFLX_LOADING's first hide() (see the
+        // patchLoading() block, which already gates X-Bot briefing audio on
+        // this same "initial loading sequence complete" moment).
+        window.pflxXBotAutoStartTheaterOnLogin = function () {
+            if (window._pflxTheaterAutoStartDone) return;
+            window._pflxTheaterAutoStartDone = true;
+            (async function () {
+                try {
+                    if (typeof window.pflxXBotLoadSessions !== 'function') return;
+                    var sessions = await window.pflxXBotLoadSessions();
+                    window._xbotTheaterCache = sessions || [];
+                    window._xbotTheaterPlaylistCache = (typeof window.xbotTheaterLoadPlaylist === 'function')
+                        ? await window.xbotTheaterLoadPlaylist() : [];
+                    var live = window._xbotTheaterCache.find(function (x) { return x.status === 'active' && x.youtubeEmbedId; });
+                    if (live && typeof window.xbotTheaterWatch === 'function') { window.xbotTheaterWatch(live.id); return; }
+                    var pl = window._xbotTheaterPlaylistCache;
+                    if (pl && pl.length && typeof window.xbotTheaterWatchSaved === 'function') { window.xbotTheaterWatchSaved(pl[0].id); return; }
+                } catch (e) {}
+            })();
         };
         // v177 -- ported directly from X-Live's own pflxYouTubeExtractId
         // (x-live-check/index.html), same regex logic, not reinvented:
@@ -58554,6 +58618,10 @@ function ppRenderCheckpoints(el) {
         window.xbotSoundboardPlay = function (slot) {
             return window.pflxDBAudioLoad('xbot_pad_' + slot).then(function (dataUrl) {
                 if (!dataUrl) return false;
+                try {
+                    var __ls = document.getElementById('pflx-loading-screen');
+                    if (__ls && __ls.classList.contains('active')) return false;
+                } catch (e) {}
                 var audio = new Audio(dataUrl);
                 audio.play().catch(function () {});
                 return true;
@@ -64722,6 +64790,14 @@ RESPONSE RULES:
         function pflxPlaySfx(event) {
             // Check if SFX is enabled
             if (SE.config.sfxEnabled === false || SE.playerPrefs.sfxOn === false || SE.playerPrefs.muteAll) return;
+            // v198 (Ennis): loading screens own their own sound -- don't let
+            // unrelated UI SFX (nav/click/save/...) layer on top of one.
+            // playLoadingSfx()/stopLoadingSfx() use their own Audio()
+            // objects directly, never this function, so they're unaffected.
+            try {
+                var __ls = document.getElementById('pflx-loading-screen');
+                if (__ls && __ls.classList.contains('active') && event !== 'loading-screen') return;
+            } catch (e) {}
             var sfxMix = SE.config.sfxVolume !== undefined ? SE.config.sfxVolume : 0.7;
             var vol = (SE.config.masterVolume || 0.7) * (SE.playerPrefs.volume || 0.7) * sfxMix;
 
