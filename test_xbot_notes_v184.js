@@ -1,4 +1,13 @@
 #!/usr/bin/env node
+// SUPERSEDED as of PATCH PLATFORM v205 (Sept 15) -- the v184
+// single-textarea Notes contract this file tests (#xbot-notes-textarea,
+// one note per session) was deliberately replaced by a multi-note,
+// rich-text, named/downloadable Notes panel. Beyond this file's own
+// expected stale-PFLX_PATCH-literal check, its other non-passes here
+// are EXPECTED, not a regression -- the DOM/behavior it exercises no
+// longer exists by design. Current coverage lives in
+// test_xbot_notes_v185.js. Left in place (not deleted) as a record of
+// the prior contract; do not try to force it back to green.
 // PATCH PLATFORM v184 (Ennis): Notes panel simplified from v181's
 // Supabase-backed autosave to plain localStorage -- no cloud round-trip,
 // no new app_data row. Extracts the REAL shipped code via brace/string

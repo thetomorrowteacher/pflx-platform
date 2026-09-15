@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 204;
+      window.PFLX_PATCH   = 205;
       window.PFLX_BUILD   = '2026.09';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -14190,14 +14190,40 @@
                     </div>
                 </div>
 
-                <!-- v181 -- xb-10: private, per-user per-session Notes.
-                     Autosaves to Supabase (pflx_xbot_notes_<sessionId>),
-                     same single-writer per-entity-row convention as
-                     pflx_player_<id>/pflx_xbot_briefing_<id>. -->
+                <!-- v185 -- xb-10 Notes v2 (Sept 15, Ennis: "advanced rich
+                     text formatting... save an entire note as a single note
+                     file... edit and save and name"). Rebuilds the v184
+                     single-textarea note into a small library of NAMED,
+                     rich-text notes -- still plain localStorage only, same
+                     key (pflx_xbot_notes_<sessionId>) v184 already used
+                     (Ennis: "simplest way possible... no Supabase"),
+                     migrated in place from a plain string to
+                     {notes:[{id,title,html,updatedAt}], activeId} on first
+                     load. Each note can also be downloaded as a real,
+                     standalone .html file via xbotNotesDownloadActive(). -->
+                <style>
+                    #xbot-notes-editor:empty:before { content: attr(data-placeholder); color: #6a7290; }
+                    .xbot-notes-btn:hover { background: rgba(0,240,255,0.12) !important; }
+                </style>
                 <div id="xbot-notes-section" style="flex:1;overflow-y:auto;padding:16px;display:none;">
                     <div style="font-family:'Orbitron',sans-serif;font-size:10px;color:rgba(0,240,255,0.7);letter-spacing:2px;margin-bottom:10px;">MY NOTES</div>
                     <div style="font-size:11px;color:#6a7290;margin-bottom:10px;">Private to you for this session — nobody else can see these, including the host.</div>
-                    <textarea id="xbot-notes-textarea" oninput="window.xbotNotesScheduleSave()" placeholder="Jot down anything you want to remember..." style="width:100%;min-height:200px;padding:10px;background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.12);border-radius:8px;color:#e0e6ff;font-family:'Rajdhani',sans-serif;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
+                    <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
+                        <select id="xbot-notes-picker" onchange="window.xbotNotesSelect(this.value)" style="flex:1;min-width:120px;padding:6px 8px;background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.12);border-radius:6px;color:#e0e6ff;font-family:'Rajdhani',sans-serif;font-size:12px;"></select>
+                        <button class="xbot-notes-btn" onclick="window.xbotNotesNew()" title="New note" style="padding:6px 10px;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-size:11px;font-weight:700;cursor:pointer;">+ New</button>
+                        <button class="xbot-notes-btn" onclick="window.xbotNotesDeleteActive()" title="Delete this note" style="padding:6px 10px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.3);border-radius:6px;color:#fca5a5;font-size:11px;cursor:pointer;">\U0001F5D1</button>
+                    </div>
+                    <input id="xbot-notes-title" type="text" placeholder="Note title…" oninput="window.xbotNotesScheduleSave()" style="width:100%;padding:8px 10px;margin-bottom:8px;background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.12);border-radius:6px;color:#e0e6ff;font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:700;box-sizing:border-box;">
+                    <div style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap;align-items:center;">
+                        <button class="xbot-notes-btn" onclick="window.xbotNotesExec('bold')" title="Bold" style="width:28px;height:26px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:5px;color:#e0e6ff;font-weight:900;cursor:pointer;">B</button>
+                        <button class="xbot-notes-btn" onclick="window.xbotNotesExec('italic')" title="Italic" style="width:28px;height:26px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:5px;color:#e0e6ff;font-style:italic;cursor:pointer;">I</button>
+                        <button class="xbot-notes-btn" onclick="window.xbotNotesExec('underline')" title="Underline" style="width:28px;height:26px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:5px;color:#e0e6ff;text-decoration:underline;cursor:pointer;">U</button>
+                        <button class="xbot-notes-btn" onclick="window.xbotNotesExec('formatBlock','H2')" title="Heading" style="width:28px;height:26px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:5px;color:#e0e6ff;font-weight:700;cursor:pointer;">H</button>
+                        <button class="xbot-notes-btn" onclick="window.xbotNotesExec('insertUnorderedList')" title="Bullet list" style="width:28px;height:26px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:5px;color:#e0e6ff;cursor:pointer;">•≡</button>
+                        <button class="xbot-notes-btn" onclick="window.xbotNotesExec('insertOrderedList')" title="Numbered list" style="width:28px;height:26px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:5px;color:#e0e6ff;font-size:10px;cursor:pointer;">1.≡</button>
+                        <button class="xbot-notes-btn" onclick="window.xbotNotesDownloadActive()" title="Download this note as a standalone file" style="margin-left:auto;padding:0 10px;height:26px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:5px;color:#4ade80;font-size:11px;cursor:pointer;white-space:nowrap;">⬇ Save as File</button>
+                    </div>
+                    <div id="xbot-notes-editor" contenteditable="true" oninput="window.xbotNotesScheduleSave()" data-placeholder="Jot down anything you want to remember…" style="width:100%;min-height:200px;padding:10px;background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.12);border-radius:8px;color:#e0e6ff;font-family:'Rajdhani',sans-serif;font-size:13px;box-sizing:border-box;overflow-y:auto;"></div>
                     <div id="xbot-notes-status" style="margin-top:8px;font-size:10px;color:#6a7290;"></div>
                 </div>
 
@@ -58599,30 +58625,96 @@ function ppRenderCheckpoints(el) {
         };
         var xbotNotesSaveTimer = null;
         var xbotNotesLoadedKey = null;
-        window.xbotNotesLoad = function () {
-            var ta = document.getElementById('xbot-notes-textarea');
+        var xbotNotesStore = null; // { notes: [{id,title,html,updatedAt}], activeId }
+        // v185 -- pure migration/normalization: takes whatever the OLD raw
+        // localStorage string was (v184's plain text, this version's own
+        // JSON, garbage, or nothing) and returns a well-formed store, never
+        // throwing. Pure so it's unit-testable without touching localStorage
+        // or the DOM.
+        window.xbotNotesMigrateLegacy = function (raw) {
+            if (!raw) return { notes: [], activeId: null };
+            var parsed = null;
+            try { parsed = JSON.parse(raw); } catch (e) { parsed = null; }
+            if (parsed && Array.isArray(parsed.notes)) {
+                var notes = parsed.notes.filter(function (n) { return n && n.id; }).map(function (n) {
+                    return { id: n.id, title: n.title || 'Untitled Note', html: n.html || '', updatedAt: n.updatedAt || Date.now() };
+                });
+                var activeId = (parsed.activeId && notes.some(function (n) { return n.id === parsed.activeId; })) ? parsed.activeId : (notes[0] ? notes[0].id : null);
+                return { notes: notes, activeId: activeId };
+            }
+            // Legacy v184 plain-text note (or any unrecognized non-JSON
+            // string) -- wrap it into a single real note so nothing a
+            // player already wrote is lost.
+            if (typeof raw === 'string' && raw.trim()) {
+                var html = escapeHtml(raw).replace(/\n/g, '<br>');
+                var id = 'note_legacy';
+                return { notes: [{ id: id, title: 'My Notes', html: html, updatedAt: Date.now() }], activeId: id };
+            }
+            return { notes: [], activeId: null };
+        };
+        // Reads the active note's live editor state (title input + the
+        // contenteditable's innerHTML) back into the in-memory store before
+        // it's serialized -- the DOM is the source of truth while editing.
+        function xbotNotesPullActiveFromDom() {
+            if (!xbotNotesStore) return;
+            var active = xbotNotesStore.notes.find(function (n) { return n.id === xbotNotesStore.activeId; });
+            if (!active) return;
+            var titleEl = document.getElementById('xbot-notes-title');
+            var bodyEl = document.getElementById('xbot-notes-editor');
+            if (titleEl) active.title = titleEl.value || 'Untitled Note';
+            if (bodyEl) active.html = bodyEl.innerHTML;
+            active.updatedAt = Date.now();
+        }
+        window.xbotNotesRenderList = function () {
+            var picker = document.getElementById('xbot-notes-picker');
+            if (!picker || !xbotNotesStore) return;
+            picker.innerHTML = xbotNotesStore.notes.length
+                ? xbotNotesStore.notes.map(function (n) {
+                    return '<option value="' + escapeHtml(n.id) + '"' + (n.id === xbotNotesStore.activeId ? ' selected' : '') + '>' + escapeHtml(n.title || 'Untitled Note') + '</option>';
+                  }).join('')
+                : '<option value="">No notes yet</option>';
+        };
+        window.xbotNotesRenderActive = function () {
+            var titleEl = document.getElementById('xbot-notes-title');
+            var bodyEl = document.getElementById('xbot-notes-editor');
             var status = document.getElementById('xbot-notes-status');
-            if (!ta) return;
+            if (!titleEl || !bodyEl || !xbotNotesStore) return;
+            var active = xbotNotesStore.notes.find(function (n) { return n.id === xbotNotesStore.activeId; });
+            var has = !!active;
+            titleEl.disabled = !has;
+            bodyEl.setAttribute('contenteditable', has ? 'true' : 'false');
+            titleEl.value = has ? (active.title || '') : '';
+            bodyEl.innerHTML = has ? (active.html || '') : '';
+            if (status) status.textContent = has ? (active.updatedAt ? window.xbotNotesFormatSavedTime(new Date(active.updatedAt)) : '') : 'Click + New to start a note.';
+        };
+        window.xbotNotesLoad = function () {
+            var status = document.getElementById('xbot-notes-status');
             try {
                 var session = window.activeSession;
                 var key = window.pflxXBotNotesLocalKey(session);
                 if (!key) {
-                    ta.value = '';
-                    ta.disabled = true;
+                    xbotNotesStore = { notes: [], activeId: null };
                     xbotNotesLoadedKey = null;
+                    window.xbotNotesRenderList();
+                    window.xbotNotesRenderActive();
                     if (status) status.textContent = 'Log in to keep notes.';
                     return;
                 }
-                ta.disabled = false;
                 // Don't clobber in-progress typing if this tab is reopened
                 // for the SAME session it already loaded notes for.
-                if (xbotNotesLoadedKey === key) return;
-                var text = '';
-                try { text = window.localStorage.getItem(key) || ''; }
-                catch (e) { console.warn('[xbot-notes] local read failed', e); }
-                ta.value = text;
+                if (xbotNotesLoadedKey === key && xbotNotesStore) { window.xbotNotesRenderList(); window.xbotNotesRenderActive(); return; }
+                var raw = null;
+                try { raw = window.localStorage.getItem(key); } catch (e) { console.warn('[xbot-notes] local read failed', e); }
+                var wasLegacyOrEmpty = !!raw && (function () { try { var p = JSON.parse(raw); return !(p && Array.isArray(p.notes)); } catch (e) { return true; } })();
+                xbotNotesStore = window.xbotNotesMigrateLegacy(raw);
                 xbotNotesLoadedKey = key;
-                if (status) status.textContent = text ? window.xbotNotesFormatSavedTime() : '';
+                if (wasLegacyOrEmpty && xbotNotesStore.notes.length) {
+                    // Persist the migrated shape immediately so this doesn't
+                    // re-run the legacy-wrap every load.
+                    try { window.localStorage.setItem(key, JSON.stringify(xbotNotesStore)); } catch (e) {}
+                }
+                window.xbotNotesRenderList();
+                window.xbotNotesRenderActive();
             } catch (e) { console.warn('[xbot-notes] load orchestrator failed', e); }
         };
         window.xbotNotesScheduleSave = function () {
@@ -58632,20 +58724,90 @@ function ppRenderCheckpoints(el) {
             xbotNotesSaveTimer = setTimeout(function () { window.xbotNotesSaveNow(); }, 900);
         };
         window.xbotNotesSaveNow = function () {
-            var ta = document.getElementById('xbot-notes-textarea');
             var status = document.getElementById('xbot-notes-status');
-            if (!ta) return;
+            if (!xbotNotesStore) return;
             try {
                 var session = window.activeSession;
                 var key = window.pflxXBotNotesLocalKey(session);
                 if (!key) return;
-                window.localStorage.setItem(key, ta.value);
+                xbotNotesPullActiveFromDom();
+                window.localStorage.setItem(key, JSON.stringify(xbotNotesStore));
                 xbotNotesLoadedKey = key;
+                window.xbotNotesRenderList(); // title may have changed
                 if (status) status.textContent = window.xbotNotesFormatSavedTime();
             } catch (e) {
                 console.warn('[xbot-notes] local save failed', e);
                 if (status) status.textContent = 'Not saved (storage full or blocked)';
             }
+        };
+        window.xbotNotesNew = function () {
+            if (!xbotNotesStore) xbotNotesStore = { notes: [], activeId: null };
+            var id = 'note_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+            xbotNotesStore.notes.push({ id: id, title: 'Untitled Note', html: '', updatedAt: Date.now() });
+            xbotNotesStore.activeId = id;
+            window.xbotNotesSaveNow();
+            window.xbotNotesRenderList();
+            window.xbotNotesRenderActive();
+            var titleEl = document.getElementById('xbot-notes-title');
+            if (titleEl) { titleEl.focus(); titleEl.select(); }
+        };
+        window.xbotNotesSelect = function (id) {
+            if (!xbotNotesStore) return;
+            xbotNotesPullActiveFromDom();
+            xbotNotesStore.activeId = id || null;
+            window.xbotNotesSaveNow();
+            window.xbotNotesRenderActive();
+        };
+        window.xbotNotesDeleteActive = function () {
+            if (!xbotNotesStore || !xbotNotesStore.activeId) return;
+            var active = xbotNotesStore.notes.find(function (n) { return n.id === xbotNotesStore.activeId; });
+            if (!active) return;
+            if (!confirm('Delete "' + (active.title || 'Untitled Note') + '"? This can\'t be undone.')) return;
+            xbotNotesStore.notes = xbotNotesStore.notes.filter(function (n) { return n.id !== active.id; });
+            xbotNotesStore.activeId = xbotNotesStore.notes.length ? xbotNotesStore.notes[0].id : null;
+            window.xbotNotesSaveNow();
+            window.xbotNotesRenderList();
+            window.xbotNotesRenderActive();
+        };
+        // Rich-text toolbar -- plain document.execCommand, same "simplest
+        // way possible" spirit as the rest of this feature: no external
+        // editor library, no new dependency.
+        window.xbotNotesExec = function (cmd, val) {
+            var bodyEl = document.getElementById('xbot-notes-editor');
+            if (!bodyEl || bodyEl.getAttribute('contenteditable') !== 'true') return;
+            bodyEl.focus();
+            try { document.execCommand(cmd, false, val || null); } catch (e) { console.warn('[xbot-notes] exec failed', cmd, e); }
+            window.xbotNotesScheduleSave();
+        };
+        // "Save an entire note as a single note file" -- a real, standalone
+        // downloadable .html file (title + rich content), not just an
+        // in-app named entry. Pure filename sanitizer factored out so it's
+        // unit-testable without touching the DOM/Blob APIs.
+        window.xbotNotesSafeFilename = function (title) {
+            var t = String(title || 'Untitled Note').trim() || 'Untitled Note';
+            t = t.replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim();
+            return (t || 'Untitled Note') + '.html';
+        };
+        window.xbotNotesDownloadActive = function () {
+            if (!xbotNotesStore || !xbotNotesStore.activeId) { if (typeof pflxToast === 'function') pflxToast('No note selected.', 'error'); return; }
+            xbotNotesPullActiveFromDom();
+            var active = xbotNotesStore.notes.find(function (n) { return n.id === xbotNotesStore.activeId; });
+            if (!active) return;
+            try {
+                var doc = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + escapeHtml(active.title || 'Untitled Note') + '</title></head>' +
+                    '<body style="font-family:sans-serif;max-width:700px;margin:40px auto;padding:0 20px;">' +
+                    '<h1>' + escapeHtml(active.title || 'Untitled Note') + '</h1>' +
+                    '<div>' + (active.html || '') + '</div></body></html>';
+                var blob = new Blob([doc], { type: 'text/html' });
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = window.xbotNotesSafeFilename(active.title);
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+            } catch (e) { console.warn('[xbot-notes] download failed', e); if (typeof pflxToast === 'function') pflxToast('Could not save the file.', 'error'); }
         };
 
         // ══ PATCH PLATFORM v174 -- xc-3: Theater watch panel, ported from
