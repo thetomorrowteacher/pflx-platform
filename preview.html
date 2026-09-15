@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 203;
+      window.PFLX_PATCH   = 204;
       window.PFLX_BUILD   = '2026.09';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -7882,6 +7882,13 @@
                                 </div>
                                 <!-- ═══ HOST DASHBOARD (default) ═══ -->
                                 <div id="mc-dash-host-view">
+                                <!-- ═══ ORGANIZATION / COHORT BANNER (Sept 15) ═══
+                                     Reuses the SAME real org-lookup already proven for the
+                                     Player Portal home (ppHomeOrgCardHtml, Sept 12) so the
+                                     host's own Mission Dashboard shows the same real org/
+                                     cohort identity card -- not a separate/fabricated one.
+                                     Rendered by mcRenderDashboard(). -->
+                                <div id="mc-dash-org-banner"></div>
                                 <!-- ═══ PLATFORM NOTIFICATION BANNER ═══ -->
                                 <div id="pflx-home-notifications" style="display:none;margin-bottom:14px;"></div>
                                 <!-- ═══ DARKCAMPUS MESSAGE BOARD ═══ -->
@@ -7918,15 +7925,20 @@
                                     <div class="mc-card-title">RECENT ACTIVITY</div>
                                     <div id="mc-activity-feed" style="display:flex;flex-direction:column;gap:8px;max-height:300px;overflow-y:auto;"></div>
                                 </div>
+                                <!-- Active Programs (Sept 15) -->
+                                <div class="mc-card">
+                                    <div class="mc-card-title">ACTIVE PROGRAMS</div>
+                                    <div id="mc-dash-programs" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(300px, 1fr));gap:14px;"></div>
+                                </div>
                                 <!-- Active Checkpoints with Progress -->
                                 <div class="mc-card">
                                     <div class="mc-card-title">ACTIVE CHECKPOINTS</div>
-                                    <div id="mc-dash-checkpoints" style="display:flex;flex-direction:column;gap:10px;"></div>
+                                    <div id="mc-dash-checkpoints" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(300px, 1fr));gap:14px;"></div>
                                 </div>
                                 <!-- Active Projects with Progress -->
                                 <div class="mc-card">
                                     <div class="mc-card-title">ACTIVE PROJECTS</div>
-                                    <div id="mc-dash-projects" style="display:flex;flex-direction:column;gap:10px;"></div>
+                                    <div id="mc-dash-projects" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(300px, 1fr));gap:14px;"></div>
                                 </div>
                                 <div class="mc-card">
                                     <div class="mc-card-title">QUICK ACTIONS</div>
@@ -29030,8 +29042,57 @@
         } catch (e) { console.warn('[v1.33 mc sidebar drawer]', e); }
 
         // ── Dashboard ───────────────────────────────────────────────
+        // ── Dashboard summary cards (Sept 15) ── real 16:9 cover-art cards
+        // for Programs/Checkpoints/Projects on the Mission Dashboard landing
+        // page, matching the standard already shipped in the dedicated
+        // Programs/Checkpoints/Projects TABS (mcRenderProgramsTab/
+        // mcRenderCheckpoints/mcRenderProjects, which already render real
+        // embedUrl/bannerImage art via pflxCoverMediaEl at full card size).
+        // This is a lighter, dashboard-sized card -- NOT a duplicate of the
+        // Checkpoints tab's "hero" card (which nests a full Project/Task
+        // content tree per checkpoint; too heavy for a landing-page summary
+        // of a handful of items) -- same cover-art treatment, condensed body.
+        function mcDashCardHtml(opts) {
+            var accentRgb = opts.accentRgb || '0,212,255';
+            var banner = (opts.embedUrl || opts.bannerImage)
+                ? '<div style="width:calc(100% + 36px);aspect-ratio:16/9;background:rgba(6,10,20,0.6);overflow:hidden;margin:-18px -18px 14px -18px;border-radius:14px 14px 0 0;">' +
+                    (typeof pflxCoverMediaEl === 'function'
+                        ? pflxCoverMediaEl(opts.embedUrl, opts.bannerImage)
+                        : '<img src="' + escapeHtml(opts.bannerImage || '') + '" style="width:100%;height:100%;object-fit:cover;display:block;">') +
+                  '</div>'
+                : '<div style="width:calc(100% + 36px);aspect-ratio:16/9;background:linear-gradient(135deg, rgba(' + accentRgb + ',0.18), rgba(' + accentRgb + ',0.06));display:flex;align-items:center;justify-content:center;margin:-18px -18px 14px -18px;border-radius:14px 14px 0 0;">' +
+                    '<div style="font-size:36px;opacity:0.5;">' + (opts.icon || '') + '</div>' +
+                  '</div>';
+            return '<div class="mc-card" style="border-left:3px solid rgba(' + accentRgb + ',0.8);">' +
+                banner +
+                '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+                    '<span style="flex:1;min-width:120px;font-size:14px;color:#f0f0ff;font-weight:800;">' + (opts.icon || '') + ' ' + escapeHtml(opts.title || '') + '</span>' +
+                    (opts.statusLabel ? '<span class="mc-pill" style="background:rgba(' + accentRgb + ',0.12);color:' + (opts.statusColor || '#fff') + ';">' + escapeHtml(opts.statusLabel) + '</span>' : '') +
+                '</div>' +
+                (opts.metaLine ? '<div style="font-size:10px;color:rgba(255,255,255,0.4);font-family:monospace;margin-top:6px;">' + opts.metaLine + '</div>' : '') +
+                (opts.statsHtml || '') +
+                '<div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap;">' + (opts.buttonsHtml || '') + '</div>' +
+            '</div>';
+        }
+        window.mcDashCardHtml = mcDashCardHtml;
+
         function mcRenderDashboard() {
             mcLoadData();
+            // Organization/Cohort banner (Sept 15) -- reuses the real,
+            // already-wired org lookup from the Player Portal home
+            // (ppHomeOrgCardHtml, Sept 12) so the host's own Mission
+            // Dashboard shows the same real org/cohort identity card, not a
+            // separate/fabricated one. Resolves off THIS account's own
+            // cohort field -- if a host manages multiple cohorts across
+            // orgs, this reflects their own assigned cohort, not whichever
+            // cohort they're currently filtering by elsewhere on this page.
+            // Silently empty (no visual change) when there's no
+            // ORGANIZATIONS[] entry whose cohorts[] contains it.
+            var orgBannerEl = document.getElementById('mc-dash-org-banner');
+            if (orgBannerEl) {
+                try { orgBannerEl.innerHTML = (typeof ppHomeOrgCardHtml === 'function') ? ppHomeOrgCardHtml() : ''; }
+                catch (e) { orgBannerEl.innerHTML = ''; }
+            }
             const statsEl = document.getElementById('mc-dashboard-stats');
             const activityEl = document.getElementById('mc-activity-feed');
             if (!statsEl) return;
@@ -29066,51 +29127,113 @@
                     }).join('');
             }
 
-            // Checkpoint progress cards
+            // Programs summary -- real 16:9 cover-art cards (Sept 15),
+            // matching the standard already shipped in the dedicated
+            // Programs tab (mcRenderProgramsTab). Active programs first,
+            // capped at 6 so the landing page stays a summary, not a
+            // duplicate of the full tab -- a "View All" tile closes the
+            // grid when there are more.
+            var pgmEl = document.getElementById('mc-dash-programs');
+            if (pgmEl) {
+                var allPrograms = (typeof mcPrograms !== 'undefined' && Array.isArray(mcPrograms)) ? mcPrograms.slice() : [];
+                var activePrograms = allPrograms.filter(function (p) { return p && p.status === 'active'; });
+                var shownPrograms = (activePrograms.length ? activePrograms : allPrograms).slice(0, 6);
+                pgmEl.innerHTML = shownPrograms.length === 0
+                    ? '<div style="color:rgba(255,255,255,0.25);font-size:12px;">No programs yet.</div>'
+                    : shownPrograms.map(function (pg) {
+                        var col = pg.status === 'active' ? '#4ade80' : (pg.status === 'completed' ? '#8a92b0' : '#c4b5fd');
+                        var accentRgb = pg.status === 'active' ? '74,222,128' : '167,139,250';
+                        var roll = (typeof _pflxProgramRollup === 'function') ? _pflxProgramRollup(pg) : { cpDone:0, cpTotal:0, projDone:0, projTotal:0, taskPct:0, taskTotal:0 };
+                        var statsHtml = '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:rgba(255,255,255,0.5);">' +
+                            '<span>✅ ' + roll.cpDone + '/' + roll.cpTotal + ' checkpoints</span>' +
+                            '<span>\u{1F4E6} ' + roll.projDone + '/' + roll.projTotal + ' projects</span>' +
+                            (roll.taskTotal > 0 ? '<span>\u{1F4CB} ' + roll.taskPct + '% tasks</span>' : '') +
+                        '</div>';
+                        return mcDashCardHtml({
+                            icon: '\u{1F4D0}', title: pg.name || 'Program',
+                            statusLabel: (pg.status || 'draft').toUpperCase(), statusColor: col, accentRgb: accentRgb,
+                            metaLine: '\u{1F4C5} ' + escapeHtml(pg.startDate || 'no start date') + ' · ' + (pg.durationWeeks || 0) + 'wk',
+                            embedUrl: pg.embedUrl, bannerImage: pg.bannerImage,
+                            statsHtml: statsHtml,
+                            buttonsHtml: '<button class="mc-btn" style="padding:4px 10px;font-size:10px;background:rgba(74,222,128,0.1);border-color:rgba(74,222,128,0.3);color:#4ade80;" onclick="mcSeasonGenerateCheckpoints(\'' + escapeHtml(pg.id) + '\')">Generate Checkpoints</button>' +
+                                '<button class="mc-btn" style="padding:4px 10px;font-size:10px;" onclick="mcNav(\'programs\');setTimeout(function(){mcShowProgramTabForm(\'' + escapeHtml(pg.id) + '\')},120);">Edit</button>' +
+                                '<button class="mc-btn mc-btn-red" style="padding:4px 10px;font-size:10px;" onclick="mcNav(\'programs\');setTimeout(function(){mcSeasonDeleteProgram(\'' + escapeHtml(pg.id) + '\')},120);">Delete</button>'
+                        });
+                    }).join('') + (allPrograms.length > shownPrograms.length ? '<div class="mc-card" style="display:flex;align-items:center;justify-content:center;cursor:pointer;color:rgba(255,255,255,0.4);font-size:12px;" onclick="mcNav(\'programs\')">View all ' + allPrograms.length + ' programs →</div>' : '');
+            }
+
+            // Checkpoint progress cards -- real 16:9 cover-art cards (Sept
+            // 15), matching the standard already shipped in the dedicated
+            // Checkpoints tab. Capped at 6 for the same reason as Programs.
             var cpEl = document.getElementById('mc-dash-checkpoints');
             if (cpEl) {
                 var activeCPs = mcCheckpoints.filter(function(c) { return c.status === 'active' || c.status === 'upcoming'; });
-                cpEl.innerHTML = activeCPs.length === 0
+                var shownCPs = activeCPs.slice(0, 6);
+                cpEl.innerHTML = shownCPs.length === 0
                     ? '<div style="color:rgba(255,255,255,0.25);font-size:12px;">No active checkpoints.</div>'
-                    : activeCPs.map(function(cp) {
+                    : shownCPs.map(function(cp) {
+                        var cpIdx = mcCheckpoints.indexOf(cp);
                         var cpTasks = mcTasks.filter(function(t) { return t.roundId === cp.id; });
                         var totalT = cpTasks.length;
                         var approvedT = cpTasks.filter(function(t) { return t.status === 'approved'; }).length;
                         var pct = totalT > 0 ? Math.round((approvedT / totalT) * 100) : 0;
                         var barColor = pct >= 100 ? '#22c55e' : pct > 50 ? '#f5c842' : 'var(--cyan)';
-                        return '<div style="padding:12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.04);border-radius:10px;">' +
-                            (cp.bannerImage ? '<div style="width:100%;height:60px;border-radius:6px;overflow:hidden;margin-bottom:8px;"><img src="' + cp.bannerImage + '" style="width:100%;height:100%;object-fit:cover;"></div>' : '') +
-                            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
-                            '<span style="font-weight:900;color:#f0f0ff;font-size:13px;">' + escapeHtml(cp.name) + '</span>' +
-                            '<span style="font-size:11px;color:' + barColor + ';font-weight:700;">' + pct + '%</span></div>' +
-                            '<div style="height:6px;background:rgba(255,255,255,0.06);border-radius:4px;overflow:hidden;">' +
-                            '<div style="height:100%;width:' + pct + '%;background:' + barColor + ';border-radius:4px;transition:width 0.5s;"></div></div>' +
-                            '<div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:4px;">' + approvedT + '/' + totalT + ' tasks completed</div></div>';
-                    }).join('');
+                        var col = cp.status === 'active' ? '#4ade80' : '#4f8ef7';
+                        var accentRgb = cp.status === 'active' ? '0,212,255' : '79,142,247';
+                        var statsHtml = '<div style="margin-top:10px;">' +
+                            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
+                                '<span style="font-size:10px;color:rgba(255,255,255,0.4);">\u{1F4CB} Tasks</span>' +
+                                '<span style="font-size:10px;color:' + barColor + ';font-family:monospace;font-weight:700;">' + approvedT + '/' + totalT + ' (' + pct + '%)</span>' +
+                            '</div>' +
+                            '<div style="height:6px;background:rgba(255,255,255,0.06);border-radius:4px;overflow:hidden;"><div style="height:100%;width:' + pct + '%;background:' + barColor + ';border-radius:4px;"></div></div>' +
+                        '</div>';
+                        return mcDashCardHtml({
+                            icon: '\u{1F3C1}', title: cp.name || 'Checkpoint',
+                            statusLabel: (cp.status || 'upcoming').toUpperCase(), statusColor: col, accentRgb: accentRgb,
+                            metaLine: escapeHtml(cp.startDate || 'TBD') + ' → ' + escapeHtml(cp.endDate || 'TBD'),
+                            embedUrl: cp.embedUrl, bannerImage: cp.bannerImage,
+                            statsHtml: statsHtml,
+                            buttonsHtml: (cpIdx >= 0 ? '<button class="mc-btn" style="padding:4px 10px;font-size:10px;" onclick="mcNav(\'checkpoints\');setTimeout(function(){mcEditCheckpoint(' + cpIdx + ')},120);">Edit</button>' +
+                                '<button class="mc-btn mc-btn-red" style="padding:4px 10px;font-size:10px;" onclick="mcNav(\'checkpoints\');setTimeout(function(){mcDeleteCheckpoint(' + cpIdx + ')},120);">Delete</button>' : '')
+                        });
+                    }).join('') + (activeCPs.length > shownCPs.length ? '<div class="mc-card" style="display:flex;align-items:center;justify-content:center;cursor:pointer;color:rgba(255,255,255,0.4);font-size:12px;" onclick="mcNav(\'checkpoints\')">View all ' + activeCPs.length + ' checkpoints →</div>' : '');
             }
 
-            // Project progress cards
+            // Project progress cards -- real 16:9 cover-art cards (Sept
+            // 15), matching the standard already shipped in the dedicated
+            // Projects tab. Capped at 6 for the same reason as Programs.
             var projEl = document.getElementById('mc-dash-projects');
             if (projEl) {
                 var activeProjs = mcProjects.filter(function(p) { return p.status === 'in_progress' || p.status === 'planning'; });
-                projEl.innerHTML = activeProjs.length === 0
+                var shownProjs = activeProjs.slice(0, 6);
+                projEl.innerHTML = shownProjs.length === 0
                     ? '<div style="color:rgba(255,255,255,0.25);font-size:12px;">No active projects.</div>'
-                    : activeProjs.map(function(proj) {
+                    : shownProjs.map(function(proj) {
+                        var projIdx = mcProjects.indexOf(proj);
                         var projTaskIds = proj.taskIds || [];
                         var projTasks = projTaskIds.map(function(tid) { return mcTasks.find(function(t) { return t.id === tid; }); }).filter(Boolean);
                         var totalT = projTasks.length;
                         var approvedT = projTasks.filter(function(t) { return t.status === 'approved'; }).length;
                         var pct = totalT > 0 ? Math.round((approvedT / totalT) * 100) : 0;
                         var barColor = pct >= 100 ? '#22c55e' : pct > 50 ? '#f5c842' : '#a78bfa';
-                        return '<div style="padding:12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.04);border-radius:10px;">' +
-                            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
-                            '<span style="font-weight:900;color:#f0f0ff;font-size:13px;">' + escapeHtml(proj.name) + '</span>' +
-                            '<span style="font-size:11px;color:' + barColor + ';font-weight:700;">' + pct + '%</span></div>' +
-                            '<div style="height:6px;background:rgba(255,255,255,0.06);border-radius:4px;overflow:hidden;">' +
-                            '<div style="height:100%;width:' + pct + '%;background:' + barColor + ';border-radius:4px;transition:width 0.5s;"></div></div>' +
-                            '<div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:4px;">' + approvedT + '/' + totalT + ' tasks completed' +
-                            (proj.team && proj.team.length ? ' · ' + proj.team.length + ' members' : '') + '</div></div>';
-                    }).join('');
+                        var col = proj.status === 'in_progress' ? '#a78bfa' : '#60a5fa';
+                        var statsHtml = '<div style="margin-top:10px;">' +
+                            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
+                                '<span style="font-size:10px;color:rgba(255,255,255,0.4);">\u{1F4CB} Tasks</span>' +
+                                '<span style="font-size:10px;color:' + barColor + ';font-family:monospace;font-weight:700;">' + approvedT + '/' + totalT + ' (' + pct + '%)</span>' +
+                            '</div>' +
+                            '<div style="height:6px;background:rgba(255,255,255,0.06);border-radius:4px;overflow:hidden;"><div style="height:100%;width:' + pct + '%;background:' + barColor + ';border-radius:4px;"></div></div>' +
+                            (proj.team && proj.team.length ? '<div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:4px;">' + proj.team.length + ' members</div>' : '') +
+                        '</div>';
+                        return mcDashCardHtml({
+                            icon: '\u{1F3AC}', title: proj.name || 'Project',
+                            statusLabel: (proj.status || 'planning').toUpperCase().replace('_', ' '), statusColor: col, accentRgb: '167,139,250',
+                            embedUrl: proj.embedUrl, bannerImage: proj.bannerImage,
+                            statsHtml: statsHtml,
+                            buttonsHtml: (projIdx >= 0 ? '<button class="mc-btn" style="padding:4px 10px;font-size:10px;" onclick="mcNav(\'projects\');setTimeout(function(){mcEditProject(' + projIdx + ')},120);">Edit</button>' +
+                                '<button class="mc-btn mc-btn-red" style="padding:4px 10px;font-size:10px;" onclick="mcNav(\'projects\');setTimeout(function(){mcDeleteProject(' + projIdx + ')},120);">Delete</button>' : '')
+                        });
+                    }).join('') + (activeProjs.length > shownProjs.length ? '<div class="mc-card" style="display:flex;align-items:center;justify-content:center;cursor:pointer;color:rgba(255,255,255,0.4);font-size:12px;" onclick="mcNav(\'projects\')">View all ' + activeProjs.length + ' projects →</div>' : '');
             }
         }
 
