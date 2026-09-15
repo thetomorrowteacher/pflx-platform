@@ -202,7 +202,12 @@ check('the auto-start is wired into PFLX_LOADING\'s first hide() -- the SAME "in
     const watchCalls = [];
     const watchSavedCalls = [];
     win.pflxXBotLoadSessions = opts.loadSessions || (async function () { return opts.sessions || []; });
-    win.xbotTheaterLoadPlaylist = opts.loadPlaylist === null ? undefined : (opts.loadPlaylist || (async function () { return opts.playlist || []; }));
+    // v203 -- auto-start now reads the plural, named-playlists shape
+    // (window.xbotTheaterLoadPlaylists -> array of {id, items}) instead
+    // of a flat item array; opts.playlist (a flat list, as this test
+    // originally wrote it) is wrapped into one mock playlist so every
+    // existing case below keeps meaning the same thing.
+    win.xbotTheaterLoadPlaylists = opts.loadPlaylist === null ? undefined : (opts.loadPlaylist || (async function () { return opts.playlist ? [{ id: 'pl_mock', name: 'Mock', items: opts.playlist }] : []; }));
     win.xbotTheaterWatch = function (id) { watchCalls.push(id); };
     win.xbotTheaterWatchSaved = function (id) { watchSavedCalls.push(id); };
     const fn = new Function('window', block + '\nreturn window.pflxXBotAutoStartTheaterOnLogin;');
