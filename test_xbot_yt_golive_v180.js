@@ -32,7 +32,7 @@ check('PFLX_PATCH bumped to 180', src.indexOf("window.PFLX_PATCH   = 180;") !== 
 check('Go Live (Screen) card exists in the TOOLS panel', src.indexOf('Go Live (Screen) — via OBS/YouTube') !== -1);
 check('#xbot-yt-live-status status container exists', src.indexOf('<div id="xbot-yt-live-status"') !== -1);
 check('the honest one-way/10-30s/OBS-not-controlled caveat is shown in the UI, not just documented', src.indexOf("Honest limits: one-way only") !== -1);
-check("TOOLS sub-tab switch renders the real YouTube status", src.indexOf("if (tab === 'tools') window.xbotLiveRenderYtStatus();") !== -1);
+check("TOOLS sub-tab switch renders the real YouTube status", src.indexOf("if (tab === 'tools') { window.xbotLiveRenderYtStatus(); window.xbotLiveRenderSessionAttachPicker(); }") !== -1); // v202: the tools switch now also renders the session-attach picker alongside the YT status -- same call, same guarantee, updated wiring string
 check('broadcast creation is NOT duplicated -- no new #yt-broadcast-title-style input was added by this patch', src.indexOf('id="xbot-yt-broadcast-title"') === -1);
 
 // ── Sandbox 1: the new read-only ytGetLiveStatus getter, extracted from

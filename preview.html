@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 201;
+      window.PFLX_PATCH   = 202;
       window.PFLX_BUILD   = '2026.09';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -14138,6 +14138,7 @@
                                 <div style="font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:600;color:#ff8fb3;">Go Live (Screen) — via OBS/YouTube</div>
                             </div>
                             <div id="xbot-yt-live-status" style="font-size:11px;color:#c9cfe8;line-height:1.5;"></div>
+                            <div id="xbot-yt-session-attach-wrap" style="margin-top:10px;"></div>
                             <div style="font-size:10px;color:#6a7290;line-height:1.5;margin-top:8px;">
                                 Honest limits: one-way only (no player mic/camera back), typically 10-30s of delay, and you still start the stream in OBS yourself — X-Live doesn't control OBS.
                             </div>
@@ -58203,7 +58204,7 @@ function ppRenderCheckpoints(el) {
             if (tab === 'theater') window.xbotTheaterRenderList();
             if (tab === 'sound') window.xbotSoundboardRenderGrid();
             if (tab === 'controller') window.xbotControllerRenderGrid();
-            if (tab === 'tools') window.xbotLiveRenderYtStatus();
+            if (tab === 'tools') { window.xbotLiveRenderYtStatus(); window.xbotLiveRenderSessionAttachPicker(); }
         };
         window.pflxXBotRenderTeams = async function () {
             var grid = document.getElementById('xbot-teams-grid');
@@ -58362,7 +58363,91 @@ function ppRenderCheckpoints(el) {
         };
         window.xbotLiveEndYouTubeStream = function () {
             if (typeof window.ytStopBroadcast === 'function') window.ytStopBroadcast();
-            setTimeout(function () { if (typeof window.xbotLiveRenderYtStatus === 'function') window.xbotLiveRenderYtStatus(); }, 300);
+            // v202: an ended broadcast must not leave a dead youtubeEmbedId
+            // on whatever session it was attached to -- Theater's own
+            // live-session filter (status==='active' && youtubeEmbedId)
+            // would otherwise keep trying to embed a stream that's gone.
+            if (window._xbotYtAttachedSessionId && typeof window.xbotLiveDetachSessionBroadcast === 'function') {
+                window.xbotLiveDetachSessionBroadcast();
+            }
+            setTimeout(function () {
+                if (typeof window.xbotLiveRenderYtStatus === 'function') window.xbotLiveRenderYtStatus();
+                if (typeof window.xbotLiveRenderSessionAttachPicker === 'function') window.xbotLiveRenderSessionAttachPicker();
+            }, 300);
+        };
+
+        // == PATCH PLATFORM v202 -- screenshare-to-Theater, part 1 of 2
+        // (Ennis: "allow a screenshare go live to the theater as well...
+        // amongst either a live session (slides) or simply a live open
+        // broadcast"). This half reuses the ALREADY-WORKING OBS/YouTube
+        // relay (v180) rather than inventing a second broadcast path --
+        // ties the real broadcast video id onto a specific X-Live
+        // session's sess.youtubeEmbedId field via the SAME merge-safe
+        // bridge xb-1 already established (pflxXBotLoadSessions/
+        // pflxXBotSaveSession). Theater's own live-session watch filter
+        // (status==='active' && youtubeEmbedId, unchanged since v174)
+        // already knows how to render that -- zero new watch/render code.
+        // Leaving the picker on "open broadcast" is the OTHER half of the
+        // same ask, and is exactly today's v180 default -- unchanged.
+        window.xbotLiveRenderSessionAttachPicker = async function () {
+            var wrap = document.getElementById('xbot-yt-session-attach-wrap');
+            if (!wrap) return;
+            var status = (typeof window.ytGetLiveStatus === 'function') ? window.ytGetLiveStatus() : { activeBroadcast: null };
+            var bc = status.activeBroadcast;
+            if (!bc) { wrap.innerHTML = ''; return; }
+            var isReal = bc.id && String(bc.id).indexOf('local_') !== 0;
+            if (window._xbotYtAttachedSessionId) {
+                var attSessions = await window.pflxXBotLoadSessions();
+                var attSess = (attSessions || []).find(function (s) { return s.id === window._xbotYtAttachedSessionId; });
+                wrap.innerHTML = '<div style="font-size:11px;color:#7dffb0;">📎 Attached to session: <strong>' + escapeHtml(attSess ? (attSess.title || 'Untitled Session') : window._xbotYtAttachedSessionId) + '</strong> — live in that session\'s Theater.</div>' +
+                    '<button onclick="xbotLiveDetachSessionBroadcast()" style="margin-top:6px;width:100%;padding:6px;background:rgba(255,0,80,0.08);border:1px solid rgba(255,0,80,0.25);border-radius:6px;color:#ff8fb3;font-family:\'Rajdhani\',sans-serif;font-size:11px;font-weight:600;cursor:pointer;">Detach (keep as open broadcast)</button>';
+                return;
+            }
+            if (!isReal) {
+                wrap.innerHTML = '<div style="font-size:10px;color:#6a7290;">Attaching to a live session needs a real YouTube connection (not local-only mode).</div>';
+                return;
+            }
+            var sessions = await window.pflxXBotLoadSessions();
+            var live = (sessions || []).filter(function (s) { return s.status === 'active'; });
+            if (!live.length) {
+                wrap.innerHTML = '<div style="font-size:10px;color:#6a7290;">No live sessions to attach to right now — this stays an open broadcast.</div>';
+                return;
+            }
+            wrap.innerHTML = '<select id="xbot-yt-session-select" style="width:100%;padding:6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,0,80,0.25);border-radius:6px;color:#e0e6ff;font-size:11px;margin-bottom:6px;">' +
+                '<option value="">-- Keep as open broadcast --</option>' +
+                live.map(function (s) { return '<option value="' + escapeHtml(s.id) + '">' + escapeHtml(s.title || 'Untitled Session') + '</option>'; }).join('') +
+                '</select>' +
+                '<button onclick="xbotLiveAttachBroadcastToSession()" style="width:100%;padding:6px;background:rgba(255,0,80,0.15);border:1px solid rgba(255,0,80,0.4);border-radius:6px;color:#ff5588;font-family:\'Rajdhani\',sans-serif;font-size:11px;font-weight:600;cursor:pointer;">📎 Attach to Session\'s Theater</button>';
+        };
+        window.xbotLiveAttachBroadcastToSession = async function () {
+            var sel = document.getElementById('xbot-yt-session-select');
+            var sid = sel ? sel.value : '';
+            if (!sid) return;
+            var status = (typeof window.ytGetLiveStatus === 'function') ? window.ytGetLiveStatus() : { activeBroadcast: null };
+            var bc = status.activeBroadcast;
+            if (!bc || !bc.id || String(bc.id).indexOf('local_') === 0) { if (typeof pflxToast === 'function') pflxToast('No real YouTube broadcast to attach.', 'error'); return; }
+            try {
+                var sessions = await window.pflxXBotLoadSessions();
+                var sess = (sessions || []).find(function (s) { return s.id === sid; });
+                if (!sess) { if (typeof pflxToast === 'function') pflxToast('Session not found.', 'error'); return; }
+                sess.youtubeEmbedId = bc.id;
+                await window.pflxXBotSaveSession(sess);
+                window._xbotYtAttachedSessionId = sid;
+                if (typeof pflxToast === 'function') pflxToast('Attached — live in that session\'s Theater now.', 'success');
+                window.xbotLiveRenderSessionAttachPicker();
+            } catch (e) { if (typeof pflxToast === 'function') pflxToast('Could not attach broadcast to session.', 'error'); }
+        };
+        window.xbotLiveDetachSessionBroadcast = async function () {
+            var sid = window._xbotYtAttachedSessionId;
+            if (!sid) return;
+            try {
+                var sessions = await window.pflxXBotLoadSessions();
+                var sess = (sessions || []).find(function (s) { return s.id === sid; });
+                if (sess) { sess.youtubeEmbedId = null; await window.pflxXBotSaveSession(sess); }
+            } catch (e) {}
+            window._xbotYtAttachedSessionId = null;
+            if (typeof pflxToast === 'function') pflxToast('Detached — back to open broadcast.', 'info');
+            window.xbotLiveRenderSessionAttachPicker();
         };
 
         // ══ PATCH PLATFORM v184 -- xb-10: private, per-user per-session
