@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 216;
+      window.PFLX_PATCH   = 217;
       window.PFLX_BUILD   = '2026.09';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -11708,6 +11708,7 @@
                                 <button class="host-subtab" data-xbot-tab="access" onclick="switchXBotSettingsTab('access')">Access Control</button>
                                 <button class="host-subtab" data-xbot-tab="monitor" onclick="switchXBotSettingsTab('monitor')">Chat Monitor</button>
                                 <button class="host-subtab" data-xbot-tab="behavior" onclick="switchXBotSettingsTab('behavior')">Behavior</button>
+                                <button class="host-subtab" data-xbot-tab="youtube" onclick="switchXBotSettingsTab('youtube')">YouTube</button>
                             </div>
 
                             <!-- ═══ AI ENGINE TAB ═══ -->
@@ -11751,6 +11752,15 @@
                                                 <div style="margin-top: 4px; font-size: 10px; color: #6a7290;">Any OpenAI-compatible endpoint. <b>DeepSeek (cloud, cheap):</b> URL <span style="color:#f5c842;">https://api.deepseek.com/v1</span>, your sk- key above, model <span style="color:#f5c842;">deepseek-chat</span>. <b>Truly local (free):</b> Ollama / LM Studio on this computer — only <b>localhost</b> URLs work from the hosted Console (browser security).</div>
                                             </div>
                                         </div>
+                        <div id="settings-yt-keybox" style="display:none;margin-top:12px;">
+                            <label style="font-size:11px;color:#8a92b0;font-family:'Rajdhani',sans-serif;display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                                <span style="width:8px;height:8px;border-radius:50%;background:#ff3b3b;display:inline-block;"></span> YouTube Data API (search + playlists for every player)
+                            </label>
+                            <input type="password" id="settings-key-youtube" placeholder="AIza…  (Google Cloud → YouTube Data API v3 → API key)" autocomplete="off" style="width:100%;background:rgba(10,18,40,0.8);border:1px solid rgba(0,240,255,0.12);color:#e0e6ff;padding:8px 10px;border-radius:6px;font-family:'Rajdhani',sans-serif;font-size:13px;">
+                            <input type="text" id="settings-yt-channel" placeholder="Channel ID — UC…  (YouTube Studio → Settings → Channel → Advanced)" style="margin-top:6px;width:100%;background:rgba(10,18,40,0.8);border:1px solid rgba(0,240,255,0.12);color:#e0e6ff;padding:8px 10px;border-radius:6px;font-family:'Rajdhani',sans-serif;font-size:13px;">
+                            <div style="margin-top:4px;font-size:10px;color:#6a7290;">Shared with every player's X-Bot (unlike the AI keys). In Google Cloud, restrict it to <b>YouTube Data API v3</b> and to <b>https://www.prototypeflx.com/*</b>.</div>
+                            
+                        </div>
                                         <button onclick="xbotSaveSettingsKeys()" style="margin-top: 14px; width: 100%; padding: 10px; background: linear-gradient(135deg, rgba(0,240,255,0.15), rgba(139,92,246,0.15)); border: 1px solid rgba(0,240,255,0.3); border-radius: 8px; color: #00f0ff; font-family: 'Orbitron', sans-serif; font-size: 11px; letter-spacing: 2px; cursor: pointer;">SAVE KEYS</button>
                                         <div id="settings-key-status" style="margin-top: 8px; font-size: 11px; color: #6a7290; text-align: center;"></div>
                                         <div id="settings-proxy-status" style="margin-top: 4px; font-size: 11px; color: #6a7290; text-align: center;"></div>
@@ -11898,6 +11908,15 @@
                                         </div>
                                     </div>
                                 </div>
+                            </div>
+
+                            <!-- ═══ YOUTUBE TAB (v217) ═══ -->
+                            <div class="host-panel" id="xbot-tab-youtube">
+                                <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;">
+                                    <h3 style="color: var(--cyan); font-family: 'Orbitron', sans-serif; font-size: 13px; letter-spacing: 1.5px; margin: 0;">X-BOT YOUTUBE</h3>
+                                </div>
+                                <p style="color:#6a7290;font-size:12px;margin-bottom:14px;">What players can search, how many new searches they get, what happens with improper searches, and everything they searched or watched. The key lives in AI Engine → YouTube Data API.</p>
+                                <div id="pflx-yt-admin"></div>
                             </div>
 
                             <!-- ═══ BEHAVIOR TAB ═══ -->
@@ -13979,6 +13998,7 @@
                     <button class="xbot-mode-tab active" data-mode="chat" onclick="switchXBotMode('chat')">Chat</button>
                     <button class="xbot-mode-tab" data-mode="voice" onclick="switchXBotMode('voice')">Voice</button>
                     <button class="xbot-mode-tab" data-mode="notes" onclick="switchXBotMode('notes')">📝 Notes</button>
+                    <button class="xbot-mode-tab" data-mode="yt" onclick="switchXBotMode('yt')" id="xbot-tab-yt" style="display:none;">▶ YouTube</button>
                     <button class="xbot-mode-tab" data-mode="host" onclick="switchXBotMode('host')" id="xbot-tab-host" style="display:none;">Host</button>
                     <button class="xbot-mode-tab" data-mode="live" onclick="switchXBotMode('live')" id="xbot-tab-live" style="display:none;">🔴 Live</button>
                     <button class="xbot-mode-tab" data-mode="eng" onclick="switchXBotMode('eng')" id="xbot-tab-eng" style="display:none;">Dev</button>
@@ -14020,6 +14040,11 @@
                     <button class="xbot-quick-btn" data-action="rank">🏆 My Rank</button>
                 </div>
 
+                <!-- v217 YouTube Section (search, resources, host tools) -->
+                <div class="xbot-yt-section" id="xbot-yt-section" style="display:none;flex:1;overflow-y:auto;padding:14px 16px;">
+                    <div id="xbot-yt-root"></div>
+                </div>
+
                 <!-- Settings Section (hidden by default) -->
                 <div class="xbot-settings-section hidden" id="xbot-settings-section" style="flex:1;overflow-y:auto;padding:16px;display:none;">
                     <div style="font-family:'Orbitron',sans-serif;font-size:11px;color:rgba(0,240,255,0.7);letter-spacing:2px;margin-bottom:14px;">AI ENGINE KEYS</div>
@@ -14051,6 +14076,15 @@
                             <input type="text" id="xbot-key-local-model" placeholder="model name — deepseek-chat, llama3.2, …" style="margin-top:6px;width:100%;background:rgba(10,18,40,0.8);border:1px solid rgba(0,240,255,0.12);color:#e0e6ff;padding:8px 10px;border-radius:6px;font-family:'Rajdhani',sans-serif;font-size:13px;">
                         </div>
                     </div>
+                        <div id="xbot-yt-keybox" style="display:none;margin-top:10px;">
+                            <label style="font-size:11px;color:#8a92b0;font-family:'Rajdhani',sans-serif;display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                                <span style="width:8px;height:8px;border-radius:50%;background:#ff3b3b;display:inline-block;"></span> YouTube Data API (search + playlists for every player)
+                            </label>
+                            <input type="password" id="xbot-key-youtube" placeholder="AIza…  (Google Cloud → YouTube Data API v3 → API key)" autocomplete="off" style="width:100%;background:rgba(10,18,40,0.8);border:1px solid rgba(0,240,255,0.12);color:#e0e6ff;padding:8px 10px;border-radius:6px;font-family:'Rajdhani',sans-serif;font-size:13px;">
+                            <input type="text" id="xbot-yt-channel" placeholder="Channel ID — UC…  (YouTube Studio → Settings → Channel → Advanced)" style="margin-top:6px;width:100%;background:rgba(10,18,40,0.8);border:1px solid rgba(0,240,255,0.12);color:#e0e6ff;padding:8px 10px;border-radius:6px;font-family:'Rajdhani',sans-serif;font-size:13px;">
+                            <div style="margin-top:4px;font-size:10px;color:#6a7290;">Shared with every player's X-Bot (unlike the AI keys). In Google Cloud, restrict it to <b>YouTube Data API v3</b> and to <b>https://www.prototypeflx.com/*</b>.</div>
+                            <div id="xbot-yt-keystatus" style="margin-top:4px;font-size:11px;"></div>
+                        </div>
                     <button onclick="xbotSaveKeys()" style="margin-top:14px;width:100%;padding:10px;background:linear-gradient(135deg,rgba(0,240,255,0.15),rgba(139,92,246,0.15));border:1px solid rgba(0,240,255,0.3);border-radius:8px;color:#00f0ff;font-family:'Orbitron',sans-serif;font-size:11px;letter-spacing:2px;cursor:pointer;transition:all 0.2s;">SAVE KEYS</button>
                     <div id="xbot-key-status" style="margin-top:10px;font-size:11px;color:#6a7290;font-family:'Rajdhani',sans-serif;text-align:center;"></div>
                     <div id="xbot-proxy-status" style="margin-top:6px;font-size:11px;color:#6a7290;font-family:'Rajdhani',sans-serif;text-align:center;"></div>
@@ -46180,6 +46214,7 @@ function ppRenderCheckpoints(el) {
                 el = document.getElementById('yt-settings-oauth-secret'); if (el) ytConfig.oauthSecret = el.value.trim();
                 ytSaveConfigToStorage();
                 ytUpdateConnectionStatus();
+                try { if (window.pflxYT) window.pflxYT.adoptLocalConfig(); } catch (e) {} // v217: share with players' X-Bot
             }
             function ytLoadSettingsUI() {
                 ytLoadConfig();
@@ -60953,6 +60988,9 @@ function ppRenderCheckpoints(el) {
             if (engSection) engSection.style.display = 'none';
             if (liveSection) liveSection.style.display = 'none';
             if (notesSection) notesSection.style.display = 'none';
+            var ytSection = document.getElementById('xbot-yt-section');   // v217
+            if (ytSection) ytSection.style.display = 'none';
+            if (mode === 'settings') { try { if (window.pflxYT) window.pflxYT.fillKeyInputs(); } catch (e) {} }
 
             if (mode === 'voice') {
                 voiceSection.classList.remove('hidden');
@@ -60981,6 +61019,15 @@ function ppRenderCheckpoints(el) {
                 if (notesSection) {
                     notesSection.style.display = 'block';
                     if (typeof window.xbotNotesLoad === 'function') window.xbotNotesLoad();
+                }
+            } else if (mode === 'yt') {   // v217
+                voiceSection.classList.add('hidden');
+                chatMessages.style.display = 'none';
+                quickActions.style.display = 'none';
+                inputArea.style.display = 'none';
+                if (ytSection) {
+                    ytSection.style.display = 'block';
+                    if (window.pflxYT) window.pflxYT.open();
                 }
             } else if (mode === 'live') {
                 voiceSection.classList.add('hidden');
@@ -62372,6 +62419,7 @@ RESPONSE RULES:
             if (lm) XBOT_AI.keys.localModel = lm.value.trim();
             if (lk) XBOT_AI.keys.localKey = lk.value.trim();
             XBOT_AI.saveKeys();
+            try { if (window.pflxYT) window.pflxYT.saveKeyFromInputs('xbot-key-youtube', 'xbot-yt-channel'); } catch (e) {} // v217
             const avail = XBOT_AI.availableModels();
             const statusEl = document.getElementById('xbot-key-status');
             if (avail.length > 0) {
@@ -62730,10 +62778,12 @@ RESPONSE RULES:
             if (tab === 'engine') xbotRefreshEngineUI();
             if (tab === 'access') xbotRefreshAccessUI();
             if (tab === 'monitor') xbotRefreshMonitorUI();
+            if (tab === 'engine' || tab === 'youtube') { try { if (window.pflxYT) window.pflxYT.ensureLoaded(true).then(function () { window.pflxYT.fillKeyInputs(); if (tab === 'youtube') window.pflxYT.renderAdmin(document.getElementById('pflx-yt-admin')); }); } catch (e) {} } // v217
         }
 
         // Save keys from the full settings page
         function xbotSaveSettingsKeys() {
+            try { if (window.pflxYT) window.pflxYT.saveKeyFromInputs('settings-key-youtube', 'settings-yt-channel'); } catch (e) {} // v217
             XBOT_AI.keys.claude = document.getElementById('settings-key-claude').value.trim();
             XBOT_AI.keys.gemini = document.getElementById('settings-key-gemini').value.trim();
             XBOT_AI.keys.openai = document.getElementById('settings-key-openai').value.trim();
@@ -70895,6 +70945,7 @@ RESPONSE RULES:
                 if (tbLbl) tbLbl.textContent = window.pflxRole === 'host' ? 'HOST MODE' : 'PLAYER MODE';
                 // Apply initial body gating class
                 document.body.classList.toggle('pflx-as-player', window.pflxRole === 'player' && isAdmin);
+                try { if (window.pflxYT) { window.pflxYT.syncTabVisibility(); window.pflxYT.fillKeyInputs(); } } catch (e) {} // v217
                 console.log('[PFLX] RolePill injected — isAdmin:', isAdmin, 'role:', role, 'pflxRole:', window.pflxRole);
             };
 
@@ -71622,6 +71673,641 @@ RESPONSE RULES:
     // ═══ /PATCH PLATFORM v213 ═══
     </script>
 
+    <script>
+        // ═══════════════════════════════════════════════════════════════════
+        // PATCH v217 -- X-BOT YOUTUBE (Sep 16, Ennis)
+        //  Players search YouTube inside X-Bot for tutorials, and open the
+        //  playlists/videos a host posts as X-Bot Resources. Hosts pick from
+        //  their channel's public playlists (Channel ID) or paste any link.
+        //  * One shared key: saved by a host in X-Bot > AI Engine Keys (or MC
+        //    Settings > YouTube API) and synced as app_data 'pflx_yt_shared'
+        //    so every player's X-Bot can search. Lock it to prototypeflx.com
+        //    in Google Cloud.
+        //  * Quota: identical searches come from a shared cloud cache
+        //    ('pflx_ytc_<hash>', 24h) and cost nothing; each player gets
+        //    settings.dailyLimit (default 5) NEW searches a day; hosts are
+        //    unlimited.
+        //  * Safety toggles: strict SafeSearch, learning categories only
+        //    (Education / How-to / Science & Tech), approved channels only,
+        //    blocked words. Every search/watch is logged per player
+        //    ('pflx_yt_log_<id>') for the host report. Improper searches are
+        //    blocked, flagged live to hosts, and fined (settings.fineId).
+        //    Searches that suggest a player may be struggling are NEVER
+        //    fined: they are blocked, shown support text, and flagged to
+        //    hosts as a wellbeing check-in.
+        // ═══════════════════════════════════════════════════════════════════
+        window.pflxYT = (function () {
+            var SHARED_KEY = 'pflx_yt_shared', RES_KEY = 'pflx_xbot_yt_resources', LOG_PREFIX = 'pflx_yt_log_', CACHE_PREFIX = 'pflx_ytc_';
+            var API = 'https://www.googleapis.com/youtube/v3/';
+            var LEARNING_CATS = ['26', '27', '28'];
+            var DEFAULTS = { playersEnabled: true, strict: true, learningOnly: false, approvedOnly: false, approvedChannels: [],
+                             dailyLimit: 5, autoFine: true, fineId: '', blockTerms: [], cacheHours: 24 };
+            var WELLBEING = ['suicide', 'suicidal', 'kill myself', 'killing myself', 'self harm', 'selfharm', 'cut myself', 'cutting myself',
+                'want to die', 'wanna die', 'how to die', 'end my life', 'overdose', 'hurt myself', 'hang myself', 'i hate my life'];
+            var BLOCK = ['porn', 'porno', 'pornhub', 'xxx', 'nsfw', 'nude', 'nudes', 'naked', 'sexy', 'hentai', 'onlyfans', 'fetish', 'strip club',
+                'stripper', 'boobs', 'titties', 'beheading', 'meth', 'cocaine', 'heroin',
+                'fentanyl', 'get high', 'buy weed', 'fuck', 'fucking', 'shit', 'bitch', 'pussy', 'asshole',
+                'twerk', 'twerking', 'rule 34', 'milf'];
+            var BLOCK_STEMS = ['porn', 'hentai', 'nsfw', 'onlyfans', 'fuck', 'nude'];
+            // Words with innocent uses (weed the garden, naked eye, Al Gore, great tits,
+            // casino probability, bomb shelter) block the search for a host to look at -- never fined.
+            var REVIEW = ['make a bomb', 'build a bomb', 'make a gun', 'sex', 'sexual', 'drunk', 'weed', 'vape', 'vaping', 'naked', 'gore', 'tits', 'gambling', 'casino', 'fight compilation'];
+            var S = { cfg: { apiKey: '', channelId: '', settings: clone(DEFAULTS) }, res: { items: [] }, loaded: false,
+                      view: 'search', q: '', results: [], busy: false, msg: '', msgKind: '', myPls: null, plOpen: null,
+                      plItems: {}, playing: null, report: null, reportFilter: 'all', seen: {} };
+
+            function clone(o) { return JSON.parse(JSON.stringify(o)); }
+            function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+            function sb() { return (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null; }
+            function me() { return window.activeSession || null; }
+            function realHost() {
+                var s = me(); var r = String((s && s.role) || '').toLowerCase();
+                return !!(s && (r === 'admin' || r === 'host' || r === 'teacher' || r === 'instructor' || s.hostTier));
+            }
+            function hostView() { return realHost() && window.pflxRole !== 'player'; }
+            function settings() { return Object.assign(clone(DEFAULTS), (S.cfg && S.cfg.settings) || {}); }
+            function localCfg() {
+                try { var raw = (typeof pflxSafeGet === 'function') ? pflxSafeGet('pflx_yt_config') : localStorage.getItem('pflx_yt_config'); var v = (typeof raw === 'string') ? JSON.parse(raw) : raw; return (v && typeof v === 'object') ? v : {}; } catch (e) { return {}; }
+            }
+            function key() { return (S.cfg && S.cfg.apiKey) || localCfg().apiKey || ''; }
+            function channelId() { return (S.cfg && S.cfg.channelId) || localCfg().channelId || ''; }
+            function hash(s) { var h = 5381; for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); }
+            function toast(m, k) { try { if (typeof pflxToast === 'function') pflxToast(m, k || 'info', 5000); } catch (e) {} }
+
+            // ── cloud rows ──
+            function readRow(k) {
+                var c = sb(); if (!c) return Promise.resolve(null);
+                return c.from('app_data').select('data, updated_at').eq('key', k).limit(1).then(function (r) {
+                    return (r && r.data && r.data[0]) || null;
+                }, function () { return null; });
+            }
+            function writeRow(k, data) {
+                var c = sb(); if (!c) return Promise.resolve(false);
+                return c.from('app_data').upsert({ key: k, data: data, updated_at: new Date().toISOString() }, { onConflict: 'key' })
+                    .then(function (r) { return !(r && r.error); }, function () { return false; });
+            }
+            function applyShared(d) {
+                if (!d || typeof d !== 'object') return;
+                S.cfg = { apiKey: d.apiKey || '', channelId: d.channelId || '', settings: Object.assign(clone(DEFAULTS), d.settings || {}),
+                          updatedAt: d.updatedAt || 0, updatedBy: d.updatedBy || '' };
+            }
+            function saveShared() {
+                if (!realHost()) return Promise.resolve(false);
+                var s = me();
+                var data = { apiKey: S.cfg.apiKey || '', channelId: S.cfg.channelId || '', settings: settings(),
+                             updatedAt: Date.now(), updatedBy: (s && (s.brand || s.name)) || 'host' };
+                return writeRow(SHARED_KEY, data);
+            }
+            function ensureLoaded(force) {
+                if (S.loaded && !force) return Promise.resolve();
+                return Promise.all([readRow(SHARED_KEY), readRow(RES_KEY)]).then(function (rs) {
+                    if (rs[0] && rs[0].data) applyShared(rs[0].data);
+                    if (rs[1] && rs[1].data && Array.isArray(rs[1].data.items)) S.res = rs[1].data;
+                    S.loaded = true;
+                    // First host device with a key in MC Settings shares it once.
+                    var lc = localCfg();
+                    if (realHost() && !S.cfg.apiKey && lc.apiKey) {
+                        S.cfg.apiKey = lc.apiKey; if (!S.cfg.channelId && lc.channelId) S.cfg.channelId = lc.channelId;
+                        saveShared();
+                    }
+                    fillKeyInputs(); syncTabVisibility();
+                });
+            }
+            // live: shared settings, resources, and flagged searches (hosts)
+            function onFeed(payload) {
+                var row = payload && (payload.new || payload.record);
+                if (!row || !row.key) return;
+                if (row.key === SHARED_KEY && row.data) { applyShared(row.data); fillKeyInputs(); syncTabVisibility(); rerender(); return; }
+                if (row.key === RES_KEY && row.data && Array.isArray(row.data.items)) { S.res = row.data; rerender(); return; }
+                if (row.key.indexOf(LOG_PREFIX) === 0 && row.data && hostView()) {
+                    var en = (row.data.entries || []).slice(-1)[0];
+                    if (en && en.flag && !S.seen[en.id]) {
+                        S.seen[en.id] = 1;
+                        if (Date.now() - (en.at || 0) < 120000) {
+                            if (en.flag === 'wellbeing') toast('💙 X-Bot: ' + (row.data.brand || 'A player') + ' searched something that may need a check-in. See X-Bot > YouTube > Activity.', 'warning');
+                            else toast('⚠ X-Bot flagged a YouTube search by ' + (row.data.brand || 'a player') + (en.fined ? ' (fine applied)' : ''), 'warning');
+                        }
+                    }
+                    if (S.report) { S.report = null; if (S.view === 'activity') loadReport(); }
+                }
+            }
+            function startFeed() {
+                if (S.feed) return;
+                if (typeof window.pflxAppDataFeed === 'function') S.feed = window.pflxAppDataFeed('pflx-youtube', onFeed);
+            }
+
+            // ── keys (X-Bot AI Engine Keys + MC Settings) ──
+            function setKeys(apiKey, chId) {
+                if (!realHost()) { toast('Only hosts can change the YouTube key.', 'warning'); return Promise.resolve(false); }
+                S.cfg.apiKey = String(apiKey || '').trim();
+                if (chId !== undefined) S.cfg.channelId = String(chId || '').trim();
+                try {
+                    var lc = localCfg(); lc.apiKey = S.cfg.apiKey; lc.channelId = S.cfg.channelId;
+                    var js = JSON.stringify(lc);
+                    if (typeof pflxSafeSet === 'function') pflxSafeSet('pflx_yt_config', js); else localStorage.setItem('pflx_yt_config', js);
+                } catch (e) {}
+                S.myPls = null;
+                fillKeyInputs();
+                return saveShared();
+            }
+            function saveKeyFromInputs(keyId, chId) {
+                var k = document.getElementById(keyId), c = document.getElementById(chId);
+                if (!k || !realHost()) return;
+                var val = k.value.trim();
+                if (val === (S.cfg.apiKey || '') && (!c || c.value.trim() === (S.cfg.channelId || ''))) return;
+                setKeys(val, c ? c.value.trim() : undefined).then(function (ok) {
+                    if (ok) toast(val ? '▶ YouTube key saved — shared with every player\'s X-Bot' : 'YouTube key removed', 'success');
+                });
+            }
+            // MC Settings > YouTube API saved its own copy -> share it
+            function adoptLocalConfig() {
+                if (!realHost()) return;
+                var lc = localCfg();
+                if ((lc.apiKey || '') === (S.cfg.apiKey || '') && (lc.channelId || '') === (S.cfg.channelId || '')) return;
+                S.cfg.apiKey = lc.apiKey || ''; S.cfg.channelId = lc.channelId || '';
+                saveShared(); fillKeyInputs();
+            }
+            function fillKeyInputs() {
+                var host = realHost();
+                [['xbot-key-youtube', 'xbot-yt-channel', 'xbot-yt-keybox'], ['settings-key-youtube', 'settings-yt-channel', 'settings-yt-keybox']].forEach(function (ids) {
+                    var box = document.getElementById(ids[2]);
+                    if (box) box.style.display = host ? '' : 'none';
+                    var k = document.getElementById(ids[0]), c = document.getElementById(ids[1]);
+                    if (k && document.activeElement !== k) k.value = host ? (S.cfg.apiKey || '') : '';
+                    if (c && document.activeElement !== c) c.value = host ? (S.cfg.channelId || '') : '';
+                });
+                var st = document.getElementById('xbot-yt-keystatus');
+                if (st) st.innerHTML = S.cfg.apiKey ? '<span style="color:#34d399;">✓ YouTube search is on for every player</span>' : '<span style="color:#f97316;">No YouTube key yet — players can\'t search</span>';
+            }
+            function syncTabVisibility() {
+                var t = document.getElementById('xbot-tab-yt');
+                if (t) t.style.display = (settings().playersEnabled || realHost()) && me() ? '' : 'none';
+            }
+
+            // ── moderation ──
+            function norm(q) {
+                return (' ' + String(q || '').toLowerCase()
+                    .replace(/[0@4]/g, function (c) { return c === '0' ? 'o' : 'a'; }).replace(/[1!]/g, 'i').replace(/3/g, 'e').replace(/[5$]/g, 's')
+                    .replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim() + ' ');
+            }
+            function hasTerm(n, list) {
+                for (var i = 0; i < list.length; i++) { var t = norm(list[i]); if (t.trim() && n.indexOf(t) >= 0) return list[i]; }
+                return null;
+            }
+            function classify(q) {
+                var n = norm(q);
+                var w = hasTerm(n, WELLBEING); if (w) return { flag: 'wellbeing', term: w };
+                var extra = (settings().blockTerms || []).filter(Boolean);
+                var b = hasTerm(n, BLOCK.concat(extra));
+                if (!b) {
+                    var toks = n.trim().split(' ');
+                    for (var i = 0; i < toks.length && !b; i++) for (var j = 0; j < BLOCK_STEMS.length; j++) if (toks[i].indexOf(BLOCK_STEMS[j]) === 0) { b = BLOCK_STEMS[j]; break; }
+                }
+                if (b) return { flag: 'blocked', term: b };
+                var r = hasTerm(n, REVIEW); if (r) return { flag: 'review', term: r };
+                return null;
+            }
+            function titleOk(t) { var c = classify(t); return !c || c.flag === 'review'; }
+
+            // ── per-player log: one small row per player per day ──
+            function ymd(t) { var d = new Date(t || Date.now()); return d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0'); }
+            function logKey(pid) { return LOG_PREFIX + pid + '_' + ymd(); }
+            function logEntry(entry) {
+                var s = me(); if (!s || !s.id) return Promise.resolve();
+                entry.id = entry.id || ('yt-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6));
+                entry.at = entry.at || Date.now();
+                var k = logKey(s.id);
+                if (!S.myLog || S.myLog.key !== k) S.myLog = { key: k, playerId: s.id, brand: s.brand || s.name || '', entries: [] };
+                S.myLog.entries.push(entry);
+                return readRow(k).then(function (row) {
+                    var d = (row && row.data) || { playerId: s.id, brand: s.brand || s.name || '', entries: [] };
+                    var list = Array.isArray(d.entries) ? d.entries : [];
+                    if (!list.some(function (e) { return e && e.id === entry.id; })) list.push(entry);
+                    d.entries = list.slice(-200); d.brand = s.brand || s.name || d.brand; d.cohort = s.cohort || d.cohort || '';
+                    d.day = ymd(); S.myLog = Object.assign({ key: k }, d);
+                    return writeRow(k, d);
+                });
+            }
+            function myLog() {
+                var s = me(); if (!s || !s.id) return Promise.resolve({ entries: [] });
+                var k = logKey(s.id);
+                if (S.myLog && S.myLog.key === k) return Promise.resolve(S.myLog);
+                return readRow(k).then(function (row) { S.myLog = Object.assign({ key: k, playerId: s.id, entries: [] }, (row && row.data) || {}); return S.myLog; });
+            }
+            function usedToday(log) {
+                var day = new Date().toDateString();
+                return (log.entries || []).filter(function (e) { return e && e.kind === 'search' && e.cached === false && !e.flag && !e.limited && new Date(e.at).toDateString() === day; }).length;
+            }
+
+            // ── YouTube API ──
+            function api(path, params) {
+                var k = key(); if (!k) return Promise.reject(new Error('nokey'));
+                var qs = Object.keys(params).filter(function (p) { return params[p] !== undefined && params[p] !== ''; })
+                    .map(function (p) { return p + '=' + encodeURIComponent(params[p]); }).join('&');
+                return fetch(API + path + '?' + qs + '&key=' + encodeURIComponent(k)).then(function (r) { return r.json(); }).then(function (d) {
+                    if (d && d.error) throw new Error((d.error.message || 'YouTube error').replace(/<[^>]+>/g, ''));
+                    return d;
+                });
+            }
+            function thumbOf(sn) { var t = (sn && sn.thumbnails) || {}; return ((t.medium || t.high || t.default || {}).url) || ''; }
+            function decode(s) { var ta = document.createElement('textarea'); ta.innerHTML = s || ''; return ta.value; }
+            function runSearch(q, st) {
+                return api('search', { part: 'snippet', type: 'video', maxResults: 15, videoEmbeddable: 'true',
+                                       safeSearch: st.strict ? 'strict' : 'moderate', q: q }).then(function (d) {
+                    var items = (d.items || []).filter(function (x) { return x && x.id && x.id.videoId; }).map(function (x) {
+                        var sn = x.snippet || {};
+                        return { videoId: x.id.videoId, title: decode(sn.title), channel: sn.channelTitle || '', channelId: sn.channelId || '', thumb: thumbOf(sn) };
+                    });
+                    if (!items.length) return items;
+                    return api('videos', { part: 'snippet', id: items.map(function (i) { return i.videoId; }).join(',') }).then(function (v) {
+                        var cat = {}; (v.items || []).forEach(function (x) { cat[x.id] = (x.snippet || {}).categoryId || ''; });
+                        items.forEach(function (i) { i.cat = cat[i.videoId] || ''; });
+                        return items;
+                    }, function () { return items; });
+                });
+            }
+            function applyFilters(items, st) {
+                var appr = (st.approvedChannels || []).map(function (c) { return c.id; });
+                return (items || []).filter(function (i) {
+                    if (!titleOk(i.title)) return false;
+                    if (st.learningOnly && i.cat && LEARNING_CATS.indexOf(String(i.cat)) < 0) return false;
+                    if (st.approvedOnly && appr.indexOf(i.channelId) < 0) return false;
+                    return true;
+                }).slice(0, 12);
+            }
+
+            function search(q) {
+                q = String(q || '').trim();
+                S.q = q; S.msg = ''; S.msgKind = ''; S.playing = null;
+                if (!q) { S.results = []; rerender(); return Promise.resolve([]); }
+                var st = settings();
+                var host = realHost();
+                var s = me();
+                if (!s || !s.id) { S.msg = 'Log in to search.'; rerender(); return Promise.resolve([]); }
+                if (!host && !st.playersEnabled) { S.msg = 'YouTube search is turned off by your host.'; rerender(); return Promise.resolve([]); }
+                var c = classify(q);
+                if (c) {
+                    S.results = [];
+                    if (c.flag === 'wellbeing') {
+                        S.msgKind = 'care';
+                        S.msg = 'It sounds like things might be hard right now. You don\'t have to handle that alone. Please talk to your host, a teacher, or another adult you trust. If you are in danger right now, contact local emergency services.';
+                        rerender();
+                        return logEntry({ kind: 'search', q: q, flag: 'wellbeing', term: c.term, blocked: true }).then(function () { return []; });
+                    }
+                    var fined = false, fineName = '';
+                    if (c.flag === 'blocked' && st.autoFine && st.fineId && !host && window.pflxModifiers) {
+                        try {
+                            var r = window.pflxModifiers.applyToPlayer(st.fineId, s.id, { source: 'xbot-youtube', reason: 'Improper YouTube search in X-Bot' });
+                            fined = !!(r && r.ok); fineName = (r && r.modifier && r.modifier.name) || '';
+                        } catch (e) {}
+                    }
+                    S.msgKind = 'bad';
+                    S.msg = c.flag === 'review'
+                        ? 'That search needs a host to OK it first, so X-Bot didn\'t run it. Try wording it for a class project.'
+                        : 'That search isn\'t allowed in PFLX.' + (fined ? ' A fine was applied (' + fineName + ').' : '') + ' Your host can see this.';
+                    rerender();
+                    return logEntry({ kind: 'search', q: q, flag: c.flag, term: c.term, blocked: true, fined: fined, fine: fineName }).then(function () { return []; });
+                }
+                if (!key()) { S.msg = host ? 'Add your YouTube Data API key in X-Bot ⚙ > AI Engine Keys first.' : 'YouTube search isn\'t set up yet — ask your host.'; rerender(); return Promise.resolve([]); }
+                var flags = [st.strict ? 's' : 'm', st.learningOnly ? 'l' : '', st.approvedOnly ? 'a' + hash((st.approvedChannels || []).map(function (x) { return x.id; }).join(',')) : ''].join('');
+                var ck = CACHE_PREFIX + hash(q.toLowerCase().replace(/\s+/g, ' ').trim() + '|' + flags);
+                S.busy = true; rerender();
+                return readRow(ck).then(function (row) {
+                    var fresh = row && row.data && Array.isArray(row.data.results) && (Date.now() - (row.data.at || 0)) < (st.cacheHours || 24) * 3600000;
+                    if (fresh) {
+                        S.results = applyFilters(row.data.results, st); S.busy = false;
+                        if (!S.results.length) S.msg = 'No videos matched the class filters. Try other words.';
+                        rerender();
+                        return logEntry({ kind: 'search', q: q, cached: true, n: S.results.length }).then(function () { return S.results; });
+                    }
+                    return myLog().then(function (log) {
+                        var used = usedToday(log);
+                        if (!host && used >= (st.dailyLimit || 0)) {
+                            S.busy = false; S.results = [];
+                            S.msg = 'You\'ve used your ' + (st.dailyLimit || 0) + ' new searches for today. Open a Resource, or try a search someone already ran (those are free). New searches reset tomorrow.';
+                            rerender();
+                            return logEntry({ kind: 'search', q: q, limited: true }).then(function () { return []; });
+                        }
+                        return runSearch(q, st).then(function (items) {
+                            writeRow(ck, { q: q, flags: flags, results: items, at: Date.now() });
+                            S.results = applyFilters(items, st); S.busy = false;
+                            if (!S.results.length) S.msg = 'No videos matched the class filters. Try other words.';
+                            else if (!host) S.msg = (st.dailyLimit - used - 1) + ' new search' + ((st.dailyLimit - used - 1) === 1 ? '' : 'es') + ' left today.';
+                            rerender();
+                            return logEntry({ kind: 'search', q: q, cached: false, n: S.results.length }).then(function () { return S.results; });
+                        });
+                    });
+                }).catch(function (e) {
+                    S.busy = false; S.results = [];
+                    S.msg = /nokey/.test(e.message) ? 'YouTube isn\'t set up yet.' : ('YouTube: ' + e.message);
+                    if (/quota/i.test(e.message)) S.msg = 'PFLX has used today\'s YouTube searches. Resources still work — try again tomorrow.';
+                    rerender(); return [];
+                });
+            }
+
+            // ── resources ──
+            function parseLink(u) {
+                u = String(u || '').trim();
+                var m = u.match(/[?&]list=([A-Za-z0-9_-]{10,})/); if (m) return { type: 'playlist', id: m[1] };
+                m = u.match(/(?:youtu\.be\/|[?&]v=|\/shorts\/|\/embed\/|\/live\/)([A-Za-z0-9_-]{11})/); if (m) return { type: 'video', id: m[1] };
+                if (/^PL[A-Za-z0-9_-]{10,}$/.test(u)) return { type: 'playlist', id: u };
+                if (/^[A-Za-z0-9_-]{11}$/.test(u)) return { type: 'video', id: u };
+                return null;
+            }
+            function saveResources() {
+                S.res.updatedAt = Date.now();
+                return writeRow(RES_KEY, S.res);
+            }
+            function addResource(item) {
+                if (!realHost() || !item) return Promise.resolve(false);
+                if ((S.res.items || []).some(function (x) { return x.type === item.type && x.refId === item.refId; })) { toast('Already in X-Bot Resources'); return Promise.resolve(false); }
+                var s = me();
+                item.id = 'ytr-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5);
+                item.addedAt = Date.now(); item.addedBy = (s && (s.brand || s.name)) || 'host';
+                S.res.items = (S.res.items || []).concat([item]);
+                return saveResources().then(function (ok) { if (ok) toast('Added to X-Bot Resources: ' + item.title, 'success'); rerender(); return ok; });
+            }
+            function removeResource(id) {
+                if (!realHost()) return;
+                S.res.items = (S.res.items || []).filter(function (x) { return x.id !== id; });
+                saveResources().then(rerender);
+            }
+            function addFromLink(u) {
+                var p = parseLink(u);
+                if (!p) { toast('That doesn\'t look like a YouTube video or playlist link', 'warning'); return; }
+                if (p.type === 'playlist') {
+                    api('playlists', { part: 'snippet,contentDetails', id: p.id }).then(function (d) {
+                        var x = (d.items || [])[0];
+                        if (!x) { toast('Playlist not found (it must be public or unlisted)', 'warning'); return; }
+                        addResource({ type: 'playlist', refId: p.id, title: decode(x.snippet.title), channel: x.snippet.channelTitle || '', thumb: thumbOf(x.snippet), count: (x.contentDetails || {}).itemCount || 0 });
+                    }).catch(function (e) { toast('YouTube: ' + e.message, 'warning'); });
+                } else {
+                    api('videos', { part: 'snippet', id: p.id }).then(function (d) {
+                        var x = (d.items || [])[0];
+                        if (!x) { toast('Video not found', 'warning'); return; }
+                        addResource({ type: 'video', refId: p.id, title: decode(x.snippet.title), channel: x.snippet.channelTitle || '', thumb: thumbOf(x.snippet) });
+                    }).catch(function (e) { toast('YouTube: ' + e.message, 'warning'); });
+                }
+            }
+            function loadMyPlaylists() {
+                var ch = channelId();
+                if (!ch) { S.myPls = { error: 'Add your Channel ID in X-Bot ⚙ > AI Engine Keys (YouTube Studio > Settings > Channel > Advanced).' }; rerender(); return; }
+                S.myPls = { loading: true }; rerender();
+                var all = [];
+                (function page(tok) {
+                    api('playlists', { part: 'snippet,contentDetails', channelId: ch, maxResults: 50, pageToken: tok || '' }).then(function (d) {
+                        (d.items || []).forEach(function (x) { all.push({ refId: x.id, title: decode(x.snippet.title), channel: x.snippet.channelTitle || '', thumb: thumbOf(x.snippet), count: (x.contentDetails || {}).itemCount || 0 }); });
+                        if (d.nextPageToken && all.length < 200) page(d.nextPageToken);
+                        else { S.myPls = { items: all }; rerender(); }
+                    }).catch(function (e) { S.myPls = { error: 'YouTube: ' + e.message }; rerender(); });
+                })('');
+            }
+            function openPlaylist(refId) {
+                S.plOpen = refId; S.playing = null; rerender();
+                if (S.plItems[refId]) return;
+                var ck = CACHE_PREFIX + 'pl_' + refId;
+                readRow(ck).then(function (row) {
+                    if (row && row.data && Array.isArray(row.data.items) && Date.now() - (row.data.at || 0) < 6 * 3600000) { S.plItems[refId] = row.data.items; rerender(); return; }
+                    if (!key()) { S.plItems[refId] = { error: 'YouTube isn\'t set up yet.' }; rerender(); return; }
+                    var items = [];
+                    (function page(tok) {
+                        api('playlistItems', { part: 'snippet', playlistId: refId, maxResults: 50, pageToken: tok || '' }).then(function (d) {
+                            (d.items || []).forEach(function (x) {
+                                var sn = x.snippet || {}; var vid = sn.resourceId && sn.resourceId.videoId;
+                                if (!vid || /^(Private|Deleted) video$/.test(sn.title || '')) return;
+                                items.push({ videoId: vid, title: decode(sn.title), channel: sn.videoOwnerChannelTitle || sn.channelTitle || '', thumb: thumbOf(sn) });
+                            });
+                            if (d.nextPageToken && items.length < 200) page(d.nextPageToken);
+                            else { S.plItems[refId] = items; writeRow(ck, { items: items, at: Date.now() }); rerender(); }
+                        }).catch(function (e) { S.plItems[refId] = { error: 'YouTube: ' + e.message }; rerender(); });
+                    })('');
+                });
+            }
+            function play(videoId, title, from) {
+                S.playing = { videoId: videoId, title: title || '' }; rerender();
+                logEntry({ kind: 'watch', videoId: videoId, title: title || '', from: from || S.view });
+                try { var el = document.getElementById('xbot-yt-player'); if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+            }
+            function approveChannel(id, title) {
+                if (!realHost() || !id) return;
+                var st = settings();
+                if (!(st.approvedChannels || []).some(function (c) { return c.id === id; })) st.approvedChannels = (st.approvedChannels || []).concat([{ id: id, title: title || id }]);
+                S.cfg.settings = st; saveShared().then(function () { toast('Channel approved: ' + (title || id), 'success'); rerender(); });
+            }
+            function setSetting(k, v) {
+                if (!realHost()) return;
+                var st = settings(); st[k] = v; S.cfg.settings = st;
+                saveShared(); rerender();
+            }
+
+            // ── host report ──
+            function loadReport() {
+                var c = sb(); if (!c) return;
+                S.report = { loading: true }; rerender();
+                c.from('app_data').select('key, data').like('key', LOG_PREFIX + '%').order('updated_at', { ascending: false }).limit(400).then(function (r) {
+                    var rows = [];
+                    ((r && r.data) || []).forEach(function (row) {
+                        var d = row.data || {};
+                        (d.entries || []).forEach(function (e) { if (e) rows.push(Object.assign({ brand: d.brand || d.playerId || '?', playerId: d.playerId, cohort: d.cohort || '' }, e)); });
+                    });
+                    rows.sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
+                    S.report = { rows: rows };
+                    rerender();
+                }, function () { S.report = { error: 'Could not load activity' }; rerender(); });
+            }
+
+            // ── rendering ──
+            var CSS = '<style>' +
+                '.pyt{font-family:Rajdhani,sans-serif;color:#dfe6ff;font-size:13px}' +
+                '.pyt-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}' +
+                '.pyt-tab{padding:6px 10px;border-radius:8px;border:1px solid rgba(0,240,255,.15);background:rgba(10,18,40,.6);color:#8fa0c8;font-family:Orbitron,sans-serif;font-size:9.5px;letter-spacing:1px;cursor:pointer}' +
+                '.pyt-tab.on{color:#00f0ff;border-color:rgba(0,240,255,.5);background:rgba(0,240,255,.08)}' +
+                '.pyt-row{display:flex;gap:6px}.pyt-in{flex:1;min-width:0;background:rgba(10,18,40,.85);border:1px solid rgba(0,240,255,.15);color:#e0e6ff;padding:8px 10px;border-radius:8px;font-size:13px}' +
+                '.pyt-btn{padding:7px 12px;border-radius:8px;border:1px solid rgba(0,240,255,.3);background:rgba(0,240,255,.1);color:#00f0ff;font-family:Orbitron,sans-serif;font-size:9.5px;letter-spacing:1px;cursor:pointer;white-space:nowrap}' +
+                '.pyt-btn.gh{border-color:rgba(255,255,255,.15);background:transparent;color:#aab4d4}.pyt-btn.red{border-color:rgba(255,80,100,.35);color:#ff8095;background:rgba(255,80,100,.08)}' +
+                '.pyt-msg{margin:8px 0;padding:8px 10px;border-radius:8px;background:rgba(0,240,255,.05);border:1px solid rgba(0,240,255,.12);color:#aab4d4}' +
+                '.pyt-msg.bad{background:rgba(255,80,100,.08);border-color:rgba(255,80,100,.3);color:#ffb3bf}.pyt-msg.care{background:rgba(96,165,250,.1);border-color:rgba(96,165,250,.35);color:#dbeafe}' +
+                '.pyt-list{display:flex;flex-direction:column;gap:6px;margin-top:8px}' +
+                '.pyt-card{display:flex;gap:8px;align-items:center;padding:6px;border-radius:10px;background:rgba(10,18,40,.55);border:1px solid rgba(255,255,255,.06);cursor:pointer}' +
+                '.pyt-card:hover{border-color:rgba(0,240,255,.35)}.pyt-card img{width:96px;height:54px;object-fit:cover;border-radius:6px;flex:none;background:#000}' +
+                '.pyt-t{font-weight:700;line-height:1.2;color:#eef2ff;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}' +
+                '.pyt-s{font-size:11px;color:#7f8bb0;margin-top:2px}.pyt-grow{flex:1;min-width:0}' +
+                '.pyt-player{margin:8px 0;border-radius:10px;overflow:hidden;border:1px solid rgba(0,240,255,.25);background:#000}' +
+                '.pyt-player iframe{width:100%;aspect-ratio:16/9;border:0;display:block}' +
+                '.pyt-h{font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:1.5px;color:rgba(0,240,255,.75);margin:12px 0 6px}' +
+                '.pyt-set label{display:flex;gap:8px;align-items:center;margin:5px 0;cursor:pointer}.pyt-set input[type=checkbox]{width:auto}' +
+                '.pyt-chip{display:inline-flex;gap:4px;align-items:center;padding:2px 8px;border-radius:12px;background:rgba(255,255,255,.06);margin:2px;font-size:11px}' +
+                '.pyt-tbl{width:100%;border-collapse:collapse;font-size:12px}.pyt-tbl td,.pyt-tbl th{padding:5px 6px;border-bottom:1px solid rgba(255,255,255,.06);text-align:left;vertical-align:top}' +
+                '.pyt-tbl th{font-family:Orbitron,sans-serif;font-size:9px;letter-spacing:1px;color:#7f8bb0}.pyt-flag{color:#ff8095;font-weight:700}.pyt-care{color:#93c5fd;font-weight:700}' +
+                '</style>';
+            function card(inner, onclick) { return '<div class="pyt-card" onclick="' + onclick + '">' + inner + '</div>'; }
+            function q1(s) { return esc(String(s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'")); }
+            function playerHtml() {
+                if (!S.playing) return '';
+                return '<div class="pyt-player" id="xbot-yt-player"><iframe src="https://www.youtube-nocookie.com/embed/' + esc(S.playing.videoId) +
+                    '?rel=0&modestbranding=1&playsinline=1&autoplay=1" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen title="' + esc(S.playing.title) + '"></iframe></div>' +
+                    '<div class="pyt-row" style="justify-content:space-between;align-items:center"><div class="pyt-s">' + esc(S.playing.title) + '</div><button class="pyt-btn gh" onclick="pflxYT.stop()">✕ CLOSE</button></div>';
+            }
+            function videoCards(list, from) {
+                var host = hostView();
+                return '<div class="pyt-list">' + list.map(function (v) {
+                    var extra = host && from === 'search'
+                        ? '<div class="pyt-row" style="margin-top:4px"><button class="pyt-btn gh" onclick="event.stopPropagation();pflxYT.addVideo(\'' + q1(v.videoId) + '\')">+ RESOURCE</button>' +
+                          (v.channelId ? '<button class="pyt-btn gh" onclick="event.stopPropagation();pflxYT.approveChannel(\'' + q1(v.channelId) + '\',\'' + q1(v.channel) + '\')">✓ CHANNEL</button>' : '') + '</div>'
+                        : '';
+                    return card('<img src="' + esc(v.thumb) + '" alt="" loading="lazy"><div class="pyt-grow"><div class="pyt-t">' + esc(v.title) + '</div><div class="pyt-s">' + esc(v.channel) + '</div>' + extra + '</div>',
+                        'pflxYT.play(\'' + q1(v.videoId) + '\',\'' + q1(v.title) + '\',\'' + from + '\')');
+                }).join('') + '</div>';
+            }
+            function viewSearch() {
+                var st = settings();
+                var chips = [st.strict ? '🛡 SafeSearch' : '', st.learningOnly ? '🎓 Learning only' : '', st.approvedOnly ? '✓ Approved channels' : ''].filter(Boolean)
+                    .map(function (c) { return '<span class="pyt-chip">' + c + '</span>'; }).join('');
+                return '<div class="pyt-row"><input class="pyt-in" id="pyt-q" placeholder="Search tutorials, how-tos, topics…" value="' + esc(S.q) + '" onkeydown="if(event.key===\'Enter\')pflxYT.search(this.value)">' +
+                    '<button class="pyt-btn" onclick="pflxYT.search(document.getElementById(\'pyt-q\').value)">' + (S.busy ? '…' : '🔍 SEARCH') + '</button></div>' +
+                    '<div style="margin-top:4px">' + chips + '</div>' +
+                    (S.msg ? '<div class="pyt-msg ' + esc(S.msgKind) + '">' + esc(S.msg) + '</div>' : '') +
+                    playerHtml() + videoCards(S.results, 'search');
+            }
+            function viewResources() {
+                var host = hostView();
+                var items = S.res.items || [];
+                var out = '';
+                if (host) out += '<div class="pyt-row"><input class="pyt-in" id="pyt-link" placeholder="Paste a YouTube playlist or video link"><button class="pyt-btn" onclick="pflxYT.addFromLink(document.getElementById(\'pyt-link\').value)">+ ADD</button></div>';
+                if (S.plOpen) {
+                    var pl = items.find(function (x) { return x.refId === S.plOpen; }) || (S.myPls && S.myPls.items || []).find(function (x) { return x.refId === S.plOpen; }) || { title: 'Playlist' };
+                    var its = S.plItems[S.plOpen];
+                    out += '<div class="pyt-row" style="align-items:center;margin-top:8px"><button class="pyt-btn gh" onclick="pflxYT.back()">← BACK</button><div class="pyt-t" style="flex:1">' + esc(pl.title) + '</div></div>' + playerHtml();
+                    if (!its) out += '<div class="pyt-msg">Loading videos…</div>';
+                    else if (its.error) out += '<div class="pyt-msg bad">' + esc(its.error) + '</div>';
+                    else out += videoCards(its.filter(function (v) { return titleOk(v.title); }), 'resource');
+                    return out;
+                }
+                out += playerHtml();
+                if (!items.length) return out + '<div class="pyt-msg">' + (host ? 'No resources yet. Add one of your playlists (My Playlists) or paste a link.' : 'No resources posted yet.') + '</div>';
+                return out + '<div class="pyt-list">' + items.slice().reverse().map(function (r) {
+                    var open = r.type === 'playlist' ? 'pflxYT.openPlaylist(\'' + q1(r.refId) + '\')' : 'pflxYT.play(\'' + q1(r.refId) + '\',\'' + q1(r.title) + '\',\'resource\')';
+                    return card('<img src="' + esc(r.thumb) + '" alt="" loading="lazy"><div class="pyt-grow"><div class="pyt-t">' + (r.type === 'playlist' ? '📚 ' : '▶ ') + esc(r.title) + '</div><div class="pyt-s">' +
+                        esc(r.channel || '') + (r.type === 'playlist' ? ' · ' + (r.count || 0) + ' videos' : '') + '</div>' +
+                        (host ? '<div style="margin-top:4px"><button class="pyt-btn red" onclick="event.stopPropagation();pflxYT.removeResource(\'' + q1(r.id) + '\')">REMOVE</button></div>' : '') + '</div>', open);
+                }).join('') + '</div>';
+            }
+            function viewMine() {
+                if (!S.myPls) { loadMyPlaylists(); return '<div class="pyt-msg">Loading your playlists…</div>'; }
+                if (S.myPls.loading) return '<div class="pyt-msg">Loading your playlists…</div>';
+                if (S.myPls.error) return '<div class="pyt-msg bad">' + esc(S.myPls.error) + '</div>';
+                var have = {}; (S.res.items || []).forEach(function (r) { have[r.refId] = 1; });
+                if (!S.myPls.items.length) return '<div class="pyt-msg">No public playlists found on this channel. Unlisted/private playlists can be added by pasting their link in Resources (unlisted) — private ones can\'t be read.</div>';
+                return '<div class="pyt-s">Public playlists on your channel. Pick the ones players should see.</div><div class="pyt-list">' + S.myPls.items.map(function (p) {
+                    var btn = have[p.refId] ? '<span class="pyt-chip">✓ In Resources</span>'
+                        : '<button class="pyt-btn" onclick="event.stopPropagation();pflxYT.addPlaylist(\'' + q1(p.refId) + '\')">+ ADD TO X-BOT</button>';
+                    return card('<img src="' + esc(p.thumb) + '" alt="" loading="lazy"><div class="pyt-grow"><div class="pyt-t">📚 ' + esc(p.title) + '</div><div class="pyt-s">' + (p.count || 0) + ' videos</div><div style="margin-top:4px">' + btn + '</div></div>',
+                        'pflxYT.openPlaylist(\'' + q1(p.refId) + '\');pflxYT.go(\'resources\')');
+                }).join('') + '</div>';
+            }
+            function fineOptions(sel) {
+                var cat = (window.pflxModifiers && window.pflxModifiers.catalog) ? window.pflxModifiers.catalog() : [];
+                var fines = cat.filter(function (m) { return m && (m.type === 'tax' || /fine|penalt|tax/i.test(m.name || '')); });
+                return '<option value="">— pick a fine —</option>' + fines.map(function (m) {
+                    var id = m.id || m.name;
+                    return '<option value="' + esc(id) + '"' + (id === sel ? ' selected' : '') + '>' + esc(m.name) + (m.effectValue || m.costXcoin ? ' (−' + (m.effectValue || m.costXcoin) + ' XC)' : '') + '</option>';
+                }).join('');
+            }
+            function viewSafety() {
+                var st = settings();
+                function tg(k, label, hint) {
+                    return '<label><input type="checkbox" ' + (st[k] ? 'checked' : '') + ' onchange="pflxYT.set(\'' + k + '\', this.checked)"> <b>' + label + '</b> <span class="pyt-s">' + hint + '</span></label>';
+                }
+                return '<div class="pyt-set">' +
+                    tg('playersEnabled', 'Players can search', 'Resources stay visible either way') +
+                    tg('strict', 'Strict SafeSearch', 'YouTube\'s strictest filter') +
+                    tg('learningOnly', 'Learning topics only', 'Education, How-to, Science & Tech') +
+                    tg('approvedOnly', 'Approved channels only', 'Use ✓ CHANNEL on a search result to approve') +
+                    '<div class="pyt-h">APPROVED CHANNELS</div><div>' + ((st.approvedChannels || []).map(function (c) {
+                        return '<span class="pyt-chip">' + esc(c.title) + ' <a style="cursor:pointer;color:#ff8095" onclick="pflxYT.unapprove(\'' + q1(c.id) + '\')">✕</a></span>';
+                    }).join('') || '<span class="pyt-s">None yet</span>') + '</div>' +
+                    '<div class="pyt-h">NEW SEARCHES PER PLAYER PER DAY</div><input class="pyt-in" type="number" min="0" max="100" value="' + (st.dailyLimit || 0) + '" style="width:90px" onchange="pflxYT.set(\'dailyLimit\', Math.max(0, parseInt(this.value, 10) || 0))"> <span class="pyt-s">Repeat searches are free (shared cache). Hosts are unlimited.</span>' +
+                    '<div class="pyt-h">IMPROPER SEARCHES</div>' + tg('autoFine', 'Fine automatically', 'Blocked searches get the fine below') +
+                    '<select class="pyt-in" style="width:100%;margin-top:4px" onchange="pflxYT.set(\'fineId\', this.value)">' + fineOptions(st.fineId) + '</select>' +
+                    (st.autoFine && !st.fineId ? '<div class="pyt-msg bad">Pick a fine — until then blocked searches are flagged but not fined.</div>' : '') +
+                    '<div class="pyt-s" style="margin-top:6px">Searches that suggest a player is struggling (self-harm etc.) are never fined — they are blocked, the player sees support text, and you get a check-in alert.</div>' +
+                    '<div class="pyt-h">EXTRA BLOCKED WORDS</div><input class="pyt-in" style="width:100%" placeholder="comma separated" value="' + esc((st.blockTerms || []).join(', ')) + '" onchange="pflxYT.set(\'blockTerms\', this.value.split(\',\').map(function(s){return s.trim();}).filter(Boolean))">' +
+                    '</div>';
+            }
+            function viewActivity() {
+                if (!S.report) { loadReport(); return '<div class="pyt-msg">Loading activity…</div>'; }
+                if (S.report.loading) return '<div class="pyt-msg">Loading activity…</div>';
+                if (S.report.error) return '<div class="pyt-msg bad">' + esc(S.report.error) + '</div>';
+                var rows = S.report.rows.filter(function (r) {
+                    if (S.reportFilter === 'flagged') return !!r.flag;
+                    if (S.reportFilter === 'searches') return r.kind === 'search';
+                    return true;
+                });
+                var nFlag = S.report.rows.filter(function (r) { return r.flag; }).length;
+                var f = function (k, l) { return '<button class="pyt-tab' + (S.reportFilter === k ? ' on' : '') + '" onclick="pflxYT.filter(\'' + k + '\')">' + l + '</button>'; };
+                return '<div class="pyt-tabs">' + f('all', 'ALL') + f('searches', 'SEARCHES') + f('flagged', '⚠ FLAGGED (' + nFlag + ')') + '<button class="pyt-tab" onclick="pflxYT.refreshReport()">↻</button></div>' +
+                    '<table class="pyt-tbl"><tr><th>PLAYER</th><th>WHAT</th><th>WHEN</th><th>RESULT</th></tr>' + rows.slice(0, 300).map(function (r) {
+                        var what = r.kind === 'watch' ? '▶ ' + esc(r.title || r.videoId) : '🔍 ' + esc(r.q || '');
+                        var res = r.flag === 'wellbeing' ? '<span class="pyt-care">💙 CHECK IN</span>'
+                            : r.flag === 'blocked' ? '<span class="pyt-flag">BLOCKED' + (r.fined ? ' · FINED' : '') + '</span>'
+                            : r.flag === 'review' ? '<span class="pyt-flag">NEEDS REVIEW</span>'
+                            : r.limited ? 'daily limit' : r.kind === 'watch' ? 'watched' : (r.cached ? 'cached · ' : 'new · ') + (r.n || 0) + ' results';
+                        return '<tr><td>' + esc(r.brand) + '</td><td>' + what + '</td><td>' + new Date(r.at).toLocaleString() + '</td><td>' + res + '</td></tr>';
+                    }).join('') + '</table>' + (rows.length ? '' : '<div class="pyt-msg">Nothing yet.</div>');
+            }
+            function viewsFor() {
+                var v = [['search', '🔍 SEARCH'], ['resources', '📚 RESOURCES']];
+                if (hostView()) v.push(['mine', '▶ MY PLAYLISTS'], ['activity', '📊 ACTIVITY'], ['safety', '🛡 SAFETY']);
+                return v;
+            }
+            function render(root) {
+                if (!root) return;
+                var views = viewsFor();
+                if (!views.some(function (v) { return v[0] === S.view; })) S.view = 'search';
+                var body = S.view === 'resources' ? viewResources() : S.view === 'mine' ? viewMine() : S.view === 'activity' ? viewActivity() : S.view === 'safety' ? viewSafety() : viewSearch();
+                var focus = document.activeElement && document.activeElement.id;
+                root.innerHTML = CSS + '<div class="pyt"><div class="pyt-tabs">' + views.map(function (v) {
+                    return '<button class="pyt-tab' + (S.view === v[0] ? ' on' : '') + '" onclick="pflxYT.go(\'' + v[0] + '\')">' + v[1] + '</button>';
+                }).join('') + '</div>' + body + '</div>';
+                if (focus === 'pyt-q') { var i = document.getElementById('pyt-q'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }
+            }
+            function rerender() {
+                render(document.getElementById('xbot-yt-root'));
+                var admin = document.getElementById('pflx-yt-admin');
+                if (admin && admin.offsetParent !== null) renderAdmin(admin);
+            }
+            // MC Settings > X-Bot > YouTube: safety + activity side by side
+            function renderAdmin(el) {
+                if (!el) return;
+                if (!realHost()) { el.innerHTML = '<div class="pyt-msg">Hosts only.</div>'; return; }
+                el.innerHTML = CSS + '<div class="pyt" style="display:grid;grid-template-columns:minmax(260px,380px) 1fr;gap:18px">' +
+                    '<div><div class="pyt-h">SAFETY & LIMITS</div>' + viewSafety() + '</div>' +
+                    '<div><div class="pyt-h">PLAYER YOUTUBE ACTIVITY</div>' + viewActivity() + '</div></div>';
+            }
+            function open() {
+                startFeed();
+                ensureLoaded().then(function () { rerender(); });
+                rerender();
+            }
+
+            // boot: load + listen once Supabase is up
+            setTimeout(function () { try { startFeed(); ensureLoaded(); } catch (e) {} }, 2500);
+            window.addEventListener('pflx-role-changed', function () { try { fillKeyInputs(); syncTabVisibility(); rerender(); } catch (e) {} });
+
+            return {
+                open: open, render: render, renderAdmin: renderAdmin, search: search, go: function (v) { S.view = v; if (v !== 'resources') S.plOpen = null; if (v === 'activity') S.report = null; rerender(); },
+                play: play, stop: function () { S.playing = null; rerender(); }, back: function () { S.plOpen = null; S.playing = null; rerender(); },
+                openPlaylist: openPlaylist, addFromLink: addFromLink, removeResource: removeResource,
+                addPlaylist: function (refId) { var p = (S.myPls && S.myPls.items || []).find(function (x) { return x.refId === refId; }); if (p) addResource({ type: 'playlist', refId: p.refId, title: p.title, channel: p.channel, thumb: p.thumb, count: p.count }); },
+                addVideo: function (vid) { var v = (S.results || []).find(function (x) { return x.videoId === vid; }); if (v) addResource({ type: 'video', refId: v.videoId, title: v.title, channel: v.channel, thumb: v.thumb }); },
+                approveChannel: approveChannel, unapprove: function (id) { var st = settings(); st.approvedChannels = (st.approvedChannels || []).filter(function (c) { return c.id !== id; }); S.cfg.settings = st; saveShared(); rerender(); },
+                set: setSetting, filter: function (k) { S.reportFilter = k; rerender(); }, refreshReport: loadReport,
+                saveKeyFromInputs: saveKeyFromInputs, adoptLocalConfig: adoptLocalConfig, fillKeyInputs: fillKeyInputs, syncTabVisibility: syncTabVisibility,
+                key: key, ensureLoaded: ensureLoaded, classify: classify, parseLink: parseLink,
+                _state: function () { return S; }
+            };
+        })();
+    </script>
     <!-- FLP PHASE SUBMISSIONS MODAL — opened when host clicks a submissions chip
          on a task or project card. Lists each submission grouped by phase with
          Approve/Reject buttons per submission. Populated by pflxOpenSubmissionsModal. -->
@@ -75132,7 +75818,7 @@ RESPONSE RULES:
                 // ticker and the per-player popup even though the balance
                 // itself updated fine. Every nonzero-XC award now gets the
                 // same treatment, through the same single choke point.
-                if (!(awardObj.badge && awardObj.badge.id) && totalXcDelta !== 0 && typeof window.pflxEmitXcoinEvent === 'function') {
+                if (!(awardObj.badge && awardObj.badge.id) && totalXcDelta !== 0 && awardObj.source !== 'modifier' && typeof window.pflxEmitXcoinEvent === 'function') {   // v217: modifiers emit their own fine/upgrade event
                     try {
                         window.pflxEmitXcoinEvent(playerId, 'xc', {
                             title: totalXcDelta > 0 ? 'X-Coin Earned' : 'X-Coin Deducted',
@@ -81045,7 +81731,7 @@ RESPONSE RULES:
         // YouTube search: uses the YouTube Data API key saved in Settings ->
         // YouTube API (same pflx_yt_config the Go Live tools use).
         function ytKey() {
-            try { var raw = (typeof pflxSafeGet === 'function') ? pflxSafeGet('pflx_yt_config') : localStorage.getItem('pflx_yt_config'); var c = raw ? JSON.parse(raw) : null; return (c && c.apiKey) || ''; } catch (e) { return ''; }
+            try { var raw = (typeof pflxSafeGet === 'function') ? pflxSafeGet('pflx_yt_config') : localStorage.getItem('pflx_yt_config'); var c = raw ? JSON.parse(raw) : null; return (c && c.apiKey) || (window.pflxYT ? window.pflxYT.key() : '') || ''; } catch (e) { return (window.pflxYT ? window.pflxYT.key() : '') || ''; }
         }
         T.search = { q: '', shorts: false, results: [], busy: false, error: '' };
         window.pflxTheaterSearch = async function (q, shorts) {
