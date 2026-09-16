@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 212;
+      window.PFLX_PATCH   = 213;
       window.PFLX_BUILD   = '2026.09';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -7580,6 +7580,33 @@
             <div class="pip-rz pip-rz-sw" data-pip-dir="sw" data-pip-id="pip-theater"></div>
         </div>
 
+        <!-- ═══ X-LIVE PIP (v213, Ennis: "When the host pushes a manual game,
+             activity, screenshare, etc... it will automatically pull the
+             players in ... The player can still navigate into other tabs as
+             well. Then X-Live should become active in PIP in X-Bot.") ═══ -->
+        <div class="pflx-pip-widget" id="pip-xlive" style="display:none;width:480px;min-width:260px;min-height:200px;bottom:96px;right:24px;">
+            <div class="pflx-pip-titlebar" data-pip-drag="pip-xlive">
+                <span class="pflx-pip-title" style="color:#ff4d6d;" id="pip-xlive-title">&#x1F534; X-LIVE</span>
+                <div class="pflx-pip-controls">
+                    <button class="pflx-pip-ctrl-btn" data-pip-preset="small" data-pip-id="pip-xlive" title="Small">S</button>
+                    <button class="pflx-pip-ctrl-btn" data-pip-preset="medium" data-pip-id="pip-xlive" title="Medium">M</button>
+                    <button class="pflx-pip-ctrl-btn active" data-pip-preset="large" data-pip-id="pip-xlive" title="Large">L</button>
+                    <button class="pflx-pip-ctrl-btn" onclick="pflxXlivePipExpand()" title="Open X-Live">&#x2922;</button>
+                    <button class="pflx-pip-ctrl-btn" onclick="pflxPipMinimize('pip-xlive')" title="Minimize">&#x2500;</button>
+                    <button class="pflx-pip-close" onclick="pflxXlivePipClose()" title="Close">&#x2715;</button>
+                </div>
+            </div>
+            <div class="pflx-pip-body" id="pip-xlive-body"><iframe id="pip-xlive-frame" src="about:blank" allow="fullscreen; autoplay; display-capture" title="X-Live"></iframe></div>
+            <div class="pip-rz pip-rz-n" data-pip-dir="n" data-pip-id="pip-xlive"></div>
+            <div class="pip-rz pip-rz-s" data-pip-dir="s" data-pip-id="pip-xlive"></div>
+            <div class="pip-rz pip-rz-e" data-pip-dir="e" data-pip-id="pip-xlive"></div>
+            <div class="pip-rz pip-rz-w" data-pip-dir="w" data-pip-id="pip-xlive"></div>
+            <div class="pip-rz pip-rz-ne" data-pip-dir="ne" data-pip-id="pip-xlive"></div>
+            <div class="pip-rz pip-rz-nw" data-pip-dir="nw" data-pip-id="pip-xlive"></div>
+            <div class="pip-rz pip-rz-se" data-pip-dir="se" data-pip-id="pip-xlive"></div>
+            <div class="pip-rz pip-rz-sw" data-pip-dir="sw" data-pip-id="pip-xlive"></div>
+        </div>
+
         <!-- ═══ PFLX MOBILE CONTROLLER VIEW ═══ -->
         <div class="pflx-ctrl-view" id="pflx-controller-view">
             <!-- Top bar -->
@@ -11466,7 +11493,7 @@
                         <div class="iframe-loader-spinner"></div>
                         <div class="iframe-loader-text">Loading X-Live...</div>
                     </div>
-                    <iframe src="about:blank" allow="fullscreen; clipboard-write; clipboard-read; autoplay" style="width: 100%; height: 100%; border: none;" data-app="lite"></iframe>
+                    <iframe src="about:blank" allow="fullscreen; clipboard-write; clipboard-read; autoplay; display-capture" style="width: 100%; height: 100%; border: none;" data-app="lite"></iframe>
                 </div>
 
                 <!-- ═══════════════════ PORTFOLIO VIEW ═══════════════════ -->
@@ -71353,6 +71380,102 @@ RESPONSE RULES:
     })();
     </script>
 
+    <style>
+        /* PATCH PLATFORM v213 -- X-Live PiP */
+        #pip-xlive .pflx-pip-body { padding: 0; max-height: none; overflow: hidden; }
+        #pip-xlive-frame { display: block; width: 100%; height: min(64vh, 560px); min-height: 240px; border: 0; background: #05070f; border-radius: 0 0 14px 14px; }
+        #pip-xlive { box-shadow: 0 0 14px 2px rgba(255,77,109,0.25), 0 8px 36px rgba(0,0,0,0.55); border-color: rgba(255,77,109,0.45); }
+    </style>
+    <script>
+    // ═══ PATCH PLATFORM v213 -- X-Live live production: PiP pull-in ═══
+    // A player who JOINED a live X-Live show and is anywhere else in PFLX
+    // gets the show in a floating X-Bot PiP the moment a host pushes
+    // (PUSH, screen share, go-live, or a move with "pull players in" on).
+    // The PiP is a compact X-Live (?pip=1&session=<id>); ⤢ opens the full
+    // X-Live tab. Sessions stay in app_data 'sessions' (read-only here).
+    (function () {
+        var WINDOW_MS = 120000;
+        var mem = {};
+        function me() { return window.activeSession || null; }
+        function client() { return (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null; }
+        function liteVisible() { var v = document.querySelector('.lite-view'); return !!(v && v.classList.contains('active')); }
+        function seenKey(id) { return 'pflx_xl_pip_seen_' + id; }
+        function getSeen(id) { try { return parseInt(sessionStorage.getItem(seenKey(id)) || '0', 10) || 0; } catch (e) { return mem[id] || 0; } }
+        function setSeen(id, q) { mem[id] = q; try { sessionStorage.setItem(seenKey(id), String(q)); } catch (e) {} }
+        // Pure: the session whose newest push should pull this player in.
+        window.pflxXlivePipPick = function (sessions, myId, seenFn, now) {
+            if (!Array.isArray(sessions) || !myId) return null;
+            var best = null;
+            sessions.forEach(function (s) {
+                if (!s || s.status !== 'active' || !s.push) return;
+                var joined = (s.liveParticipants || []).some(function (p) { return p && p.id === myId; });
+                if (!joined) return;
+                if ((s.push.seq | 0) <= (seenFn(s.id) | 0)) return;
+                if (now - (s.push.at || 0) >= WINDOW_MS) return;
+                if (!best || (s.push.at || 0) > (best.push.at || 0)) best = s;
+            });
+            return best;
+        };
+        var checking = false;
+        async function check() {
+            var s0 = me(); if (!s0 || !s0.id || checking) return;
+            if (window.pflxRole === 'host') return; // hosts run the show, they are not pulled into it
+            var c = client(); if (!c) return;
+            checking = true;
+            try {
+                var res = await c.from('app_data').select('data').eq('key', 'sessions').maybeSingle();
+                var list = (res && res.data && Array.isArray(res.data.data)) ? res.data.data : [];
+                var s = window.pflxXlivePipPick(list, s0.id, getSeen, Date.now());
+                if (!s) return;
+                setSeen(s.id, s.push.seq);
+                if (liteVisible()) return; // X-Live is on screen -- it pulls itself in
+                open(s);
+            } catch (e) { console.warn('[xlive-pip] check failed', e); }
+            finally { checking = false; }
+        }
+        window.pflxXlivePipCheck = check;
+        function open(s) {
+            var frame = document.getElementById('pip-xlive-frame');
+            var title = document.getElementById('pip-xlive-title');
+            if (!frame || typeof window.pflxPipOpen !== 'function') return;
+            if (frame.dataset.session !== s.id || !frame.src || frame.src === 'about:blank') {
+                var base = (typeof buildAppURL === 'function') ? buildAppURL('lite') : 'https://thetomorrowteacher.github.io/x-live';
+                frame.src = base + (base.indexOf('?') === -1 ? '?' : '&') + 'pip=1&session=' + encodeURIComponent(s.id);
+                frame.dataset.session = s.id;
+            }
+            if (title) title.textContent = '🔴 ' + String(s.title || 'X-LIVE').toUpperCase().slice(0, 40);
+            var wasOpen = typeof window.pflxPipIsOpen === 'function' && window.pflxPipIsOpen('pip-xlive');
+            window.pflxPipOpen('pip-xlive');
+            if (!wasOpen && typeof window.pflxPipApplyPreset === 'function') window.pflxPipApplyPreset('pip-xlive', 'large');
+            try { if (typeof pflxToast === 'function') pflxToast('📣 ' + (s.push.label || 'The host pulled you into the live show'), 'info'); } catch (e) {}
+        }
+        window.pflxXlivePipOpen = open;
+        window.pflxXlivePipClose = function () {
+            try { if (typeof window.pflxPipClose === 'function') window.pflxPipClose('pip-xlive'); } catch (e) {}
+            var frame = document.getElementById('pip-xlive-frame');
+            if (frame) { frame.src = 'about:blank'; delete frame.dataset.session; } // stop its media
+        };
+        window.pflxXlivePipExpand = function () {
+            window.pflxXlivePipClose();
+            try { if (typeof navigateTo === 'function') navigateTo('lite'); } catch (e) {}
+        };
+        window.addEventListener('message', function (e) {
+            var m = e.data; if (typeof m === 'string') { if (m.indexOf('pflx_xlive_') === -1) return; try { m = JSON.parse(m); } catch (er) { return; } }
+            if (!m || !m.type) return;
+            if (m.type === 'pflx_xlive_expand') window.pflxXlivePipExpand();
+            if (m.type === 'pflx_xlive_push') setTimeout(check, 400); // a host in this browser pushed
+        });
+        window.addEventListener('pflx-sessions-changed', function () { setTimeout(check, 250); });
+        setInterval(function () {
+            if (!me()) return;
+            // X-Live opened full-size: one copy is enough.
+            if (liteVisible() && typeof window.pflxPipIsOpen === 'function' && window.pflxPipIsOpen('pip-xlive')) window.pflxXlivePipClose();
+        }, 1500);
+        setInterval(function () { if (me()) check(); }, 20000);
+    })();
+    // ═══ /PATCH PLATFORM v213 ═══
+    </script>
+
     <!-- FLP PHASE SUBMISSIONS MODAL — opened when host clicks a submissions chip
          on a task or project card. Lists each submission grouped by phase with
          Approve/Reject buttons per submission. Populated by pflxOpenSubmissionsModal. -->
@@ -80389,6 +80512,7 @@ RESPONSE RULES:
             _sessNudgeT = setTimeout(function () {
                 _sessNudgeT = null;
                 pflxFxPostToFrames({ type: 'pflx_xlive_sessions_changed', at: Date.now() });
+                try { window.dispatchEvent(new Event('pflx-sessions-changed')); } catch (e) {} // v213 X-Live PiP
             }, 120);
         }
         async function boot() {
