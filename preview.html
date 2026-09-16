@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 219;
+      window.PFLX_PATCH   = 220;
       window.PFLX_BUILD   = '2026.09';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -14265,12 +14265,13 @@
 
                 <!-- ═══ X-LIVE CONTROL (X-Bot / X-Live session bridge, xb-1) ═══ -->
                 <div id="xbot-live-section" style="flex:1;overflow-y:auto;padding:16px;display:none;">
-                    <div style="font-family:'Orbitron',sans-serif;font-size:10px;color:rgba(255,0,80,0.8);letter-spacing:2px;margin-bottom:10px;">X-LIVE CONTROL</div>
+                    <!-- v219 Live hub: stage, personal preview, ON AIR / WATCH / LIBRARY / CLASS / STUDIO -->
+                    <div id="plh-root"></div>
                     <!-- v173 -- xc-2: SESSIONS / TEAMS sub-tabs inside the
                          same Live tab. Teams is the first "some sizes work
                          well for X" layout from Ennis's X-Bot Controller
                          ask, ported from X-Live's own rTeams(). -->
-                    <div style="display:flex;margin-bottom:12px;">
+                    <div id="xbot-live-legacy-tabs" style="display:flex;margin-bottom:12px;">
                         <button class="xbot-live-subtab active" data-subtab="sessions" onclick="xbotLiveSwitchSubTab('sessions')">🔴 SESSIONS</button>
                         <button class="xbot-live-subtab" data-subtab="teams" onclick="xbotLiveSwitchSubTab('teams')">🏟️ TEAMS</button>
                         <button class="xbot-live-subtab" data-subtab="theater" onclick="xbotLiveSwitchSubTab('theater')">🎬 THEATER</button>
@@ -60981,6 +60982,7 @@ function ppRenderCheckpoints(el) {
 
 
         function switchXBotMode(mode) {
+            if (mode === 'yt' && window.pflxLiveHub) { window.pflxLiveHub.open('watch'); return; }   // v219
             xbotCurrentMode = mode;
             document.querySelectorAll('.xbot-mode-tab').forEach(t => {
                 t.classList.toggle('active', t.dataset.mode === mode);
@@ -61062,6 +61064,7 @@ function ppRenderCheckpoints(el) {
                     if (activeSubtab && activeSubtab.getAttribute('data-subtab') === 'theater') window.xbotTheaterRenderList();
                     if (activeSubtab && activeSubtab.getAttribute('data-subtab') === 'sound') window.xbotSoundboardRenderGrid();
                     if (activeSubtab && activeSubtab.getAttribute('data-subtab') === 'controller') window.xbotControllerRenderGrid();
+                    try { if (window.pflxLiveHub) window.pflxLiveHub.onShow(); } catch (e) { console.warn('[live-hub]', e); } // v219
                 }
             } else if (mode === 'eng') {
                 voiceSection.classList.add('hidden');
@@ -70975,13 +70978,14 @@ RESPONSE RULES:
                 var liveTab = document.getElementById('xbot-tab-live');
                 if (hostTab) hostTab.style.display = isAdmin ? '' : 'none';
                 if (engTab) engTab.style.display = isAdmin ? '' : 'none';
-                if (liveTab) liveTab.style.display = isAdmin ? '' : 'none';
+                if (liveTab) liveTab.style.display = (isAdmin || (window.pflxLiveHub && sess)) ? '' : 'none';   // v219: players get the Live hub
                 var tbLbl = document.getElementById('tr-label-text');
                 if (tbLbl) tbLbl.textContent = window.pflxRole === 'host' ? 'HOST MODE' : 'PLAYER MODE';
                 // Apply initial body gating class
                 document.body.classList.toggle('pflx-as-player', window.pflxRole === 'player' && isAdmin);
                 try { if (window.pflxYT) { window.pflxYT.syncTabVisibility(); window.pflxYT.fillKeyInputs(); } } catch (e) {} // v217
                 try { if (window.pflxXGems) window.pflxXGems.renderAll(); } catch (e) {} // v218
+                try { if (window.pflxLiveHub) window.pflxLiveHub.syncTabs(); } catch (e) {} // v219
                 console.log('[PFLX] RolePill injected — isAdmin:', isAdmin, 'role:', role, 'pflxRole:', window.pflxRole);
             };
 
@@ -71877,6 +71881,7 @@ RESPONSE RULES:
             }
             function syncTabVisibility() {
                 var t = document.getElementById('xbot-tab-yt');
+                if (t && window.pflxLiveHub) { t.style.display = 'none'; return; }   // v219: YouTube is Live > WATCH
                 if (t) t.style.display = (settings().playersEnabled || realHost()) && me() ? '' : 'none';
             }
 
@@ -72050,9 +72055,21 @@ RESPONSE RULES:
                 if (/^[A-Za-z0-9_-]{11}$/.test(u)) return { type: 'video', id: u };
                 return null;
             }
-            function saveResources() {
-                S.res.updatedAt = Date.now();
-                return writeRow(RES_KEY, S.res);
+            // v219: read-merge-write (two hosts can post at once); removed ids are remembered so a stale copy can't bring them back
+            function saveResources(removedId) {
+                return readRow(RES_KEY).then(function (row) {
+                    var cur = (row && row.data) || {};
+                    var gone = [].concat(cur.removed || [], S.res.removed || [], removedId ? [removedId] : []);
+                    gone = gone.filter(function (x, i) { return x && gone.indexOf(x) === i; }).slice(-300);
+                    var by = {}, order = [];
+                    (cur.items || []).concat(S.res.items || []).forEach(function (it) {
+                        if (!it || !it.id || gone.indexOf(it.id) >= 0) return;
+                        if (!by[it.id]) order.push(it.id);
+                        by[it.id] = it;
+                    });
+                    S.res = { items: order.map(function (id) { return by[id]; }), removed: gone, updatedAt: Date.now() };
+                    return writeRow(RES_KEY, S.res);
+                });
             }
             function addResource(item) {
                 if (!realHost() || !item) return Promise.resolve(false);
@@ -72066,7 +72083,7 @@ RESPONSE RULES:
             function removeResource(id) {
                 if (!realHost()) return;
                 S.res.items = (S.res.items || []).filter(function (x) { return x.id !== id; });
-                saveResources().then(rerender);
+                saveResources(id).then(rerender);
             }
             function addFromLink(u) {
                 var p = parseLink(u);
@@ -72311,6 +72328,11 @@ RESPONSE RULES:
                 render(document.getElementById('xbot-yt-root'));
                 var admin = document.getElementById('pflx-yt-admin');
                 if (admin && admin.offsetParent !== null) renderAdmin(admin);
+                try { if (window.pflxLiveHub) window.pflxLiveHub.onYT(); } catch (e) {} // v219
+            }
+            function renderPart(root, v) {   // v219: one view, no tabs (Live hub > STUDIO)
+                if (!root) return;
+                root.innerHTML = CSS + '<div class="pyt">' + (v === 'activity' ? viewActivity() : v === 'safety' ? viewSafety() : v === 'mine' ? viewMine() : v === 'resources' ? viewResources() : viewSearch()) + '</div>';
             }
             // MC Settings > X-Bot > YouTube: safety + activity side by side
             function renderAdmin(el) {
@@ -72340,6 +72362,8 @@ RESPONSE RULES:
                 set: setSetting, filter: function (k) { S.reportFilter = k; rerender(); }, refreshReport: loadReport,
                 saveKeyFromInputs: saveKeyFromInputs, adoptLocalConfig: adoptLocalConfig, fillKeyInputs: fillKeyInputs, syncTabVisibility: syncTabVisibility,
                 key: key, ensureLoaded: ensureLoaded, classify: classify, parseLink: parseLink,
+                renderPart: renderPart, loadMyPlaylists: loadMyPlaylists, addResource: addResource, settings: settings, titleOk: titleOk,   // v219
+                logWatch: function (videoId, title, from) { return logEntry({ kind: 'watch', videoId: videoId, title: title || '', from: from || 'live' }); },
                 _state: function () { return S; }
             };
         })();
@@ -72807,6 +72831,901 @@ RESPONSE RULES:
                         .then(function (rs) { rs.filter(function (r) { return r && r.text; }).forEach(function (r) { ED.files.push(r); }); drawEditor(); });
                 },
                 _state: function () { return S; }
+            };
+        })();
+    </script>
+    <script>
+        // ═══════════════════════════════════════════════════════════════════
+        // PATCH v219 -- LIVE HUB: X-Bot Theater + YouTube in one place (Sep 16, Ennis)
+        //  X-Bot's 🔴 Live tab becomes one hub for everyone:
+        //    NOW PLAYING stage (the shared Theater live record) + a personal
+        //    preview player, then ON AIR · WATCH · LIBRARY · CLASS · STUDIO
+        //    (players: ON AIR · WATCH · LIBRARY).
+        //  · WATCH is the safe YouTube search (pflxYT: moderation, cache,
+        //    daily limit, activity log). Hosts queue / play / post results;
+        //    players suggest them.
+        //  · LIBRARY is one list: class playlists (Theater), posted
+        //    resources, and the host's channel playlists. Any of them can be
+        //    posted to players or played to the class.
+        //  · Suggestions: each player writes only their own row
+        //    'pflx_live_sugg_<playerId>'; hosts write only
+        //    'pflx_live_suggdec'. Approve = queued (or played now) for the
+        //    class through the Theater live record, and the player is told
+        //    live or at their next login.
+        //  Nothing about the shared rows the Theater, X-Live and pflxYT use
+        //  changes shape, so every device keeps working together.
+        // ═══════════════════════════════════════════════════════════════════
+        window.pflxLiveHub = (function () {
+            var SUG_PREFIX = 'pflx_live_sugg_', DEC_KEY = 'pflx_live_suggdec', SEEN_LS = 'pflx_live_sugg_seen_v1', TAB_LS = 'pflx_live_hub_tab_v1';
+            var MAX_PENDING = 3, MAX_PER_DAY = 10, KEEP_MS = 30 * 86400000, PENDING_MS = 7 * 86400000;
+            var LEGACY = { sessions: 'xbot-live-sessions-panel', teams: 'xbot-live-teams-panel', theater: 'xbot-live-theater-panel',
+                           sound: 'xbot-live-sound-panel', controller: 'xbot-live-controller-panel', tools: 'xbot-live-tools-panel' };
+            var H = { tab: null, studio: 'sound', libFilter: 'all', libOpen: null, preview: null, previewKey: '', stageKey: '',
+                      mine: null, dec: {}, sugs: {}, sugsLoaded: false, cfg: null, sessions: null, feed: null, cards: {},
+                      seenToast: {}, booted: false, shell: false, timer: null };
+
+            // ── helpers ──
+            function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+            function q1(s) { return esc(String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'")); }
+            function sb() { return (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null; }
+            function me() { return window.activeSession || null; }
+            function $(id) { return document.getElementById(id); }
+            function realHost() {
+                var s = me(); var r = String((s && s.role) || '').toLowerCase();
+                return !!(s && (r === 'admin' || r === 'host' || r === 'teacher' || r === 'instructor' || s.hostTier));
+            }
+            function hostView() { return realHost() && window.pflxRole !== 'player'; }
+            function YT() { return window.pflxYT || null; }
+            function ytState() { var y = YT(); return y ? y._state() : null; }
+            function ytSettings() { var y = YT(); return (y && y.settings) ? y.settings() : {}; }
+            function toast(m, k, ms) { try { if (typeof window.pflxToast === 'function') window.pflxToast(m, k || 'info', ms || 5000); } catch (e) {} }
+            function ago(t) {
+                var s = Math.max(0, Math.round((Date.now() - (t || 0)) / 1000));
+                if (s < 60) return 'just now';
+                if (s < 3600) return Math.round(s / 60) + 'm ago';
+                if (s < 86400) return Math.round(s / 3600) + 'h ago';
+                return Math.round(s / 86400) + 'd ago';
+            }
+            function myId() { var s = me(); return (s && s.id) || ''; }
+            function myCohorts() {
+                var s = me(); if (!s) return [];
+                var a = Array.isArray(s.cohorts) ? s.cohorts.slice() : [];
+                String(s.cohort || '').split(',').forEach(function (c) { c = c.trim(); if (c) a.push(c); });
+                return a.map(function (c) { return String(c).toLowerCase().trim(); });
+            }
+            function readRow(k) {
+                var c = sb(); if (!c) return Promise.resolve(null);
+                return c.from('app_data').select('data').eq('key', k).limit(1).then(function (r) { return (r && r.data && r.data[0] && r.data[0].data) || null; }, function () { return null; });
+            }
+            function writeRow(k, d) {
+                var c = sb(); if (!c) return Promise.resolve(false);
+                return c.from('app_data').upsert({ key: k, data: d, updated_at: new Date().toISOString() }, { onConflict: 'key' }).then(function (r) { return !(r && r.error); }, function () { return false; });
+            }
+            function isYTItem(it) { var s = (it && it.source) || 'youtube'; return s === 'youtube' || s === 'shorts'; }
+            function thumbFor(it) { return it.thumb || (window.pflxTheaterItemThumb ? window.pflxTheaterItemThumb(it) : '') || ''; }
+            function srcMeta(it) { var S = window.pflxTheaterSources || {}; return S[(it && it.source) || 'youtube'] || { label: 'YouTube', icon: '▶', color: '#ff3b3b' }; }
+            function titleOk(t) { var y = YT(); if (!y || !y.classify) return true; var c = y.classify(t || ''); return !c || c.flag === 'review'; }
+            // cards the buttons refer to (so onclick only carries an id)
+            function reg(v) { if (v && v.videoId) H.cards[v.videoId] = { videoId: v.videoId, title: v.title || '', channel: v.channel || '', channelId: v.channelId || '', thumb: v.thumb || '', source: v.source || 'youtube' }; return v; }
+            function card(vid) { return H.cards[vid] || null; }
+
+            // ── pure merges (unit-tested) ──
+            function mergeItems(a, b) {
+                var by = {}, order = [];
+                (a || []).concat(b || []).forEach(function (it) {
+                    if (!it || !it.id) return;
+                    var cur = by[it.id];
+                    if (!cur) { by[it.id] = it; order.push(it.id); return; }
+                    if ((it.updatedAt || it.at || 0) >= (cur.updatedAt || cur.at || 0)) by[it.id] = it;
+                });
+                var now = Date.now();
+                return order.map(function (id) { return by[id]; }).filter(function (it) { return now - (it.at || 0) < KEEP_MS; })
+                    .sort(function (x, y) { return (x.at || 0) - (y.at || 0); }).slice(-40);
+            }
+            function mergeDec(a, b) {
+                var out = {}, now = Date.now();
+                [a || {}, b || {}].forEach(function (m) {
+                    Object.keys(m).forEach(function (id) {
+                        var d = m[id]; if (!d) return;
+                        if (!out[id] || (d.at || 0) > (out[id].at || 0)) out[id] = d;
+                    });
+                });
+                var ids = Object.keys(out).filter(function (id) { return now - (out[id].at || 0) < KEEP_MS; })
+                    .sort(function (x, y) { return (out[y].at || 0) - (out[x].at || 0); }).slice(0, 500);
+                var res = {}; ids.forEach(function (id) { res[id] = out[id]; });
+                return res;
+            }
+            function pendingOf(row, dec) {
+                var now = Date.now();
+                return ((row && row.items) || []).filter(function (it) { return it && it.status === 'pending' && !(dec || {})[it.id] && now - (it.at || 0) < PENDING_MS; });
+            }
+            function statusOf(it) {
+                var d = H.dec[it.id];
+                if (d) return d.status;
+                if (it.status === 'withdrawn') return 'withdrawn';
+                if (Date.now() - (it.at || 0) >= PENDING_MS) return 'expired';
+                return 'pending';
+            }
+
+            // ── suggestions: player side ──
+            function loadMine() {
+                var id = myId(); if (!id) return Promise.resolve(null);
+                return readRow(SUG_PREFIX + id).then(function (d) { H.mine = d || { playerId: id, items: [] }; return H.mine; });
+            }
+            function saveMine(changed) {
+                var s = me(), id = myId(); if (!id) return Promise.resolve(false);
+                return readRow(SUG_PREFIX + id).then(function (cur) {
+                    var items = mergeItems((cur && cur.items) || [], (H.mine && H.mine.items || []).concat(changed ? [changed] : []));
+                    H.mine = { playerId: id, brand: (s.brand || s.name || ''), cohort: s.cohort || '', items: items, updatedAt: Date.now() };
+                    return writeRow(SUG_PREFIX + id, H.mine);
+                });
+            }
+            function myPendingFor(vid) {
+                return ((H.mine && H.mine.items) || []).some(function (it) { return it.videoId === vid && statusOf(it) === 'pending'; });
+            }
+            function suggest(vid) {
+                var v = card(vid), s = me();
+                if (!v || !s || !s.id) return Promise.resolve(false);
+                if (!titleOk(v.title)) { toast('That video can\'t be suggested.', 'error'); return Promise.resolve(false); }
+                return (H.mine ? Promise.resolve(H.mine) : loadMine()).then(function () {
+                    var items = (H.mine && H.mine.items) || [];
+                    if (myPendingFor(vid)) { toast('You already suggested this one — your host will see it.'); return false; }
+                    var pending = items.filter(function (it) { return statusOf(it) === 'pending'; }).length;
+                    if (pending >= MAX_PENDING) { toast('You have ' + MAX_PENDING + ' suggestions waiting. Wait for your host, or withdraw one in ON AIR.', 'error'); return false; }
+                    var day = new Date().toDateString();
+                    if (items.filter(function (it) { return new Date(it.at).toDateString() === day; }).length >= MAX_PER_DAY) { toast('That\'s ' + MAX_PER_DAY + ' suggestions today. Try again tomorrow.', 'error'); return false; }
+                    var now = Date.now();
+                    var it = { id: 'sg-' + now.toString(36) + '-' + Math.random().toString(36).slice(2, 6), videoId: v.videoId, source: v.source === 'shorts' ? 'shorts' : 'youtube',
+                               title: String(v.title || '').slice(0, 160), channel: v.channel || '', thumb: v.thumb || '', at: now, updatedAt: now, status: 'pending' };
+                    return saveMine(it).then(function (ok) {
+                        if (ok) toast('💡 Sent to your host: ' + it.title, 'success');
+                        else toast('Could not send that — check your connection.', 'error');
+                        render();
+                        return ok;
+                    });
+                });
+            }
+            function withdraw(sid) {
+                var it = ((H.mine && H.mine.items) || []).find(function (x) { return x.id === sid; });
+                if (!it || statusOf(it) !== 'pending') return Promise.resolve(false);
+                var ch = Object.assign({}, it, { status: 'withdrawn', updatedAt: Date.now() });
+                return saveMine(ch).then(function (ok) { render(); return ok; });
+            }
+            function seenSet() { try { return JSON.parse(localStorage.getItem(SEEN_LS) || '{}') || {}; } catch (e) { return {}; } }
+            function markSeen(id) { try { var m = seenSet(); m[id] = Date.now(); var ks = Object.keys(m); if (ks.length > 300) ks.sort(function (a, b) { return m[a] - m[b]; }).slice(0, ks.length - 300).forEach(function (k) { delete m[k]; }); localStorage.setItem(SEEN_LS, JSON.stringify(m)); } catch (e) {} }
+            // live, or at the next login: tell a player what happened to their suggestions
+            function notifyMine() {
+                if (!H.mine || hostView()) return;
+                var seen = seenSet();
+                (H.mine.items || []).forEach(function (it) {
+                    var d = H.dec[it.id];
+                    if (!d || seen[it.id] || d.playerId && d.playerId !== myId()) return;
+                    markSeen(it.id);
+                    if (Date.now() - (d.at || 0) > 7 * 86400000) return;   // a fresh device doesn't replay old news
+                    if (d.status === 'approved') {
+                        toast((d.mode === 'now' ? '📡 Your suggestion is playing for the class: ' : '✅ Your suggestion is up next for the class: ') + it.title, 'success', 7000);
+                        try { if (typeof window.pflxPlaySfx === 'function') window.pflxPlaySfx('success'); } catch (e) {}
+                    } else if (d.status === 'declined') {
+                        toast('Your host passed on "' + it.title + '". Try another one!', 'info', 6000);
+                    }
+                });
+            }
+
+            // ── suggestions: host side ──
+            function loadDecisions() {
+                return readRow(DEC_KEY).then(function (d) { H.dec = mergeDec(H.dec, (d && d.items) || {}); return H.dec; });
+            }
+            function loadAllSugs() {
+                var c = sb(); if (!c) return Promise.resolve();
+                return c.from('app_data').select('key, data').like('key', SUG_PREFIX + '%').limit(400).then(function (r) {
+                    ((r && r.data) || []).forEach(function (row) {
+                        if (!row || String(row.key).indexOf(SUG_PREFIX) !== 0 || !row.data) return;   // LIKE's "_" also matches the decisions row
+                        H.sugs[row.key] = row.data;
+                    });
+                    H.sugsLoaded = true;
+                    render();
+                }, function () {});
+            }
+            function hostQueue() {
+                var out = [];
+                Object.keys(H.sugs).forEach(function (k) {
+                    var row = H.sugs[k];
+                    pendingOf(row, H.dec).forEach(function (it) { out.push({ key: k, row: row, item: it }); });
+                });
+                return out.sort(function (a, b) { return (a.item.at || 0) - (b.item.at || 0); });
+            }
+            function findSug(sid) { return hostQueue().find(function (x) { return x.item.id === sid; }) || null; }
+            function saveDecision(sid, d) {
+                var patch = {}; patch[sid] = d;
+                H.dec = mergeDec(H.dec, patch);
+                return readRow(DEC_KEY).then(function (cur) {
+                    var merged = mergeDec((cur && cur.items) || {}, H.dec);
+                    H.dec = merged;
+                    return writeRow(DEC_KEY, { items: merged, updatedAt: Date.now() });
+                });
+            }
+            function decide(sid, status, mode) {
+                if (!realHost()) return Promise.resolve(false);
+                var x = findSug(sid); if (!x) return Promise.resolve(false);
+                var it = x.item, s = me();
+                var wasLive = !!(window.pflxTheaterLiveIsActive && window.pflxTheaterLiveIsActive());
+                if (status === 'approved' && !wasLive) mode = 'now';   // nothing on air: it starts playing right away
+                var d = { status: status, mode: mode || '', at: Date.now(), by: (s && (s.brand || s.name)) || 'host', playerId: x.row.playerId || '', title: it.title };
+                var play = Promise.resolve(true);
+                if (status === 'approved') play = enqueue({ source: it.source || 'youtube', videoId: it.videoId, title: it.title, thumb: it.thumb }, mode === 'now' ? 'now' : 'next');
+                return play.then(function () { return saveDecision(sid, d); }).then(function (ok) {
+                    if (status === 'approved') toast((mode === 'now' ? '📡 Playing now: ' : '✓ Up next: ') + it.title + ' (from ' + (x.row.brand || 'a player') + ')', 'success');
+                    render();
+                    return ok;
+                });
+            }
+
+            // ── class stream (Theater live record) ──
+            function enqueue(v, how) {
+                if (!realHost() || typeof window.pflxTheaterLiveEnqueue !== 'function') return Promise.resolve(null);
+                var it = { source: v.source || 'youtube', videoId: v.videoId || '', ref: v.ref || '', title: v.title || '', durationSec: v.durationSec || null };
+                return window.pflxTheaterLiveEnqueue([it], { at: how === 'end' ? 'end' : 'next', jump: how === 'now' });
+            }
+            function queueVideo(vid, how) {
+                var v = card(vid); if (!v) return;
+                enqueue(v, how).then(function (r) {
+                    if (r) toast(how === 'now' ? '📡 Playing for the class: ' + v.title : '＋ Added to the class queue: ' + v.title, 'success');
+                });
+            }
+            function playList(items, opts) {
+                if (!realHost() || !items || !items.length) return Promise.resolve(null);
+                return window.pflxTheaterLivePlay(items, 0, Object.assign({ loop: 'all' }, opts || {}));
+            }
+            function playYTPlaylist(refId, title) {
+                var y = YT(); if (!y) return;
+                var st = ytState();
+                var got = st && st.plItems[refId];
+                var go = function (list) {
+                    var items = (list || []).filter(function (v) { return titleOk(v.title); }).map(function (v) { return { source: 'youtube', videoId: v.videoId, title: v.title }; });
+                    if (!items.length) { toast('That playlist has no playable videos.', 'error'); return; }
+                    playList(items).then(function (r) { if (r) toast('📡 Playing "' + (title || 'playlist') + '" for the class (' + items.length + ' videos)', 'success'); });
+                };
+                if (Array.isArray(got)) return go(got);
+                y.openPlaylist(refId);
+                var tries = 0;
+                (function wait() {
+                    var l = ytState().plItems[refId];
+                    if (Array.isArray(l)) return go(l);
+                    if (l && l.error) return toast(l.error, 'error');
+                    if (++tries < 40) setTimeout(wait, 250); else toast('Could not load that playlist.', 'error');
+                })();
+            }
+            function playTheaterPlaylist(plId) {
+                if (typeof window.xbotTheaterStartBroadcast === 'function') window.xbotTheaterStartBroadcast(plId);
+            }
+
+            // ── personal preview (one player, just for this person) ──
+            function preview(it, from) {
+                if (!it) return;
+                H.preview = { source: it.source || 'youtube', videoId: it.videoId || '', ref: it.ref || '', title: it.title || '', live: !!it.live, thumb: it.thumb || '', channel: it.channel || '' };
+                if (isYTItem(H.preview)) { reg(H.preview); try { var y = YT(); if (y && y.logWatch) y.logWatch(H.preview.videoId, H.preview.title, from || H.tab || 'live'); } catch (e) {} }
+                renderPreview();
+                try { var el = $('plh-preview'); if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+            }
+            function previewVideo(vid, from) { var v = card(vid); if (v) preview(v, from); }
+            function closePreview() { H.preview = null; renderPreview(); }
+            function previewHtml(p) {
+                var src = p.source || 'youtube', media;
+                if (src === 'youtube' || src === 'shorts') {
+                    media = '<iframe class="pflx-theater-media" src="https://www.youtube-nocookie.com/embed/' + esc(p.videoId) + '?rel=0&modestbranding=1&playsinline=1&autoplay=1&enablejsapi=1&origin=' + encodeURIComponent(location.origin) +
+                        '" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen title="' + esc(p.title) + '"></iframe>';
+                } else if (src === 'file') {
+                    media = '<video class="pflx-theater-media" src="' + esc(p.ref) + '" controls autoplay playsinline></video>';
+                } else {
+                    var url = window.pflxTheaterMediaUrl ? window.pflxTheaterMediaUrl(p, src === 'gdrive' ? 'iframe' : undefined) : '';
+                    media = '<iframe class="pflx-theater-media" src="' + esc(url) + '" allow="autoplay; encrypted-media; fullscreen"></iframe>';
+                }
+                var host = hostView(), yt = isYTItem(p) && !p.live;
+                var acts = '';
+                if (host && yt) acts += '<button class="plh-b" onclick="pflxLiveHub.queue(\'' + q1(p.videoId) + '\',\'end\')" title="Add to the class queue">＋ QUEUE</button><button class="plh-b hot" onclick="pflxLiveHub.queue(\'' + q1(p.videoId) + '\',\'now\')" title="Play for the class now">📡 NOW</button>';
+                if (!host && yt && canSuggest()) acts += myPendingFor(p.videoId) ? '<span class="plh-chip">💡 SUGGESTED</span>' : '<button class="plh-b" onclick="pflxLiveHub.suggest(\'' + q1(p.videoId) + '\')">💡 SUGGEST</button>';
+                return '<div class="plh-pv' + (src === 'shorts' || src === 'tiktok' ? ' tall' : '') + '">' + media + '</div>' +
+                    '<div class="plh-pvbar"><span class="plh-chip">' + (p.live ? '● LIVE · ' : '') + 'JUST YOU</span><span class="plh-pvt">' + esc(p.title) + '</span>' + acts +
+                    '<button class="plh-b gh" onclick="pflxLiveHub.closePreview()" aria-label="Close preview">✕</button></div>';
+            }
+            function renderPreview() {
+                var el = $('plh-preview'); if (!el) return;
+                var p = H.preview;
+                var key = p ? [p.source, p.videoId, p.ref, hostView() ? 'h' : 'p', myPendingFor(p.videoId) ? 's' : ''].join('|') : '';
+                if (key === H.previewKey && (!!p) === (el.childElementCount > 0)) return;
+                // only the button bar changed -> keep the playing video
+                if (p && H.previewKey && H.previewKey.split('|').slice(0, 3).join('|') === key.split('|').slice(0, 3).join('|') && el.querySelector('.plh-pvbar')) {
+                    var tmp = document.createElement('div'); tmp.innerHTML = previewHtml(p);
+                    el.replaceChild(tmp.querySelector('.plh-pvbar'), el.querySelector('.plh-pvbar'));
+                    H.previewKey = key;
+                    return;
+                }
+                H.previewKey = key;
+                el.innerHTML = p ? previewHtml(p) : '';
+                el.style.display = p ? '' : 'none';
+                if (window.PFLX_AUDIO) { try { window.PFLX_AUDIO.refresh(); } catch (e) {} }
+            }
+
+            // ── stage: what the class is watching ──
+            function renderStage() {
+                var el = $('plh-stage'); if (!el) return;
+                var T = window.pflxTheaterLive, st = T && T.state;
+                var on = !!(window.pflxTheaterLiveIsActive && window.pflxTheaterLiveIsActive());
+                var host = hostView();
+                var pos = on ? window.pflxTheaterLivePosition(st, Date.now(), T.skew) : null;
+                var key = on ? [st.id, st.rev, pos && pos.index, st.paused, host].join('|') : 'off|' + host;
+                if (key === H.stageKey && el.childElementCount) return;
+                H.stageKey = key;
+                if (!on || !pos) {
+                    el.className = 'plh-stage off';
+                    el.innerHTML = '<div class="plh-st-l"><span class="plh-dot"></span><div><div class="plh-st-k">OFF AIR</div><div class="plh-st-t">' +
+                        (host ? 'Nothing is playing for the class. Play something from WATCH or LIBRARY.' : 'Nothing is playing for the class right now.') + '</div></div></div>';
+                    return;
+                }
+                var n = st.playlist.length, sm = srcMeta(pos.item);
+                var next = [];
+                for (var i = 1; i <= 2 && pos.index + i < n; i++) next.push(st.playlist[pos.index + i]);
+                var ctl = host
+                    ? '<button class="plh-b" title="Previous" onclick="pflxTheaterLiveSkip(-1)">⏮</button><button class="plh-b hot" onclick="pflxTheaterLiveTogglePause()">' + (st.paused ? '▶' : '⏸') + '</button>' +
+                      '<button class="plh-b" title="Next" onclick="pflxTheaterLiveSkip(1)">⏭</button><button class="plh-b" title="My pop-out" onclick="pflxTheaterLiveOpenPip(true)">⧉</button>' +
+                      '<button class="plh-b red" title="Stop for everyone" onclick="pflxTheaterLiveStop()">■</button>'
+                    : '<button class="plh-b hot" onclick="pflxTheaterLiveOpenPip(true)">▶ WATCH</button>';
+                el.className = 'plh-stage on';
+                el.innerHTML = '<div class="plh-st-l"><span class="plh-dot live"></span><div style="min-width:0;flex:1"><div class="plh-st-k">' + (st.paused ? 'PAUSED' : 'ON AIR') + ' · CLASS THEATER' + (n > 1 ? ' · ' + (pos.index + 1) + '/' + n : '') + '</div>' +
+                    '<div class="plh-st-t" title="' + esc(pos.item.title) + '"><i style="color:' + sm.color + '">' + sm.icon + '</i> ' + esc(pos.item.title) + '</div>' +
+                    (next.length ? '<div class="plh-st-n">UP NEXT: ' + next.map(function (x) { return esc(x.title); }).join(' · ') + '</div>' : '') + '</div></div>' +
+                    '<div class="plh-st-c">' + ctl + '</div>';
+            }
+
+            // ── tabs ──
+            function canSuggest() { return !!myId(); }
+            function watchAllowed() { return hostView() || ytSettings().playersEnabled !== false; }
+            function tabsFor() {
+                if (hostView()) {
+                    var n = hostQueue().length;
+                    return [['onair', '📡 ON AIR' + (n ? ' <b class="plh-badge">' + n + '</b>' : '')], ['watch', '🔍 WATCH'], ['library', '📚 LIBRARY'], ['class', '🏟 CLASS'], ['studio', '🎛 STUDIO']];
+                }
+                var t = [['onair', '📡 ON AIR']];
+                if (watchAllowed()) t.push(['watch', '🔍 WATCH']);
+                t.push(['library', '📚 LIBRARY']);
+                return t;
+            }
+            function setPanel(id, show) { var el = $(id); if (el) el.style.display = show ? 'block' : 'none'; }
+            function applyVisibility() {
+                var host = hostView(), tab = H.tab;
+                setPanel('plh-onair', tab === 'onair');
+                setPanel('plh-watch', tab === 'watch');
+                setPanel('plh-library', tab === 'library');
+                setPanel('plh-studio', tab === 'studio' && host);
+                setPanel(LEGACY.theater, tab === 'onair' && host);
+                setPanel(LEGACY.sessions, tab === 'onair' && host);
+                setPanel(LEGACY.teams, tab === 'class' && host);
+                ['sound', 'controller', 'tools'].forEach(function (k) { setPanel(LEGACY[k], host && tab === 'studio' && H.studio === k); });
+                setPanel('plh-studio-yt', host && tab === 'studio' && (H.studio === 'safety' || H.studio === 'activity'));
+                var lt = $('plh-lib-theater');
+                if (lt) lt.style.display = (tab === 'library' && H.libOpen && H.libOpen.type === 'theater' && host) ? 'block' : 'none';
+            }
+            // opening a tab (re)loads what it shows; the Live section's own
+            // show also calls this, so the data is fresh each time it opens
+            function go(tab) {
+                var tabs = tabsFor().map(function (t) { return t[0]; });
+                if (tabs.indexOf(tab) < 0) tab = 'onair';
+                H.tab = tab;
+                try { localStorage.setItem(TAB_LS, tab); } catch (e) {}
+                applyVisibility();
+                var host = hostView();
+                {
+                    if (tab === 'onair') {
+                        if (host) {
+                            try { window.xbotTheaterRenderList(); } catch (e) {}
+                            try { window.xbotLiveRenderSessions(); } catch (e) {}
+                            loadAllSugs();
+                            loadDecisions().then(render);
+                        } else { loadSessions(); loadMine().then(function () { loadDecisions().then(function () { notifyMine(); render(); }); }); }
+                    }
+                    if (tab === 'library') {
+                        if (host) { try { window.xbotTheaterRenderList(); } catch (e) {} var st = ytState(); if (st && !st.myPls && YT().loadMyPlaylists) YT().loadMyPlaylists(); }
+                        else loadCfg();
+                        try { YT().ensureLoaded(true).then(render); } catch (e) {}
+                    }
+                    if (tab === 'watch' && !host) { if (!H.mine) loadMine().then(render); }
+                    if (tab === 'class' && host) { try { window.pflxXBotRenderTeams(); } catch (e) {} }
+                    if (tab === 'studio' && host) studioGo(H.studio);
+                }
+                render();
+            }
+            function studioGo(k) {
+                H.studio = k;
+                applyVisibility();
+                if (k === 'sound') { try { window.xbotSoundboardRenderGrid(); } catch (e) {} }
+                if (k === 'controller') { try { window.xbotControllerRenderGrid(); } catch (e) {} }
+                if (k === 'tools') { try { window.xbotLiveRenderYtStatus(); window.xbotLiveRenderSessionAttachPicker(); } catch (e) {} }
+                if (k === 'safety' || k === 'activity') {
+                    var y = YT(), el = $('plh-studio-yt');
+                    if (y && el) y.ensureLoaded(true).then(function () { y.renderPart(el, k); });
+                }
+                renderStudioTabs();
+            }
+            function renderStudioTabs() {
+                var el = $('plh-studio-tabs'); if (!el) return;
+                el.innerHTML = [['sound', '🔊 SOUND'], ['controller', '🎛 CONTROLLER'], ['tools', '🛠 TOOLS'], ['safety', '🛡 YOUTUBE SAFETY'], ['activity', '📊 YOUTUBE ACTIVITY']].map(function (t) {
+                    return '<button class="plh-tab sm' + (H.studio === t[0] ? ' on' : '') + '" onclick="pflxLiveHub.studio(\'' + t[0] + '\')">' + t[1] + '</button>';
+                }).join('');
+            }
+
+            // ── data for players ──
+            function loadCfg() {
+                if (typeof window.pflxXBotLoadCfg !== 'function') return Promise.resolve(null);
+                return window.pflxXBotLoadCfg().then(function (c) { H.cfg = c; render(); return c; });
+            }
+            function loadSessions() {
+                if (typeof window.pflxXBotLoadSessions !== 'function') return Promise.resolve([]);
+                return window.pflxXBotLoadSessions().then(function (l) { H.sessions = l || []; render(); return H.sessions; });
+            }
+            function playlists() {
+                var c = window._xbotTheaterPlaylistsCache;
+                if (hostView() && Array.isArray(c)) return c;
+                return (H.cfg && Array.isArray(H.cfg.theaterPlaylists)) ? H.cfg.theaterPlaylists : (Array.isArray(c) ? c : []);
+            }
+            function liveSessionsForMe() {
+                var mine = myCohorts();
+                return (H.sessions || []).filter(function (s) {
+                    if (!s || s.status !== 'active' || !s.youtubeEmbedId) return false;
+                    if (s.allCohorts || !(s.cohorts || []).length) return true;
+                    return (s.cohorts || []).some(function (c) { return mine.indexOf(String(c).toLowerCase().trim()) >= 0; });
+                });
+            }
+
+            // ── views ──
+            function vcard(v, from) {
+                reg(v);
+                var host = hostView(), vid = q1(v.videoId);
+                var btns = '<button class="plh-b" onclick="pflxLiveHub.preview(\'' + vid + '\',\'' + from + '\')">▶</button>';
+                if (host) {
+                    btns += '<button class="plh-b" title="Add to the class queue" onclick="pflxLiveHub.queue(\'' + vid + '\',\'end\')">＋ QUEUE</button>' +
+                        '<button class="plh-b hot" title="Play for the class now" onclick="pflxLiveHub.queue(\'' + vid + '\',\'now\')">📡 NOW</button>';
+                    if (from !== 'posted') btns += '<button class="plh-b" title="Post for players in LIBRARY" onclick="pflxLiveHub.postVideo(\'' + vid + '\')">📌 POST</button>';
+                    if (from === 'search' && v.channelId) btns += '<button class="plh-b gh" title="Approve this channel" onclick="pflxLiveHub.approveChannel(\'' + vid + '\')">✓ CH</button>';
+                } else if (canSuggest()) {
+                    btns += myPendingFor(v.videoId) ? '<span class="plh-chip">💡 SUGGESTED</span>' : '<button class="plh-b" onclick="pflxLiveHub.suggest(\'' + vid + '\')">💡 SUGGEST</button>';
+                }
+                return '<div class="plh-card"><img src="' + esc(v.thumb || ('https://i.ytimg.com/vi/' + v.videoId + '/mqdefault.jpg')) + '" alt="" loading="lazy" onclick="pflxLiveHub.preview(\'' + vid + '\',\'' + from + '\')">' +
+                    '<div class="plh-grow"><div class="plh-t">' + esc(v.title) + '</div><div class="plh-s">' + esc(v.channel || '') + '</div><div class="plh-acts">' + btns + '</div></div></div>';
+            }
+            function viewWatch() {
+                var y = YT(), st = ytState();
+                if (!y || !st) return '<div class="plh-msg">YouTube isn\'t available.</div>';
+                if (!watchAllowed()) return '<div class="plh-msg">YouTube search is turned off by your host.</div>';
+                var set = ytSettings();
+                var chips = [set.strict ? '🛡 SafeSearch' : '', set.learningOnly ? '🎓 Learning only' : '', set.approvedOnly ? '✓ Approved channels' : ''].filter(Boolean)
+                    .map(function (c) { return '<span class="plh-chip">' + c + '</span>'; }).join('');
+                var out = '<div class="plh-row"><input class="plh-in" id="plh-q" type="search" placeholder="Search tutorials, how-tos, topics…" value="' + esc(st.q) + '" onkeydown="if(event.key===\'Enter\')pflxLiveHub.search(this.value)">' +
+                    '<button class="plh-b hot" onclick="pflxLiveHub.search(document.getElementById(\'plh-q\').value)">' + (st.busy ? '…' : '🔍 SEARCH') + '</button></div>' +
+                    '<div class="plh-chips">' + chips + '</div>';
+                if (!y.key()) out += '<div class="plh-msg">' + (hostView() ? 'Add your YouTube Data API key in X-Bot ⚙ → AI Engine Keys to search.' : 'YouTube search isn\'t set up yet — ask your host.') + '</div>';
+                if (st.msg) out += '<div class="plh-msg ' + esc(st.msgKind || '') + '">' + esc(st.msg) + '</div>';
+                out += '<div class="plh-list">' + (st.results || []).map(function (v) { return vcard(v, 'search'); }).join('') + '</div>';
+                if (!hostView() && !(st.results || []).length && !st.msg) out += '<div class="plh-hint">Found something the class should see? Tap 💡 SUGGEST and your host can play it for everyone.</div>';
+                return out;
+            }
+            function libEntries() {
+                var host = hostView(), st = ytState() || { res: { items: [] } };
+                var posted = (st.res && st.res.items) || [];
+                var pls = playlists();
+                var postedTheater = {}, postedYT = {};
+                posted.forEach(function (r) { if (r.type === 'theater') postedTheater[r.refId] = r; else postedYT[r.refId] = r; });
+                var out = [];
+                if (host) {
+                    pls.forEach(function (p) { out.push({ kind: 'class', id: p.id, title: p.name, sub: ((p.items || []).length) + ' videos', thumb: p.items && p.items[0] ? thumbFor(p.items[0]) : '', posted: postedTheater[p.id] || null, pl: p }); });
+                }
+                posted.forEach(function (r) {
+                    if (r.type === 'theater') {
+                        if (host) return;   // already listed as a class playlist
+                        var p = pls.find(function (x) { return x.id === r.refId; });
+                        if (!p) return;   // deleted playlist
+                        out.push({ kind: 'class', id: p.id, title: p.name, sub: ((p.items || []).length) + ' videos', thumb: p.items && p.items[0] ? thumbFor(p.items[0]) : '', posted: r, pl: p });
+                        return;
+                    }
+                    out.push({ kind: r.type === 'playlist' ? 'posted-pl' : 'posted-video', id: r.refId, title: r.title, sub: (r.channel || '') + (r.type === 'playlist' ? ' · ' + (r.count || 0) + ' videos' : ''), thumb: r.thumb, posted: r, res: r });
+                });
+                if (host && st.myPls && st.myPls.items) {
+                    st.myPls.items.forEach(function (p) {
+                        if (postedYT[p.refId]) return;
+                        out.push({ kind: 'channel', id: p.refId, title: p.title, sub: (p.count || 0) + ' videos · your channel', thumb: p.thumb, posted: null, ch: p });
+                    });
+                }
+                return out;
+            }
+            var KIND = { 'class': ['🎬', 'CLASS PLAYLIST'], 'posted-pl': ['📚', 'POSTED PLAYLIST'], 'posted-video': ['▶', 'POSTED VIDEO'], 'channel': ['📺', 'MY CHANNEL'] };
+            function libRow(e) {
+                var host = hostView(), id = q1(e.id), k = KIND[e.kind];
+                var btns = '';
+                if (e.kind === 'posted-video') {
+                    reg({ videoId: e.id, title: e.title, channel: e.res.channel, thumb: e.thumb });
+                    btns += '<button class="plh-b" onclick="pflxLiveHub.preview(\'' + id + '\',\'resource\')">▶ WATCH</button>';
+                    if (host) btns += '<button class="plh-b" onclick="pflxLiveHub.queue(\'' + id + '\',\'end\')">＋ QUEUE</button><button class="plh-b hot" onclick="pflxLiveHub.queue(\'' + id + '\',\'now\')">📡 NOW</button>';
+                    else if (canSuggest()) btns += myPendingFor(e.id) ? '<span class="plh-chip">💡 SUGGESTED</span>' : '<button class="plh-b" onclick="pflxLiveHub.suggest(\'' + id + '\')">💡 SUGGEST</button>';
+                } else {
+                    btns += '<button class="plh-b" onclick="pflxLiveHub.openItem(\'' + e.kind + '\',\'' + id + '\')">OPEN</button>';
+                    if (host) btns += '<button class="plh-b hot" title="Play the whole playlist for the class" onclick="pflxLiveHub.playAll(\'' + e.kind + '\',\'' + id + '\')">📡 PLAY</button>';
+                }
+                if (host) {
+                    if (e.posted) btns += '<button class="plh-b red" title="Stop showing this to players" onclick="pflxLiveHub.unpost(\'' + q1(e.posted.id) + '\')">UNPOST</button>';
+                    else btns += '<button class="plh-b" title="Show this to players in their LIBRARY" onclick="pflxLiveHub.post(\'' + e.kind + '\',\'' + id + '\')">📌 POST</button>';
+                }
+                var T = window.pflxTheaterLive, st = T && T.state;
+                var onAir = e.kind === 'class' && st && st.active && st.playlistId === e.id;
+                return '<div class="plh-card"><img src="' + esc(e.thumb || '') + '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">' +
+                    '<div class="plh-grow"><div class="plh-tags"><span class="plh-tag k-' + e.kind + '">' + k[0] + ' ' + k[1] + '</span>' +
+                    (onAir ? '<span class="plh-tag live">● ON AIR</span>' : '') + (host && e.posted ? '<span class="plh-tag ok">📌 PLAYERS SEE THIS</span>' : '') + '</div>' +
+                    '<div class="plh-t">' + esc(e.title) + '</div><div class="plh-s">' + esc(e.sub || '') + '</div><div class="plh-acts">' + btns + '</div></div></div>';
+            }
+            function viewLibraryOpen() {
+                var o = H.libOpen, host = hostView(), y = YT(), st = ytState();
+                var back = '<div class="plh-row" style="align-items:center"><button class="plh-b gh" onclick="pflxLiveHub.back()">← LIBRARY</button><div class="plh-t" style="flex:1">' + esc(o.title || '') + '</div></div>';
+                if (o.type === 'theater') {
+                    if (host) return back.replace(esc(o.title || ''), '🎬 CLASS PLAYLISTS') + '<div class="plh-hint">Drag to reorder, paste links or drop video files. 📡 plays from that video for everyone.</div>';
+                    var p = playlists().find(function (x) { return x.id === o.id; });
+                    if (!p) return back + '<div class="plh-msg">This playlist isn\'t available any more.</div>';
+                    return back + '<div class="plh-list">' + (p.items || []).map(function (it) {
+                        var sm = srcMeta(it), idx = 'pflxLiveHub.previewItem(\'' + q1(p.id) + '\',\'' + q1(it.id) + '\')';
+                        var yt = isYTItem(it);
+                        if (yt) reg({ videoId: it.videoId, title: it.title, thumb: thumbFor(it), source: it.source });
+                        return '<div class="plh-card"><img src="' + esc(thumbFor(it)) + '" alt="" loading="lazy" onclick="' + idx + '" onerror="this.style.visibility=\'hidden\'"><div class="plh-grow">' +
+                            '<div class="plh-t"><i style="color:' + sm.color + '">' + sm.icon + '</i> ' + esc(it.title) + '</div><div class="plh-acts"><button class="plh-b" onclick="' + idx + '">▶ WATCH</button>' +
+                            (yt && canSuggest() ? (myPendingFor(it.videoId) ? '<span class="plh-chip">💡 SUGGESTED</span>' : '<button class="plh-b" onclick="pflxLiveHub.suggest(\'' + q1(it.videoId) + '\')">💡 SUGGEST</button>') : '') +
+                            '</div></div></div>';
+                    }).join('') + '</div>';
+                }
+                // a YouTube playlist (posted or from the host's channel)
+                var items = st && st.plItems[o.id];
+                var head = back;
+                if (host) head += '<div class="plh-acts" style="margin:6px 0"><button class="plh-b hot" onclick="pflxLiveHub.playAll(\'' + q1(o.kind) + '\',\'' + q1(o.id) + '\')">📡 PLAY ALL FOR THE CLASS</button>' +
+                    (o.kind === 'channel' ? '<button class="plh-b" onclick="pflxLiveHub.post(\'channel\',\'' + q1(o.id) + '\')">📌 POST</button>' : '') + '</div>';
+                if (!items) return head + '<div class="plh-msg">Loading videos…</div>';
+                if (items.error) return head + '<div class="plh-msg bad">' + esc(items.error) + '</div>';
+                return head + '<div class="plh-list">' + items.filter(function (v) { return titleOk(v.title); }).map(function (v) { return vcard(v, 'posted'); }).join('') + '</div>';
+            }
+            function viewLibrary() {
+                if (H.libOpen) return viewLibraryOpen();
+                var host = hostView(), st = ytState();
+                var all = libEntries();
+                var out = '';
+                if (host) {
+                    out += '<div class="plh-row"><input class="plh-in" id="plh-link" placeholder="Paste a YouTube playlist or video link to post for players">' +
+                        '<button class="plh-b" onclick="pflxLiveHub.postLink()">📌 POST</button></div>' +
+                        '<div class="plh-acts" style="margin:6px 0 2px"><button class="plh-b" onclick="pflxLiveHub.newPlaylist()">＋ NEW CLASS PLAYLIST</button></div>';
+                    var f = [['all', 'ALL'], ['class', '🎬 CLASS'], ['posted', '📌 POSTED'], ['channel', '📺 MY CHANNEL']];
+                    out += '<div class="plh-chips">' + f.map(function (x) { return '<button class="plh-tab sm' + (H.libFilter === x[0] ? ' on' : '') + '" onclick="pflxLiveHub.libFilter(\'' + x[0] + '\')">' + x[1] + '</button>'; }).join('') + '</div>';
+                    all = all.filter(function (e) {
+                        if (H.libFilter === 'class') return e.kind === 'class';
+                        if (H.libFilter === 'posted') return !!e.posted;
+                        if (H.libFilter === 'channel') return e.kind === 'channel';
+                        return true;
+                    });
+                    if (st && st.myPls && st.myPls.error && (H.libFilter === 'channel' || H.libFilter === 'all')) out += '<div class="plh-msg">' + esc(st.myPls.error) + '</div>';
+                    if (st && st.myPls && st.myPls.loading && H.libFilter === 'channel') out += '<div class="plh-msg">Loading your channel…</div>';
+                }
+                if (!all.length) return out + '<div class="plh-msg">' + (host ? 'Nothing here yet. Make a class playlist, post a link, or add your Channel ID in X-Bot ⚙ to see your playlists.' : 'Your host hasn\'t posted anything yet.') + '</div>';
+                return out + '<div class="plh-list">' + all.map(libRow).join('') + '</div>';
+            }
+            function viewOnAir() {
+                var host = hostView(), out = '';
+                if (host) {
+                    var q = hostQueue();
+                    out += '<div class="plh-h">💡 SUGGESTIONS FROM PLAYERS' + (q.length ? ' (' + q.length + ')' : '') + '</div>';
+                    if (!q.length) out += '<div class="plh-hint">' + (H.sugsLoaded ? 'No suggestions right now. Players can suggest videos from WATCH and LIBRARY.' : 'Loading…') + '</div>';
+                    else out += '<div class="plh-list">' + q.map(function (x) {
+                        var it = x.item, sid = q1(it.id);
+                        reg({ videoId: it.videoId, title: it.title, channel: it.channel, thumb: it.thumb, source: it.source });
+                        return '<div class="plh-card sug"><img src="' + esc(it.thumb || ('https://i.ytimg.com/vi/' + it.videoId + '/mqdefault.jpg')) + '" alt="" loading="lazy" onclick="pflxLiveHub.preview(\'' + q1(it.videoId) + '\',\'suggestion\')">' +
+                            '<div class="plh-grow"><div class="plh-t">' + esc(it.title) + '</div><div class="plh-s">💡 ' + esc(x.row.brand || 'Player') + (x.row.cohort ? ' · ' + esc(x.row.cohort) : '') + ' · ' + ago(it.at) + '</div>' +
+                            '<div class="plh-acts"><button class="plh-b" onclick="pflxLiveHub.preview(\'' + q1(it.videoId) + '\',\'suggestion\')">▶</button>' +
+                            '<button class="plh-b ok" onclick="pflxLiveHub.approve(\'' + sid + '\',\'next\')">✓ PLAY NEXT</button>' +
+                            '<button class="plh-b hot" onclick="pflxLiveHub.approve(\'' + sid + '\',\'now\')">📡 NOW</button>' +
+                            '<button class="plh-b red" onclick="pflxLiveHub.decline(\'' + sid + '\')">✕</button></div></div></div>';
+                    }).join('') + '</div>';
+                    out += '<div class="plh-h">🎬 CLASS THEATER</div>';
+                    return out;
+                }
+                var live = liveSessionsForMe();
+                out += '<div class="plh-h">🔴 LIVE SESSIONS</div>';
+                out += live.length ? '<div class="plh-list">' + live.map(function (s) {
+                    return '<div class="plh-card"><div class="plh-grow"><div class="plh-t">' + esc(s.title || 'Live session') + '</div><div class="plh-s"><span class="plh-tag live">● LIVE NOW</span></div>' +
+                        '<div class="plh-acts"><button class="plh-b hot" onclick="pflxLiveHub.watchSession(\'' + q1(s.id) + '\')">▶ WATCH</button></div></div></div>';
+                }).join('') + '</div>' : '<div class="plh-hint">' + (H.sessions ? 'No live session right now.' : 'Loading…') + '</div>';
+                var mine = ((H.mine && H.mine.items) || []).slice().reverse().slice(0, 12);
+                out += '<div class="plh-h">💡 MY SUGGESTIONS</div>';
+                if (!mine.length) out += '<div class="plh-hint">Find a video in ' + (watchAllowed() ? 'WATCH or ' : '') + 'LIBRARY and tap 💡 SUGGEST. If your host approves it, it plays for the whole class.</div>';
+                else out += '<div class="plh-list">' + mine.map(function (it) {
+                    var s = statusOf(it);
+                    var lab = s === 'approved' ? '<span class="plh-tag ok">✓ APPROVED</span>' : s === 'declined' ? '<span class="plh-tag">PASSED</span>' : s === 'withdrawn' ? '<span class="plh-tag">WITHDRAWN</span>' : s === 'expired' ? '<span class="plh-tag">EXPIRED</span>' : '<span class="plh-tag wait">⏳ WAITING FOR HOST</span>';
+                    return '<div class="plh-card"><img src="' + esc(it.thumb || ('https://i.ytimg.com/vi/' + it.videoId + '/mqdefault.jpg')) + '" alt="" loading="lazy"><div class="plh-grow"><div class="plh-t">' + esc(it.title) + '</div>' +
+                        '<div class="plh-s">' + lab + ' · ' + ago(it.at) + '</div>' +
+                        (s === 'pending' ? '<div class="plh-acts"><button class="plh-b gh" onclick="pflxLiveHub.withdraw(\'' + q1(it.id) + '\')">WITHDRAW</button></div>' : '') + '</div></div>';
+                }).join('') + '</div>';
+                return out;
+            }
+
+            // ── shell + render ──
+            var CSS = '<style id="plh-css">' +
+                'html body .plh :where(p,span,div,label){color:inherit}' +
+                'html body .plh{color:#dfe6ff;font-family:Rajdhani,sans-serif;font-size:13px}' +
+                'html body .plh-head{display:flex;align-items:baseline;gap:8px;margin-bottom:8px}' +
+                'html body .plh-title{font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:2px;color:#ff3d7f}' +
+                'html body .plh-subt{font-size:11px;color:#7f8bb0}' +
+                'html body .plh-stage{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 12px;border-radius:12px;margin-bottom:8px;border:1px solid rgba(255,255,255,.08);background:rgba(10,15,30,.7)}' +
+                'html body .plh-stage.on{border-color:rgba(255,0,80,.45);background:linear-gradient(120deg,rgba(255,0,80,.14),rgba(10,15,30,.75) 60%)}' +
+                'html body .plh-st-l{display:flex;gap:10px;align-items:center;flex:1;min-width:0}' +
+                'html body .plh-st-k{font-family:Orbitron,sans-serif;font-size:9px;letter-spacing:1.5px;color:#ff7aa6}' +
+                'html body .plh-stage.off .plh-st-k{color:#7f8bb0}' +
+                'html body .plh-st-t{font-weight:700;color:#f2f5ff;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+                'html body .plh-stage.off .plh-st-t{white-space:normal;font-weight:500;color:#aab4d4}' +
+                'html body .plh-st-n{font-size:11px;color:#8f9ac0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+                'html body .plh-st-c{display:flex;gap:4px;flex-wrap:wrap}' +
+                'html body .plh-dot{flex:none;width:10px;height:10px;border-radius:50%;background:#4a5372}' +
+                'html body .plh-dot.live{background:#ff0050;box-shadow:0 0 0 0 rgba(255,0,80,.7);animation:plhPulse 1.6s infinite}' +
+                '@keyframes plhPulse{70%{box-shadow:0 0 0 8px rgba(255,0,80,0)}100%{box-shadow:0 0 0 0 rgba(255,0,80,0)}}' +
+                'html body #plh-preview{margin-bottom:8px}' +
+                'html body .plh-pv{position:relative;border-radius:10px;overflow:hidden;background:#000;border:1px solid rgba(0,240,255,.25);aspect-ratio:16/9}' +
+                'html body .plh-pv.tall{aspect-ratio:9/16;max-height:60vh;margin:0 auto}' +
+                'html body .plh-pv iframe,html body .plh-pv video{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000}' +
+                'html body .plh-pvbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px}' +
+                'html body .plh-pvt{flex:1;min-width:120px;font-weight:700;color:#eef2ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+                'html body .plh-tabs{display:flex;gap:4px;flex-wrap:wrap;margin:4px 0 10px}' +
+                'html body .plh-tab{padding:7px 10px;border-radius:9px;border:1px solid rgba(255,255,255,.1);background:rgba(10,18,40,.6);color:#8f9ac0;font-family:Orbitron,sans-serif;font-size:9.5px;letter-spacing:1px;cursor:pointer;display:inline-flex;gap:5px;align-items:center}' +
+                'html body .plh-tab.on{color:#fff;border-color:rgba(255,0,80,.55);background:rgba(255,0,80,.14)}' +
+                'html body .plh-tab.sm{padding:5px 8px;font-size:8.5px}' +
+                'html body .plh-badge{background:#ff0050;color:#fff;border-radius:9px;padding:0 6px;font-size:9px;line-height:15px}' +
+                'html body .plh-h{font-family:Orbitron,sans-serif;font-size:9.5px;letter-spacing:1.5px;color:rgba(0,240,255,.8);margin:12px 0 6px}' +
+                'html body .plh-row{display:flex;gap:6px}' +
+                'html body .plh-in{flex:1;min-width:0;background:rgba(10,18,40,.85);border:1px solid rgba(0,240,255,.15);color:#e0e6ff;padding:8px 10px;border-radius:8px;font-size:13px;font-family:Rajdhani,sans-serif}' +
+                'html body .plh-b{padding:5px 9px;border-radius:8px;border:1px solid rgba(0,240,255,.3);background:rgba(0,240,255,.08);color:#7fefff;font-family:Orbitron,sans-serif;font-size:9px;letter-spacing:.8px;cursor:pointer;white-space:nowrap}' +
+                'html body .plh-b:hover{border-color:rgba(0,240,255,.6);color:#fff}' +
+                'html body .plh-b.hot{border-color:rgba(255,0,80,.5);background:rgba(255,0,80,.14);color:#ff8fb3}' +
+                'html body .plh-b.ok{border-color:rgba(52,211,153,.45);background:rgba(52,211,153,.1);color:#6ee7b7}' +
+                'html body .plh-b.red{border-color:rgba(255,80,100,.35);background:rgba(255,80,100,.06);color:#ff8095}' +
+                'html body .plh-b.gh{border-color:rgba(255,255,255,.14);background:transparent;color:#aab4d4}' +
+                'html body .plh-chips{display:flex;gap:4px;flex-wrap:wrap;margin:6px 0}' +
+                'html body .plh-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:12px;background:rgba(255,255,255,.07);font-size:11px;color:#c9d2f0;white-space:nowrap}' +
+                'html body .plh-msg{margin:8px 0;padding:8px 10px;border-radius:8px;background:rgba(0,240,255,.05);border:1px solid rgba(0,240,255,.12);color:#aab4d4}' +
+                'html body .plh-msg.bad{background:rgba(255,80,100,.08);border-color:rgba(255,80,100,.3);color:#ffb3bf}' +
+                'html body .plh-msg.care{background:rgba(96,165,250,.1);border-color:rgba(96,165,250,.35);color:#dbeafe}' +
+                'html body .plh-hint{font-size:12px;color:#7f8bb0;margin:4px 0 8px}' +
+                'html body .plh-list{display:flex;flex-direction:column;gap:6px;margin-top:6px}' +
+                'html body .plh-card{display:flex;gap:8px;align-items:flex-start;padding:6px;border-radius:10px;background:rgba(10,18,40,.55);border:1px solid rgba(255,255,255,.06)}' +
+                'html body .plh-card.sug{border-color:rgba(255,200,61,.3);background:rgba(255,200,61,.05)}' +
+                'html body .plh-card img{width:96px;height:54px;object-fit:cover;border-radius:6px;flex:none;background:#050a18;cursor:pointer}' +
+                'html body .plh-grow{flex:1;min-width:0}' +
+                'html body .plh-t{font-weight:700;line-height:1.2;color:#eef2ff;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}' +
+                'html body .plh-s{font-size:11px;color:#7f8bb0;margin-top:2px}' +
+                'html body .plh-acts{display:flex;gap:4px;flex-wrap:wrap;margin-top:5px;align-items:center}' +
+                'html body .plh-tags{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:2px}' +
+                'html body .plh-tag{display:inline-block;padding:1px 6px;border-radius:6px;font-family:Orbitron,sans-serif;font-size:7.5px;letter-spacing:1px;background:rgba(255,255,255,.07);color:#aab4d4}' +
+                'html body .plh-tag.k-class{background:rgba(255,0,80,.12);color:#ff8fb3}' +
+                'html body .plh-tag.k-channel{background:rgba(255,59,59,.12);color:#ff9d9d}' +
+                'html body .plh-tag.k-posted-pl,html body .plh-tag.k-posted-video{background:rgba(0,240,255,.1);color:#7fefff}' +
+                'html body .plh-tag.live{background:rgba(255,0,80,.2);color:#ff6b9a}' +
+                'html body .plh-tag.ok{background:rgba(52,211,153,.14);color:#6ee7b7}' +
+                'html body .plh-tag.wait{background:rgba(255,200,61,.14);color:#ffd67a}' +
+                'html body #plh-studio-yt{margin-top:6px}' +
+                '</style>';
+            function ensureShell() {
+                var root = $('plh-root'); if (!root) return false;
+                if (H.shell && root.firstChild) return true;
+                if (!$('plh-css')) document.head.insertAdjacentHTML('beforeend', CSS);
+                root.innerHTML = '<div class="plh"><div class="plh-head"><span class="plh-title">🔴 LIVE</span><span class="plh-subt" id="plh-subt"></span></div>' +
+                    '<div id="plh-stage" class="plh-stage off"></div>' +
+                    '<div class="plh-tabs" id="plh-tabs" role="tablist"></div><div id="plh-preview" style="display:none"></div>' +
+                    '<div id="plh-onair"></div><div id="plh-watch" style="display:none"></div>' +
+                    '<div id="plh-library" style="display:none"><div id="plh-lib-list"></div><div id="plh-lib-theater" style="display:none"></div></div>' +
+                    '<div id="plh-studio" style="display:none"><div class="plh-tabs" id="plh-studio-tabs"></div><div id="plh-studio-yt" class="plh"></div></div></div>';
+                root.classList.add('plh');
+                // the class theater (deck + live sessions) sits above the X-Live session list
+                var th = $(LEGACY.theater), se = $(LEGACY.sessions);
+                if (th && se && se.parentNode && th.compareDocumentPosition(se) & Node.DOCUMENT_POSITION_PRECEDING) se.parentNode.insertBefore(th, se);
+                var legacy = $('xbot-live-legacy-tabs'); if (legacy) legacy.style.display = 'none';
+                H.shell = true;
+                return true;
+            }
+            function keepFocus(fn) {
+                var a = document.activeElement, id = a && a.id, val = a && a.value, sel = null;
+                try { sel = a && a.selectionStart; } catch (e) {}
+                fn();
+                if (id && (id === 'plh-q' || id === 'plh-link')) {
+                    var el = $(id);
+                    if (el && el !== a) { el.value = val; el.focus(); try { el.setSelectionRange(sel, sel); } catch (e) {} }
+                }
+            }
+            function render() {
+                if (!ensureShell()) return;
+                var host = hostView();
+                var tabs = tabsFor();
+                if (!H.tab || !tabs.some(function (t) { return t[0] === H.tab; })) {
+                    var saved = null; try { saved = localStorage.getItem(TAB_LS); } catch (e) {}
+                    H.tab = tabs.some(function (t) { return t[0] === saved; }) ? saved : 'onair';
+                    applyVisibility();
+                }
+                var sub = $('plh-subt'); if (sub) sub.textContent = host ? 'Class theater · YouTube · sessions' : 'Watch together · find videos · suggest';
+                $('plh-tabs').innerHTML = tabs.map(function (t) {
+                    return '<button class="plh-tab' + (H.tab === t[0] ? ' on' : '') + '" role="tab" aria-selected="' + (H.tab === t[0]) + '" data-plh-tab="' + t[0] + '" onclick="pflxLiveHub.go(\'' + t[0] + '\')">' + t[1] + '</button>';
+                }).join('');
+                renderStage();
+                renderPreview();
+                keepFocus(function () {
+                    if (H.tab === 'onair') $('plh-onair').innerHTML = viewOnAir();
+                    if (H.tab === 'watch') $('plh-watch').innerHTML = viewWatch();
+                    if (H.tab === 'library') $('plh-lib-list').innerHTML = viewLibrary();
+                });
+                if (H.tab === 'studio') renderStudioTabs();
+                applyVisibility();
+            }
+            function visible() { var s = $('xbot-live-section'); return !!(s && s.style.display !== 'none'); }
+
+            // ── live feed ──
+            function onFeed(payload) {
+                var row = payload && (payload.new || payload.record);
+                if (!row || !row.key) return;
+                var k = row.key;
+                if (k.indexOf(SUG_PREFIX) === 0) {
+                    if (!row.data) { readRow(k).then(function (d) { if (d) onFeed({ new: { key: k, data: d } }); }); return; }
+                    var prev = H.sugs[k];
+                    H.sugs[k] = row.data;
+                    if (row.data.playerId && row.data.playerId === myId()) { H.mine = { playerId: row.data.playerId, brand: row.data.brand, cohort: row.data.cohort, items: mergeItems(H.mine && H.mine.items, row.data.items) }; }
+                    if (hostView()) {
+                        var before = {}; ((prev && prev.items) || []).forEach(function (it) { before[it.id] = it.status; });
+                        pendingOf(row.data, H.dec).forEach(function (it) {
+                            if (before[it.id] === 'pending' || H.seenToast[it.id] || Date.now() - (it.at || 0) > 120000) return;
+                            H.seenToast[it.id] = 1;
+                            toast('💡 ' + (row.data.brand || 'A player') + ' suggested "' + it.title + '" — X-Bot › Live', 'info', 6000);
+                        });
+                        syncTabBadge();
+                    }
+                    if (visible()) render();
+                    return;
+                }
+                if (k === DEC_KEY) {
+                    if (!row.data) { loadDecisions().then(function () { notifyMine(); if (visible()) render(); }); return; }
+                    H.dec = mergeDec(H.dec, row.data.items || {});
+                    notifyMine(); syncTabBadge();
+                    if (visible()) render();
+                    return;
+                }
+                if (k === 'pflx_lite_config') {
+                    var apply = function (d) {
+                        if (!d) return;
+                        H.cfg = d;
+                        if (Array.isArray(d.theaterPlaylists) && realHost()) {
+                            // keep the host's cached copy current (older helpers save from it)
+                            if (window._xbotLiveCfg && (window._xbotLiveCfg.updatedAt || 0) <= (d.updatedAt || 0)) { window._xbotLiveCfg = d; window._xbotTheaterPlaylistsCache = d.theaterPlaylists; }
+                            if (visible() && (H.tab === 'library' || H.tab === 'onair') && typeof window.xbotTheaterRender === 'function') { try { window.xbotTheaterRender(); } catch (e) {} }
+                        }
+                        if (visible() && H.tab === 'library') render();
+                    };
+                    if (row.data) apply(row.data); else if (visible() && H.tab === 'library') loadCfg();
+                    return;
+                }
+                if (k === 'sessions') {
+                    if (Array.isArray(row.data)) H.sessions = row.data;
+                    else if (visible()) { loadSessions(); return; }
+                    if (visible() && H.tab === 'onair' && !hostView()) render();
+                }
+            }
+            function syncTabBadge() {
+                var t = $('xbot-tab-live'); if (!t) return;
+                var n = hostView() ? hostQueue().length : 0;
+                var b = t.querySelector('.plh-badge');
+                if (!n) { if (b) b.remove(); return; }
+                if (!b) { if (!$('plh-css')) document.head.insertAdjacentHTML('beforeend', CSS); b = document.createElement('b'); b.className = 'plh-badge'; b.style.marginLeft = '4px'; t.appendChild(b); }
+                b.textContent = n;
+            }
+            function syncTabs() {
+                var t = $('xbot-tab-live');
+                if (t) t.style.display = me() ? '' : 'none';
+                syncTabBadge();
+                if (visible()) render();
+            }
+
+            // ── overrides of the older private players (one personal player now) ──
+            function installOverrides() {
+                window.xbotTheaterWatchSaved = function (itemId) {
+                    var it = window.xbotTheaterFindPlaylistItem ? window.xbotTheaterFindPlaylistItem(itemId) : null;
+                    if (it) preview(Object.assign({}, it, { thumb: thumbFor(it) }), 'playlist');
+                };
+                window.xbotTheaterWatch = function (sessionId) { watchSession(sessionId); };
+                var _setRole = window.pflxSetRole;
+                if (typeof _setRole === 'function' && !_setRole._plh) {
+                    window.pflxSetRole = function () {
+                        var r = _setRole.apply(this, arguments);
+                        try { window.dispatchEvent(new Event('pflx-role-changed')); } catch (e) {}
+                        try { H.stageKey = ''; H.previewKey = ''; H.libOpen = null; syncTabs(); } catch (e) {}
+                        return r;
+                    };
+                    window.pflxSetRole._plh = true;
+                }
+            }
+            function watchSession(sessionId) {
+                var list = (H.sessions || []).concat(window._xbotTheaterCache || []);
+                var s = list.find(function (x) { return x && x.id === sessionId; });
+                if (!s || !s.youtubeEmbedId) return;
+                preview({ source: 'youtube', videoId: s.youtubeEmbedId, title: s.title || 'Live session', live: true }, 'session');
+            }
+
+            // ── boot ──
+            function boot() {
+                if (H.booted) return;
+                if (!me() || !sb()) { setTimeout(boot, 2000); return; }
+                H.booted = true;
+                installOverrides();
+                try { if (typeof window.pflxAppDataFeed === 'function') H.feed = window.pflxAppDataFeed('pflx-livehub', onFeed); } catch (e) {}
+                Promise.all([loadDecisions(), loadMine()]).then(function () { notifyMine(); syncTabs(); });
+                if (realHost()) loadAllSugs().then(syncTabBadge);
+                syncTabs();
+                H.timer = setInterval(function () { if (visible()) renderStage(); }, 4000);
+            }
+            setTimeout(boot, 3000);
+
+            return {
+                onShow: function () { ensureShell(); go(H.tab || (function () { try { return localStorage.getItem(TAB_LS); } catch (e) { return null; } })() || 'onair'); },
+                open: function (tab) {
+                    if (typeof window.switchXBotMode === 'function') window.switchXBotMode('live');
+                    go(tab || 'onair');
+                },
+                go: go, studio: studioGo, render: render, renderStage: renderStage, syncTabs: syncTabs,
+                onTheater: function () { renderStage(); if (visible() && H.tab === 'library' && !H.libOpen) keepFocus(function () { var el = $('plh-lib-list'); if (el) el.innerHTML = viewLibrary(); }); },
+                onYT: function () { if (!visible()) return; if (H.tab === 'watch' || H.tab === 'library') render(); if (H.tab === 'studio' && (H.studio === 'safety' || H.studio === 'activity')) { var y = YT(), el = $('plh-studio-yt'); if (y && el && y.renderPart) y.renderPart(el, H.studio); } },
+                search: function (q) { var y = YT(); if (y) return y.search(q); },
+                preview: previewVideo,
+                previewItem: function (plId, itemId) {
+                    var p = playlists().find(function (x) { return x.id === plId; });
+                    var it = p && (p.items || []).find(function (x) { return x.id === itemId; });
+                    if (it) preview(Object.assign({}, it, { thumb: thumbFor(it) }), 'playlist');
+                },
+                closePreview: closePreview, watchSession: watchSession,
+                queue: queueVideo, suggest: suggest, withdraw: withdraw,
+                approve: function (sid, mode) { return decide(sid, 'approved', mode); },
+                decline: function (sid) { return decide(sid, 'declined'); },
+                postVideo: function (vid) {
+                    var v = card(vid), y = YT(); if (!v || !y) return;
+                    y.addResource({ type: 'video', refId: v.videoId, title: v.title, channel: v.channel, thumb: v.thumb });
+                },
+                approveChannel: function (vid) { var v = card(vid), y = YT(); if (v && y && v.channelId) y.approveChannel(v.channelId, v.channel); },
+                post: function (kind, id) {
+                    var y = YT(); if (!y) return;
+                    if (kind === 'class') {
+                        var p = playlists().find(function (x) { return x.id === id; });
+                        if (p) y.addResource({ type: 'theater', refId: p.id, title: p.name, channel: 'Class playlist', thumb: p.items && p.items[0] ? thumbFor(p.items[0]) : '', count: (p.items || []).length });
+                    } else if (kind === 'channel') {
+                        var st = ytState(), c = st && st.myPls && (st.myPls.items || []).find(function (x) { return x.refId === id; });
+                        if (c) y.addResource({ type: 'playlist', refId: c.refId, title: c.title, channel: c.channel, thumb: c.thumb, count: c.count });
+                    }
+                },
+                unpost: function (resId) { var y = YT(); if (y) y.removeResource(resId); },
+                postLink: function () { var el = $('plh-link'), y = YT(); if (el && y && el.value.trim()) { y.addFromLink(el.value.trim()); el.value = ''; } },
+                newPlaylist: function () { if (typeof window.xbotTheaterCreatePlaylistFromPrompt === 'function') { Promise.resolve(window.xbotTheaterCreatePlaylistFromPrompt()).then(function () { var id = window._xbotTheaterSelectedPlaylistId; var p = id && playlists().find(function (x) { return x.id === id; }); if (p) { H.libOpen = { type: 'theater', kind: 'class', id: p.id, title: p.name }; render(); } }); } },
+                libFilter: function (f) { H.libFilter = f; render(); },
+                openItem: function (kind, id) {
+                    if (kind === 'class') {
+                        var p = playlists().find(function (x) { return x.id === id; });
+                        H.libOpen = { type: 'theater', kind: kind, id: id, title: p ? p.name : 'Playlist' };
+                        if (hostView() && typeof window.xbotTheaterSelectPlaylist === 'function') window.xbotTheaterSelectPlaylist(id);
+                    } else {
+                        var st = ytState() || {};
+                        var src = ((st.res && st.res.items) || []).concat((st.myPls && st.myPls.items) || []).find(function (x) { return x.refId === id; });
+                        H.libOpen = { type: 'yt', kind: kind, id: id, title: src ? src.title : 'Playlist' };
+                        if (YT()) YT().openPlaylist(id);
+                    }
+                    render();
+                },
+                back: function () { H.libOpen = null; render(); },
+                playAll: function (kind, id) {
+                    if (kind === 'class') return playTheaterPlaylist(id);
+                    var st = ytState() || {};
+                    var src = ((st.res && st.res.items) || []).concat((st.myPls && st.myPls.items) || []).find(function (x) { return x.refId === id; });
+                    playYTPlaylist(id, src && src.title);
+                },
+                _merge: { items: mergeItems, dec: mergeDec, pending: pendingOf },
+                _state: function () { return H; }
             };
         })();
     </script>
@@ -82488,6 +83407,26 @@ RESPONSE RULES:
             }, fromRev);
         }
 
+        // v219: add to what the class is watching -- after the current video (or at
+        // the end), optionally jumping to it; starts a new stream when nothing is on.
+        window.pflxTheaterLiveEnqueue = function (items, opts) {
+            opts = opts || {};
+            var list = (items || []).map(cleanItem).filter(Boolean);
+            if (!list.length) return Promise.resolve(null);
+            return write(function (cur) {
+                if (!cur.active || !Array.isArray(cur.playlist) || !cur.playlist.length) {
+                    return { id: newId('th'), active: true, playlistId: null, playlist: list, index: 0, startedAt: Date.now(),
+                             paused: false, pausedPos: 0, loop: 'none', cohorts: opts.cohorts || cohortsForCast() };
+                }
+                var pl = cur.playlist.slice();
+                var at = opts.at === 'end' ? pl.length : Math.min(pl.length, (cur.index | 0) + 1);
+                Array.prototype.splice.apply(pl, [at, 0].concat(list));
+                cur.playlist = pl;
+                if (opts.jump) { cur.index = at; cur.startedAt = Date.now(); cur.paused = false; cur.pausedPos = 0; }
+                return cur;
+            });
+        };
+
         // v203's buttons now drive the live record.
         var _v203Start = window.xbotTheaterStartBroadcast;
         window.xbotTheaterStartBroadcast = async function (playlistId) {
@@ -82835,7 +83774,7 @@ RESPONSE RULES:
                 '<label class="ptl-check"><input id="ptl-search-shorts" type="checkbox"' + (S.shorts ? ' checked' : '') + '> Shorts</label>' +
                 '<button class="ptl-btn" onclick="pflxTheaterSearchFromInput()">🔍 SEARCH</button></div>' + res + '</div>';
         }
-        function editorHtml() {
+        function editorHtml(noSearch) {
             var pls = window._xbotTheaterPlaylistsCache || [];
             var selId = window._xbotTheaterSelectedPlaylistId;
             if (!selId || !pls.find(function (p) { return p.id === selId; })) selId = pls.length ? pls[0].id : null;
@@ -82889,7 +83828,7 @@ RESPONSE RULES:
                     '<div class="ptl-deck-row"><button class="ptl-btn ptl-quiet" onclick="xbotTheaterRenamePlaylistFromPrompt(\'' + jsq(selPl.id) + '\')">Rename</button><button class="ptl-btn ptl-quiet" onclick="xbotTheaterDeletePlaylistConfirm(\'' + jsq(selPl.id) + '\')">Delete Playlist</button></div>';
             }
             return '<div class="xbot-theater-playlist-section ptl-editor"><div class="ptl-sec-h">📺 PLAYLISTS</div><div class="ptl-tabs">' + tabs + '</div>' + body +
-                '<div class="ptl-sec-h" style="margin-top:14px">🔍 FIND VIDEOS</div>' + searchHtml() + '</div>';
+                (noSearch ? '' : '<div class="ptl-sec-h" style="margin-top:14px">🔍 FIND VIDEOS</div>' + searchHtml()) + '</div>';
         }
         function sessionsHtml() {
             var live = (window._xbotTheaterCache || []).filter(function (x) { return x.status === 'active' && x.youtubeEmbedId; });
@@ -82927,7 +83866,10 @@ RESPONSE RULES:
             if (!body) return;
             // keep focus/typing in the search + add boxes across re-renders
             var active = document.activeElement, keepId = active && active.id, keepVal = active && active.value, keepSel = active && active.selectionStart;
-            body.innerHTML = deckHtml() + sessionsHtml() + editorHtml();
+            var __lib = document.getElementById('plh-lib-theater');   // v219 Live hub: playlists live in LIBRARY, search in WATCH
+            body.innerHTML = deckHtml() + sessionsHtml() + (__lib ? '' : editorHtml());
+            if (__lib) __lib.innerHTML = editorHtml(true);
+            try { if (window.pflxLiveHub) window.pflxLiveHub.onTheater(); } catch (e) {}
             if (keepId && (keepId === 'ptl-search-q' || keepId === 'xbot-theater-playlist-input')) {
                 var el = document.getElementById(keepId);
                 if (el) { el.value = keepVal; el.focus(); try { el.setSelectionRange(keepSel, keepSel); } catch (e) {} }
