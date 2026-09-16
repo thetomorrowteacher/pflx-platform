@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 221;
+      window.PFLX_PATCH   = 222;
       window.PFLX_BUILD   = '2026.09';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -58823,6 +58823,15 @@ function ppRenderCheckpoints(el) {
         function pflxXBotDrawTeamNames(n) {
             return PFLX_XBOT_TEAM_NAME_BANK.slice().sort(function () { return Math.random() - 0.5; }).slice(0, n);
         }
+        // v222: the team board's own avatar (it used to call _pcAvatarHtml, which is
+        // private to the chat module, so the board threw once teams had players)
+        function pflxXBotAvatarHtml(img, name, size) {
+            size = size || 26;
+            var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+            if (img && /^(https?:|data:)/i.test(img))
+                return '<img src="' + esc(img) + '" alt="" style="width:' + size + 'px;height:' + size + 'px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1px solid rgba(255,255,255,0.1);">';
+            return '<div style="width:' + size + 'px;height:' + size + 'px;border-radius:50%;background:linear-gradient(135deg,rgba(0,212,255,0.25),rgba(139,92,246,0.15));display:flex;align-items:center;justify-content:center;color:#f0f0ff;font-weight:800;font-size:' + Math.round(size * 0.42) + 'px;flex-shrink:0;border:1px solid rgba(255,255,255,0.1);">' + esc(String(name || '?').substr(0, 1).toUpperCase()) + '</div>';
+        }
         function pflxXBotTeamColor(name, names) {
             var i = (names || []).indexOf(name);
             return PFLX_XBOT_TEAM_COLORS[(i + PFLX_XBOT_TEAM_COLORS.length) % PFLX_XBOT_TEAM_COLORS.length];
@@ -58882,7 +58891,7 @@ function ppRenderCheckpoints(el) {
                 var rows = members.map(function (p) {
                     var pname = p.brand || p.brandName || p.name || 'Player';
                     return '<div onclick="pflxXBotTeamsMovePlayer(\'' + p.id + '\')" title="Tap to move to the next team" style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:5px 7px;border-radius:8px;background:rgba(255,255,255,0.04);border:1px solid ' + col + '33;margin-bottom:5px;">' +
-                        _pcAvatarHtml(p.image, pname, 26) +
+                        pflxXBotAvatarHtml(p.image, pname, 26) +
                         '<div style="font-family:\'Rajdhani\',sans-serif;font-size:11px;font-weight:600;color:#e0e6ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;">' + escapeHtml(pname) + '</div>' +
                         '<div style="font-size:10px;color:#5c6488;">⇄</div></div>';
                 }).join('');
