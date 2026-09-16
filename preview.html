@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 217;
+      window.PFLX_PATCH   = 218;
       window.PFLX_BUILD   = '2026.09';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -11709,6 +11709,7 @@
                                 <button class="host-subtab" data-xbot-tab="monitor" onclick="switchXBotSettingsTab('monitor')">Chat Monitor</button>
                                 <button class="host-subtab" data-xbot-tab="behavior" onclick="switchXBotSettingsTab('behavior')">Behavior</button>
                                 <button class="host-subtab" data-xbot-tab="youtube" onclick="switchXBotSettingsTab('youtube')">YouTube</button>
+                                <button class="host-subtab" data-xbot-tab="xgems" onclick="switchXBotSettingsTab('xgems')">💎 X-Gems</button>
                             </div>
 
                             <!-- ═══ AI ENGINE TAB ═══ -->
@@ -11908,6 +11909,15 @@
                                         </div>
                                     </div>
                                 </div>
+                            </div>
+
+                            <!-- ═══ X-GEMS TAB (v218) ═══ -->
+                            <div class="host-panel" id="xbot-tab-xgems">
+                                <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;">
+                                    <h3 style="color: var(--cyan); font-family: 'Orbitron', sans-serif; font-size: 13px; letter-spacing: 1.5px; margin: 0;">X-GEMS</h3>
+                                </div>
+                                <p style="color:#6a7290;font-size:12px;margin-bottom:14px;">Turn a Gemini Gem into an X-Gem: paste its instructions, add its knowledge files and its share link. Players pick an X-Gem in X-Bot and X-Bot takes on that persona.</p>
+                                <div id="pflx-xgem-admin"></div>
                             </div>
 
                             <!-- ═══ YOUTUBE TAB (v217) ═══ -->
@@ -14023,6 +14033,9 @@
                         <div class="wave-bar"></div>
                     </div>
                 </div>
+
+                <!-- v218 X-Gems bar (chips, banner, open-outside) -->
+                <div id="xgem-bar"></div>
 
                 <!-- Chat Messages -->
                 <div class="xbot-chat-messages" id="xbot-chat-messages">
@@ -60990,6 +61003,8 @@ function ppRenderCheckpoints(el) {
             if (notesSection) notesSection.style.display = 'none';
             var ytSection = document.getElementById('xbot-yt-section');   // v217
             if (ytSection) ytSection.style.display = 'none';
+            var gemBar = document.getElementById('xgem-bar');   // v218
+            if (gemBar) gemBar.style.display = (mode === 'chat') ? '' : 'none';
             if (mode === 'settings') { try { if (window.pflxYT) window.pflxYT.fillKeyInputs(); } catch (e) {} }
 
             if (mode === 'voice') {
@@ -61226,7 +61241,7 @@ function ppRenderCheckpoints(el) {
             keys: { claude: '', gemini: '', openai: '', localUrl: '', localModel: '', localKey: '' },
             models: {
                 claude: 'claude-sonnet-4-6',
-                gemini: 'gemini-2.0-flash',
+                gemini: 'gemini-2.5-flash',   // v218: 2.0-flash was retired 2026-06-01
                 openai: 'gpt-4o-mini'
             },
             routeMode: 'auto',   // auto | local | claude | gemini | openai | roundrobin
@@ -61655,7 +61670,8 @@ RESPONSE RULES:
             // ── API Callers ──────────────────────────────────────────
 
             // Server-side proxy call (keys live in Vercel env, not here)
-            async callProxy(provider, systemPrompt, messages) {
+            async callProxy(provider, systemPrompt, messages, opts) {
+                opts = opts || {};   // v218: X-Gems pin model / temperature / grounding
                 const resp = await fetch(this.PROXY_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -61663,7 +61679,10 @@ RESPONSE RULES:
                         provider,
                         system: systemPrompt,
                         messages: messages.map(m => ({ role: m.role, content: m.content })),
-                        maxTokens: 512,
+                        maxTokens: opts.maxTokens || 512,
+                        model: opts.model || (provider === 'gemini' ? this.models.gemini : undefined),
+                        temperature: (typeof opts.temperature === 'number') ? opts.temperature : undefined,
+                        grounding: opts.grounding ? true : undefined,
                         // when a per-cohort host key is configured, the proxy uses it
                         cohort: (function () { try { return (window.pflxPlayerAI && pflxPlayerAI.activeCohort && pflxPlayerAI.activeCohort()) || (window.activeSession && activeSession.cohort) || ''; } catch (e) { return ''; } })()
                     })
@@ -61741,9 +61760,11 @@ RESPONSE RULES:
                 return data.content[0].text;
             },
 
-            async callGemini(systemPrompt, messages) {
-                if (!this.keys.gemini) return this.callProxy('gemini', systemPrompt, messages);
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.models.gemini}:generateContent?key=${this.keys.gemini}`;
+            async callGemini(systemPrompt, messages, opts) {
+                opts = opts || {};   // v218
+                if (!this.keys.gemini) return this.callProxy('gemini', systemPrompt, messages, opts);
+                const model = opts.model || this.models.gemini;
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.keys.gemini}`;
                 const contents = [];
                 messages.forEach(m => {
                     contents.push({
@@ -61755,22 +61776,29 @@ RESPONSE RULES:
                 if (contents.length === 0) {
                     contents.push({ role: 'user', parts: [{ text: '.' }] });
                 }
+                const gen = { maxOutputTokens: opts.maxTokens || 512 };
+                if (typeof opts.temperature === 'number') gen.temperature = Math.max(0, Math.min(2, opts.temperature));
+                const body = { system_instruction: { parts: [{ text: systemPrompt }] }, contents, generationConfig: gen };
+                if (opts.grounding) body.tools = [{ google_search: {} }];
                 const resp = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        system_instruction: { parts: [{ text: systemPrompt }] },
-                        contents,
-                        generationConfig: { maxOutputTokens: 512 }
-                    })
+                    body: JSON.stringify(body)
                 });
                 if (!resp.ok) {
                     const errBody = await resp.text().catch(() => '');
+                    // v218: a retired / unknown model id -> retry once on Google's current Flash alias
+                    if ((resp.status === 404 || /not found|not supported/i.test(errBody)) && model !== 'gemini-flash-latest' && !opts._retried) {
+                        console.warn('[X-Bot AI] Gemini model ' + model + ' unavailable, retrying on gemini-flash-latest');
+                        return this.callGemini(systemPrompt, messages, Object.assign({}, opts, { model: 'gemini-flash-latest', _retried: true }));
+                    }
                     throw new Error(`Gemini ${resp.status}: ${errBody.slice(0, 200)}`);
                 }
                 const data = await resp.json();
-                if (!data.candidates || !data.candidates[0]?.content?.parts?.[0]?.text) throw new Error('Gemini: empty response');
-                return data.candidates[0].content.parts[0].text;
+                const parts = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [];
+                const text = parts.map(p => (p && typeof p.text === 'string') ? p.text : '').join('').trim();
+                if (!text) throw new Error('Gemini: empty response');
+                return text;
             },
 
             async callOpenAI(systemPrompt, messages) {
@@ -61823,6 +61851,11 @@ RESPONSE RULES:
                         }
                     }
                 } catch (e) {}
+                // v218 X-Gems: the selected (or keyword-matched) X-Gem answers in its own persona
+                try {
+                    const __gem = window.pflxXGems ? await window.pflxXGems.personaFor(userInput) : null;
+                    if (__gem) return await window.pflxXGems.respondAs(__gem, userInput, this);
+                } catch (e) { console.warn('[X-Gems] persona failed, X-Bot answers', e); }
                 // Add to conversation history
                 this.conversationHistory.push({ role: 'user', content: userInput });
                 if (this.conversationHistory.length > this.maxHistory) {
@@ -62778,6 +62811,7 @@ RESPONSE RULES:
             if (tab === 'engine') xbotRefreshEngineUI();
             if (tab === 'access') xbotRefreshAccessUI();
             if (tab === 'monitor') xbotRefreshMonitorUI();
+            if (tab === 'xgems') { try { if (window.pflxXGems) window.pflxXGems.load(true).then(function () { window.pflxXGems.renderAdmin(document.getElementById('pflx-xgem-admin')); }); } catch (e) {} } // v218
             if (tab === 'engine' || tab === 'youtube') { try { if (window.pflxYT) window.pflxYT.ensureLoaded(true).then(function () { window.pflxYT.fillKeyInputs(); if (tab === 'youtube') window.pflxYT.renderAdmin(document.getElementById('pflx-yt-admin')); }); } catch (e) {} } // v217
         }
 
@@ -63073,6 +63107,7 @@ RESPONSE RULES:
                 badge.textContent = modelName.toUpperCase();
                 bubble.appendChild(badge);
             }
+            try { if (!isUser && window.pflxXGems) window.pflxXGems.decorate(avatar, bubble); } catch (e) {} // v218
 
             msgDiv.appendChild(avatar);
             msgDiv.appendChild(bubble);
@@ -70946,6 +70981,7 @@ RESPONSE RULES:
                 // Apply initial body gating class
                 document.body.classList.toggle('pflx-as-player', window.pflxRole === 'player' && isAdmin);
                 try { if (window.pflxYT) { window.pflxYT.syncTabVisibility(); window.pflxYT.fillKeyInputs(); } } catch (e) {} // v217
+                try { if (window.pflxXGems) window.pflxXGems.renderAll(); } catch (e) {} // v218
                 console.log('[PFLX] RolePill injected — isAdmin:', isAdmin, 'role:', role, 'pflxRole:', window.pflxRole);
             };
 
@@ -72304,6 +72340,472 @@ RESPONSE RULES:
                 set: setSetting, filter: function (k) { S.reportFilter = k; rerender(); }, refreshReport: loadReport,
                 saveKeyFromInputs: saveKeyFromInputs, adoptLocalConfig: adoptLocalConfig, fillKeyInputs: fillKeyInputs, syncTabVisibility: syncTabVisibility,
                 key: key, ensureLoaded: ensureLoaded, classify: classify, parseLink: parseLink,
+                _state: function () { return S; }
+            };
+        })();
+    </script>
+    <script>
+        // ═══════════════════════════════════════════════════════════════════
+        // PATCH v218 -- X-GEMS: Gemini Gems powering X-Bot (Sep 16, Ennis)
+        //  A host turns a Gemini Gem into an X-Gem: its instructions +
+        //  knowledge files + a pinned Gemini model and creativity. A player
+        //  picks an X-Gem in X-Bot and X-Bot takes on that persona. X-Bot can
+        //  also hand a question to the X-Gem whose keywords match ("connects
+        //  to various Gems"). Every X-Gem has an Open-outside button that
+        //  opens its Gem share link in Gemini.
+        //  Branding: an ORIGINAL faceted-gem mark with a four-colour shimmer
+        //  and the plain-text line "Powered by Gemini Gems" -- no Google or
+        //  Gemini logos are drawn.
+        //  Rows: 'pflx_xgems' {items:[meta]} (live) and 'pflx_xgem_<id>'
+        //  {instructions, files:[{name,text}]} (loaded on demand).
+        // ═══════════════════════════════════════════════════════════════════
+        window.pflxXGems = (function () {
+            var LIST_KEY = 'pflx_xgems', GEM_PREFIX = 'pflx_xgem_', ACTIVE_LS = 'pflx_xgem_active_v1';
+            var KNOWLEDGE_CAP = 100000;
+            var NUL = String.fromCharCode(0);
+            var MODELS = [
+                ['gemini-2.5-flash', 'Gemini 2.5 Flash — fast, steady (default)'],
+                ['gemini-3.5-flash', 'Gemini 3.5 Flash'],
+                ['gemini-3.8-flash', 'Gemini 3.8 Flash — smartest Flash'],
+                ['gemini-2.5-pro', 'Gemini 2.5 Pro — deep reasoning (slower)'],
+                ['gemini-flash-latest', 'Latest Flash (changes when Google updates it)']
+            ];
+            var S = { list: [], content: {}, active: null, hist: {}, loaded: false, reply: null, feed: null, header: null };
+
+            function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+            function q1(s) { return esc(String(s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'")); }
+            function sb() { return (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null; }
+            function me() { return window.activeSession || null; }
+            function isHost() {
+                var s = me(); var r = String((s && s.role) || '').toLowerCase();
+                return !!(s && (r === 'admin' || r === 'host' || r === 'teacher' || r === 'instructor' || s.hostTier));
+            }
+            function hostView() { return isHost() && window.pflxRole !== 'player'; }
+            function toast(m, k) { try { if (typeof pflxToast === 'function') pflxToast(m, k || 'info', 4500); } catch (e) {} }
+            function readRow(k) {
+                var c = sb(); if (!c) return Promise.resolve(null);
+                return c.from('app_data').select('data').eq('key', k).limit(1).then(function (r) { return (r && r.data && r.data[0] && r.data[0].data) || null; }, function () { return null; });
+            }
+            function writeRow(k, d) {
+                var c = sb(); if (!c) return Promise.resolve(false);
+                return c.from('app_data').upsert({ key: k, data: d, updated_at: new Date().toISOString() }, { onConflict: 'key' }).then(function (r) { return !(r && r.error); }, function () { return false; });
+            }
+            function myCohorts() {
+                var s = me(); if (!s) return [];
+                var a = Array.isArray(s.cohorts) ? s.cohorts.slice() : [];
+                String(s.cohort || '').split(',').forEach(function (c) { c = c.trim(); if (c) a.push(c); });
+                return a.map(function (c) { return String(c).toLowerCase().trim(); });
+            }
+            function canUse(g) {
+                if (!g) return false;
+                if (isHost()) return true;
+                if (g.enabled === false) return false;
+                if (g.allCohorts !== false) return true;
+                var mine = myCohorts();
+                return (g.cohorts || []).some(function (c) { return mine.indexOf(String(c).toLowerCase().trim()) >= 0; });
+            }
+            function gems() { return (S.list || []).filter(canUse); }
+            function byId(id) { return (S.list || []).find(function (g) { return g && g.id === id; }) || null; }
+            function shareOk(u) { return /^https:\/\/(gemini\.google\.com|g\.co)\//i.test(String(u || '')); }
+
+            // ── original X-Gem mark (faceted gem + four-colour shimmer) ──
+            var uid = 0;
+            function mark(size, g) {
+                var id = 'xgm' + (++uid);
+                if (g && g.image && /^(data:image|https:)/.test(g.image)) {
+                    return '<img class="xgem-mark-img" src="' + esc(g.image) + '" alt="" style="width:' + size + 'px;height:' + size + 'px">';
+                }
+                return '<svg class="xgem-mark" width="' + size + '" height="' + size + '" viewBox="0 0 64 64" aria-hidden="true">' +
+                    '<defs><linearGradient id="' + id + 's" x1="0" y1="0" x2="1" y2="1">' +
+                    '<stop offset="0" stop-color="#ff5a4f"/><stop offset=".34" stop-color="#ffc83d"/><stop offset=".66" stop-color="#34c77b"/><stop offset="1" stop-color="#4c8dff"/>' +
+                    '<animateTransform attributeName="gradientTransform" type="rotate" values="0 .5 .5;360 .5 .5" dur="9s" repeatCount="indefinite"/></linearGradient>' +
+                    '<linearGradient id="' + id + 'f" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity=".55"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></linearGradient></defs>' +
+                    '<path d="M20 10h24l12 14-24 30L8 24z" fill="url(#' + id + 's)"/>' +
+                    '<path d="M20 10h24l12 14H8z" fill="url(#' + id + 'f)"/>' +
+                    '<path d="M8 24h48M20 10l-4 14 16 30 16-30-4-14M32 10l-8 14h16z" fill="none" stroke="rgba(10,14,40,.55)" stroke-width="1.6" stroke-linejoin="round"/>' +
+                    '<path d="M20 10h24l12 14-24 30L8 24z" fill="none" stroke="#fff" stroke-opacity=".85" stroke-width="2" stroke-linejoin="round"/>' +
+                    (g && g.emoji ? '<text x="32" y="30" text-anchor="middle" font-size="14" dominant-baseline="middle">' + esc(g.emoji) + '</text>' : '') +
+                    '</svg>';
+            }
+            function wordmark() { return '<span class="xgem-word">X-<span class="xgem-g">G</span>em</span>'; }
+            var OUT_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+            var CSS = '<style id="xgem-css">' +
+                // generic text inside X-Gem UI keeps the X-Gem colours on light skins (clouddesk)
+                'html body .xgem-ed :where(p,span,div,label),html body .xgem-bar :where(p,span,div,label),html body .xgem-admin :where(p,span,div,label){color:inherit}' +
+                'html body .xgem-bar{color:#dfe6ff}html body .xgem-admin .xgem-rn{font-family:Orbitron,sans-serif;font-size:12px;color:#fff}html body .xgem-admin{color:#dfe6ff;background:linear-gradient(150deg,#0a1228,#0d1730);border:1px solid rgba(76,141,255,.22);border-radius:14px;padding:14px}' +
+                'html body .xgem-bar{padding:8px 12px 6px;border-bottom:1px solid rgba(0,240,255,.08);font-family:Rajdhani,sans-serif}' +
+                'html body .xgem-chips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}html body .xgem-chips::-webkit-scrollbar{display:none}' +
+                'html body .xgem-chip{flex:none;display:flex;align-items:center;gap:6px;padding:4px 10px 4px 5px;border-radius:20px;border:1px solid rgba(255,255,255,.1);background:rgba(10,18,40,.6);color:#b8c2e4;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}' +
+                'html body .xgem-chip.on{border-color:transparent;color:#fff;background:linear-gradient(rgba(10,18,40,.9),rgba(10,18,40,.9)) padding-box,linear-gradient(120deg,#ff5a4f,#ffc83d,#34c77b,#4c8dff) border-box;box-shadow:0 0 14px rgba(76,141,255,.25)}' +
+                'html body .xgem-chip.off{opacity:.5}html body .xgem-chip img,html body .xgem-chip svg{flex:none}' +
+                'html body .xgem-chip.add{color:#00f0ff;border-style:dashed;padding:4px 10px}' +
+                'html body .xgem-banner{display:flex;gap:10px;align-items:center;margin-top:8px;padding:8px 10px;border-radius:12px;background:rgba(76,141,255,.06);border:1px solid rgba(76,141,255,.18)}' +
+                'html body .xgem-banner .nm{font-family:Orbitron,sans-serif;font-size:12px;letter-spacing:1px;color:#fff}html body .xgem-banner .tg{font-size:12px;color:#aab4d4;line-height:1.2}' +
+                'html body .xgem-pw{font-size:10px;color:#8fa0c8;letter-spacing:.5px;margin-top:2px}' +
+                'html body .xgem-word{font-family:Orbitron,sans-serif;font-weight:800;letter-spacing:1px;color:#e8ecff}' +
+                'html body .xgem-g{background:linear-gradient(120deg,#ff5a4f,#ffc83d,#34c77b,#4c8dff,#ff5a4f);background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:xgemShim 6s linear infinite}' +
+                '@keyframes xgemShim{to{background-position:300% 0}}' +
+                'html body .xgem-ib{flex:none;width:30px;height:30px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:rgba(10,18,40,.6);color:#cfe3ff;display:flex;align-items:center;justify-content:center;cursor:pointer}' +
+                'html body .xgem-ib:hover{border-color:rgba(76,141,255,.6);color:#fff}' +
+                'html body .xgem-starters{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}html body .xgem-starter{padding:4px 9px;border-radius:14px;border:1px solid rgba(0,240,255,.18);background:rgba(0,240,255,.05);color:#9fdcff;font-size:11.5px;cursor:pointer}' +
+                'html body .xgem-mark-img{border-radius:10px;object-fit:cover}' +
+                'html body .xgem-ov{position:fixed;inset:0;z-index:100060;background:rgba(2,6,23,.8);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:16px}' +
+                'html body .xgem-ed{width:min(760px,96vw);max-height:92vh;overflow:auto;background:linear-gradient(150deg,#0a1228,#0d1730);border:1px solid rgba(76,141,255,.3);border-radius:18px;padding:20px;color:#dfe6ff;font-family:Rajdhani,sans-serif}' +
+                'html body .xgem-ed .xgem-h{margin:0;color:#fff;font-family:Orbitron,sans-serif;font-size:14px;letter-spacing:1.5px}' +
+                'html body .xgem-ed label{display:block;font-size:11px;color:#8a92b0;margin:12px 0 4px;letter-spacing:.5px}' +
+                'html body .xgem-ed input[type=text],html body .xgem-ed input[type=url],html body .xgem-ed textarea,html body .xgem-ed select{width:100%;box-sizing:border-box;background:rgba(10,18,40,.85);border:1px solid rgba(0,240,255,.14);color:#e0e6ff;padding:8px 10px;border-radius:8px;font-family:Rajdhani,sans-serif;font-size:14px}' +
+                'html body .xgem-ed textarea{min-height:140px;resize:vertical}html body .xgem-row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}' +
+                'html body .xgem-btn{padding:9px 16px;border-radius:9px;border:1px solid rgba(0,240,255,.35);background:rgba(0,240,255,.1);color:#00f0ff;font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:1.5px;cursor:pointer}' +
+                'html body .xgem-btn.gh{border-color:rgba(255,255,255,.15);background:transparent;color:#aab4d4}html body .xgem-btn.red{border-color:rgba(255,80,100,.4);color:#ff8095;background:rgba(255,80,100,.08)}' +
+                'html body .xgem-file{display:flex;justify-content:space-between;gap:8px;padding:5px 8px;border-radius:6px;background:rgba(255,255,255,.04);margin-top:4px;font-size:12px}' +
+                'html body .xgem-note{font-size:11px;color:#7f8bb0;margin-top:4px}html body .xgem-cks{display:flex;flex-wrap:wrap;gap:4px 12px;max-height:120px;overflow:auto}' +
+                'html body .xgem-cks label{display:flex;gap:6px;align-items:center;margin:0;color:#cfd6f0;font-size:12px}' +
+                'html body .xgem-admin-row{display:flex;gap:12px;align-items:center;padding:10px;border-radius:12px;background:rgba(10,15,30,.6);border:1px solid rgba(0,240,255,.08);margin-bottom:8px}' +
+                '@media (max-width:600px){html body .xgem-row2{grid-template-columns:1fr}}' +
+                '</style>';
+            function ensureCss() { if (!document.getElementById('xgem-css')) document.head.insertAdjacentHTML('beforeend', CSS); }
+
+            // ── data ──
+            function load(force) {
+                if (S.loaded && !force) return Promise.resolve();
+                return readRow(LIST_KEY).then(function (d) {
+                    S.list = (d && Array.isArray(d.items)) ? d.items : [];
+                    S.loaded = true;
+                    try { var a = localStorage.getItem(ACTIVE_LS); if (a && byId(a) && canUse(byId(a))) S.active = a; } catch (e) {}
+                    renderAll();
+                });
+            }
+            function onFeed(payload) {
+                var row = payload && (payload.new || payload.record);
+                if (!row || !row.key) return;
+                if (row.key === LIST_KEY && row.data && Array.isArray(row.data.items)) {
+                    S.list = row.data.items;
+                    if (S.active && !canUse(byId(S.active))) select(null);
+                    renderAll(); renderAdminIfOpen();
+                } else if (row.key.indexOf(GEM_PREFIX) === 0 && row.data) {
+                    S.content[row.key.slice(GEM_PREFIX.length)] = row.data;
+                }
+            }
+            function content(id) {
+                if (S.content[id]) return Promise.resolve(S.content[id]);
+                return readRow(GEM_PREFIX + id).then(function (d) { S.content[id] = d || { instructions: '', files: [] }; return S.content[id]; });
+            }
+            function saveList() { return writeRow(LIST_KEY, { items: S.list, updatedAt: Date.now() }); }
+
+            // ── persona ──
+            function select(id) {
+                S.active = (id && byId(id) && canUse(byId(id))) ? id : null;
+                try { if (S.active) localStorage.setItem(ACTIVE_LS, S.active); else localStorage.removeItem(ACTIVE_LS); } catch (e) {}
+                if (S.active) content(S.active);
+                renderAll();
+            }
+            function buildPrompt(g, c) {
+                var parts = [];
+                if (!isHost() && window.pflxPlayerAI && typeof window.pflxPlayerAI.safetyPrompt === 'function') parts.push(window.pflxPlayerAI.safetyPrompt());
+                parts.push('You are "' + g.name + '", an X-Gem inside PFLX (a learning platform). X-Bot has taken on your persona; you are powered by a Gemini Gem. Stay in character as ' + g.name + ' for the whole conversation. Do not claim to be X-Bot, Gemini or any other assistant unless asked what powers you.');
+                if (c && c.instructions) parts.push('YOUR INSTRUCTIONS:\n' + c.instructions);
+                var files = (c && c.files) || [];
+                if (files.length) {
+                    var used = 0, kb = [];
+                    files.forEach(function (f) {
+                        if (used >= KNOWLEDGE_CAP) return;
+                        var t = String(f.text || '').slice(0, KNOWLEDGE_CAP - used);
+                        used += t.length;
+                        kb.push('### ' + (f.name || 'Document') + '\n' + t);
+                    });
+                    parts.push('YOUR KNOWLEDGE (treat this as your source of truth; if something is not covered, say so briefly and still help within your role):\n\n' + kb.join('\n\n'));
+                }
+                var s = me();
+                if (s) parts.push('CURRENT USER: ' + (s.brand || s.name || 'Player') + (s.cohort ? ' · cohort ' + s.cohort : '') + (isHost() ? ' · host' : ' · player') + '.');
+                return parts.join('\n\n');
+            }
+            function norm(t) { return ' ' + String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() + ' '; }
+            function autoMatch(input) {
+                var n = norm(input);
+                return gems().find(function (g) {
+                    return g.enabled !== false && g.autoRoute && (g.keywords || []).some(function (k) { k = norm(k); return k.trim() && n.indexOf(k) >= 0; });
+                }) || null;
+            }
+            // Called by XBOT_AI.respond: which persona (if any) should answer?
+            function personaFor(input) {
+                if (!S.loaded) return Promise.resolve(null);
+                var g = S.active ? byId(S.active) : null;
+                var auto = false;
+                if (!g) { g = autoMatch(input); auto = !!g; }
+                if (!g || !canUse(g)) return Promise.resolve(null);
+                return content(g.id).then(function (c) { return { gem: g, content: c, auto: auto }; });
+            }
+            async function respondAs(p, input, AI) {
+                var g = p.gem;
+                var hist = S.hist[g.id] || (S.hist[g.id] = []);
+                hist.push({ role: 'user', content: input });
+                if (hist.length > 20) S.hist[g.id] = hist = hist.slice(-20);
+                var sys = buildPrompt(g, p.content);
+                var avail = AI.availableModels();
+                if (!avail.length) {
+                    var off = g.name + ' needs an AI connection. ' + (isHost() ? 'Add a Gemini key in X-Bot ⚙ AI Engine Keys (or GEMINI_API_KEY on the server).' : 'Tap ⚡ to connect, or ask your host.');
+                    hist.push({ role: 'assistant', content: off });
+                    return { text: off, model: 'offline', routed: false };
+                }
+                var chain = avail.indexOf('gemini') >= 0 ? ['gemini'].concat(avail.filter(function (m) { return m !== 'gemini'; })) : avail.slice();
+                var opts = { model: g.model || 'gemini-2.5-flash', temperature: (typeof g.temperature === 'number' ? g.temperature : 0.4), grounding: !!g.grounding, maxTokens: 1024 };
+                var errors = [];
+                for (var i = 0; i < chain.length; i++) {
+                    var m = chain[i];
+                    try {
+                        var text = m === 'gemini' ? await AI.callGemini(sys, hist, opts) : await AI.callModel(m, sys, hist);
+                        text = String(text || '').replace(/\[NAV:\w+\]/g, '').trim();
+                        hist.push({ role: 'assistant', content: text });
+                        S.reply = { id: g.id, at: Date.now(), auto: p.auto, engine: m };
+                        return { text: (p.auto ? '↪ X-Bot connected you to ' + g.name + '\n\n' : '') + text, model: m, routed: true, xgem: g.id };
+                    } catch (e) { errors.push(m + ': ' + (e && e.message || e)); }
+                }
+                hist.pop();
+                return { text: '⚠️ ' + g.name + ' couldn\'t answer right now.\n' + errors.map(function (e) { return '• ' + e; }).join('\n'), model: 'error', routed: false };
+            }
+            // xbotAddMessage asks once whether the reply it is drawing came from an X-Gem
+            function takeReply() { var r = S.reply; S.reply = null; return (r && Date.now() - r.at < 5000) ? r : null; }
+            function decorate(avatarEl, bubbleEl) {
+                var r = takeReply(); if (!r) return;
+                var g = byId(r.id); if (!g) return;
+                try {
+                    avatarEl.innerHTML = mark(30, g);
+                    avatarEl.style.background = 'transparent';
+                    var old = bubbleEl.lastElementChild;
+                    if (old && old.tagName === 'DIV' && /^[A-Z]+$/.test(old.textContent || '')) old.remove();
+                    var tag = document.createElement('div');
+                    tag.className = 'xgem-reply-tag';
+                    tag.style.cssText = "font-size:9px;color:#9fb8ff;font-family:'Orbitron',sans-serif;letter-spacing:1px;margin-top:4px;opacity:.85";
+                    tag.textContent = '💎 ' + String(g.name).toUpperCase() + ' · X-GEM · ' + (r.engine && r.engine !== 'gemini' ? 'VIA ' + r.engine.toUpperCase() : 'GEMINI');
+                    bubbleEl.appendChild(tag);
+                } catch (e) {}
+            }
+            function openOutside(id) {
+                var g = byId(id || S.active);
+                if (!g || !shareOk(g.shareUrl)) { toast('This X-Gem has no Gemini share link yet.'); return; }
+                try { window.open(g.shareUrl, '_blank', 'noopener,noreferrer'); } catch (e) {}
+            }
+
+            // ── UI: gem bar + header ──
+            function sendText(t) {
+                var inp = document.getElementById('xbot-chat-input'), btn = document.getElementById('xbot-send-btn');
+                if (!inp || !btn) return;
+                inp.value = t; btn.click();
+            }
+            function renderHeader() {
+                var panel = document.getElementById('xbot-side-panel'); if (!panel) return;
+                var title = panel.querySelector('.xbot-chat-title'), sub = panel.querySelector('.xbot-chat-subtitle');
+                var left = panel.querySelector('.xbot-chat-header-left');
+                if (!title || !sub || !left) return;
+                var cur = left.firstElementChild;
+                if (!S.header) S.header = { title: title.textContent, sub: sub.textContent, img: cur ? cur.outerHTML : '' };
+                var g = S.active ? byId(S.active) : null;
+                if (g) {
+                    title.textContent = g.name;
+                    sub.textContent = 'X-GEM · POWERED BY GEMINI GEMS';
+                    var span = document.createElement('span'); span.className = 'xgem-hmark'; span.style.display = 'flex'; span.innerHTML = mark(32, g);
+                    if (cur) left.replaceChild(span, cur);
+                } else {
+                    title.textContent = S.header.title; sub.textContent = S.header.sub;
+                    if (cur && cur.className === 'xgem-hmark' && S.header.img) { var t = document.createElement('div'); t.innerHTML = S.header.img; left.replaceChild(t.firstElementChild, cur); }
+                }
+            }
+            function renderBar() {
+                var bar = document.getElementById('xgem-bar'); if (!bar) return;
+                ensureCss();
+                var list = gems();
+                var host = hostView();
+                if (!list.length && !host) { bar.innerHTML = ''; bar.classList.remove('xgem-bar'); return; }
+                bar.classList.add('xgem-bar');
+                var chips = '<button class="xgem-chip' + (!S.active ? ' on' : '') + '" onclick="pflxXGems.select(null)"><img src="public/X Official for PFLX.png" alt="" style="width:20px;height:20px;object-fit:contain"> X-Bot</button>' +
+                    list.map(function (g) {
+                        return '<button class="xgem-chip' + (S.active === g.id ? ' on' : '') + (g.enabled === false ? ' off' : '') + '" title="' + esc(g.tagline || '') + '" onclick="pflxXGems.select(\'' + q1(g.id) + '\')">' + mark(20, g) + esc(g.name) + '</button>';
+                    }).join('') +
+                    (host ? '<button class="xgem-chip add" onclick="pflxXGems.edit()">＋ X-Gem</button>' : '');
+                var g = S.active ? byId(S.active) : null;
+                var banner = '';
+                if (g) {
+                    banner = '<div class="xgem-banner">' + mark(40, g) + '<div style="flex:1;min-width:0"><div>' + wordmark() + ' <span class="nm">· ' + esc(g.name) + '</span></div>' +
+                        (g.tagline ? '<div class="tg">' + esc(g.tagline) + '</div>' : '') + '<div class="xgem-pw">Powered by Gemini Gems</div></div>' +
+                        (shareOk(g.shareUrl) ? '<button class="xgem-ib xgem-out" title="Open outside app — this Gem in Gemini" aria-label="Open in Gemini" onclick="pflxXGems.openOutside()">' + OUT_SVG + '</button>' : '') +
+                        (host ? '<button class="xgem-ib" title="Edit X-Gem" onclick="pflxXGems.edit(\'' + q1(g.id) + '\')">✎</button>' : '') + '</div>' +
+                        ((g.starters || []).length ? '<div class="xgem-starters">' + g.starters.slice(0, 4).map(function (s) {
+                            return '<button class="xgem-starter" onclick="pflxXGems.send(\'' + q1(s) + '\')">' + esc(s) + '</button>';
+                        }).join('') + '</div>' : '');
+                }
+                bar.innerHTML = '<div class="xgem-chips">' + chips + '</div>' + banner;
+                var inp = document.getElementById('xbot-chat-input');
+                if (inp) inp.placeholder = g ? 'Ask ' + g.name + '…' : 'Ask X-Bot anything...';
+            }
+            function renderAll() { try { renderBar(); renderHeader(); } catch (e) { console.warn('[xgems] render', e); } }
+
+            // ── host editor ──
+            function readFileText(f) {
+                var name = f.name || 'file';
+                if (/\.pdf$/i.test(name) || f.type === 'application/pdf') return pdfText(f);
+                return new Promise(function (res, rej) { var r = new FileReader(); r.onload = function () { res(String(r.result || '')); }; r.onerror = rej; r.readAsText(f); });
+            }
+            function loadPdfJs() {
+                if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+                return new Promise(function (res, rej) {
+                    var s = document.createElement('script');
+                    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+                    s.onload = function () { try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; } catch (e) {} res(window.pdfjsLib); };
+                    s.onerror = function () { rej(new Error('PDF reader failed to load')); };
+                    document.head.appendChild(s);
+                });
+            }
+            async function pdfText(f) {
+                var lib = await loadPdfJs();
+                var doc = await lib.getDocument({ data: await f.arrayBuffer() }).promise;
+                var out = [];
+                for (var i = 1; i <= Math.min(doc.numPages, 300); i++) {
+                    var pg = await doc.getPage(i); var tc = await pg.getTextContent();
+                    out.push(tc.items.map(function (it) { return it.str; }).join(' '));
+                }
+                return out.join('\n\n');
+            }
+            function shrinkImage(f) {
+                return new Promise(function (res, rej) {
+                    var r = new FileReader();
+                    r.onload = function () {
+                        var im = new Image();
+                        im.onload = function () {
+                            var c = document.createElement('canvas'); c.width = c.height = 160;
+                            var x = c.getContext('2d'); var s = Math.min(im.width, im.height);
+                            x.drawImage(im, (im.width - s) / 2, (im.height - s) / 2, s, s, 0, 0, 160, 160);
+                            res(c.toDataURL('image/webp', 0.85));
+                        };
+                        im.onerror = rej; im.src = r.result;
+                    };
+                    r.onerror = rej; r.readAsDataURL(f);
+                });
+            }
+            var ED = null;
+            function edit(id) {
+                if (!isHost()) return;
+                ensureCss();
+                var g = id ? byId(id) : null;
+                var base = g ? JSON.parse(JSON.stringify(g)) : { id: 'xg-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: '', tagline: '', emoji: '', image: '',
+                    shareUrl: '', model: 'gemini-2.5-flash', temperature: 0.4, grounding: false, keywords: [], autoRoute: false, starters: [], allCohorts: true, cohorts: [], enabled: true };
+                ED = { gem: base, isNew: !g, files: [], instructions: '' };
+                return (g ? content(g.id) : Promise.resolve({ instructions: '', files: [] })).then(function (c) {
+                    ED.instructions = (c && c.instructions) || ''; ED.files = ((c && c.files) || []).slice();
+                    drawEditor();
+                });
+            }
+            function drawEditor() {
+                var old = document.getElementById('xgem-ov'); if (old) old.remove();
+                var g = ED.gem;
+                var cohorts = (typeof window.pflxGetAllCohorts === 'function') ? window.pflxGetAllCohorts() : [];
+                var chars = ED.files.reduce(function (s, f) { return s + String(f.text || '').length; }, 0);
+                var ov = document.createElement('div'); ov.id = 'xgem-ov'; ov.className = 'xgem-ov';
+                ov.innerHTML = '<div class="xgem-ed" role="dialog" aria-label="X-Gem editor">' +
+                    '<div style="display:flex;align-items:center;gap:12px">' + mark(44, g) + '<div style="flex:1"><div class="xgem-h">' + (ED.isNew ? 'NEW ' : 'EDIT ') + wordmark() + '</div><div class="xgem-pw">Powered by Gemini Gems — paste your Gem\'s instructions and add its knowledge files.</div></div>' +
+                    '<button class="xgem-btn gh" onclick="pflxXGems._close()">✕</button></div>' +
+                    '<div class="xgem-row2"><div><label>NAME</label><input type="text" id="xg-name" maxlength="40" value="' + esc(g.name) + '" placeholder="ThinkTable"></div>' +
+                    '<div><label>TAGLINE</label><input type="text" id="xg-tag" maxlength="90" value="' + esc(g.tagline) + '" placeholder="Your ideation coach"></div></div>' +
+                    '<div class="xgem-row2"><div><label>GEMINI GEM SHARE LINK (for the Open outside app button)</label><input type="url" id="xg-share" value="' + esc(g.shareUrl) + '" placeholder="https://gemini.google.com/gem/…"></div>' +
+                    '<div><label>ICON — emoji inside the gem, or upload an image</label><div style="display:flex;gap:6px"><input type="text" id="xg-emoji" maxlength="4" value="' + esc(g.emoji) + '" placeholder="💡" style="width:70px">' +
+                    '<button class="xgem-btn gh" onclick="document.getElementById(\'xg-img\').click()">UPLOAD</button>' + (g.image ? '<button class="xgem-btn gh" onclick="pflxXGems._clearImg()">REMOVE</button>' : '') +
+                    '<input type="file" id="xg-img" accept="image/*" style="display:none" onchange="pflxXGems._img(this)"></div></div></div>' +
+                    '<label>INSTRUCTIONS — copy them from your Gem (Gemini → Gems → Edit)</label><textarea id="xg-ins" placeholder="You are ThinkTable, a friendly ideation coach…">' + esc(ED.instructions) + '</textarea>' +
+                    '<label>KNOWLEDGE FILES — .txt .md .csv .json .pdf (' + chars.toLocaleString() + ' / ' + KNOWLEDGE_CAP.toLocaleString() + ' characters used)</label>' +
+                    ED.files.map(function (f, i) { return '<div class="xgem-file"><span>📄 ' + esc(f.name) + ' · ' + String(f.text || '').length.toLocaleString() + ' ch</span><a style="cursor:pointer;color:#ff8095" onclick="pflxXGems._rmFile(' + i + ')">remove</a></div>'; }).join('') +
+                    '<div style="margin-top:6px"><button class="xgem-btn gh" onclick="document.getElementById(\'xg-files\').click()">📥 ADD FILES</button><input type="file" id="xg-files" multiple accept=".txt,.md,.markdown,.csv,.json,.pdf" style="display:none" onchange="pflxXGems._files(this)"></div>' +
+                    (chars > KNOWLEDGE_CAP ? '<div class="xgem-note" style="color:#ffb3bf">Only the first ' + KNOWLEDGE_CAP.toLocaleString() + ' characters are used.</div>' : '') +
+                    '<div class="xgem-row2"><div><label>GEMINI MODEL (pinned, so answers stay consistent)</label><select id="xg-model">' + MODELS.map(function (m) { return '<option value="' + m[0] + '"' + (m[0] === g.model ? ' selected' : '') + '>' + esc(m[1]) + '</option>'; }).join('') + '</select></div>' +
+                    '<div><label>FOCUSED ↔ CREATIVE (<span id="xg-tv">' + Number(g.temperature || 0).toFixed(1) + '</span>)</label><input type="range" id="xg-temp" min="0" max="1.2" step="0.1" value="' + g.temperature + '" style="width:100%" oninput="document.getElementById(\'xg-tv\').textContent=(+this.value).toFixed(1)"></div></div>' +
+                    '<label style="display:flex;gap:8px;align-items:center;margin-top:12px;color:#cfd6f0"><input type="checkbox" id="xg-ground"' + (g.grounding ? ' checked' : '') + '> Use Google Search for up-to-date answers (like the Gemini app)</label>' +
+                    '<label>STARTER PROMPTS — one per line (up to 4)</label><textarea id="xg-starters" style="min-height:70px">' + esc((g.starters || []).join('\n')) + '</textarea>' +
+                    '<label>AUTO-CONNECT KEYWORDS — X-Bot hands matching questions to this X-Gem</label><input type="text" id="xg-keys" value="' + esc((g.keywords || []).join(', ')) + '" placeholder="brainstorm, ideas, pitch">' +
+                    '<label style="display:flex;gap:8px;align-items:center;color:#cfd6f0"><input type="checkbox" id="xg-auto"' + (g.autoRoute ? ' checked' : '') + '> Let X-Bot auto-connect players to this X-Gem</label>' +
+                    '<label>WHO CAN USE IT</label><label style="display:flex;gap:8px;align-items:center;color:#cfd6f0;margin:0"><input type="checkbox" id="xg-all"' + (g.allCohorts !== false ? ' checked' : '') + ' onchange="document.getElementById(\'xg-cks\').style.opacity=this.checked?.4:1"> Every cohort</label>' +
+                    '<div class="xgem-cks" id="xg-cks" style="opacity:' + (g.allCohorts !== false ? '.4' : '1') + '">' + cohorts.map(function (c) { return '<label><input type="checkbox" value="' + esc(c) + '"' + ((g.cohorts || []).indexOf(c) >= 0 ? ' checked' : '') + '> ' + esc(c) + '</label>'; }).join('') + '</div>' +
+                    '<label style="display:flex;gap:8px;align-items:center;color:#cfd6f0"><input type="checkbox" id="xg-on"' + (g.enabled !== false ? ' checked' : '') + '> Visible to players</label>' +
+                    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">' + (ED.isNew ? '' : '<button class="xgem-btn red" onclick="pflxXGems._delete()">DELETE</button><span style="flex:1"></span>') +
+                    '<button class="xgem-btn gh" onclick="pflxXGems._close()">CANCEL</button><button class="xgem-btn" id="xg-save" onclick="pflxXGems._save()">SAVE X-GEM</button></div></div>';
+                ov.addEventListener('click', function (e) { if (e.target === ov) closeEditor(); });
+                document.body.appendChild(ov);
+            }
+            function pullForm() {
+                var v = function (id) { var el = document.getElementById(id); return el ? el.value : ''; };
+                var c = function (id) { var el = document.getElementById(id); return !!(el && el.checked); };
+                var g = ED.gem;
+                g.name = v('xg-name').trim(); g.tagline = v('xg-tag').trim(); g.shareUrl = v('xg-share').trim(); g.emoji = v('xg-emoji').trim();
+                g.model = v('xg-model') || 'gemini-2.5-flash'; g.temperature = Math.max(0, Math.min(1.2, parseFloat(v('xg-temp')) || 0));
+                g.grounding = c('xg-ground'); g.autoRoute = c('xg-auto'); g.allCohorts = c('xg-all'); g.enabled = c('xg-on');
+                g.starters = v('xg-starters').split('\n').map(function (s) { return s.trim(); }).filter(Boolean).slice(0, 4);
+                g.keywords = v('xg-keys').split(',').map(function (s) { return s.trim(); }).filter(Boolean).slice(0, 20);
+                g.cohorts = Array.prototype.slice.call(document.querySelectorAll('#xg-cks input:checked')).map(function (i) { return i.value; });
+                ED.instructions = v('xg-ins');
+            }
+            function closeEditor() { var o = document.getElementById('xgem-ov'); if (o) o.remove(); ED = null; }
+            function saveEditor() {
+                if (!ED) return Promise.resolve(false);
+                pullForm();
+                var g = ED.gem;
+                if (!g.name) { toast('Give the X-Gem a name', 'warning'); return Promise.resolve(false); }
+                if (!ED.instructions.trim()) { toast('Paste the Gem\'s instructions', 'warning'); return Promise.resolve(false); }
+                if (g.shareUrl && !shareOk(g.shareUrl)) { toast('The share link should start with https://gemini.google.com/', 'warning'); return Promise.resolve(false); }
+                var s = me(); g.updatedAt = Date.now(); g.updatedBy = (s && (s.brand || s.name)) || 'host';
+                var i = S.list.findIndex(function (x) { return x.id === g.id; });
+                if (i >= 0) S.list[i] = g; else { g.createdAt = Date.now(); S.list.push(g); }
+                var body = { instructions: ED.instructions, files: ED.files, updatedAt: Date.now() };
+                S.content[g.id] = body; S.hist[g.id] = [];
+                var name = g.name, id = g.id;
+                return Promise.all([writeRow(GEM_PREFIX + id, body), saveList()]).then(function (r) {
+                    if (r[0] && r[1]) { toast('💎 X-Gem saved: ' + name, 'success'); closeEditor(); renderAll(); renderAdminIfOpen(); return true; }
+                    toast('Could not save the X-Gem — check the connection', 'error'); return false;
+                });
+            }
+            function deleteGem(skipConfirm) {
+                if (!ED || ED.isNew) return;
+                var id = ED.gem.id, name = ED.gem.name;
+                if (!skipConfirm && !window.confirm('Delete the X-Gem "' + name + '"?')) return;
+                S.list = S.list.filter(function (x) { return x.id !== id; });
+                if (S.active === id) select(null);
+                return saveList().then(function () { writeRow(GEM_PREFIX + id, { deleted: true, instructions: '', files: [] }); toast('X-Gem deleted'); closeEditor(); renderAll(); renderAdminIfOpen(); });
+            }
+
+            // ── MC Settings > X-Bot > X-Gems ──
+            function renderAdmin(el) {
+                if (!el) return;
+                ensureCss();
+                if (!isHost()) { el.innerHTML = '<div class="xgem-note">Hosts only.</div>'; return; }
+                el.innerHTML = '<div class="xgem-admin"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">' + mark(40) + '<div style="flex:1"><div>' + wordmark() + '</div><div class="xgem-pw">Powered by Gemini Gems · a Gem powers X-Bot and X-Bot takes on its persona</div></div>' +
+                    '<button class="xgem-btn" onclick="pflxXGems.edit()">＋ NEW X-GEM</button></div>' +
+                    (S.list.length ? S.list.map(function (g) {
+                        return '<div class="xgem-admin-row">' + mark(36, g) + '<div style="flex:1;min-width:0"><div class="xgem-rn">' + esc(g.name) + (g.enabled === false ? ' <span class="xgem-note">(hidden)</span>' : '') + '</div>' +
+                            '<div class="xgem-note">' + esc(g.tagline || '') + ' · ' + esc(g.model || '') + ' · ' + (g.allCohorts !== false ? 'every cohort' : (g.cohorts || []).join(', ') || 'no cohorts') + (g.autoRoute ? ' · auto-connect' : '') + '</div></div>' +
+                            (shareOk(g.shareUrl) ? '<button class="xgem-ib" title="Open outside app" onclick="pflxXGems.openOutside(\'' + q1(g.id) + '\')">' + OUT_SVG + '</button>' : '') +
+                            '<button class="xgem-btn gh" onclick="pflxXGems.edit(\'' + q1(g.id) + '\')">EDIT</button></div>';
+                    }).join('') : '<div class="xgem-note">No X-Gems yet. Create one from a Gemini Gem: copy its instructions and download its knowledge files, then add them here.</div>') +
+                    '<div class="xgem-note" style="margin-top:10px">Players use X-Gems with the Gemini key on the server (GEMINI_API_KEY in the pflx-pathway-portal Vercel env) or their own ⚡ connection.</div>' + '</div>';
+            }
+            function renderAdminIfOpen() { var el = document.getElementById('pflx-xgem-admin'); if (el && el.offsetParent !== null) renderAdmin(el); }
+
+            setTimeout(function () {
+                try { if (typeof window.pflxAppDataFeed === 'function') S.feed = window.pflxAppDataFeed('pflx-xgems', onFeed); } catch (e) {}
+                load();
+            }, 2200);
+
+            return {
+                load: load, select: select, edit: edit, openOutside: openOutside, send: sendText,
+                personaFor: personaFor, respondAs: respondAs, decorate: decorate, renderAll: renderAll, renderAdmin: renderAdmin,
+                mark: mark, list: function () { return S.list.slice(); }, active: function () { return S.active; }, buildPrompt: buildPrompt,
+                _close: closeEditor, _save: saveEditor, _delete: deleteGem,
+                _rmFile: function (i) { pullForm(); ED.files.splice(i, 1); drawEditor(); },
+                _clearImg: function () { pullForm(); ED.gem.image = ''; drawEditor(); },
+                _img: function (inp) { var f = inp.files && inp.files[0]; if (!f) return; pullForm(); shrinkImage(f).then(function (d) { ED.gem.image = d; drawEditor(); }, function () { toast('Could not read that image', 'error'); }); },
+                _files: function (inp) {
+                    var fs = Array.prototype.slice.call(inp.files || []); if (!fs.length) return Promise.resolve();
+                    pullForm();
+                    toast('Reading ' + fs.length + ' file' + (fs.length === 1 ? '' : 's') + '…');
+                    return Promise.all(fs.map(function (f) { return readFileText(f).then(function (t) { return { name: f.name, text: String(t || '').split(NUL).join('').trim() }; }, function (e) { toast('Could not read ' + f.name + ': ' + (e && e.message || e), 'error'); return null; }); }))
+                        .then(function (rs) { rs.filter(function (r) { return r && r.text; }).forEach(function (r) { ED.files.push(r); }); drawEditor(); });
+                },
                 _state: function () { return S; }
             };
         })();
