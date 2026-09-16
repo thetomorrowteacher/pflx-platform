@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 209;
+      window.PFLX_PATCH   = 210;
       window.PFLX_BUILD   = '2026.09';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -58225,7 +58225,14 @@ function ppRenderCheckpoints(el) {
             if (!local) return incoming;
             if (!incoming) return local;
             var localNewer = (local.updatedAt || 0) >= (incoming.updatedAt || 0);
-            var merged = localNewer ? Object.assign({}, incoming, local) : Object.assign({}, local, incoming);
+            // v210 -- same rule as X-Live v0.36: host-owned fields follow
+            // hostUpdatedAt (only host saves move it), so a player's stale
+            // save can't roll back the host's slide / pause / lock / reveal.
+            var lh = local.hostUpdatedAt || 0, ih = incoming.hostUpdatedAt || 0;
+            var hostLocal = lh !== ih ? lh > ih : localNewer;
+            var merged = hostLocal ? Object.assign({}, incoming, local) : Object.assign({}, local, incoming);
+            merged.updatedAt = Math.max(local.updatedAt || 0, incoming.updatedAt || 0);
+            if (lh || ih) merged.hostUpdatedAt = Math.max(lh, ih);
 
             var partById = {};
             (incoming.liveParticipants || []).forEach(function (p) { partById[p.id] = p; });
@@ -58243,7 +58250,7 @@ function ppRenderCheckpoints(el) {
                 var ls = localSlides[i], is = incomingSlides[i];
                 if (!ls) { mergedSlides.push(is); continue; }
                 if (!is) { mergedSlides.push(ls); continue; }
-                var slideMerged = localNewer ? Object.assign({}, is, ls) : Object.assign({}, ls, is);
+                var slideMerged = hostLocal ? Object.assign({}, is, ls) : Object.assign({}, ls, is);
                 slideMerged.responses = Object.assign({}, is.responses || {}, ls.responses || {});
                 mergedSlides.push(slideMerged);
             }
@@ -58270,10 +58277,21 @@ function ppRenderCheckpoints(el) {
             (local.raceEvents || []).forEach(function (e) { raceEventById[e.id] = e; });
             merged.raceEvents = Object.keys(raceEventById).map(function (k) { return raceEventById[k]; });
 
+            // v210 -- X-Live v0.35's gameshow fields: showTimer is
+            // last-write-wins on its own stamp, fxEvents is an append-only
+            // union (newest 30). Without this an X-Bot save could drop them.
+            var lt = local.showTimer, it = incoming.showTimer;
+            merged.showTimer = (!lt ? it : (!it ? lt : ((it.updatedAt || 0) > (lt.updatedAt || 0) ? it : lt))) || null;
+            var fxById = {};
+            (incoming.fxEvents || []).forEach(function (e) { if (e && e.id) fxById[e.id] = e; });
+            (local.fxEvents || []).forEach(function (e) { if (e && e.id) fxById[e.id] = e; });
+            merged.fxEvents = Object.keys(fxById).map(function (k) { return fxById[k]; })
+                .sort(function (a, b) { return (a.at || 0) - (b.at || 0); }).slice(-30);
+
             var TERMINAL = { ended: 1, archived: 1 };
             if (TERMINAL[incoming.status] && !TERMINAL[local.status]) merged.status = incoming.status;
             else if (TERMINAL[local.status] && !TERMINAL[incoming.status]) merged.status = local.status;
-            else merged.status = localNewer ? local.status : incoming.status;
+            else merged.status = hostLocal ? local.status : incoming.status;
 
             return merged;
         }
@@ -58294,6 +58312,7 @@ function ppRenderCheckpoints(el) {
         };
         window.pflxXBotSaveSession = async function (sess) {
             sess.updatedAt = Date.now();
+            sess.hostUpdatedAt = sess.updatedAt; // v210 -- X-Bot's Live tab is host-only
             var sb = window.pflxSupabase();
             if (!sb) return sess;
             var cloud = [];
