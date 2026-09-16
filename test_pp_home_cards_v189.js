@@ -7,6 +7,14 @@
 'use strict';
 const fs = require('fs');
 
+// v212 -- player cards now use the shared poster-card kit (ppCardShellOpen /
+// ppCoverHtml / ppCoverChip / ppTaskCardExtrasHtml, defined in the v212
+// module). Stubbed here like every other dependency these sandboxes inject.
+global.ppCardShellOpen = global.ppCardShellOpen || function (o) { o = o || {}; return '<div class="pp-item-card"' + (o.attrs ? ' ' + o.attrs : '') + (o.onclick ? ' onclick="' + o.onclick + '"' : '') + '>'; };
+global.ppCoverHtml = global.ppCoverHtml || function (item, o) { item = item || {}; o = o || {}; return '<div class="pp-cover">' + (item.bannerImage ? '<img src="' + item.bannerImage + '">' : '<span class="pp-cover-icon">' + (o.icon || '') + '</span>') + (o.chips ? '<div class="pp-cover-chips">' + o.chips + '</div>' : '') + '</div>'; };
+global.ppCoverChip = global.ppCoverChip || function (label) { return '<span class="pp-chip">' + label + '</span>'; };
+global.ppTaskCardExtrasHtml = global.ppTaskCardExtrasHtml || function () { return ''; };
+
 const SRC_PATH = process.argv[2] || 'preview.html';
 const src = fs.readFileSync(SRC_PATH, 'utf8');
 
@@ -43,7 +51,7 @@ check('PFLX_PATCH bumped to 189', /window\.PFLX_PATCH\s*=\s*189;/.test(src));
 const projSrc = extractFn('ppHomeProjectCardHtml');
 check('project fn found', projSrc.length > 100);
 check('project card still 340px', /flex:0 0 340px/.test(projSrc));
-check('project card banner height increased to 170px (poster look)', /height:170px/.test(projSrc));
+check('project card banner height increased to 170px (poster look; v212: a 16:9 cover supersedes it)', /height:170px/.test(projSrc) || /ppCoverHtml\(proj/.test(projSrc));
 check('project card keeps home-pj- key prefix', /home-pj-/.test(projSrc));
 check('project card keeps dropdown toggle', /ppToggleDropdown/.test(projSrc));
 check('project card still calls ppProjectStatsHtml inside dropdown', /ppProjectStatsHtml\(proj\)/.test(projSrc));

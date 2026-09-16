@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 211;
+      window.PFLX_PATCH   = 212;
       window.PFLX_BUILD   = '2026.09';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -7340,7 +7340,7 @@
             <div class="toolbar-host-tools">
                 <button class="toolbar-role-toggle" id="toolbar-role-toggle" type="button" title="Toggle Host View / Player View" onclick="pflxToggleRole()" style="display:none;">
                     <span class="tr-dot"></span>
-                    <span class="tr-label" id="tr-label-text">HOST VIEW</span>
+                    <span class="tr-label" id="tr-label-text">HOST MODE</span>
                 </button>
                 <!-- v1.47 (Ennis): "Remove Chat from top toolbar. Its not needed.
                      This will provide more space." Hidden rather than deleted —
@@ -10554,6 +10554,7 @@
                                     </div>
                                 </div>
 
+                                <div id="mc-jobs-sizer"></div>
                                 <div id="mc-jobs-list" style="display:flex;flex-direction:column;gap:12px;"></div>
                             </div>
 
@@ -29518,6 +29519,7 @@
                 case 'calendar': ppRenderCalendar(container); break;
                 default: ppRenderHome(container);
             }
+            try { if (typeof pflxMhpmDecorate === 'function') pflxMhpmDecorate(container); } catch (e) {}
         }
 
         function ppNav(view, data) {
@@ -30043,6 +30045,8 @@
             var s = window.activeSession || {};
             var pid = s.id || null;
             var cohorts = Array.isArray(s.cohorts) ? s.cohorts : (s.cohort ? [s.cohort] : []);
+            // v212 -- Master Host in Player Mode (see pflxMhpmCohorts).
+            try { var __mh = (typeof pflxMhpmCohorts === 'function') ? pflxMhpmCohorts() : null; if (__mh) cohorts = __mh; } catch (e) {}
             return pflxPlayerCanSeeItem(item, pid, cohorts);
         }
 
@@ -30704,10 +30708,8 @@
             var isActive = cp.status === 'active' || cp.status === 'current';
             var accentRgb = isActive ? '34,197,94' : cp.status === 'upcoming' ? '79,142,247' : '167,139,250';
             var key = 'home-cp-' + escapeHtml(String(cp.id || ''));
-            return '<div style="flex:0 0 200px;scroll-snap-align:start;background:rgba(255,255,255,0.02);border:1px solid rgba(' + accentRgb + ',0.25);border-radius:12px;overflow:hidden;cursor:pointer;" onclick="ppNav(\'checkpoint-detail\',{id:\'' + escapeHtml(String(cp.id || '')) + '\'})">' +
-                (cp.bannerImage
-                    ? '<div style="height:90px;overflow:hidden;"><img src="' + escapeHtml(cp.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;" draggable="false"></div>'
-                    : '<div style="height:90px;background:linear-gradient(135deg,rgba(' + accentRgb + ',0.25),rgba(' + accentRgb + ',0.06));display:flex;align-items:center;justify-content:center;font-size:26px;">\u{1F3C1}</div>') +
+            return '<div style="flex:0 0 280px;scroll-snap-align:start;background:rgba(255,255,255,0.02);border:1px solid rgba(' + accentRgb + ',0.25);border-radius:12px;overflow:hidden;cursor:pointer;" onclick="ppNav(\'checkpoint-detail\',{id:\'' + escapeHtml(String(cp.id || '')) + '\'})">' +
+                ppCoverHtml(cp, { icon: '\u{1F3C1}', accentRgb: accentRgb, title: cp.name || 'Checkpoint', compact: true }) +
                 '<div style="padding:10px 12px;">' +
                     '<div style="font-size:12px;font-weight:800;color:#e0e6ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(cp.name || 'Checkpoint') + '</div>' +
                     '<div style="display:flex;justify-content:flex-end;margin-top:4px;">' +
@@ -30754,20 +30756,10 @@
             var urg = (typeof _mcUrgencyForDueDate === 'function') ? _mcUrgencyForDueDate(proj.dueDate || proj.endDate || proj.deadline) : null;
             var key = 'home-pj-' + escapeHtml(String(proj.id || ''));
             var html = '<div style="flex:0 0 340px;scroll-snap-align:start;background:rgba(255,255,255,0.02);border:1px solid rgba(167,139,250,0.22);border-radius:14px;overflow:hidden;cursor:pointer;" onclick="ppNav(\'project-detail\',{id:\'' + escapeHtml(String(proj.id || '')) + '\'})">';
-            if (proj.bannerImage) {
-                html += '<div style="position:relative;height:170px;overflow:hidden;"><img src="' + escapeHtml(proj.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;" draggable="false">' +
-                    '<div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(10,10,15,0) 40%, rgba(22,22,31,0.9) 100%);"></div>' +
-                    '<div style="position:absolute;left:14px;right:14px;bottom:10px;display:flex;justify-content:space-between;align-items:flex-end;gap:8px;">' +
-                        '<span style="font-size:15px;font-weight:900;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,0.8);">' + escapeHtml(proj.name || proj.title || 'Project') + '</span>' +
-                        (!canEnter ? '<span style="background:rgba(0,0,0,0.55);color:#fff;padding:3px 9px;border-radius:10px;font-size:9px;font-weight:700;white-space:nowrap;">\u{1F512} LOCKED</span>' : '') +
-                    '</div></div>';
-            } else {
-                html += '<div style="height:170px;background:linear-gradient(135deg,rgba(167,139,250,0.22),rgba(167,139,250,0.05));display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;padding:0 14px;text-align:center;">' +
-                    '<span style="font-size:34px;">\u{1F3AC}</span>' +
-                    '<span style="font-size:14px;font-weight:900;color:#e0e6ff;">' + escapeHtml(proj.name || proj.title || 'Project') + '</span>' +
-                    (!canEnter ? '<span style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);padding:2px 8px;border-radius:10px;font-size:9px;font-weight:700;">\u{1F512} LOCKED</span>' : '') +
-                '</div>';
-            }
+            // v212 -- host cover at 16:9 (image, video, slideshow, HTML or embed).
+            html += ppCoverHtml(proj, { icon: '\u{1F3AC}', accentRgb: '167,139,250', title: proj.name || proj.title || 'Project',
+                chips: !canEnter ? ppCoverChip('\u{1F512} LOCKED', '239,68,68') : '' });
+            html += '<div style="padding:10px 14px 0;font-size:14px;font-weight:900;color:#e0e6ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" class="pp-card-title">' + escapeHtml(proj.name || proj.title || 'Project') + '</div>';
             html += '<div style="padding:8px 14px 10px;display:flex;justify-content:flex-end;">' +
                 '<button onclick="event.stopPropagation();ppToggleDropdown(event,\'' + key + '\')" style="background:none;border:none;color:rgba(255,255,255,0.45);font-size:10px;cursor:pointer;padding:2px 0;">' +
                 '<span id="pp-arrow-' + key + '">▾</span> More info &amp; stats</button>' +
@@ -30801,11 +30793,9 @@
             var appState = (typeof pflxPlayerApplicationState === 'function') ? pflxPlayerApplicationState(pg, 'program') : 'none';
             var cpCount = (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) ? mcCheckpoints.filter(function (c) { return c && c.programId === pg.id; }).length : 0;
             var html = '<div style="flex:0 0 340px;scroll-snap-align:start;background:rgba(255,255,255,0.02);border:1px solid rgba(0,212,255,0.22);border-radius:14px;overflow:hidden;cursor:pointer;" onclick="ppNav(\'program-detail\',{id:\'' + escapeHtml(String(pg.id || '')) + '\'})">';
-            html += (pg.bannerImage
-                ? '<div style="height:120px;overflow:hidden;"><img src="' + escapeHtml(pg.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;" draggable="false"></div>'
-                : '<div style="height:120px;background:linear-gradient(135deg,rgba(0,212,255,0.22),rgba(0,212,255,0.05));display:flex;align-items:center;justify-content:center;font-size:32px;">\u{1F4D0}</div>');
+            html += ppCoverHtml(pg, { icon: '\u{1F4D0}', accentRgb: '0,212,255', title: pg.name || 'Program' });
             html += '<div style="padding:12px 14px;">' +
-                '<div style="font-size:14px;font-weight:900;color:#e0e6ff;">' + escapeHtml(pg.name || 'Program') + '</div>';
+                '<div class="pp-card-title" style="font-size:14px;">' + escapeHtml(pg.name || 'Program') + '</div>';
             if (pg.description) html += '<div style="font-size:11px;color:#8a92b0;margin-top:6px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + escapeHtml(String(pg.description).substring(0, 120)) + '</div>';
             html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;flex-wrap:wrap;gap:6px;">' +
                 '<span style="font-size:10px;color:rgba(255,255,255,0.35);">' + cpCount + ' checkpoint' + (cpCount === 1 ? '' : 's') + '</span>';
@@ -30994,6 +30984,11 @@
             var checkpoints = ppGetCheckpoints().filter(ppItemAssignedToActivePlayer);
             var tasks = ppGetTasks().filter(ppItemAssignedToActivePlayer);
             var jobs = ppGetJobs().filter(ppItemAssignedToActivePlayer);
+            if (typeof pflxMhpmShows === 'function') {
+                if (!pflxMhpmShows('checkpoints')) checkpoints = [];
+                if (!pflxMhpmShows('tasks')) tasks = [];
+                if (!pflxMhpmShows('jobs')) jobs = [];
+            }
 
             // Active checkpoint (first with status active/current)
             var activeCp = null;
@@ -31132,6 +31127,7 @@
                 // same visual identity the host configured.
                 var heroBanner = ppBannerHeader({
                     image: activeCp.bannerImage,
+                    embed: activeCp.embedUrl || '',
                     title: activeCp.name || 'Active Checkpoint',
                     accent: heroPill ? heroPill.color : '0,212,255',
                     pill: heroPill,
@@ -31272,6 +31268,7 @@
             // directly on the Dashboard page itself, not as separate pages).
             html += ppHomeOrgCardHtml();
             var __homePrograms = (typeof mcPrograms !== 'undefined' && Array.isArray(mcPrograms)) ? mcPrograms : [];
+            if (typeof pflxMhpmShows === 'function' && !pflxMhpmShows('programs')) __homePrograms = [];
             if (__homePrograms.length) {
                 html += ppCarouselRowHtml({
                     rowId: 'programs', icon: '\u{1F4D0}', title: 'PROGRAMS',
@@ -31287,6 +31284,7 @@
                 });
             }
             var __homeProjects = ppGetProjects().filter(ppItemAssignedToActivePlayer);
+            if (typeof pflxMhpmShows === 'function' && !pflxMhpmShows('projects')) __homeProjects = [];
             if (__homeProjects.length) {
                 html += ppCarouselRowHtml({
                     rowId: 'projects', icon: '\u{1F3AC}', title: 'PROJECTS',
@@ -31440,9 +31438,13 @@ function ppProgramStatusBucketFor(pg) {
 window.ppProgramStatusBucketFor = ppProgramStatusBucketFor;
 
 function ppRenderPrograms(el) {
+            // v212 (Ennis: "The Player Dashboard should be the same" as the
+            // host's) -- host-parity poster cards: the host's cover (image,
+            // video, slideshow, HTML or embed) at 16:9 on top, body below.
             var programs = (typeof mcPrograms !== 'undefined' && Array.isArray(mcPrograms)) ? mcPrograms.slice() : [];
             var html = ppBreadcrumb([{ label: 'Home', view: 'home' }, { label: 'Programs', view: 'programs' }]);
-            try { if (typeof pflxApplyCardSize === 'function') pflxApplyCardSize('ppprograms'); } catch (e) {}
+            var __hidden = (typeof pflxMhpmHiddenHtml === 'function') ? pflxMhpmHiddenHtml('programs') : '';
+            if (__hidden) { el.innerHTML = html + __hidden; return; }
             html += (typeof pflxCardSizeSliderHtml === 'function') ? pflxCardSizeSliderHtml('ppprograms', 'Program') : '';
 
             if (!programs.length) {
@@ -31455,49 +31457,50 @@ function ppRenderPrograms(el) {
             }
 
             var __programCards = programs.map(function (pg) {
-                var cardHtml = '';
-
+                var pid = escapeHtml(String(pg.id || ''));
                 var canEnter = (typeof pflxPlayerCanEnterItem === 'function') ? pflxPlayerCanEnterItem(pg, 'program') : true;
                 var appState = (typeof pflxPlayerApplicationState === 'function') ? pflxPlayerApplicationState(pg, 'program') : 'none';
                 var cpCount = (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) ? mcCheckpoints.filter(function (c) { return c && c.programId === pg.id; }).length : 0;
                 var accent = canEnter ? '0,212,255' : '245,200,66';
-                cardHtml += '<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(' + accent + ',0.2);border-radius:14px;padding:16px;margin-bottom:10px;' + (canEnter ? 'cursor:pointer;' : '') + '"' +
-                    (canEnter ? ' onclick="ppNav(\'program-detail\',{id:\'' + escapeHtml(String(pg.id || '')) + '\'})"' : '') + '>' +
-                    '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-                    '<div><div style="font-size:14px;font-weight:700;color:#e0e6ff;">📐 ' + escapeHtml(pg.name || 'Program') + '</div>' +
-                    (pg.description ? '<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:4px;">' + escapeHtml(String(pg.description).substring(0, 100)) + '</div>' : '') +
-                    '<div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:6px;">' + cpCount + ' checkpoint' + (cpCount === 1 ? '' : 's') + '</div></div>';
+                var chip;
+                if (canEnter) chip = ppCoverChip('&#x2713; OPEN', '34,197,94');
+                else if (!pg.applyEnabled) chip = ppCoverChip('&#x1F512; ' + escapeHtml((pg.lockMessage || 'COHORT REQUIRED').substring(0, 40)), '239,68,68');
+                else if (appState === 'pending') chip = ppCoverChip('&#x23F3; PENDING', '245,200,66');
+                else if (appState === 'approved-unpaid') chip = ppCoverChip('&#x1F4B3; PAY $' + (Number(pg.price) || 0), '34,211,238');
+                else chip = ppCoverChip('&#x1F4DD; APPLY TO JOIN', '0,212,255');
+
                 var __pgRoll = (typeof _pflxProgramRollup === 'function') ? _pflxProgramRollup(pg) : { taskTotal: 0, taskDone: 0, taskPct: 0 };
                 var __pgBarCol = __pgRoll.taskPct === 100 ? '#22c55e' : __pgRoll.taskPct >= 66 ? '#4ade80' : __pgRoll.taskPct >= 33 ? '#f5c842' : __pgRoll.taskPct > 0 ? '#ff9f40' : 'rgba(255,255,255,0.15)';
-                var __pgProgressHtml = __pgRoll.taskTotal > 0
-                    ? '<div style="margin-top:10px;">' +
-                        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
-                            '<span style="font-size:10px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.06em;">\uD83D\uDCCB Tasks</span>' +
-                            '<span style="font-size:10px;color:' + __pgBarCol + ';font-family:monospace;font-weight:700;">' + __pgRoll.taskDone + ' / ' + __pgRoll.taskTotal + ' (' + __pgRoll.taskPct + '%)</span>' +
-                        '</div>' +
-                        ppProgressBar(__pgRoll.taskPct, __pgBarCol) +
-                      '</div>'
-                    : '';
-                if (canEnter) {
-                    cardHtml += '<span style="font-size:10px;font-weight:800;color:#22c55e;letter-spacing:0.08em;">&#x2713; OPEN</span>';
-                } else if (!pg.applyEnabled) {
-                    cardHtml += '<span style="font-size:10px;font-weight:800;color:#ef4444;letter-spacing:0.08em;">&#x1F512; ' + escapeHtml((pg.lockMessage || 'COHORT REQUIRED').substring(0, 40)) + '</span>';
-                } else if (appState === 'pending') {
-                    cardHtml += '<span style="font-size:10px;font-weight:800;color:#f5c842;letter-spacing:0.08em;">&#x23F3; PENDING</span>';
-                } else if (appState === 'approved-unpaid') {
-                    cardHtml += '<span style="font-size:10px;font-weight:800;color:#22d3ee;letter-spacing:0.08em;">&#x1F4B3; PAY $' + (Number(pg.price) || 0) + '</span>';
-                }
-                cardHtml += __pgProgressHtml + '</div>';
+
+                var cardHtml = ppCardShellOpen({ accentRgb: accent, onclick: canEnter ? "ppNav('program-detail',{id:'" + pid + "'})" : '' }) +
+                    ppCoverHtml(pg, { icon: '📐', accentRgb: accent, title: pg.name || 'Program', chips: chip }) +
+                    '<div class="pp-card-body">' +
+                        '<div class="pp-card-title">📐 ' + escapeHtml(pg.name || 'Program') + '</div>' +
+                        (pg.description ? '<div class="pp-card-desc">' + escapeHtml(String(pg.description).substring(0, 160)) + '</div>' : '') +
+                        '<div class="pp-card-meta">' + cpCount + ' checkpoint' + (cpCount === 1 ? '' : 's') +
+                            (pg.startDate ? ' · 📅 ' + escapeHtml(pg.startDate) : '') +
+                            (pg.durationWeeks ? ' · ⏱ ' + escapeHtml(String(pg.durationWeeks)) + 'wk program' : '') + '</div>' +
+                        ((__pgRoll.cpTotal || __pgRoll.projTotal)
+                            ? '<div class="pp-card-meta">✅ Checkpoints: ' + (__pgRoll.cpDone || 0) + ' / ' + (__pgRoll.cpTotal || 0) + ' · 📦 Projects: ' + (__pgRoll.projDone || 0) + ' / ' + (__pgRoll.projTotal || 0) + '</div>'
+                            : '') +
+                        (__pgRoll.taskTotal > 0
+                            ? '<div style="margin-top:10px;">' +
+                                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
+                                    '<span class="pp-card-label">📋 Tasks</span>' +
+                                    '<span style="font-size:10px;color:' + __pgBarCol + ';font-family:monospace;font-weight:700;">' + __pgRoll.taskDone + ' / ' + __pgRoll.taskTotal + ' (' + __pgRoll.taskPct + '%)</span>' +
+                                '</div>' + ppProgressBar(__pgRoll.taskPct, __pgBarCol) +
+                              '</div>'
+                            : '') +
+                        '<div class="pp-card-actions">';
                 if (!canEnter && pg.applyEnabled && appState !== 'pending' && appState !== 'approved-unpaid') {
                     var label = pg.price > 0 ? ('Apply to Join — $' + pg.price) : 'Apply to Join — Free';
-                    cardHtml += '<button class="mc-btn" style="margin-top:10px;font-size:10px;padding:6px 12px;" onclick="event.stopPropagation();mcApplyToProgramOrProject(\'program\',\'' + escapeHtml(String(pg.id || '')) + '\');ppRenderPrograms(document.getElementById(\'mc-dash-player-content\'));">' + escapeHtml(label) + '</button>';
+                    cardHtml += '<button class="mc-btn" style="font-size:10px;padding:6px 12px;" onclick="event.stopPropagation();mcApplyToProgramOrProject(\'program\',\'' + pid + '\');ppRenderPrograms(document.getElementById(\'mc-dash-player-content\'));">' + escapeHtml(label) + '</button>';
                 }
                 if (canEnter) {
                     var __pgCta = (typeof pflxEntryCtaLabel === 'function') ? pflxEntryCtaLabel(pg) : 'Start';
-                    cardHtml += '<button class="mc-btn mc-btn-green" style="margin-top:10px;font-size:10px;padding:6px 12px;" onclick="event.stopPropagation();ppNav(\'program-detail\',{id:\'' + escapeHtml(String(pg.id || '')) + '\'});">&#x25B6; ' + escapeHtml(__pgCta) + '</button>';
+                    cardHtml += '<button class="mc-btn mc-btn-green" style="font-size:10px;padding:6px 12px;" onclick="event.stopPropagation();ppNav(\'program-detail\',{id:\'' + pid + '\'});">&#x25B6; ' + escapeHtml(__pgCta) + '</button>';
                 }
-                cardHtml += '</div>';
-            
+                cardHtml += '</div></div></div>';
                 return cardHtml;
             });
 
@@ -31506,6 +31509,7 @@ function ppRenderPrograms(el) {
                 : __programCards.join('');
             html += '<div id="ppmc-programs-list">' + __programSections + '</div>';
             el.innerHTML = html;
+            try { if (typeof pflxApplyCardSize === 'function') pflxApplyCardSize('ppprograms'); } catch (e) {}
         }
         window.ppRenderPrograms = ppRenderPrograms;
 
@@ -31692,7 +31696,11 @@ function ppRenderPrograms(el) {
             // would be unclickable. The title moves BELOW the frame instead. This
             // mirrors the Checkpoint card, which has rendered cp.embedUrl this way
             // since v1.6 — projects simply never got wired up.
-            if (opts.embed && typeof pflxCoverMediaEl === 'function') {
+            // v212 (Ennis: banners must be 16:9 and readable) -- an IMAGE cover
+            // now uses the same 16:9 frame + title-below layout as an embed,
+            // so the title never sits on top of the art (it used to be
+            // recoloured dark by the light skins' ink layer, on a dark wash).
+            if ((opts.embed || opts.image) && typeof pflxCoverMediaEl === 'function') {
                 var eAccent = opts.accent || '0,212,255';
                 var eKicker = opts.kicker
                     ? '<span style="font-family:\'Share Tech Mono\',monospace;font-size:10px;color:rgba(255,255,255,0.55);letter-spacing:0.18em;text-transform:uppercase;">' + escapeHtml(opts.kicker) + '</span>'
@@ -31766,7 +31774,8 @@ function ppRenderPrograms(el) {
 function ppRenderCheckpoints(el) {
             var checkpoints = ppGetCheckpoints();
             var html = ppBreadcrumb([{ label: 'Home', view: 'home' }, { label: 'Checkpoints', view: 'checkpoints' }]);
-            try { if (typeof pflxApplyCardSize === 'function') pflxApplyCardSize('ppcheckpoints'); } catch (e) {}
+            var __hidden = (typeof pflxMhpmHiddenHtml === 'function') ? pflxMhpmHiddenHtml('checkpoints') : '';
+            if (__hidden) { el.innerHTML = html + __hidden; return; }
             html += (typeof pflxCardSizeSliderHtml === 'function') ? pflxCardSizeSliderHtml('ppcheckpoints', 'Checkpoint') : '';
 
             if (!checkpoints.length) {
@@ -31809,41 +31818,26 @@ function ppRenderCheckpoints(el) {
                 }).length;
                 var pct = cpTasks.length ? Math.round(cpDone * 100 / cpTasks.length) : (cp.progress || 0);
 
-                // Outer card. overflow:hidden so the banner image can be flush
-                // against the top-left/top-right corners.
-                cardHtml += '<div style="background:' + bgGrad + ';border:1px solid ' + borderColor + ';border-radius:14px;padding:0;margin-bottom:12px;cursor:pointer;transition:all 0.2s;overflow:hidden;" onclick="ppNav(\'checkpoint-detail\',{id:\'' + (cp.id || '') + '\'})" onmouseenter="this.style.transform=\'translateY(-2px)\'" onmouseleave="this.style.transform=\'\'">';
-
-                // Banner image (same source field as the host card). Falls back
-                // to a plain title header when no banner is set so legacy
-                // checkpoints don't render as a blank gradient block.
-                var ppAccentRgb = isActive ? '34,197,94' : cp.status === 'upcoming' ? '79,142,247' : '167,139,250';
-                if (cp.bannerImage) {
-                    cardHtml += '<div style="position:relative;height:130px;overflow:hidden;">' +
-                        '<img src="' + escapeHtml(cp.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;display:block;filter:saturate(1.15) brightness(1.05);">' +
-                        '<div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(10,10,15,0) 0%, rgba(22,22,31,0.45) 55%, rgba(22,22,31,0.95) 100%);"></div>' +
-                        '<div style="position:absolute;inset:0;box-shadow:inset 0 0 60px rgba(' + ppAccentRgb + ',0.22);pointer-events:none;"></div>' +
-                        '<div style="position:absolute;left:16px;right:16px;bottom:12px;display:flex;justify-content:space-between;align-items:flex-end;gap:12px;">' +
-                            '<div style="font-family:\'Rajdhani\',sans-serif;font-size:18px;font-weight:900;color:#ffffff;text-shadow:0 2px 12px rgba(0,0,0,0.9), 0 0 14px rgba(' + ppAccentRgb + ',0.30);letter-spacing:0.02em;">' + escapeHtml(cp.name || 'Checkpoint') + '</div>' +
-                            (isActive
-                                ? '<span style="background:rgba(34,197,94,0.2);color:#22c55e;padding:4px 10px;border-radius:12px;font-size:10px;font-weight:700;border:1px solid rgba(34,197,94,0.5);backdrop-filter:blur(8px);text-transform:uppercase;letter-spacing:0.08em;white-space:nowrap;">● ACTIVE NOW</span>'
-                                : '') +
-                        '</div>' +
-                    '</div>';
-                }
+                // v212 -- host-parity poster card: the host's cover (image,
+                // video, slideshow, HTML or embed) at 16:9, always.
+                var ppAccentRgb = isActive ? '34,197,94' : cp.status === 'upcoming' ? '79,142,247' : cp.status === 'completed' ? '156,163,175' : '167,139,250';
+                var __cpChip = isActive ? ppCoverChip('● ACTIVE NOW', '34,197,94')
+                    : cp.status === 'upcoming' ? ppCoverChip('⏳ UPCOMING', '79,142,247')
+                    : cp.status === 'open' ? ppCoverChip('🔓 OPEN', '79,142,247')
+                    : cp.status === 'completed' ? ppCoverChip('✓ COMPLETED', '156,163,175') : '';
+                cardHtml += ppCardShellOpen({ accentRgb: ppAccentRgb, onclick: "ppNav('checkpoint-detail',{id:'" + escapeHtml(String(cp.id || '')) + "'})" }) +
+                    ppCoverHtml(cp, { icon: '🏁', accentRgb: ppAccentRgb, title: cp.name || 'Checkpoint', chips: __cpChip });
 
                 // Card body — padded. Skip the redundant title when the banner
                 // already shows it.
-                cardHtml += '<div style="padding:18px;">';
+                cardHtml += '<div class="pp-card-body">';
 
-                if (!cp.bannerImage && isActive) cardHtml += '<div style="display:inline-block;background:rgba(34,197,94,0.15);color:#22c55e;font-size:9px;font-weight:700;padding:3px 8px;border-radius:6px;letter-spacing:1px;margin-bottom:10px;">● ACTIVE NOW</div>';
 
                 cardHtml += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">' +
                     '<div>' +
-                    (cp.bannerImage
-                        ? ''
-                        : '<div style="font-family:\'Rajdhani\',sans-serif;font-size:18px;font-weight:900;color:#e0e6ff;">' + escapeHtml(cp.name || 'Checkpoint') + '</div>') +
-                    (cp.description ? '<div style="font-size:12px;color:#8a92b0;margin-top:4px;max-width:400px;">' + escapeHtml(cp.description).substring(0, 100) + '</div>' : '') + '</div>' +
-                    '<div style="text-align:right;">' +
+                    '<div class="pp-card-title">🏁 ' + escapeHtml(cp.name || 'Checkpoint') + '</div>' +
+                    (cp.description ? '<div class="pp-card-desc">' + escapeHtml(String(cp.description).substring(0, 160)) + '</div>' : '') + '</div>' +
+                    '<div style="text-align:right;flex-shrink:0;padding-left:10px;">' +
                     (cp.xc ? '<div style="font-family:\'Share Tech Mono\',monospace;font-size:14px;color:#f5c842;font-weight:700;">' + cp.xc + ' XC</div>' : '') +
                     (daysText ? '<div style="font-size:10px;color:' + (daysText === 'PAST DUE' ? '#ef4444' : 'rgba(255,255,255,0.4)') + ';margin-top:2px;">' + daysText + '</div>' : '') +
                     '</div></div>';
@@ -31877,6 +31871,7 @@ function ppRenderCheckpoints(el) {
             html += '<div id="ppmc-checkpoints-list">' + __cpSections + '</div>';
 
             el.innerHTML = html;
+            try { if (typeof pflxApplyCardSize === 'function') pflxApplyCardSize('ppcheckpoints'); } catch (e) {}
         }
 
 
@@ -31946,7 +31941,10 @@ function ppRenderCheckpoints(el) {
 
         function ppRenderProjects(el) {
             var projects = ppGetProjects().filter(ppItemAssignedToActivePlayer);
-            var html = ppBreadcrumb([{ label: 'Home', view: 'home' }, { label: 'Projects', view: 'projects' }]);            try { if (typeof pflxApplyCardSize === 'function') pflxApplyCardSize('ppprojects'); } catch (e) {}            html += (typeof pflxCardSizeSliderHtml === 'function') ? pflxCardSizeSliderHtml('ppprojects', 'Project') : '';
+            var html = ppBreadcrumb([{ label: 'Home', view: 'home' }, { label: 'Projects', view: 'projects' }]);
+            var __hidden = (typeof pflxMhpmHiddenHtml === 'function') ? pflxMhpmHiddenHtml('projects') : '';
+            if (__hidden) { el.innerHTML = html + __hidden; return; }
+            html += (typeof pflxCardSizeSliderHtml === 'function') ? pflxCardSizeSliderHtml('ppprojects', 'Project') : '';
 
             if (!projects.length) {
                 html += '<div class="mc-card" style="text-align:center;padding:40px;">' +
@@ -31966,30 +31964,21 @@ function ppRenderCheckpoints(el) {
                 var lockIcon = String.fromCodePoint(128274);
                 var filmIcon = String.fromCodePoint(127916);
 
-                cardHtml += '<div style="background:rgba(255,255,255,0.015);border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:0;margin-bottom:12px;cursor:pointer;transition:all 0.2s;overflow:hidden;" onclick="ppNav(\'project-detail\',{id:\'' + escapeHtml(String(proj.id || '')) + '\'})" onmouseenter="this.style.transform=\'translateY(-2px)\'" onmouseleave="this.style.transform=\'\'">';
+                // v212 -- host-parity poster card: the host's cover (image,
+                // video, slideshow, HTML or embed) at 16:9, always.
+                var __pjAcc = !canEnter ? '245,200,66' : comp.pct === 100 ? '34,197,94' : '167,139,250';
+                var __pjChips = (!canEnter ? ppCoverChip(lockIcon + ' LOCKED', '239,68,68') : '') +
+                    (comp.pct === 100 ? ppCoverChip('✓ COMPLETE', '34,197,94') : '');
+                cardHtml += ppCardShellOpen({ accentRgb: __pjAcc, onclick: "ppNav('project-detail',{id:'" + escapeHtml(String(proj.id || '')) + "'})" }) +
+                    ppCoverHtml(proj, { icon: filmIcon, accentRgb: __pjAcc, title: proj.name || proj.title || 'Project', chips: __pjChips });
 
-                if (proj.bannerImage) {
-                    cardHtml += '<div style="position:relative;height:110px;overflow:hidden;">' +
-                        '<img src="' + escapeHtml(proj.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;display:block;filter:saturate(1.15) brightness(1.05);">' +
-                        '<div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(10,10,15,0) 0%, rgba(22,22,31,0.45) 55%, rgba(22,22,31,0.95) 100%);"></div>' +
-                        '<div style="position:absolute;left:16px;right:16px;bottom:10px;display:flex;justify-content:space-between;align-items:flex-end;gap:12px;">' +
-                            '<div style="font-family:\'Rajdhani\',sans-serif;font-size:16px;font-weight:900;color:#ffffff;text-shadow:0 2px 12px rgba(0,0,0,0.9);">' + escapeHtml(proj.name || proj.title || 'Project') + '</div>' +
-                            (!canEnter ? '<span style="background:rgba(0,0,0,0.5);color:#fff;padding:4px 10px;border-radius:12px;font-size:10px;font-weight:700;backdrop-filter:blur(8px);">' + lockIcon + ' LOCKED</span>' : '') +
-                        '</div></div>';
-                }
-
-                cardHtml += '<div style="padding:16px;">';
-                if (!proj.bannerImage) {
-                    cardHtml += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">' +
-                        '<div style="font-family:\'Rajdhani\',sans-serif;font-size:16px;font-weight:900;color:#e0e6ff;">' + filmIcon + ' ' + escapeHtml(proj.name || proj.title || 'Project') + '</div>' +
-                        (!canEnter ? '<span style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);padding:3px 9px;border-radius:10px;font-size:10px;font-weight:700;white-space:nowrap;">' + lockIcon + ' Locked</span>' : '') +
-                    '</div>';
-                }
+                cardHtml += '<div class="pp-card-body">';
+                cardHtml += '<div class="pp-card-title">' + filmIcon + ' ' + escapeHtml(proj.name || proj.title || 'Project') + '</div>';
                 if (parentCp) {
                     cardHtml += '<div style="font-size:10px;color:rgba(255,255,255,0.35);margin-top:4px;">' + String.fromCharCode(8618) + ' ' + escapeHtml(parentCp.name || 'Checkpoint') + '</div>';
                 }
                 if (proj.description) {
-                    cardHtml += '<div style="font-size:12px;color:#8a92b0;margin-top:6px;max-width:480px;">' + escapeHtml(proj.description).substring(0, 100) + '</div>';
+                    cardHtml += '<div class="pp-card-desc">' + escapeHtml(String(proj.description).substring(0, 160)) + '</div>';
                 }
                 cardHtml += '<div style="display:flex;align-items:center;gap:10px;margin-top:10px;">' +
                     '<div style="flex:1;">' + ppProgressBar(comp.pct, comp.pct === 100 ? '#22c55e' : '#a78bfa') + '</div>' +
@@ -32015,6 +32004,7 @@ function ppRenderCheckpoints(el) {
             html += '<div id="ppmc-projects-list">' + __ppProjSections + '</div>';
 
             el.innerHTML = html;
+            try { if (typeof pflxApplyCardSize === 'function') pflxApplyCardSize('ppprojects'); } catch (e) {}
         }
 
         // ── CHECKPOINT DETAIL — drill-in ──
@@ -32055,7 +32045,16 @@ function ppRenderCheckpoints(el) {
             // Header card — 16:9 hero banner matching MC treatment. Rounded
             // corners + overflow hidden so the image reaches edge-to-edge.
             html += '<div style="background:linear-gradient(180deg, rgba(22,22,31,0.85), rgba(22,22,31,0.65));border:1.5px solid rgba(' + ppDetailAccentRgb + ',0.4);border-radius:22px;margin-bottom:20px;overflow:hidden;box-shadow:0 0 26px rgba(' + ppDetailAccentRgb + ',0.14), 0 16px 34px rgba(0,0,0,0.5);">';
-            if (cp.bannerImage) {
+            if (cp.embedUrl) {
+                // v212 -- a Checkpoint's embed / video / slideshow / HTML cover
+                // (the detail view used to show only a static image).
+                html += ppBannerHeader({
+                    embed: cp.embedUrl, image: cp.bannerImage || '',
+                    title: cp.name || 'Checkpoint', accent: ppDetailAccentRgb,
+                    kicker: '🏁 CHECKPOINT',
+                    pill: isActive ? { label: '● Active', color: '34,197,94' } : null
+                });
+            } else if (cp.bannerImage) {
                 html += '<div style="position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;">' +
                     '<img src="' + escapeHtml(cp.bannerImage) + '" style="width:100%;height:100%;object-fit:cover;display:block;filter:saturate(1.15) brightness(1.02);">' +
                     '<div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(10,10,15,0) 0%, rgba(10,10,15,0.15) 45%, rgba(22,22,31,0.92) 100%);"></div>' +
@@ -32068,7 +32067,7 @@ function ppRenderCheckpoints(el) {
                         : '') +
                     // Title — bottom overlay
                     '<div style="position:absolute;left:24px;right:24px;bottom:20px;">' +
-                        '<div style="font-family:Orbitron,sans-serif;font-size:28px;font-weight:900;color:#ffffff;text-shadow:0 2px 18px rgba(0,0,0,0.9), 0 0 22px rgba(' + ppDetailAccentRgb + ',0.35);letter-spacing:0.02em;line-height:1.1;">' + escapeHtml(cp.name || 'Checkpoint') + '</div>' +
+                        '<div class="pflx-on-media" style="font-family:Orbitron,sans-serif;font-size:28px;font-weight:900;color:#ffffff;text-shadow:0 2px 18px rgba(0,0,0,0.9), 0 0 22px rgba(' + ppDetailAccentRgb + ',0.35);letter-spacing:0.02em;line-height:1.1;">' + escapeHtml(cp.name || 'Checkpoint') + '</div>' +
                     '</div>' +
                 '</div>';
             } else {
@@ -32226,12 +32225,20 @@ function ppRenderCheckpoints(el) {
         function ppRenderJobBoard(el) {
             var jobs = ppGetJobs();
             var cohort = (window.activeSession || {}).cohort || 'PlayerPool';
+            // v212 -- the Master Host in Player Mode is a member of every
+            // cohort (or the ones picked in their Player Mode settings).
+            var __mhCohorts = (typeof pflxMhpmCohorts === 'function') ? pflxMhpmCohorts() : null;
+            var __myCohorts = __mhCohorts ? __mhCohorts.map(function (c) { return String(c).trim().toLowerCase(); }) : null;
             var myJobs = jobs.filter(function(j) {
                 if (!j.cohorts || !j.cohorts.length) return true;
+                if (__myCohorts) return j.cohorts.some(function (c) { return __myCohorts.indexOf(String(c).trim().toLowerCase()) !== -1; });
                 return j.cohorts.indexOf(cohort) !== -1;
             });
 
             var html = ppBreadcrumb([{ label: 'Home', view: 'home' }, { label: 'Job Board', view: 'jobs' }]);
+            var __hidden = (typeof pflxMhpmHiddenHtml === 'function') ? pflxMhpmHiddenHtml('jobs') : '';
+            if (__hidden) { el.innerHTML = html + __hidden; return; }
+            html += (typeof pflxCardSizeSliderHtml === 'function') ? pflxCardSizeSliderHtml('ppjobs', 'Job') : '';
 
             if (!myJobs.length) {
                 html += '<div class="mc-card" style="text-align:center;padding:40px;">' +
@@ -32244,6 +32251,7 @@ function ppRenderCheckpoints(el) {
 
             var me = window.activeSession || {};
             var myId = me.id || me.brand || me.brandName || '';
+            html += '<div id="ppmc-jobs-list" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(var(--pflx-card-min, 360px), 1fr));gap:16px;align-items:start;">';
             myJobs.forEach(function(job) {
                 var xcVal = job.xcReward || job.xc || 0;
                 var endDate = job.endDate || job.deadline;
@@ -32253,7 +32261,11 @@ function ppRenderCheckpoints(el) {
                 var applied = Array.isArray(job.applicants) ? job.applicants.some(function (a) { return a && a.playerId === myId; }) : false;
                 var slotsFilled = (Array.isArray(job.hired) ? job.hired.length : 0) >= (job.slots || 1);
                 var borderCol = hired ? 'rgba(34,197,94,0.35)' : applied ? 'rgba(245,165,0,0.28)' : 'rgba(167,139,250,0.15)';
-                html += '<div data-job-row="' + escapeHtml(String(job.id || '')) + '" style="background:rgba(255,255,255,0.02);border:1px solid ' + borderCol + ';border-radius:14px;padding:18px;margin-bottom:10px;transition:box-shadow 0.3s ease, border-color 0.3s ease;">';
+                var __jobAcc = hired ? '34,197,94' : applied ? '245,165,0' : '167,139,250';
+                var __jobChip = hired ? ppCoverChip('✓ HIRED', '34,197,94') : applied ? ppCoverChip('◐ APPLIED', '245,165,0') : slotsFilled ? ppCoverChip('SLOTS FILLED', '156,163,175') : ppCoverChip('💼 OPEN', '167,139,250');
+                html += ppCardShellOpen({ accentRgb: __jobAcc, attrs: 'data-job-row="' + escapeHtml(String(job.id || '')) + '"' }) +
+                    ppCoverHtml(job, { icon: '💼', accentRgb: __jobAcc, title: job.title || 'Job', chips: (xcVal > 0 ? ppCoverChip('⚡ ' + xcVal + ' XC', '245,200,66') : '') + __jobChip }) +
+                    '<div class="pp-card-body">';
 
                 if (hired) {
                     html += '<div style="display:inline-block;background:rgba(34,197,94,0.15);color:#22c55e;font-size:9px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.14em;margin-bottom:8px;text-transform:uppercase;">✓ Hired — Assigned as Task</div>';
@@ -32262,8 +32274,8 @@ function ppRenderCheckpoints(el) {
                 }
 
                 html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px;">' +
-                    '<div style="flex:1;min-width:0;"><div style="font-family:\'Rajdhani\',sans-serif;font-size:18px;font-weight:900;color:#e0e6ff;">💼 ' + escapeHtml(job.title || 'Job') + '</div>' +
-                    (job.description ? '<div style="font-size:12px;color:#8a92b0;margin-top:4px;line-height:1.5;">' + escapeHtml(String(job.description).substring(0, 160)) + '</div>' : '') + '</div>' +
+                    '<div style="flex:1;min-width:0;"><div class="pp-card-title">💼 ' + escapeHtml(job.title || 'Job') + '</div>' +
+                    (job.description ? '<div class="pp-card-desc">' + escapeHtml(String(job.description).substring(0, 160)) + '</div>' : '') + '</div>' +
                     '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;">' +
                     (xcVal > 0 ? '<span style="background:rgba(245,200,66,0.16);color:#f5c842;padding:5px 12px;border-radius:12px;font-size:12px;font-weight:800;border:1px solid rgba(245,200,66,0.4);white-space:nowrap;box-shadow:0 0 10px rgba(245,200,66,0.14);">⚡ ' + xcVal + ' XC</span>' : '') +
                     (urgency && endDate ? '<span style="background:rgba(' + urgency.rgb + ',0.14);color:rgba(' + urgency.rgb + ',1);padding:4px 10px;border-radius:10px;font-size:10px;font-weight:700;border:1px solid rgba(' + urgency.rgb + ',0.35);white-space:nowrap;">📅 ' + urgency.label + '</span>' : '') +
@@ -32292,10 +32304,12 @@ function ppRenderCheckpoints(el) {
                     html += '<div style="margin-top:10px;"><button class="mc-btn" onclick="ppApplyForJob(\'' + (job.id || '') + '\')" style="font-size:12px;padding:9px 22px;background:rgba(167,139,250,0.14);border-color:rgba(167,139,250,0.4);color:#c4b5fd;font-weight:800;letter-spacing:0.06em;">📝 Apply for This Job</button></div>';
                 }
 
-                html += '</div>';
+                html += '</div></div>';
             });
+            html += '</div>';
 
             el.innerHTML = html;
+            try { if (typeof pflxApplyCardSize === 'function') pflxApplyCardSize('ppjobs'); } catch (e) {}
 
             // If we got here via a deep-link with a specific job id (Home
             // Base Job Board card click), scroll that row into view and
@@ -32723,14 +32737,18 @@ function ppRenderCheckpoints(el) {
             // identity), then checkpoint. Falls back to the plain title row
             // when no parent banner exists.
             var html = ppBreadcrumb(crumb);
-            var bannerSrc = (parentProj && parentProj.bannerImage) ? parentProj.bannerImage
-                          : (parentCp   && parentCp.bannerImage)   ? parentCp.bannerImage
-                          : '';
-            var bannerKicker = (parentProj && parentProj.bannerImage) ? ('PROJECT · ' + (parentProj.name || parentProj.title || ''))
-                              : (parentCp && parentCp.bannerImage)    ? ('CHECKPOINT · ' + (parentCp.name || ''))
-                              : '';
+            // v212 -- the task's own cover first, then its project's, then its
+            // checkpoint's (image, video, slideshow, HTML or embed).
+            var __tCov = (task.embedUrl || task.bannerImage) ? task
+                       : (parentProj && (parentProj.embedUrl || parentProj.bannerImage)) ? parentProj
+                       : (parentCp && (parentCp.embedUrl || parentCp.bannerImage)) ? parentCp : null;
+            var bannerSrc = __tCov ? (__tCov.bannerImage || '') : '';
+            var bannerKicker = !__tCov || __tCov === task ? ''
+                              : __tCov === parentProj ? ('PROJECT · ' + (parentProj.name || parentProj.title || ''))
+                              : ('CHECKPOINT · ' + (parentCp.name || ''));
             var taskBanner = ppBannerHeader({
                 image: bannerSrc,
+                embed: __tCov ? (__tCov.embedUrl || '') : '',
                 title: task.title || task.name || 'Task',
                 accent: '0,212,255',
                 titleFont: "'Rajdhani',sans-serif",
@@ -33105,7 +33123,8 @@ function ppRenderCheckpoints(el) {
         function ppRenderMyTasks(el) {
             var tasks = ppGetTasks().filter(ppItemAssignedToActivePlayer);
             var html = ppBreadcrumb([{ label: 'Home', view: 'home' }, { label: 'My Tasks', view: 'tasks' }]);
-            try { if (typeof pflxApplyCardSize === 'function') pflxApplyCardSize('pptasks'); } catch (e) {}
+            var __hidden = (typeof pflxMhpmHiddenHtml === 'function') ? pflxMhpmHiddenHtml('tasks') : '';
+            if (__hidden) { el.innerHTML = html + __hidden; return; }
             html += (typeof pflxCardSizeSliderHtml === 'function') ? pflxCardSizeSliderHtml('pptasks', 'Task') : '';
 
             // Per-player split (July 15): "done" means MY submission is approved,
@@ -33166,7 +33185,9 @@ function ppRenderCheckpoints(el) {
                     var statusChip = (pflxTaskStateForPlayer(t, __mtPid) === 'submitted')
                         ? '<span style="display:inline-block;background:rgba(245,165,0,0.14);color:#f5a500;font-size:9px;font-weight:800;padding:3px 8px;border-radius:5px;text-transform:uppercase;letter-spacing:0.06em;">◐ SUBMITTED</span>'
                         : '';
-                    cardHtml += '<div onclick="ppNav(\'task-detail\',{id:\'' + (t.id || '') + '\'})" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px;margin-bottom:8px;cursor:pointer;transition:background 0.15s ease;" onmouseover="this.style.background=\'rgba(30,30,42,0.7)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.02)\'">' +
+                    cardHtml += ppCardShellOpen({ accentRgb: '0,212,255', onclick: "ppNav('task-detail',{id:'" + escapeHtml(String(t.id || '')) + "'})" }) +
+                        ppCoverHtml(t, { icon: '📋', accentRgb: '0,212,255', title: t.title || t.name || 'Task', inherit: true, chips: statusChip ? ppCoverChip('◐ SUBMITTED', '245,165,0') : '' }) +
+                        '<div class="pp-card-body"><div style="display:flex;align-items:flex-start;gap:10px;">' +
                         // Left: empty-outline checkbox + priority dot
                         '<div style="width:22px;height:22px;border-radius:6px;background:rgba(255,255,255,0.02);border:2px solid rgba(255,255,255,0.15);flex-shrink:0;"></div>' +
                         priorityFlag +
@@ -33182,7 +33203,7 @@ function ppRenderCheckpoints(el) {
                         '<div style="display:flex;gap:6px;align-items:center;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">' +
                             dueChip + xcChip +
                         '</div>' +
-                    '</div>';
+                    '</div>' + ppTaskCardExtrasHtml(t) + '</div></div>';
                 
                 return cardHtml;
             });
@@ -33193,10 +33214,12 @@ function ppRenderCheckpoints(el) {
                 
                 var __taskCardsDone = done.map(function(t) {
                 var cardHtml = '';
-                    cardHtml += '<div onclick="ppNav(\'task-detail\',{id:\'' + (t.id || '') + '\'})" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(255,255,255,0.01);border:1px solid rgba(255,255,255,0.04);border-radius:10px;margin-bottom:4px;opacity:0.7;cursor:pointer;">' +
+                    cardHtml += ppCardShellOpen({ accentRgb: '34,197,94', onclick: "ppNav('task-detail',{id:'" + escapeHtml(String(t.id || '')) + "'})", dim: true }) +
+                        ppCoverHtml(t, { icon: '✅', accentRgb: '34,197,94', title: t.title || t.name || 'Task', inherit: true, chips: ppCoverChip('✓ DONE', '34,197,94') }) +
+                        '<div class="pp-card-body"><div style="display:flex;align-items:center;gap:10px;">' +
                         '<span style="font-size:14px;">✅</span>' +
                         '<span style="flex:1;font-size:12px;color:rgba(255,255,255,0.4);text-decoration:line-through;">' + escapeHtml(t.title || t.name || 'Task') + '</span>' +
-                        (t.xcReward || t.xc ? '<span style="font-size:11px;color:rgba(245,200,66,0.5);font-family:\'Share Tech Mono\',monospace;">+' + (t.xcReward || t.xc) + ' XC</span>' : '') + '</div>';
+                        (t.xcReward || t.xc ? '<span style="font-size:11px;color:rgba(245,200,66,0.5);font-family:\'Share Tech Mono\',monospace;">+' + (t.xcReward || t.xc) + ' XC</span>' : '') + '</div></div></div>';
                 
                 return cardHtml;
             });
@@ -33209,6 +33232,7 @@ function ppRenderCheckpoints(el) {
                 : __allCardsOrdered.join('');
             html += '<div id="ppmc-tasks-list">' + __taskSections + '</div>';
             el.innerHTML = html;
+            try { if (typeof pflxApplyCardSize === 'function') pflxApplyCardSize('pptasks'); } catch (e) {}
         }
 
         // ── PORTFOLIO — player-facing showcase of approved work ──
@@ -35284,9 +35308,9 @@ function ppRenderCheckpoints(el) {
         // pushed on every 'input' tick via pflxLiveResizeCards (cheap — one
         // style write); the chosen size is only written to localStorage on
         // 'change' (drag release) via pflxSetCardSize.
-        var PFLX_CARD_SIZE_DEFAULTS = { seasons: 900, programs: 520, checkpoints: 560, projects: 380, tasks: 900, ppprojects: 380, ppcheckpoints: 380, pptasks: 340, ppprograms: 380 };
-        var PFLX_CARD_SIZE_RANGE    = { seasons: [420, 1400], programs: [320, 900], checkpoints: [380, 900], projects: [260, 1400], tasks: [420, 1400], ppprojects: [260, 900], ppcheckpoints: [260, 900], pptasks: [220, 700], ppprograms: [260, 900] };
-        var PFLX_CARD_SIZE_LIST_ID  = { seasons: 'mc-seasons-list', programs: 'mc-programs-tab-list', checkpoints: 'mc-checkpoints-list', projects: 'mc-projects-list', tasks: 'mc-tasks-list', ppprojects: 'ppmc-projects-list', ppcheckpoints: 'ppmc-checkpoints-list', pptasks: 'ppmc-tasks-list', ppprograms: 'ppmc-programs-list' };
+        var PFLX_CARD_SIZE_DEFAULTS = { seasons: 900, programs: 520, checkpoints: 560, projects: 380, tasks: 900, ppprojects: 380, ppcheckpoints: 380, pptasks: 340, ppprograms: 380, jobs: 380, ppjobs: 360 };
+        var PFLX_CARD_SIZE_RANGE    = { seasons: [420, 1400], programs: [320, 900], checkpoints: [380, 900], projects: [260, 1400], tasks: [420, 1400], ppprojects: [260, 900], ppcheckpoints: [260, 900], pptasks: [220, 700], ppprograms: [260, 900], jobs: [280, 1000], ppjobs: [260, 900] };
+        var PFLX_CARD_SIZE_LIST_ID  = { seasons: 'mc-seasons-list', programs: 'mc-programs-tab-list', checkpoints: 'mc-checkpoints-list', projects: 'mc-projects-list', tasks: 'mc-tasks-list', ppprojects: 'ppmc-projects-list', ppcheckpoints: 'ppmc-checkpoints-list', pptasks: 'ppmc-tasks-list', ppprograms: 'ppmc-programs-list', jobs: 'mc-jobs-list', ppjobs: 'ppmc-jobs-list' };
         function pflxCardSizes() {
             try { return Object.assign({}, PFLX_CARD_SIZE_DEFAULTS, JSON.parse(localStorage.getItem('pflx_mc_card_sizes') || '{}')); }
             catch (e) { return Object.assign({}, PFLX_CARD_SIZE_DEFAULTS); }
@@ -35329,7 +35353,7 @@ function ppRenderCheckpoints(el) {
         function pflxCardSizeSliderHtml(key, label) {
             var range = PFLX_CARD_SIZE_RANGE[key] || [300, 900];
             var val = pflxCardSize(key);
-            return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;padding:8px 14px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:10px;">' +
+            return '<div class="pflx-card-size-bar" data-size-key="' + key + '">' +
                 '<span style="font-size:10px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.08em;font-family:Orbitron,sans-serif;white-space:nowrap;">&#x1F5B0; Card Size</span>' +
                 '<input type="range" min="' + range[0] + '" max="' + range[1] + '" step="20" value="' + val + '" ' +
                     'oninput="pflxLiveResizeCards(\'' + key + '\', this.value)" ' +
@@ -47545,8 +47569,9 @@ function ppRenderCheckpoints(el) {
 
             // Apply grid layout to container
             list.style.display = 'grid';
-            list.style.gridTemplateColumns = 'repeat(auto-fill, minmax(380px, 1fr))';
+            list.style.gridTemplateColumns = 'repeat(auto-fill, minmax(var(--pflx-card-min, 380px), 1fr))';
             list.style.gap = '20px';
+            try { var __jsz = document.getElementById('mc-jobs-sizer'); if (__jsz) __jsz.innerHTML = pflxCardSizeSliderHtml('jobs', 'Job'); pflxApplyCardSize('jobs'); } catch (e) {}
 
             list.innerHTML = filtered.map(function(j, i) {
                 var ri = mcJobs.indexOf(j);
@@ -70628,8 +70653,8 @@ RESPONSE RULES:
                 // Update new toolbar Host/Player toggle
                 var tbBtn = document.getElementById('toolbar-role-toggle');
                 var tbLbl = document.getElementById('tr-label-text');
-                if (tbLbl) tbLbl.textContent = role === 'host' ? 'HOST VIEW' : 'PLAYER VIEW';
-                if (tbBtn) tbBtn.title = role === 'host' ? 'Switch to Player View' : 'Switch back to Host View';
+                if (tbLbl) tbLbl.textContent = role === 'host' ? 'HOST MODE' : 'PLAYER MODE';
+                if (tbBtn) tbBtn.title = role === 'host' ? 'Switch to Player Mode' : 'Switch back to Host Mode';
                 // Broadcast to all sub-app iframes
                 if (typeof mcBroadcastToApps === 'function') {
                     mcBroadcastToApps('pflx_role_changed', { role: role });
@@ -70694,7 +70719,7 @@ RESPONSE RULES:
                 if (engTab) engTab.style.display = isAdmin ? '' : 'none';
                 if (liveTab) liveTab.style.display = isAdmin ? '' : 'none';
                 var tbLbl = document.getElementById('tr-label-text');
-                if (tbLbl) tbLbl.textContent = window.pflxRole === 'host' ? 'HOST VIEW' : 'PLAYER VIEW';
+                if (tbLbl) tbLbl.textContent = window.pflxRole === 'host' ? 'HOST MODE' : 'PLAYER MODE';
                 // Apply initial body gating class
                 document.body.classList.toggle('pflx-as-player', window.pflxRole === 'player' && isAdmin);
                 console.log('[PFLX] RolePill injected — isAdmin:', isAdmin, 'role:', role, 'pflxRole:', window.pflxRole);
@@ -70716,6 +70741,616 @@ RESPONSE RULES:
                 });
             };
         })();
+    </script>
+
+    <style>
+        /* ═══ v212 — MC Player Portal poster cards, pinned card-size slider,
+           Master Host Player Mode ═══ */
+        .pflx-card-size-bar {
+            position: sticky; top: 0; z-index: 40;
+            display: flex; align-items: center; gap: 10px;
+            margin-bottom: 14px; padding: 8px 14px;
+            background: rgba(10,14,26,0.88); border: 1px solid rgba(0,212,255,0.18); border-radius: 10px;
+            -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+            box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+        }
+        :is(#mc-checkpoints-sizer, #mc-tasks-sizer, #mc-projects-sizer, #mc-seasons-sizer, #mc-programs-tab-sizer, #mc-jobs-sizer) { position: sticky; top: 0; z-index: 40; }
+        [data-pflx-light="1"] .pflx-card-size-bar { background: rgba(255,255,255,0.92); border-color: var(--ink-border, rgba(15,23,42,0.18)); box-shadow: 0 6px 16px rgba(15,23,42,0.10); }
+        [data-pflx-skin="clouddesk"] .pflx-card-size-bar { background: rgba(246,247,249,0.95); border: 1px solid var(--td-line-strong, rgba(15,31,61,0.55)); }
+
+        .pp-item-card {
+            position: relative; display: flex; flex-direction: column; min-width: 0;
+            background: rgba(22,22,31,0.6); border: 1px solid rgba(var(--c),0.24); border-radius: 18px; overflow: hidden;
+            transition: transform 0.2s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+        }
+        .pp-item-card.pp-clickable { cursor: pointer; }
+        .pp-item-card.pp-clickable:hover { transform: translateY(-2px); border-color: rgba(var(--c),0.6); box-shadow: 0 10px 28px rgba(0,0,0,0.35), 0 0 18px rgba(var(--c),0.18); }
+        .pp-item-card.pp-dim { opacity: 0.82; }
+        .pp-cover { position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; background: #060a14; flex-shrink: 0; border-bottom: 1px solid rgba(var(--c),0.28); }
+        .pp-cover > img, .pp-cover > video, .pp-cover > iframe { width: 100%; height: 100%; object-fit: cover; display: block; border: 0; }
+        .pp-cover-fallback { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 0 16px; box-sizing: border-box; text-align: center;
+            background: radial-gradient(circle at 30% 20%, rgba(var(--c),0.28), transparent 60%), linear-gradient(135deg, rgba(var(--c),0.20), rgba(var(--c),0.04)); }
+        .pp-cover-icon { font-size: 40px; opacity: 0.7; line-height: 1; }
+        .pp-cover-compact .pp-cover-icon { font-size: 30px; }
+        .pp-cover-fb-title { font-family: Orbitron, sans-serif; font-size: 13px; font-weight: 800; letter-spacing: 0.06em; color: #e0e6ff; max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .pp-cover-chips { position: absolute; top: 8px; left: 8px; right: 48px; display: flex; flex-wrap: wrap; gap: 6px; pointer-events: none; z-index: 3; }
+        .pp-cover .pp-chip, .pp-item-card .pp-chip {
+            display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 12px;
+            font-size: 10px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap;
+            color: #fff !important; background: rgba(8,12,24,0.78); border: 1px solid rgba(var(--c),0.75);
+            box-shadow: 0 0 10px rgba(var(--c),0.3); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); text-shadow: none !important;
+        }
+        .pp-card-body { padding: 14px 16px 16px; display: flex; flex-direction: column; flex: 1; min-width: 0; }
+        .pp-card-title { font-family: 'Rajdhani', sans-serif; font-size: 18px; font-weight: 900; line-height: 1.2; color: #e8ecff; overflow-wrap: anywhere; }
+        .pp-card-desc { font-size: 12px; line-height: 1.5; color: #9aa3c2; margin-top: 6px; }
+        .pp-card-meta { font-size: 10.5px; font-family: 'Share Tech Mono', monospace; color: rgba(255,255,255,0.5); margin-top: 6px; }
+        .pp-card-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: rgba(255,255,255,0.5); }
+        .pp-card-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; padding-top: 12px; }
+        .pp-card-actions:empty { display: none; }
+        [data-pflx-light="1"] .pp-item-card { background: var(--panel-light, #fff); box-shadow: 0 4px 14px rgba(15,23,42,0.08); }
+        [data-pflx-light="1"] .pp-item-card .pp-card-title { color: var(--ink-strong, #0f172a); }
+        [data-pflx-light="1"] .pp-item-card .pp-card-desc { color: var(--ink-mid, #475569); }
+        [data-pflx-light="1"] .pp-item-card :is(.pp-card-meta, .pp-card-label) { color: var(--ink-soft, #5b6779); }
+        [data-pflx-light="1"] .pp-cover-fb-title { color: var(--ink-strong, #0f172a); }
+        [data-pflx-skin="clouddesk"] .pp-item-card { background: linear-gradient(180deg, var(--td-plate, #f6f7f9), var(--td-plate-2, #e6eaef)); border-color: var(--td-line-strong, rgba(15,31,61,0.55)); }
+        [data-pflx-skin="clouddesk"] .pp-cover { border-bottom: 2px solid var(--td-midnight, #0f1f3d); }
+
+        /* Cover media controls */
+        .pflx-cover-btn { position: absolute; z-index: 4; width: 30px; height: 30px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.25);
+            background: rgba(8,12,24,0.72) !important; color: #fff !important; font-size: 14px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
+        .pflx-cover-btn:hover { background: rgba(0,212,255,0.35) !important; }
+        .pflx-cover-sound { right: 8px; bottom: 8px; }
+        .pflx-cover-fs { right: 44px; bottom: 8px; }
+        .pflx-cover-slides { position: relative; width: 100%; height: 100%; background: #000; overflow: hidden; }
+        .pflx-cover-slides img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.7s ease; }
+        .pflx-cover-slides img.on { opacity: 1; }
+        .pflx-cs-prev { left: 8px; top: 50%; transform: translateY(-50%); }
+        .pflx-cs-next { right: 8px; top: 50%; transform: translateY(-50%); }
+        .pflx-cover-slides:not(:hover) .pflx-cs-prev, .pflx-cover-slides:not(:hover) .pflx-cs-next { opacity: 0; }
+        .pflx-cs-dots { position: absolute; left: 0; right: 0; bottom: 8px; display: flex; justify-content: center; gap: 5px; z-index: 3; pointer-events: none; }
+        .pflx-cs-dots i { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,0.4); box-shadow: 0 0 4px rgba(0,0,0,0.6); }
+        .pflx-cs-dots i.on { background: #fff; }
+        .pflx-cover-video:fullscreen video, video:fullscreen { object-fit: contain !important; }
+
+        /* Master Host Player Mode */
+        .pflx-mhpm-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 14px; padding: 10px 14px; border-radius: 12px;
+            background: linear-gradient(90deg, rgba(245,200,66,0.14), rgba(0,212,255,0.08)); border: 1px solid rgba(245,200,66,0.4); }
+        .pflx-mhpm-tag { font-family: Orbitron, sans-serif; font-size: 11px; font-weight: 900; letter-spacing: 0.12em; color: #f5c842; }
+        .pflx-mhpm-txt { flex: 1; min-width: 200px; font-size: 12px; opacity: 0.85; }
+        [data-pflx-light="1"] .pflx-mhpm-tag { color: #8a5300; }
+        .pflx-mhpm-modal { position: fixed; inset: 0; z-index: 100050; background: rgba(4,8,18,0.72); display: flex; align-items: center; justify-content: center; padding: 16px; }
+        .pflx-mhpm-box { width: min(560px, 100%); max-height: 88vh; overflow: auto; background: #0d1426; color: #e8ecff; border: 1px solid rgba(245,200,66,0.45); border-radius: 16px; padding: 18px 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+        #pflx-mhpm-modal .pflx-mhpm-box { color: #e8ecff !important; }
+        #pflx-mhpm-modal .pflx-mhpm-box :not(button, .pflx-mhpm-head, .pflx-mhpm-head *) { color: inherit !important; }
+        .pflx-mhpm-head { display: flex; justify-content: space-between; align-items: center; font-family: Orbitron, sans-serif; font-weight: 900; letter-spacing: 0.1em; }
+        #pflx-mhpm-modal .pflx-mhpm-head, #pflx-mhpm-modal .pflx-mhpm-head span { color: #f5c842 !important; }
+        #pflx-mhpm-modal .pflx-mhpm-head button { background: none; border: 0; font-size: 18px; cursor: pointer; color: #e8ecff !important; }
+        .pflx-mhpm-sub { font-size: 12px; opacity: 0.7; margin: 8px 0 12px; line-height: 1.5; }
+        .pflx-mhpm-sec { font-family: Orbitron, sans-serif; font-size: 10px; letter-spacing: 0.14em; opacity: 0.6; margin: 14px 0 6px; }
+        .pflx-mhpm-opt { display: block; font-size: 13px; margin: 4px 0; cursor: pointer; }
+        .pflx-mhpm-opt span { opacity: 0.55; font-size: 11px; }
+        .pflx-mhpm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 12px; font-size: 12px; margin-top: 6px; }
+        .pflx-mhpm-grid label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+        .pflx-mhpm-grid.off { opacity: 0.45; }
+        .pflx-mhpm-foot { display: flex; gap: 8px; align-items: center; margin-top: 18px; flex-wrap: wrap; }
+
+        /* Detail-banner overlay text stays white on its dark wash in every skin */
+        [data-pflx-light="1"] .pflx-on-media, [data-pflx-light="1"] .pflx-on-media[style] { color: #ffffff !important; text-shadow: 0 2px 14px rgba(0,0,0,0.9) !important; }
+    </style>
+    <!-- ═══ PATCH PLATFORM v212 — MC Player Portal host parity (16:9 covers,
+         pinned card-size slider) + Master Host Player Mode ═══ -->
+    <script>
+    (function () {
+        function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+        function toast(msg, kind) { try { if (typeof window.pflxToast === 'function') window.pflxToast(msg, kind || 'info'); } catch (e) {} }
+        function sb() { return (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null; }
+        function arr(name) {
+            try {
+                switch (name) {
+                    case 'mcProjects': return (typeof mcProjects !== 'undefined' && Array.isArray(mcProjects)) ? mcProjects : [];
+                    case 'mcCheckpoints': return (typeof mcCheckpoints !== 'undefined' && Array.isArray(mcCheckpoints)) ? mcCheckpoints : [];
+                    case 'mcTasks': return (typeof mcTasks !== 'undefined' && Array.isArray(mcTasks)) ? mcTasks : [];
+                    case 'mcPrograms': return (typeof mcPrograms !== 'undefined' && Array.isArray(mcPrograms)) ? mcPrograms : [];
+                    case 'mcSeasons': return (typeof mcSeasons !== 'undefined' && Array.isArray(mcSeasons)) ? mcSeasons : [];
+                    case 'mcJobs': return (typeof mcJobs !== 'undefined' && Array.isArray(mcJobs)) ? mcJobs : [];
+                    case 'mcPlayers': return (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) ? mcPlayers : [];
+                    case 'mcCohortGroups': return (typeof mcCohortGroups !== 'undefined' && Array.isArray(mcCohortGroups)) ? mcCohortGroups : [];
+                }
+            } catch (e) {}
+            return [];
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        // 1. COVER MEDIA — images, videos, image slideshows, HTML files,
+        //    Canva / Google Slides / YouTube / Vimeo / Drive embeds.
+        //    Every cover renders in a 16:9 frame (the frame is the caller's).
+        // ─────────────────────────────────────────────────────────────
+        var VIDEO_RE = /\.(mp4|webm|ogv|ogg|mov|m4v)(\?|#|$)/i;
+        function isVideo(u) {
+            u = String(u || '').trim();
+            return !!u && (VIDEO_RE.test(u) || /\/storage\/v1\/object\/public\/pflx-theater\//i.test(u) || /^data:video\//i.test(u));
+        }
+        function slidesOf(u) {
+            var m = String(u || '').trim().match(/^slideshow:([\s\S]+)$/i);
+            if (!m) return null;
+            var list = m[1].split(/[|\n]/).map(function (x) { return x.trim(); }).filter(function (x) { return /^(https?:|data:image\/)/i.test(x); });
+            return list.length ? list : null;
+        }
+        window.pflxIsCoverVideo = isVideo;
+        window.pflxCoverSlides = slidesOf;
+        var _uid = 0;
+        function uid(p) { _uid += 1; return p + '-' + Date.now().toString(36) + '-' + _uid; }
+        function videoHtml(src, poster) {
+            var id = uid('pflx-cv');
+            return '<div class="pflx-cover-video" style="position:relative;width:100%;height:100%;background:#000;">' +
+                '<video id="' + id + '" src="' + esc(src) + '"' + (poster && !isVideo(poster) ? ' poster="' + esc(poster) + '"' : '') +
+                    ' muted autoplay loop playsinline preload="metadata" style="width:100%;height:100%;object-fit:cover;display:block;"></video>' +
+                '<button type="button" class="pflx-cover-btn pflx-cover-sound" title="Sound on/off" onclick="event.stopPropagation();pflxCoverToggleSound(\'' + id + '\', this)">🔇</button>' +
+                '<button type="button" class="pflx-cover-btn pflx-cover-fs" title="Fullscreen" onclick="event.stopPropagation();pflxToggleEmbedFullscreen(\'' + id + '\')">⛶</button>' +
+            '</div>';
+        }
+        function slidesHtml(list) {
+            var id = uid('pflx-cs');
+            return '<div id="' + id + '" class="pflx-cover-slides" data-i="0" data-n="' + list.length + '">' +
+                list.map(function (src, i) {
+                    return '<img src="' + esc(src) + '" alt="" draggable="false" class="' + (i === 0 ? 'on' : '') + '" loading="lazy">';
+                }).join('') +
+                (list.length > 1
+                    ? '<button type="button" class="pflx-cover-btn pflx-cs-prev" title="Previous" onclick="event.stopPropagation();pflxCoverSlide(\'' + id + '\',-1)">‹</button>' +
+                      '<button type="button" class="pflx-cover-btn pflx-cs-next" title="Next" onclick="event.stopPropagation();pflxCoverSlide(\'' + id + '\',1)">›</button>' +
+                      '<div class="pflx-cs-dots">' + list.map(function (_, i) { return '<i class="' + (i === 0 ? 'on' : '') + '"></i>'; }).join('') + '</div>'
+                    : '') +
+            '</div>';
+        }
+        window.pflxCoverSlide = function (id, dir, to) {
+            var el = document.getElementById(id); if (!el) return;
+            var imgs = el.querySelectorAll('img'); var dots = el.querySelectorAll('.pflx-cs-dots i');
+            var n = imgs.length; if (n < 2) return;
+            var i = parseInt(el.getAttribute('data-i') || '0', 10) || 0;
+            var next = (typeof to === 'number') ? to : ((i + dir) % n + n) % n;
+            el.setAttribute('data-i', String(next));
+            for (var k = 0; k < n; k++) {
+                imgs[k].classList.toggle('on', k === next);
+                if (dots[k]) dots[k].classList.toggle('on', k === next);
+            }
+            el.setAttribute('data-t', String(Date.now()));
+        };
+        // Auto-advance every visible slideshow (paused while hovered, and for
+        // 8s after a manual click).
+        setInterval(function () {
+            try {
+                if (document.hidden) return;
+                var now = Date.now();
+                document.querySelectorAll('.pflx-cover-slides').forEach(function (el) {
+                    if (el.matches(':hover')) return;
+                    if (now - (parseInt(el.getAttribute('data-t') || '0', 10) || 0) < 8000) return;
+                    if (!el.offsetParent) return;
+                    window.pflxCoverSlide(el.id, 1);
+                    el.setAttribute('data-t', '0');
+                });
+            } catch (e) {}
+        }, 4500);
+        window.pflxCoverToggleSound = function (id, btn) {
+            var v = document.getElementById(id); if (!v) return;
+            v.muted = !v.muted;
+            if (!v.muted) { try { v.volume = 1; var p = v.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {} }
+            if (btn) btn.textContent = v.muted ? '🔇' : '🔊';
+        };
+        function driveEmbed(u) {
+            var m = String(u || '').match(/drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?(?:export=\w+&)?id=)([A-Za-z0-9_-]{10,})/);
+            return m ? 'https://drive.google.com/file/d/' + m[1] + '/preview' : null;
+        }
+        var _origCover = window.pflxCoverMediaEl;
+        window.pflxCoverMediaEl = function (embedUrl, imgUrl) {
+            var e = String(embedUrl || '').trim();
+            var im = String(imgUrl || '').trim();
+            var sl = slidesOf(e) || (!e ? slidesOf(im) : null);
+            if (sl) return slidesHtml(sl);
+            if (e && isVideo(e)) return videoHtml(e, im);
+            if (!e && isVideo(im)) return videoHtml(im, '');
+            var d = driveEmbed(e); if (d) e = d;
+            var out = (typeof _origCover === 'function') ? _origCover(e, im) : (im ? '<img src="' + esc(im) + '" style="width:100%;height:100%;object-fit:cover;display:block;">' : '');
+            return String(out || '').replace(/<iframe (?!loading=)/g, '<iframe loading="lazy" ');
+        };
+        // The embed-field hint learns the new cover kinds.
+        var _origHint = window.pflxEmbedHint;
+        window.pflxEmbedHint = function (el, hintId) {
+            var v = String((el && el.value) || '').trim();
+            var box = document.getElementById(hintId);
+            var sl = slidesOf(v);
+            if (box && sl) { box.innerHTML = '<div style="margin-top:6px;font-size:11px;color:rgba(34,197,94,0.9);">&#x2713; Image slideshow cover — ' + sl.length + ' slide' + (sl.length === 1 ? '' : 's') + ', auto-advancing, 16:9.</div>'; return; }
+            if (box && isVideo(v)) { box.innerHTML = '<div style="margin-top:6px;font-size:11px;color:rgba(34,197,94,0.9);word-break:break-all;">&#x2713; Video cover — plays muted on a loop; players can turn the sound on.</div>'; return; }
+            if (box && driveEmbed(v)) { box.innerHTML = '<div style="margin-top:6px;font-size:11px;color:rgba(34,197,94,0.9);">&#x2713; Google Drive file — framed with Drive\'s own player (the file must be shared "Anyone with the link").</div>'; return; }
+            if (typeof _origHint === 'function') return _origHint(el, hintId);
+        };
+
+        // Host cover uploads: a video file, or several images as a slideshow.
+        window.pflxUploadCoverVideo = async function (file, inputId, hintId) {
+            try {
+                if (!file) return;
+                if (!/^video\//i.test(file.type || '')) { toast('Please choose a video file (MP4, WebM or MOV).', 'error'); return; }
+                if (file.size > 50 * 1024 * 1024) { toast('That video is over 50 MB — trim it or paste a YouTube / Drive link instead.', 'error'); return; }
+                var c = sb(); if (!c || !c.storage) { toast('Storage unavailable — try again in a moment.', 'error'); return; }
+                toast('Uploading video cover…', 'info');
+                var safe = String(file.name || 'cover.mp4').replace(/[^A-Za-z0-9._-]/g, '_').slice(-60);
+                var path = 'covers/' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '-' + safe;
+                var res = await c.storage.from('pflx-theater').upload(path, file, { contentType: file.type, upsert: false });
+                if (res && res.error) { toast('Upload failed: ' + res.error.message, 'error'); return; }
+                var pub = c.storage.from('pflx-theater').getPublicUrl(path);
+                var url = pub && pub.data && pub.data.publicUrl;
+                if (!url) { toast('Upload failed.', 'error'); return; }
+                var inp = document.getElementById(inputId);
+                if (inp) { inp.value = url; window.pflxEmbedHint(inp, hintId); }
+                toast('Video cover ready — Save to apply.', 'success');
+                return url;
+            } catch (e) { console.warn('[cover-video] upload failed', e); toast('Upload failed.', 'error'); }
+        };
+        function fileToDataUrl(file) {
+            return new Promise(function (res, rej) { var r = new FileReader(); r.onload = function (e) { res(e.target.result); }; r.onerror = rej; r.readAsDataURL(file); });
+        }
+        window.pflxUploadCoverSlides = async function (files, inputId, hintId) {
+            try {
+                files = Array.prototype.slice.call(files || []).filter(function (f) { return /^image\//i.test(f.type || ''); });
+                if (!files.length) { toast('Pick one or more images for the slideshow.', 'error'); return; }
+                if (files.length > 20) files = files.slice(0, 20);
+                toast('Uploading ' + files.length + ' slide' + (files.length === 1 ? '' : 's') + '…', 'info');
+                var urls = [];
+                for (var i = 0; i < files.length; i++) {
+                    var dataUrl;
+                    try { dataUrl = (typeof _mcDownscaleImageDataUrl === 'function') ? await _mcDownscaleImageDataUrl(files[i], 1600, 900, 0.82) : await fileToDataUrl(files[i]); }
+                    catch (e) { dataUrl = await fileToDataUrl(files[i]); }
+                    var url = (typeof window.pflxUploadBannerToStorage === 'function') ? await window.pflxUploadBannerToStorage(dataUrl, 'slides') : null;
+                    if (!url || !/^https?:/i.test(url)) { toast('Slide ' + (i + 1) + ' could not be stored — skipped.', 'error'); continue; }
+                    urls.push(url);
+                }
+                if (!urls.length) return;
+                var inp = document.getElementById(inputId);
+                if (inp) { inp.value = 'slideshow:' + urls.join('|'); window.pflxEmbedHint(inp, hintId); }
+                toast('Slideshow cover ready (' + urls.length + ') — Save to apply.', 'success');
+                return urls;
+            } catch (e) { console.warn('[cover-slides] upload failed', e); toast('Upload failed.', 'error'); }
+        };
+        // Add the two upload buttons beside each cover field's
+        // "Upload Artifact HTML" button (Program, Checkpoint, Project forms).
+        function addCoverButtons() {
+            ['mc-program-tab-embed', 'mc-cp-embed', 'mc-project-embed'].forEach(function (id) {
+                var inp = document.getElementById(id);
+                if (!inp || inp.getAttribute('data-v212')) return;
+                inp.setAttribute('data-v212', '1');
+                try { inp.type = 'text'; } catch (e) {}
+                inp.placeholder = 'Paste a Canva, Google Slides, YouTube, Vimeo, Drive or video link — or upload an HTML file, a video, or slideshow images below. Blank = use the cover image.';
+                var hint = id + '-hint';
+                var row = document.createElement('div');
+                row.className = 'pflx-cover-upload-row';
+                row.style.cssText = 'margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;';
+                row.innerHTML =
+                    '<label class="mc-btn" style="padding:4px 12px;font-size:10px;cursor:pointer;">🎬 Upload Video <input type="file" accept="video/*" style="display:none;" onchange="pflxUploadCoverVideo(this.files[0], \'' + id + '\', \'' + hint + '\'); this.value=\'\';"></label>' +
+                    '<label class="mc-btn" style="padding:4px 12px;font-size:10px;cursor:pointer;">🖼 Upload Slideshow <input type="file" accept="image/*" multiple style="display:none;" onchange="pflxUploadCoverSlides(this.files, \'' + id + '\', \'' + hint + '\'); this.value=\'\';"></label>' +
+                    '<span style="font-size:10px;opacity:0.55;align-self:center;">Covers show at 16:9 for every player.</span>';
+                var box = document.getElementById(hint);
+                var after = box && box.nextElementSibling ? box.nextElementSibling : box;
+                if (after && after.parentNode) after.parentNode.insertBefore(row, after.nextSibling);
+            });
+        }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addCoverButtons); else addCoverButtons();
+        setTimeout(addCoverButtons, 3000);
+
+        // ─────────────────────────────────────────────────────────────
+        // 2. PLAYER PORTAL CARD KIT — the host's poster-card look.
+        // ─────────────────────────────────────────────────────────────
+        window.ppCoverChip = function (label, rgb) {
+            return '<span class="pp-chip" style="--c:' + (rgb || '0,212,255') + ';">' + label + '</span>';
+        };
+        function coverParents(item) {
+            var out = [];
+            try {
+                var pjs = arr('mcProjects'), cps = arr('mcCheckpoints');
+                var proj = null;
+                if (item.projectId) proj = pjs.find(function (p) { return p && p.id === item.projectId; });
+                if (!proj && item.id) proj = pjs.find(function (p) { return p && Array.isArray(p.taskIds) && p.taskIds.indexOf(item.id) >= 0; });
+                if (proj) out.push(proj);
+                var cpId = item.roundId || item.checkpointId || (proj && (proj.checkpointId || proj.roundId)) || null;
+                var cp = cpId ? cps.find(function (c) { return c && c.id === cpId; }) : null;
+                if (!cp && item.id) cp = cps.find(function (c) { return c && ((Array.isArray(c.taskIds) && c.taskIds.indexOf(item.id) >= 0) || (Array.isArray(c.projectIds) && c.projectIds.indexOf(item.id) >= 0)); });
+                if (!cp && proj) cp = cps.find(function (c) { return c && Array.isArray(c.projectIds) && c.projectIds.indexOf(proj.id) >= 0; });
+                if (cp) out.push(cp);
+            } catch (e) {}
+            return out;
+        }
+        window.ppCoverParents = coverParents;
+        window.ppCoverHtml = function (item, o) {
+            o = o || {}; item = item || {};
+            var acc = o.accentRgb || '0,212,255';
+            var e = item.embedUrl || '', im = item.bannerImage || item.coverImage || '';
+            if (!e && !im && o.inherit) {
+                // A task with no cover of its own borrows its project's (then
+                // checkpoint's) STILL art only -- a list of 40 tasks must not
+                // mount 40 live decks or videos. The live cover is one click
+                // away on the task's detail page.
+                var ps = coverParents(item);
+                for (var i = 0; i < ps.length; i++) {
+                    var pim = ps[i].bannerImage || '';
+                    var psl = slidesOf(ps[i].embedUrl) || slidesOf(pim);
+                    if (psl) { im = psl[0]; break; }
+                    if (pim && !isVideo(pim)) { im = pim; break; }
+                }
+            }
+            var media = (e || im)
+                ? window.pflxCoverMediaEl(e, im)
+                : '<div class="pp-cover-fallback"><span class="pp-cover-icon">' + (o.icon || '') + '</span>' +
+                    (o.compact ? '' : '<span class="pp-cover-fb-title">' + esc(o.title || '') + '</span>') + '</div>';
+            return '<div class="pp-cover' + (o.compact ? ' pp-cover-compact' : '') + '" style="--c:' + acc + ';">' + media +
+                (o.chips ? '<div class="pp-cover-chips">' + o.chips + '</div>' : '') + '</div>';
+        };
+        window.ppCardShellOpen = function (o) {
+            o = o || {};
+            return '<div class="pp-item-card' + (o.onclick ? ' pp-clickable' : '') + (o.dim ? ' pp-dim' : '') + '" ' + (o.attrs || '') +
+                ' style="--c:' + (o.accentRgb || '0,212,255') + ';"' + (o.onclick ? ' onclick="' + o.onclick + '"' : '') + '>';
+        };
+        window.ppTaskCardExtrasHtml = function (t) {
+            try {
+                var out = '';
+                var ps = coverParents(t || {});
+                var pjs = arr('mcProjects');
+                var names = ps.map(function (p) { return (pjs.indexOf(p) !== -1 ? '🎬 ' : '🏁 ') + esc(p.name || p.title || ''); });
+                if (t && t.description) out += '<div class="pp-card-desc">' + esc(String(t.description).substring(0, 140)) + '</div>';
+                if (names.length) out += '<div class="pp-card-meta">↪ ' + names.join(' · ') + '</div>';
+                return out;
+            } catch (e) { return ''; }
+        };
+
+        // ─────────────────────────────────────────────────────────────
+        // 3. MASTER HOST PLAYER MODE — in Player Mode a Master Host is a
+        //    player in every cohort (auto-joins new ones), sees every active
+        //    Program / Checkpoint / Project / Task / Job, and can narrow any
+        //    of it. Settings live per host in app_data 'pflx_master_player_mode'
+        //    ({ [hostId]: { cohortMode, cohorts, show, updatedAt } }) — a small
+        //    row of its own, so this never rewrites the shared players row
+        //    and never adds the host to any real cohort roster, leaderboard
+        //    or completion count.
+        // ─────────────────────────────────────────────────────────────
+        var MH_KEY = 'pflx_master_player_mode';
+        var SHOW_KEYS = ['programs', 'checkpoints', 'projects', 'tasks', 'jobs'];
+        var SHOW_LABELS = { programs: '📐 Programs', checkpoints: '🏁 Checkpoints', projects: '🎬 Projects', tasks: '📋 Tasks', jobs: '💼 Job Board' };
+        var MH = window.pflxMhpmState = { cfg: null, loading: null, memo: null };
+        try { MH.cfg = JSON.parse(localStorage.getItem('pflx_mhpm_cache') || 'null'); } catch (e) {}
+        function isMasterSession(s) {
+            if (!s) return false;
+            try { if (typeof window.pflxHostTier === 'function') return window.pflxHostTier(s) === 'master'; } catch (e) {}
+            return String(s.role || '').toLowerCase() === 'admin';
+        }
+        window.pflxMhpmActive = function () {
+            try {
+                if (window.pflxRole !== 'player') return false;
+                if (typeof window.pflxMimicIsActive === 'function' && window.pflxMimicIsActive()) return false;
+                var s = window.activeSession;
+                return !!(s && s.id && isMasterSession(s));
+            } catch (e) { return false; }
+        };
+        function defaults() { var sh = {}; SHOW_KEYS.forEach(function (k) { sh[k] = true; }); return { cohortMode: 'all', cohorts: [], show: sh, updatedAt: 0 }; }
+        window.pflxMhpmSettings = function (id) {
+            id = id || ((window.activeSession || {}).id);
+            var d = defaults();
+            var c = (MH.cfg && id && MH.cfg[id]) || null;
+            if (!c) return d;
+            var sh = Object.assign({}, d.show, c.show || {});
+            return { cohortMode: c.cohortMode === 'custom' ? 'custom' : 'all', cohorts: Array.isArray(c.cohorts) ? c.cohorts.slice() : [], show: sh, updatedAt: c.updatedAt || 0 };
+        };
+        function normTag(t) { return String(t == null ? '' : t).trim(); }
+        function badTag(t) { var k = t.toLowerCase(); return !k || k === 'n/a' || k === 'na' || k === 'all' || k === 'none' || k === 'undefined' || k === 'null'; }
+        // Every cohort PFLX knows about: cohort groups, player rosters, and
+        // every cohort tag on a Season / Program / Checkpoint / Project /
+        // Task / Job. Player ids that sit in assignedTo are skipped.
+        window.pflxMhpmAllCohorts = function () {
+            var now = Date.now();
+            if (MH.memo && now - MH.memo.at < 1500) return MH.memo.list.slice();
+            var seen = {}, list = [];
+            function add(t) {
+                String(t == null ? '' : t).split(/[,;]/).forEach(function (part) {
+                    var v = normTag(part); if (badTag(v)) return;
+                    var k = v.toLowerCase(); if (seen[k]) return; seen[k] = 1; list.push(v);
+                });
+            }
+            var groups = arr('mcCohortGroups');
+            var groupById = {};
+            groups.forEach(function (g) { if (g && g.name) { add(g.name); if (g.id) groupById[g.id] = g.name; } });
+            var players = arr('mcPlayers');
+            var playerIds = {};
+            players.forEach(function (p) {
+                if (!p) return;
+                if (p.id) playerIds[p.id] = 1;
+                if (p.role === 'admin' || p.isHost) return;
+                if (p.cohort) add(p.cohort);
+                if (Array.isArray(p.cohorts)) p.cohorts.forEach(add);
+            });
+            function tagOf(x) { x = normTag(x); if (!x) return ''; if (groupById[x]) return groupById[x]; if (playerIds[x]) return ''; if (/^(player|admin|h|p)-/i.test(x)) return ''; return x; }
+            ['mcSeasons', 'mcPrograms', 'mcCheckpoints', 'mcProjects', 'mcTasks', 'mcJobs'].forEach(function (n) {
+                arr(n).forEach(function (it) {
+                    if (!it) return;
+                    if (it.cohort) add(tagOf(it.cohort));
+                    ['cohorts', 'cohortIds', 'assignedTo'].forEach(function (f) { if (Array.isArray(it[f])) it[f].forEach(function (x) { add(tagOf(x)); }); });
+                });
+            });
+            list.sort(function (a, b) { return a.toLowerCase() < b.toLowerCase() ? -1 : 1; });
+            MH.memo = { at: now, list: list };
+            return list.slice();
+        };
+        // The cohorts the Master Host belongs to right now, or null when
+        // Master Host Player Mode is not active (callers keep their own rule).
+        window.pflxMhpmCohorts = function () {
+            if (!window.pflxMhpmActive()) return null;
+            var st = window.pflxMhpmSettings();
+            if (st.cohortMode === 'custom') return st.cohorts.slice();
+            var all = window.pflxMhpmAllCohorts();
+            try {
+                var s = window.activeSession || {};
+                (Array.isArray(s.cohorts) ? s.cohorts : []).concat(s.cohort ? [s.cohort] : []).forEach(function (c) {
+                    c = normTag(c); if (!badTag(c) && all.indexOf(c) === -1) all.push(c);
+                });
+            } catch (e) {}
+            return all;
+        };
+        window.pflxMhpmShows = function (type) {
+            if (!window.pflxMhpmActive()) return true;
+            var st = window.pflxMhpmSettings();
+            return st.show[type] !== false;
+        };
+        window.pflxMhpmHiddenHtml = function (type) {
+            if (window.pflxMhpmShows(type)) return '';
+            return '<div class="mc-card" style="text-align:center;padding:36px;">' +
+                '<div style="font-size:40px;margin-bottom:10px;">🙈</div>' +
+                '<div style="font-family:Orbitron,sans-serif;font-size:13px;letter-spacing:2px;opacity:0.7;">' + esc((SHOW_LABELS[type] || type).replace(/^\S+\s/, '').toUpperCase()) + ' HIDDEN IN YOUR PLAYER MODE</div>' +
+                '<div style="font-size:12px;opacity:0.5;margin-top:8px;">You turned this off in your Master Host Player Mode settings.</div>' +
+                '<button class="mc-btn" style="margin-top:14px;" onclick="pflxMhpmOpenSettings()">⚙ Player Mode settings</button></div>';
+        };
+        async function loadCfg() {
+            var c = sb(); if (!c) return MH.cfg;
+            try {
+                var res = await c.from('app_data').select('data').eq('key', MH_KEY).maybeSingle();
+                var d = (res && res.data && res.data.data) || {};
+                MH.cfg = (d && typeof d === 'object') ? d : {};
+                try { localStorage.setItem('pflx_mhpm_cache', JSON.stringify(MH.cfg)); } catch (e) {}
+            } catch (e) { console.warn('[mhpm] load failed', e); }
+            return MH.cfg;
+        }
+        window.pflxMhpmLoad = function (force) {
+            if (MH.loading && !force) return MH.loading;
+            MH.loading = loadCfg();
+            return MH.loading;
+        };
+        // Read-merge-write: only this host's entry changes, and only if ours
+        // is newer than the stored one.
+        window.pflxMhpmSave = async function (settings) {
+            var s = window.activeSession || {};
+            if (!s.id || !isMasterSession(s)) { toast('Only a Master Host can change Player Mode settings.', 'error'); return false; }
+            var entry = {
+                cohortMode: settings.cohortMode === 'custom' ? 'custom' : 'all',
+                cohorts: (settings.cohorts || []).map(normTag).filter(function (x) { return !badTag(x); }),
+                show: Object.assign({}, defaults().show, settings.show || {}),
+                updatedAt: Date.now(),
+                by: s.brand || s.name || s.id
+            };
+            var c = sb();
+            var cur = {};
+            if (c) {
+                try {
+                    var res = await c.from('app_data').select('data').eq('key', MH_KEY).maybeSingle();
+                    cur = (res && res.data && res.data.data) || {};
+                } catch (e) { cur = Object.assign({}, MH.cfg || {}); }
+            }
+            var next = Object.assign({}, cur);
+            if (next[s.id] && (next[s.id].updatedAt || 0) > entry.updatedAt) { MH.cfg = next; toast('A newer Player Mode setting was saved elsewhere — reloaded it.', 'info'); return false; }
+            next[s.id] = entry;
+            MH.cfg = next;
+            try { localStorage.setItem('pflx_mhpm_cache', JSON.stringify(next)); } catch (e) {}
+            if (c) {
+                try {
+                    var w = await c.from('app_data').upsert({ key: MH_KEY, data: next, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+                    if (w && w.error) { toast('Could not save Player Mode settings: ' + w.error.message, 'error'); return false; }
+                } catch (e) { toast('Could not save Player Mode settings.', 'error'); return false; }
+            }
+            MH.memo = null;
+            return true;
+        };
+        function rerender() {
+            try { if (typeof mcRenderPlayerDashPreview === 'function') mcRenderPlayerDashPreview(); } catch (e) {}
+        }
+        window.pflxMhpmOpenSettings = async function () {
+            if (!window.activeSession || !isMasterSession(window.activeSession)) return;
+            await window.pflxMhpmLoad(true);
+            var st = window.pflxMhpmSettings();
+            var all = window.pflxMhpmAllCohorts();
+            st.cohorts.forEach(function (c) { if (all.indexOf(c) === -1) all.push(c); });
+            var old = document.getElementById('pflx-mhpm-modal'); if (old) old.remove();
+            var m = document.createElement('div');
+            m.id = 'pflx-mhpm-modal';
+            m.className = 'pflx-mhpm-modal';
+            m.innerHTML =
+                '<div class="pflx-mhpm-box" onclick="event.stopPropagation()">' +
+                    '<div class="pflx-mhpm-head"><span>🎮 MASTER HOST · PLAYER MODE</span><button type="button" onclick="document.getElementById(\'pflx-mhpm-modal\').remove()">✕</button></div>' +
+                    '<div class="pflx-mhpm-sub">In Player Mode you take part as a player. You are a member of every cohort unless you pick specific ones. Your host records, rosters and leaderboards are not changed.</div>' +
+                    '<div class="pflx-mhpm-sec">COHORT MEMBERSHIP</div>' +
+                    '<label class="pflx-mhpm-opt"><input type="radio" name="mhpm-mode" value="all"' + (st.cohortMode === 'all' ? ' checked' : '') + ' onchange="pflxMhpmModeUi()"> Every cohort <span>(joins new cohorts automatically · ' + all.length + ' now)</span></label>' +
+                    '<label class="pflx-mhpm-opt"><input type="radio" name="mhpm-mode" value="custom"' + (st.cohortMode === 'custom' ? ' checked' : '') + ' onchange="pflxMhpmModeUi()"> Only the cohorts I pick</label>' +
+                    '<div id="pflx-mhpm-cohorts" class="pflx-mhpm-grid">' +
+                        (all.length ? all.map(function (c) {
+                            var on = st.cohortMode === 'all' || st.cohorts.map(function (x) { return x.toLowerCase(); }).indexOf(c.toLowerCase()) !== -1;
+                            return '<label><input type="checkbox" value="' + esc(c) + '"' + (on ? ' checked' : '') + '> ' + esc(c) + '</label>';
+                        }).join('') : '<div style="opacity:.5;font-size:12px;">No cohorts yet.</div>') +
+                    '</div>' +
+                    '<div class="pflx-mhpm-sec">SHOW IN PLAYER MODE</div>' +
+                    '<div class="pflx-mhpm-grid">' + SHOW_KEYS.map(function (k) {
+                        return '<label><input type="checkbox" data-show="' + k + '"' + (st.show[k] !== false ? ' checked' : '') + '> ' + SHOW_LABELS[k] + '</label>';
+                    }).join('') + '</div>' +
+                    '<div class="pflx-mhpm-foot">' +
+                        '<button type="button" class="mc-btn" onclick="pflxMhpmEditProfile()">👤 Edit my player profile</button>' +
+                        '<span style="flex:1"></span>' +
+                        '<button type="button" class="mc-btn" onclick="document.getElementById(\'pflx-mhpm-modal\').remove()">Cancel</button>' +
+                        '<button type="button" class="mc-btn mc-btn-green" id="pflx-mhpm-save" onclick="pflxMhpmSaveFromUi()">Save</button>' +
+                    '</div>' +
+                '</div>';
+            m.onclick = function () { m.remove(); };
+            document.body.appendChild(m);
+            window.pflxMhpmModeUi();
+        };
+        window.pflxMhpmModeUi = function () {
+            var m = document.getElementById('pflx-mhpm-modal'); if (!m) return;
+            var sel = m.querySelector('input[name="mhpm-mode"]:checked');
+            var custom = sel && sel.value === 'custom';
+            var box = document.getElementById('pflx-mhpm-cohorts');
+            if (box) {
+                box.classList.toggle('off', !custom);
+                box.querySelectorAll('input').forEach(function (i) { i.disabled = !custom; if (!custom) i.checked = true; });
+            }
+        };
+        window.pflxMhpmSaveFromUi = async function () {
+            var m = document.getElementById('pflx-mhpm-modal'); if (!m) return;
+            var sel = m.querySelector('input[name="mhpm-mode"]:checked');
+            var mode = sel ? sel.value : 'all';
+            var cohorts = [];
+            m.querySelectorAll('#pflx-mhpm-cohorts input:checked').forEach(function (i) { cohorts.push(i.value); });
+            var show = {};
+            m.querySelectorAll('input[data-show]').forEach(function (i) { show[i.getAttribute('data-show')] = !!i.checked; });
+            var btn = document.getElementById('pflx-mhpm-save'); if (btn) btn.disabled = true;
+            var ok = await window.pflxMhpmSave({ cohortMode: mode, cohorts: cohorts, show: show });
+            if (ok) { m.remove(); toast('Player Mode settings saved.', 'success'); }
+            else if (btn) btn.disabled = false;
+            rerender();
+        };
+        // "Just like any other player": the normal Player editor, on the
+        // Master Host's own roster record.
+        window.pflxMhpmEditProfile = function () {
+            var s = window.activeSession || {};
+            try { var m = document.getElementById('pflx-mhpm-modal'); if (m) m.remove(); } catch (e) {}
+            try { if (typeof window.pflxSetRole === 'function') window.pflxSetRole('host'); } catch (e) {}
+            try { if (typeof mcNav === 'function') mcNav('players'); } catch (e) {}
+            setTimeout(function () { try { if (typeof mcEditPlayer === 'function') mcEditPlayer(s.id); } catch (e) {} }, 60);
+        };
+        // Status strip at the top of every Player Portal view.
+        window.pflxMhpmBarHtml = function () {
+            if (!window.pflxMhpmActive()) return '';
+            var st = window.pflxMhpmSettings();
+            var n = (window.pflxMhpmCohorts() || []).length;
+            var hidden = SHOW_KEYS.filter(function (k) { return st.show[k] === false; }).map(function (k) { return SHOW_LABELS[k].replace(/^\S+\s/, ''); });
+            return '<div class="pflx-mhpm-bar" id="pflx-mhpm-bar">' +
+                '<span class="pflx-mhpm-tag">🎮 PLAYER MODE</span>' +
+                '<span class="pflx-mhpm-txt">Master Host as a player · ' + (st.cohortMode === 'all' ? 'member of <b>every cohort</b> (' + n + ')' : 'member of <b>' + n + '</b> cohort' + (n === 1 ? '' : 's')) +
+                    (hidden.length ? ' · hidden: ' + esc(hidden.join(', ')) : '') + '</span>' +
+                '<button type="button" class="mc-btn" onclick="pflxMhpmOpenSettings()">⚙ Player Mode settings</button>' +
+            '</div>';
+        };
+        window.pflxMhpmDecorate = function (container) {
+            try {
+                if (!container) return;
+                var old = container.querySelector('#pflx-mhpm-bar'); if (old) old.remove();
+                var bar = window.pflxMhpmBarHtml();
+                if (bar) container.insertAdjacentHTML('afterbegin', bar);
+                if (window.pflxMhpmActive() && !MH.cfg && !MH.loading) window.pflxMhpmLoad().then(rerender);
+            } catch (e) {}
+        };
+        // Pull the settings once a Master Host session exists (cheap, one row).
+        setTimeout(function () { try { if (window.activeSession && isMasterSession(window.activeSession)) window.pflxMhpmLoad(); } catch (e) {} }, 4000);
+    })();
     </script>
 
     <!-- FLP PHASE SUBMISSIONS MODAL — opened when host clicks a submissions chip

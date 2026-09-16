@@ -5,6 +5,14 @@
 // the sidebar HTML). Extracts the REAL shipped functions via string
 // markers -- never a reimplementation.
 const fs = require('fs');
+
+// v212 -- player cards now use the shared poster-card kit (ppCardShellOpen /
+// ppCoverHtml / ppCoverChip / ppTaskCardExtrasHtml, defined in the v212
+// module). Stubbed here like every other dependency these sandboxes inject.
+global.ppCardShellOpen = global.ppCardShellOpen || function (o) { o = o || {}; return '<div class="pp-item-card"' + (o.attrs ? ' ' + o.attrs : '') + (o.onclick ? ' onclick="' + o.onclick + '"' : '') + '>'; };
+global.ppCoverHtml = global.ppCoverHtml || function (item, o) { item = item || {}; o = o || {}; return '<div class="pp-cover">' + (item.bannerImage ? '<img src="' + item.bannerImage + '">' : '<span class="pp-cover-icon">' + (o.icon || '') + '</span>') + (o.chips ? '<div class="pp-cover-chips">' + o.chips + '</div>' : '') + '</div>'; };
+global.ppCoverChip = global.ppCoverChip || function (label) { return '<span class="pp-chip">' + label + '</span>'; };
+global.ppTaskCardExtrasHtml = global.ppTaskCardExtrasHtml || function () { return ''; };
 const src = fs.readFileSync(process.argv[2], 'utf8');
 
 function extractBetween(startMarker, endMarker, fromIndex) {
