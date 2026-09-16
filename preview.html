@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 224;
+      window.PFLX_PATCH   = 225;
       window.PFLX_BUILD   = '2026.09';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -6573,6 +6573,22 @@
         .pflx-toast.error { border-color: rgba(239,68,68,0.3); }
         .pflx-toast.error .pflx-toast-icon { color: #ef4444; }
         .pflx-toast-icon { font-size: 18px; }
+        /* ═══ PFLX FX KIT (Sept 16) -- shared "something happened" pop, reused
+           across toasts/badge awards/team drafts/tab switches. Generalizes the
+           Cyber Timer's flash+pulse pattern into one reusable, accent-aware
+           (var(--cyan)) class instead of one-off bespoke keyframes per feature. ═══ */
+        @keyframes pflxFxPop {
+            0%   { transform: scale(0.75); opacity: 0; }
+            55%  { transform: scale(1.12); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .pflx-fx-pop { animation: pflxFxPop 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+        @keyframes pflxFxGlowPulse {
+            0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--cyan, #00f0ff) 55%, transparent); }
+            70%  { box-shadow: 0 0 0 14px color-mix(in srgb, var(--cyan, #00f0ff) 0%, transparent); }
+            100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--cyan, #00f0ff) 0%, transparent); }
+        }
+        .pflx-fx-glow-pulse { animation: pflxFxGlowPulse 0.9s ease-out; }
         .pflx-toast-msg { flex: 1; }
 
         /* ── Gallery delete overlay ── */
@@ -26326,8 +26342,15 @@
             var el = document.getElementById('pflx-toast');
             if (!el) return;
             el.className = 'pflx-toast ' + type;
-            el.querySelector('.pflx-toast-icon').textContent = type === 'success' ? '✓' : type === 'error' ? '✕' : 'ℹ';
+            var icon = el.querySelector('.pflx-toast-icon');
+            icon.textContent = type === 'success' ? '✓' : type === 'error' ? '✕' : 'ℹ';
             el.querySelector('.pflx-toast-msg').textContent = msg;
+            // PFLX FX Kit -- retrigger the shared pop animation every call (remove,
+            // force reflow, re-add) so back-to-back toasts each get a fresh pop,
+            // not just the first one.
+            icon.classList.remove('pflx-fx-pop');
+            void icon.offsetWidth;
+            icon.classList.add('pflx-fx-pop');
             if (_pflxToastTimer) clearTimeout(_pflxToastTimer);
             requestAnimationFrame(function() { el.classList.add('show'); });
             _pflxToastTimer = setTimeout(function() { el.classList.remove('show'); }, 3000);
@@ -58850,6 +58873,8 @@ function ppRenderCheckpoints(el) {
             });
         };
         window.xbotLiveSwitchSubTab = function (tab) {
+            var wasActive = document.querySelector('.xbot-live-subtab.active');
+            var isChange = !wasActive || wasActive.getAttribute('data-subtab') !== tab;
             document.querySelectorAll('.xbot-live-subtab').forEach(function (b) {
                 b.classList.toggle('active', b.getAttribute('data-subtab') === tab);
             });
@@ -58859,8 +58884,17 @@ function ppRenderCheckpoints(el) {
             var panels = { sessions: 'xbot-live-sessions-panel', teams: 'xbot-live-teams-panel', theater: 'xbot-live-theater-panel', sound: 'xbot-live-sound-panel', controller: 'xbot-live-controller-panel', tools: 'xbot-live-tools-panel' };
             Object.keys(panels).forEach(function (key) {
                 var el = document.getElementById(panels[key]);
-                if (el) el.style.display = (key === tab) ? 'block' : 'none';
+                if (!el) return;
+                el.style.display = (key === tab) ? 'block' : 'none';
+                // PFLX FX Kit -- pop the newly-shown panel in on a real tab change
+                // (not a same-tab reclick, and not on first render before any tab was active).
+                if (key === tab && isChange && wasActive) {
+                    el.classList.remove('pflx-fx-pop');
+                    void el.offsetWidth;
+                    el.classList.add('pflx-fx-pop');
+                }
             });
+            if (isChange && wasActive && typeof pflxPlaySfx === 'function') pflxPlaySfx('nav');
             if (tab === 'teams') window.pflxXBotRenderTeams();
             if (tab === 'theater') window.xbotTheaterRenderList();
             if (tab === 'sound') window.xbotSoundboardRenderGrid();
@@ -58886,6 +58920,7 @@ function ppRenderCheckpoints(el) {
                 return;
             }
             var roster = window.pflxXBotTeamRoster();
+            var justDrafted = !!window._xbotTeamsJustDrafted, colIdx = 0;
             var cols = names.map(function (nm) {
                 var members = roster.filter(function (p) { return cfg.teams.assign[p.id] === nm; });
                 var totalXc = members.reduce(function (s, p) { return s + (p.xcoin || 0); }, 0);
@@ -58897,13 +58932,16 @@ function ppRenderCheckpoints(el) {
                         '<div style="font-family:\'Rajdhani\',sans-serif;font-size:11px;font-weight:600;color:#e0e6ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;">' + escapeHtml(pname) + '</div>' +
                         '<div style="font-size:10px;color:#5c6488;">⇄</div></div>';
                 }).join('');
-                return '<div style="border-top:3px solid ' + col + ';background:rgba(255,255,255,0.02);border-radius:10px;padding:10px;min-width:0;">' +
+                var popStyle = justDrafted ? (' pflx-fx-pop" style="animation-delay:' + (colIdx * 0.06) + 's;border-top:3px solid ' + col + ';background:rgba(255,255,255,0.02);border-radius:10px;padding:10px;min-width:0;') : ('" style="border-top:3px solid ' + col + ';background:rgba(255,255,255,0.02);border-radius:10px;padding:10px;min-width:0;');
+                colIdx++;
+                return '<div class="' + popStyle + '">' +
                     '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">' +
                     '<div style="width:12px;height:12px;border-radius:4px;background:' + col + ';flex-shrink:0;"></div>' +
                     '<div style="font-family:\'Orbitron\',sans-serif;font-size:10px;font-weight:700;color:#fff;letter-spacing:0.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(nm) + '</div>' +
                     '<div style="font-family:\'Orbitron\',sans-serif;font-size:10px;font-weight:700;color:#ffd166;">' + totalXc.toLocaleString() + '</div>' +
                     '</div>' + (rows || '<div style="font-size:10px;color:#5c6488;text-align:center;padding:8px;">empty</div>') + '</div>';
             }).join('');
+            justDrafted = false; window._xbotTeamsJustDrafted = false;
             grid.innerHTML = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">' +
                 '<button onclick="pflxXBotTeamsShuffle()" style="flex:1;padding:7px;background:rgba(0,255,150,0.1);border:1px solid rgba(0,255,150,0.3);border-radius:6px;color:#00ff96;font-family:\'Orbitron\',sans-serif;font-size:9px;letter-spacing:0.5px;cursor:pointer;">🔀 SHUFFLE</button>' +
                 '<button onclick="pflxXBotTeamsRerollNames()" style="flex:1;padding:7px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.16);border-radius:6px;color:#c9cfe8;font-family:\'Orbitron\',sans-serif;font-size:9px;letter-spacing:0.5px;cursor:pointer;">🎲 NAMES</button>' +
@@ -58923,6 +58961,8 @@ function ppRenderCheckpoints(el) {
             cfg.teams = { names: names, assign: assign };
             await window.pflxXBotSaveCfg(cfg);
             window._xbotLiveCfg = cfg;
+            window._xbotTeamsJustDrafted = true;
+            if (typeof pflxPlaySfx === 'function') pflxPlaySfx('success');
             window.pflxXBotRenderTeams();
         };
         window.pflxXBotTeamsShuffle = async function () {
@@ -58935,6 +58975,8 @@ function ppRenderCheckpoints(el) {
             cfg.teams.assign = assign;
             await window.pflxXBotSaveCfg(cfg);
             window._xbotLiveCfg = cfg;
+            window._xbotTeamsJustDrafted = true;
+            if (typeof pflxPlaySfx === 'function') pflxPlaySfx('success');
             window.pflxXBotRenderTeams();
         };
         window.pflxXBotTeamsRerollNames = async function () {
@@ -58951,6 +58993,8 @@ function ppRenderCheckpoints(el) {
             cfg.teams = { names: fresh, assign: assign };
             await window.pflxXBotSaveCfg(cfg);
             window._xbotLiveCfg = cfg;
+            window._xbotTeamsJustDrafted = true;
+            if (typeof pflxPlaySfx === 'function') pflxPlaySfx('success');
             window.pflxXBotRenderTeams();
         };
         window.pflxXBotTeamsMovePlayer = async function (pid) {

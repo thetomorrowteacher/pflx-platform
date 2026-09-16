@@ -35,8 +35,18 @@ function makeSandbox(players) {
   const saveCalls = [];
   const teamsGrid = { innerHTML: '' };
   const teamNInput = { value: '2' };
-  const sessionsPanel = { style: {} };
-  const teamsPanel = { style: {} };
+  function mkPanelClassList(set) {
+    return {
+      remove: function (c) { set.delete(c); },
+      add: function (c) { set.add(c); },
+      toggle: function (c, on) { if (on) set.add(c); else set.delete(c); },
+      contains: function (c) { return set.has(c); },
+    };
+  }
+  const sessionsPanelClasses = new Set();
+  const teamsPanelClasses = new Set();
+  const sessionsPanel = { style: {}, offsetWidth: 0, classList: mkPanelClassList(sessionsPanelClasses) };
+  const teamsPanel = { style: {}, offsetWidth: 0, classList: mkPanelClassList(teamsPanelClasses) };
   const subtabs = [
     { attr: 'sessions', classes: new Set(['xbot-live-subtab', 'active']) },
     { attr: 'teams', classes: new Set(['xbot-live-subtab']) },
