@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 222;
+      window.PFLX_PATCH   = 223;
       window.PFLX_BUILD   = '2026.09';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -5595,6 +5595,8 @@
         @media (max-width: 560px) { .psl-row { flex-wrap: wrap; } .psl-acts { width: 100%; justify-content: flex-end; } }
         /* v207 -- Live Theater (synced stream in the Theater pop-out) */
         .ptl-wrap { display:flex; flex-direction:column; }
+        .ptl-else { position:absolute; left:8px; top:8px; z-index:3; max-width:calc(100% - 16px); padding:5px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.22); background:rgba(5,8,20,0.86); color:#e6ebff; font-family:'Rajdhani',sans-serif; font-size:12px; cursor:pointer; text-align:left; }
+        .ptl-else b { color:#7fefff; font-family:'Orbitron',sans-serif; font-size:9.5px; letter-spacing:1px; }
         .ptl-tap { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:2; padding:12px 18px; border-radius:10px; border:1px solid #ff3b5c; background:rgba(10,4,12,0.9); color:#fff; font-family:'Orbitron',sans-serif; font-size:11px; letter-spacing:1px; cursor:pointer; box-shadow:0 0 24px rgba(255,59,92,0.5); }
         .ptl-meta { display:flex; align-items:center; gap:8px; padding:6px 8px; font-family:'Rajdhani',sans-serif; font-size:12px; color:#dfe4ff; min-width:0; }
         .ptl-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
@@ -73077,6 +73079,7 @@ RESPONSE RULES:
             }
             function queueVideo(vid, how) {
                 var v = card(vid); if (!v) return;
+                if (how === 'now' && H.preview && H.preview.videoId === vid) closePreview();   // v223: don't play it twice
                 enqueue(v, how).then(function (r) {
                     if (r) toast(how === 'now' ? '📡 Playing for the class: ' + v.title : '＋ Added to the class queue: ' + v.title, 'success');
                 });
@@ -73111,6 +73114,11 @@ RESPONSE RULES:
             // ── personal preview (one player, just for this person) ──
             function preview(it, from) {
                 if (!it) return;
+                try {   // v223: the class is already playing this video -> watch it there (one sound)
+                    var T = window.pflxTheaterLive, st = T && T.state;
+                    var pos = (st && window.pflxTheaterLiveIsActive && window.pflxTheaterLiveIsActive()) ? window.pflxTheaterLivePosition(st, Date.now(), T.skew) : null;
+                    if (pos && !pos.paused && it.videoId && pos.item && pos.item.videoId === it.videoId && !it.live) { window.pflxTheaterLiveOpenPip(true); return; }
+                } catch (e) {}
                 H.preview = { source: it.source || 'youtube', videoId: it.videoId || '', ref: it.ref || '', title: it.title || '', live: !!it.live, thumb: it.thumb || '', channel: it.channel || '' };
                 if (isYTItem(H.preview)) { reg(H.preview); try { var y = YT(); if (y && y.logWatch) y.logWatch(H.preview.videoId, H.preview.title, from || H.tab || 'live'); } catch (e) {} }
                 renderPreview();
@@ -73152,6 +73160,7 @@ RESPONSE RULES:
                 H.previewKey = key;
                 el.innerHTML = p ? previewHtml(p) : '';
                 el.style.display = p ? '' : 'none';
+                if (p && window.pflxSoundOwner && !window.pflxSoundOwner.here()) window.pflxSoundOwner.claim();   // opening a preview = sound here
                 if (window.PFLX_AUDIO) { try { window.PFLX_AUDIO.refresh(); } catch (e) {} }
             }
 
@@ -73163,6 +73172,7 @@ RESPONSE RULES:
                 var host = hostView();
                 var pos = on ? window.pflxTheaterLivePosition(st, Date.now(), T.skew) : null;
                 var key = on ? [st.id, st.rev, pos && pos.index, st.paused, host].join('|') : 'off|' + host;
+                if (on && pos && !pos.paused && H.preview && !H.preview.live && H.preview.videoId && pos.item && pos.item.videoId === H.preview.videoId) closePreview();   // v223: one sound
                 if (key === H.stageKey && el.childElementCount) return;
                 H.stageKey = key;
                 if (!on || !pos) {
@@ -73735,6 +73745,161 @@ RESPONSE RULES:
                 },
                 _merge: { items: mergeItems, dec: mergeDec, pending: pendingOf },
                 _state: function () { return H; }
+            };
+        })();
+    </script>
+    <script>
+        // ═══════════════════════════════════════════════════════════════════
+        // PATCH v223 -- ONE SOUND PER PERSON (Sep 16, Ennis: "playing 2 sounds
+        // at the same time ... like an echo")
+        //  The same person can have PFLX open in several windows (a browser tab
+        //  and the desktop app, two tabs...). Each window joined the class
+        //  stream and every live timer/show FX, so everything played twice with
+        //  a small delay. Now only ONE window per person makes live sound: the
+        //  one used last (any click or key press claims it). The others keep
+        //  the picture in sync, muted; the class stream shows PLAY SOUND HERE.
+        //  Windows agree over a per-person Supabase broadcast channel (works
+        //  across browsers and the desktop app) plus a BroadcastChannel (same
+        //  browser). Newest claim wins (tie -> larger tab id); an owner that
+        //  goes quiet for 25 s or closes hands the sound to a visible window.
+        //  Covers: Theater live stream, countdowns + show FX (PflxFx), UI SFX
+        //  (pflxPlaySfx), X-Bot speech, and sub-apps (X-Live) via a
+        //  'pflx_audio_owner' message.
+        // ═══════════════════════════════════════════════════════════════════
+        window.pflxSoundOwner = (function () {
+            function rid() { return 'tab_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8); }
+            var AU = { tab: rid(), owner: null, at: 0, seen: 0, peerAt: 0, uid: '', ch: null, bc: null, timer: null, ticks: 0, listeners: [], lastHere: null };
+            function client() { return (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null; }
+            function uidNow() { var s = window.activeSession; return (s && s.id) ? String(s.id) : ''; }
+            function here() {
+                if (!AU.uid) return true;                 // not signed in: nothing to share
+                if (AU.owner === AU.tab) return true;
+                if (!AU.owner && !AU.timer) return true;  // nobody else claims it
+                return false;
+            }
+            function newer(at, tab) { return at > AU.at || (at === AU.at && String(tab) > String(AU.owner || '')); }
+            function send(t) {
+                if (!AU.uid) return;
+                var msg = { t: t, uid: AU.uid, tab: AU.tab, at: AU.at };
+                try { if (AU.bc) AU.bc.postMessage(msg); } catch (e) {}
+                try { if (AU.ch) AU.ch.send({ type: 'broadcast', event: 'audio', payload: msg }); } catch (e) {}
+            }
+            function changed() {
+                var h = here();
+                if (h === AU.lastHere) return;
+                AU.lastHere = h;
+                AU.listeners.forEach(function (fn) { try { fn(h); } catch (e) {} });
+                try {
+                    var s = JSON.stringify({ type: 'pflx_audio_owner', here: h });
+                    document.querySelectorAll('iframe').forEach(function (f) { try { if (f.contentWindow) f.contentWindow.postMessage(s, '*'); } catch (e) {} });
+                } catch (e) {}
+                if (!h) { try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) {} }
+            }
+            function connect() {
+                var uid = uidNow();
+                if (!uid || AU.uid === uid) return !!AU.uid;
+                AU.uid = uid; AU.owner = null; AU.at = 0;
+                try { if (AU.bc) AU.bc.close(); } catch (e) {}
+                try { var c0 = client(); if (AU.ch && c0 && c0.removeChannel) c0.removeChannel(AU.ch); } catch (e) {}
+                AU.bc = null; AU.ch = null;
+                try { AU.bc = new BroadcastChannel('pflx-audio-' + uid); AU.bc.onmessage = function (e) { onMsg(e && e.data); }; } catch (e) {}
+                try {
+                    var c = client();
+                    if (c && c.channel) {
+                        AU.ch = c.channel('pflx-audio-' + uid, { config: { broadcast: { self: false } } })
+                            .on('broadcast', { event: 'audio' }, function (p) { onMsg(p && p.payload); })
+                            .subscribe();
+                    }
+                } catch (e) {}
+                join(visibleWait());
+                return true;
+            }
+            function claim() {
+                if (!connect() && !AU.uid) return;
+                clearTimeout(AU.timer); AU.timer = null;
+                AU.at = Math.max(Date.now(), AU.at + 1);
+                AU.owner = AU.tab; AU.seen = Date.now();
+                send('claim');
+                changed();
+            }
+            function visibleWait() { return document.visibilityState === 'visible' ? 900 + Math.floor(Math.random() * 400) : 2200 + Math.floor(Math.random() * 1500); }
+            // ask whether another window has the sound; take it if nobody answers
+            function join(wait) {
+                if (!AU.uid || AU.owner === AU.tab) return;
+                if (AU.owner && Date.now() - AU.seen < 25000) { changed(); return; }
+                if (AU.timer) return;
+                AU.owner = null;
+                send('hello');
+                AU.timer = setTimeout(function () {
+                    AU.timer = null;
+                    if (AU.owner && AU.owner !== AU.tab && Date.now() - AU.seen < 25000) { changed(); return; }
+                    claim();
+                }, wait);
+                changed();
+            }
+            function onMsg(d) {
+                if (!d || !AU.uid || d.uid !== AU.uid || d.tab === AU.tab) return;
+                AU.peerAt = Date.now();
+                if (d.t === 'peer') return;
+                if (d.t === 'hello') { if (AU.owner === AU.tab) send('beat'); return; }
+                if (d.t === 'release') {
+                    if (d.tab !== AU.owner) return;
+                    AU.owner = null; AU.seen = 0;
+                    join(visibleWait());
+                    return;
+                }
+                if (d.t === 'claim' || d.t === 'beat') {
+                    if (newer(+d.at || 0, d.tab)) {
+                        AU.owner = d.tab; AU.at = +d.at || 0; AU.seen = Date.now();
+                        clearTimeout(AU.timer); AU.timer = null;
+                        changed();
+                    } else if (d.tab === AU.owner) {
+                        AU.seen = Date.now();
+                    } else if (AU.owner === AU.tab) {
+                        send('claim');   // an older claimant: remind it who has the sound
+                    }
+                }
+            }
+            function tick() {
+                connect();
+                if (!AU.uid) return;
+                AU.ticks++;
+                if (AU.owner === AU.tab) { if (Date.now() - AU.peerAt < 120000) send('beat'); return; }
+                if (AU.ticks % 6 === 0) send('peer');   // keeps the owner's heartbeat going
+                if (AU.owner && Date.now() - AU.seen > 25000) { AU.owner = null; join(visibleWait()); }
+            }
+            // using a window = wanting its sound
+            function onUse() { if (!AU.uid) { connect(); return; } if (AU.owner !== AU.tab) claim(); }
+            ['pointerdown', 'keydown'].forEach(function (ev) { document.addEventListener(ev, onUse, true); });
+            window.addEventListener('pagehide', function () { if (AU.owner === AU.tab) { send('release'); AU.owner = null; AU.timer = -1; } });
+            window.addEventListener('pageshow', function (e) { if (e && e.persisted && AU.uid) { AU.timer = null; AU.owner = null; join(visibleWait()); } });
+            // sub-apps (X-Live) report use and ask for the current state
+            window.addEventListener('message', function (e) {
+                var m = e && e.data;
+                if (typeof m === 'string') { if (m.indexOf('pflx_audio_') < 0) return; try { m = JSON.parse(m); } catch (er) { return; } }
+                if (!m || typeof m.type !== 'string') return;
+                if (m.type === 'pflx_audio_use') onUse();
+                else if (m.type === 'pflx_audio_query') { try { e.source && e.source.postMessage(JSON.stringify({ type: 'pflx_audio_owner', here: here() }), '*'); } catch (er) {} }
+            });
+            setInterval(tick, 5000);
+            setTimeout(tick, 1500);
+
+            // gates: speech + UI SFX (the countdown engine and the Theater read here() directly)
+            function wrap(name) {
+                var orig = window[name];
+                if (typeof orig !== 'function' || orig._plxSound) return;
+                var w = function () { if (!here()) return; return orig.apply(this, arguments); };
+                w._plxSound = true;
+                window[name] = w;
+            }
+            setTimeout(function () { wrap('pflxPlaySfx'); wrap('pflxSpeak'); }, 0);
+            setTimeout(function () { wrap('pflxPlaySfx'); wrap('pflxSpeak'); }, 4000);
+
+            return {
+                here: here, claim: claim,
+                onChange: function (fn) { AU.listeners.push(fn); },
+                state: function () { return { tab: AU.tab, owner: AU.owner, here: here(), uid: AU.uid, at: AU.at, waiting: !!AU.timer }; },
+                _msg: onMsg
             };
         })();
     </script>
@@ -82646,7 +82811,7 @@ RESPONSE RULES:
             soundRoot: '/public/sounds/',
             shakeSelector: 'body',
             pillTop: '64px',
-            isMuted: function () { var p = sePrefs(); return !!(p && (p.muteAll || p.sfxOn === false)); },
+            isMuted: function () { var p = sePrefs(); if (window.pflxSoundOwner && !window.pflxSoundOwner.here()) return true; return !!(p && (p.muteAll || p.sfxOn === false)); },   // v223
             volume: function () { var p = sePrefs(); var v = p && typeof p.volume === 'number' ? p.volume : 0.8; return Math.max(0.35, Math.min(1, v * 1.15)); },
             onDuck: function (on) {
                 try {
@@ -82941,6 +83106,27 @@ RESPONSE RULES:
     (function () {
         var KEY = 'pflx_theater_live';
         var DRIFT_S = 2.5;
+        // v223: one sound per person (window.pflxSoundOwner)
+        function soundHere() { return !window.pflxSoundOwner || window.pflxSoundOwner.here(); }
+        function soundApply() {
+            var m = T.media, h = soundHere();
+            try {
+                if (!h && m && m.kind === 'yt' && m.player && m.player.mute) m.player.mute();
+                if (!h && m && m.kind === 'video') m.el.muted = true;
+                if (!h && m && m.kind === 'tiktok') ttPost(m.el, 'mute');
+                if (h && m && m.kind === 'yt' && m.player && m.player.unMute) m.player.unMute();
+                if (h && m && m.kind === 'video') m.el.muted = false;
+                if (h && m && m.kind === 'tiktok') ttPost(m.el, 'unMute');
+            } catch (e) {}
+            var b = document.getElementById('ptl-elsewhere'); if (b) b.style.display = h ? 'none' : '';
+            if (window.PFLX_AUDIO) { try { window.PFLX_AUDIO.refresh(); } catch (e) {} }
+        }
+        function soundIsLiveEl(el) {
+            var m = T.media;
+            if (!el || !m) return false;
+            return el.id === 'pflx-theater-live-yt' || !!(m.el && m.el === el);
+        }
+        setTimeout(function () { if (window.pflxSoundOwner) window.pflxSoundOwner.onChange(soundApply); }, 0);
         var MAX_UPLOAD = 50 * 1024 * 1024;
         var BUCKET = 'pflx-theater';
         var T = window.pflxTheaterLive = {
@@ -83472,10 +83658,12 @@ RESPONSE RULES:
         function shellHtml() {
             return '<div class="ptl-wrap"><div class="ptl-video" id="ptl-stage"></div>' +
                 '<button class="ptl-tap" id="ptl-tap" onclick="pflxTheaterLiveTap()" style="display:none;">🔊 TAP TO JOIN THE LIVE STREAM</button>' +
+                '<button class="ptl-else" id="ptl-elsewhere" onclick="pflxTheaterLiveTap()" style="display:none;" title="Sound plays in one PFLX window at a time">🔇 Sound is on in your other PFLX window · <b>PLAY SOUND HERE</b></button>' +
                 '<div class="ptl-meta"><span class="ptl-live">● LIVE</span><span class="ptl-src" id="ptl-src"></span><span class="ptl-title" id="ptl-title"></span><span class="ptl-count" id="ptl-count"></span></div></div>';
         }
         window.pflxTheaterLiveTap = function () {
             var b = document.getElementById('ptl-tap'); if (b) b.style.display = 'none';
+            if (!soundHere() && window.pflxSoundOwner) window.pflxSoundOwner.claim();   // v223
             var m = T.media;
             try {
                 if (m && m.kind === 'yt' && m.player) { m.player.unMute(); m.player.playVideo(); }
@@ -83498,6 +83686,7 @@ RESPONSE RULES:
                 T.ownsPip = true;
             }
             if (!pipOpen() && typeof window.pflxPipOpen === 'function') window.pflxPipOpen('pip-theater');
+            soundApply();   // v223
             if (window._xbotTheaterWatchingId) { window._xbotTheaterWatchingId = null; render(); }
             sync();
             renderChip();
@@ -83595,7 +83784,7 @@ RESPONSE RULES:
                         videoId: it.videoId, width: '100%', height: '100%',
                         playerVars: { autoplay: 1, start: Math.floor(it.live ? 0 : pos.pos), playsinline: 1, rel: 0, modestbranding: 1, controls: 1, disablekb: isHost() ? 0 : 1, origin: location.origin },
                         events: {
-                            onReady: function () { m.readyAt = Date.now(); m.ready = true; if (window.PFLX_AUDIO) window.PFLX_AUDIO.refresh(); sync(); },
+                            onReady: function () { m.readyAt = Date.now(); m.ready = true; if (!soundHere()) { try { m.player.mute(); } catch (e) {} } if (window.PFLX_AUDIO) window.PFLX_AUDIO.refresh(); sync(); },
                             onStateChange: function (e) { if (e && e.data === 0) onEnded(); }
                         }
                     });
@@ -83615,6 +83804,7 @@ RESPONSE RULES:
             // file, or Google Drive via its direct file address first
             var v = document.createElement('video');
             v.className = 'pflx-theater-media';
+            if (!soundHere()) v.muted = true;   // v223
             v.playsInline = true; v.autoplay = true; v.controls = true; v.preload = 'auto';
             var vm = { kind: 'video', wrap: wrap, el: v, key: key, item: it, readyAt: 0 };
             v.addEventListener('loadedmetadata', function () {
@@ -83681,11 +83871,13 @@ RESPONSE RULES:
                 }
                 if (ps !== 1 && ps !== 3) { try { p.playVideo(); } catch (e) {} }
                 if (m.readyAt && Date.now() - m.readyAt > 3000 && ps !== 1 && ps !== 3) showTap(true); else if (ps === 1) showTap(false);
+                if (!soundHere()) { try { if (!p.isMuted || !p.isMuted()) p.mute(); } catch (e) {} }   // v223
                 return;
             }
             if (m.kind === 'video') {
                 var v = m.el;
                 if (!m.ready) return;
+                if (!soundHere() && !v.muted) v.muted = true;   // v223
                 if (pos.paused) {
                     if (!v.paused) v.pause();
                     if (Math.abs(v.currentTime - pos.pos) > DRIFT_S) { try { v.currentTime = pos.pos; } catch (e) {} }
@@ -83927,6 +84119,7 @@ RESPONSE RULES:
                 return out;
             };
             A._post = function (el, vol) {
+                if (soundIsLiveEl(el) && !soundHere()) vol = 0;   // v223: live sound in one window only
                 try {
                     if (el.tagName === 'VIDEO') { el.volume = Math.max(0, Math.min(1, vol / 100)); el.muted = vol <= 0; return; }
                     if (!el.contentWindow) return;
