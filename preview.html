@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 215;
+      window.PFLX_PATCH   = 216;
       window.PFLX_BUILD   = '2026.09';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -22587,7 +22587,7 @@
             console.log('[PFLX SSO] Session active:', activeSession);
             // Replay any X-Coin popups (badge / upgrade / fine) this player missed
             // while offline. Deferred so the dashboard mounts first.
-            try { if (window.pflxNotify) setTimeout(function () { window.pflxNotify.drainForCurrent(); }, 1200); } catch (e) {}
+            try { if (window.pflxNotify) { setTimeout(function () { window.pflxNotify.drainForCurrent(); }, 1200); setTimeout(function () { window.pflxNotify.drainForCurrent(); }, 8000); } } catch (e) {} // v216: cloud-read + dedupe
             try { if (typeof pflxTickerGearVisibility === 'function') pflxTickerGearVisibility(); } catch (e) {}
 
             // ── Auto-award PFLX User Certification (Signature) on first login ──
@@ -26341,7 +26341,16 @@
                 // Self-heal any mc-side write that landed reward fields on
                 // mcPlayers without reaching PLAYERS/pflx_player_<id> — see
                 // _mcReconcilePlayersFromMc above for the full root cause.
-                try { if (typeof _mcReconcilePlayersFromMc === 'function') _mcReconcilePlayersFromMc(); } catch (e) {}
+                // v216 -- while a CLOUD copy is being applied, don't heal now:
+                // healing bumps updatedAt, which made this device reject the
+                // host's newer per-player row (and the reward popups on it).
+                // Re-check a little later, after that row has arrived.
+                if (_mcApplyingCloud) {
+                    if (window._mcReconcileLaterT) clearTimeout(window._mcReconcileLaterT);
+                    window._mcReconcileLaterT = setTimeout(function () { window._mcReconcileLaterT = null; try { _mcReconcilePlayersFromMc(); } catch (e) {} }, 8000);
+                } else {
+                    try { if (typeof _mcReconcilePlayersFromMc === 'function') _mcReconcilePlayersFromMc(); } catch (e) {}
+                }
             }
             if (type === 'checkpoints' || type === 'all') _mcSetItemSafe('pflx_mc_checkpoints', mcCheckpoints);
             if (type === 'tasks' || type === 'all') _mcSetItemSafe('pflx_mc_tasks', mcTasks);
@@ -26422,6 +26431,7 @@
 
         // Push data to X-Coin app for Supabase persistence
         function mcCloudSync(type) {
+            var __echo = _mcApplyingCloud;   // v216: this save is a cloud copy being applied
             var xcoinFrame = document.getElementById('xcoin-frame');
             if (!xcoinFrame || !xcoinFrame.contentWindow) return;
             // STOMP GUARD — same rules as mcCloudPush: this path persists to
@@ -26496,6 +26506,26 @@
                 // (Aug 9); it still only sent over the fragile relay, so it
                 // gets the same direct-write treatment here.
                 var lm = LEGACY_MERGERS[k];
+                // v216 -- a cloud echo: the device that made the change already
+                // mirrored it. Wait a few seconds, check the legacy row's stamp,
+                // and only mirror if it is still behind the MC row (e.g. the
+                // change came from outside the Console).
+                if (__echo && lm) {
+                    var __mcMs = _mcRowSeenMs['pflx_mc_' + k] || 0;
+                    setTimeout(function () {
+                        var _cc = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                        if (!_cc) return;
+                        _cc.from('app_data').select('updated_at').eq('key', lm.cloudKey).limit(1).then(function (sr) {
+                            var lr = sr && sr.data && sr.data[0];
+                            var lms = lr ? Date.parse(String(lr.updated_at).replace(' ', 'T').replace(/([+-]\d\d)$/, '$1:00')) : 0;
+                            if (lr && __mcMs && isFinite(lms) && lms >= __mcMs - 15000) return;   // already mirrored
+                            var __prev = _mcApplyingCloud;
+                            _mcApplyingCloud = false;
+                            try { mcCloudSync(k); } finally { _mcApplyingCloud = __prev; }
+                        }, function () {});
+                    }, 2000 + Math.floor(Math.random() * 6000));
+                    return;
+                }
                 var _c = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
                 if (lm && _c) {
                     _c.from('app_data').select('data').eq('key', lm.cloudKey).single().then(function (res) {
@@ -27627,15 +27657,113 @@
             }
             return applied;
         };
+        // ═══════════════════════════════════════════════════════════════════
+        // PATCH v216 -- CHANGED-ONLY SYNC (Sep 16, Ennis: "download only what
+        // changed, but don't break PFLX's live interconnectivity").
+        //  * pflxAppDataFeed: ONE shared realtime subscription on app_data for
+        //    this tab. The MC and roster listeners used to open two identical
+        //    unfiltered channels, so every save anywhere reached every screen
+        //    twice. Same events, same handlers, half the traffic.
+        //  * _mcFetchChangedRows: the 3-minute backup pull first asks for
+        //    (key, updated_at) only and downloads just the rows that changed
+        //    since this tab last applied them. The database stamps updated_at
+        //    on every real change (trigger app_data_touch, v216) and drops
+        //    identical re-saves. Boot, and every 10th tick (~30 min), still do
+        //    a full pull as a safety net.
+        // ═══════════════════════════════════════════════════════════════════
+        window.pflxAppDataFeed = (function () {
+            var ch = null, handlers = [], statusCbs = [], lastStatus = null;
+            function ensure() {
+                if (ch) return true;
+                var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (!client || typeof client.channel !== 'function') return false;
+                ch = client.channel('pflx-app-data')
+                    .on('postgres_changes', { event: '*', schema: 'public', table: 'app_data' }, function (payload) {
+                        handlers.slice().forEach(function (h) {
+                            try { h.fn(payload); } catch (e) { console.warn('[app-data feed] ' + h.name + ' handler failed', e); }
+                        });
+                    })
+                    .subscribe(function (status) {
+                        lastStatus = status;
+                        statusCbs.slice().forEach(function (cb) { try { cb(status); } catch (e) {} });
+                    });
+                return true;
+            }
+            var feed = function (name, fn, statusCb) {
+                if (typeof fn !== 'function' || !ensure()) return null;
+                handlers.push({ name: name || 'anon', fn: fn });
+                if (typeof statusCb === 'function') {
+                    statusCbs.push(statusCb);
+                    if (lastStatus) { try { statusCb(lastStatus); } catch (e) {} }
+                }
+                return ch;
+            };
+            feed.handlerNames = function () { return handlers.map(function (h) { return h.name; }); };
+            feed.status = function () { return lastStatus; };
+            return feed;
+        })();
+
+        // Stamps of the rows this tab has actually applied (key -> stamp).
+        // REST returns "2026-09-16T05:02:44.873129+00:00"; realtime may send
+        // "2026-09-16 05:02:44.873129+00" -- normalise to seconds + micros.
+        var _mcRowSeen = {};
+        var _mcRowSeenMs = {};
+        var _mcPullTick = 0;
+        var _MC_SIDE_KEYS = ['pflx_player_tombstones', 'coinCategories'];
+        function pflxStampKey(s) {
+            if (!s) return '';
+            var str = String(s);
+            var m = str.match(/\.(\d+)/);
+            var micro = m ? (m[1] + '000000').slice(0, 6) : '000000';
+            var iso = str.replace(' ', 'T').replace(/\.\d+/, '').replace(/([+-]\d\d)$/, '$1:00');
+            var ms = Date.parse(iso);
+            return isFinite(ms) ? (Math.floor(ms / 1000) + '.' + micro) : str;
+        }
+        window.pflxStampKey = pflxStampKey;
+        window.pflxRowSeen = function (key, updatedAt) {
+            if (!key || !updatedAt) return;
+            _mcRowSeen[key] = pflxStampKey(updatedAt);
+            var ms = Date.parse(String(updatedAt).replace(' ', 'T').replace(/([+-]\d\d)$/, '$1:00'));
+            if (isFinite(ms)) _mcRowSeenMs[key] = ms;
+        };
+        window._mcRowSeenDebug = function () { return { seen: Object.assign({}, _mcRowSeen), tick: _mcPullTick }; };
+        async function _mcFetchChangedRows(client) {
+            var OR = 'key.like.pflx_mc_*,key.in.(' + _MC_SIDE_KEYS.join(',') + ')';
+            _mcPullTick++;
+            var full = !_mcCloudPulledOnce || !Object.keys(_mcRowSeen).length || (_mcPullTick % 10 === 0);
+            var keys = null;
+            if (!full) {
+                var st = null;
+                try { st = await client.from('app_data').select('key, updated_at').or(OR).limit(300); } catch (e) { st = null; }
+                if (!st || st.error || !Array.isArray(st.data)) {
+                    full = true;
+                } else {
+                    keys = st.data.filter(function (r) {
+                        return r && r.key && _mcRowSeen[r.key] !== pflxStampKey(r.updated_at);
+                    }).map(function (r) { return r.key; });
+                    if (!keys.length) return { data: [], side: {}, full: false, changed: [] };
+                }
+            }
+            var q = client.from('app_data').select('key, data, updated_at');
+            q = full ? q.or(OR) : q.in('key', keys);
+            var res = await q.limit(300);
+            if (!res || res.error || !Array.isArray(res.data)) return { data: null, side: {}, error: res && res.error };
+            var mc = [], side = {};
+            res.data.forEach(function (r) {
+                if (!r || !r.key) return;
+                if (r.updated_at) window.pflxRowSeen(r.key, r.updated_at);
+                if (_MC_SIDE_KEYS.indexOf(r.key) >= 0) side[r.key] = r; else mc.push(r);
+            });
+            if (!full) console.log('[MC cloud] ↻ backup pull: ' + res.data.length + ' changed row(s): ' + res.data.map(function (r) { return r.key; }).join(', '));
+            return { data: mc, side: side, full: full, changed: keys };
+        }
+        window._mcFetchChangedRows = _mcFetchChangedRows;
         window.mcCloudPull = async function () {
             var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
             if (!client) return;
             if (!_mcCloudPulledOnce) { _mcTakePrePullSnapshot(); }
             try {
-                var res = await client.from('app_data')
-                    .select('key, data')
-                    .like('key', 'pflx_mc_%')
-                    .limit(200);
+                var res = await _mcFetchChangedRows(client);   // v216 changed-only
                 if (!res || !res.data) return;
                 var changed = [];
                 res.data.forEach(function (row) {
@@ -27700,8 +27828,7 @@
                 // Tombstones ride along too (July 15) — merge cloud deletions,
                 // then purge any zombie records this device still holds.
                 try {
-                    var tres = await client.from('app_data').select('data').eq('key', 'pflx_player_tombstones').limit(1);
-                    var trow = tres && tres.data && tres.data[0];
+                    var trow = res.side && res.side['pflx_player_tombstones'];   // v216: fetched above only when changed
                     if (trow && trow.data) window.pflxTombstoneMergeCloud(trow.data);
                     var purged = window.pflxPurgeTombstoned();
                     if (purged) console.log('[MC cloud] 🪦 purged ' + purged + ' tombstoned player record(s)');
@@ -27725,8 +27852,7 @@
                 // read-only, X-Coin remains the sole writer of this key --
                 // so mcBadges can never go stale again.
                 try {
-                    var bres = await client.from('app_data').select('data').eq('key', 'coinCategories').limit(1);
-                    var brow = bres && bres.data && bres.data[0];
+                    var brow = res.side && res.side['coinCategories'];   // v216: fetched above only when changed
                     if (brow && brow.data && Array.isArray(brow.data)) {
                         var freshBadges = mcNormalizeBadges(brow.data);
                         if (freshBadges.length) {
@@ -27757,11 +27883,32 @@
             var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
             if (!client || typeof client.channel !== 'function') return;
             try {
-                _mcCloudChannel = client.channel('pflx-mc')
-                    .on('postgres_changes', { event: '*', schema: 'public', table: 'app_data' }, function (payload) {
+                _mcCloudChannel = window.pflxAppDataFeed('pflx-mc', function (payload) {   // v216 shared feed
                         try {
                             var row = payload && (payload.new || payload.record);
                             if (!row || !row.key) return;
+                            // v216 -- the badge catalog (X-Coin-owned) now updates live too.
+                            if (row.key === 'coinCategories') {
+                                if (Array.isArray(row.data)) {
+                                    var __fb = mcNormalizeBadges(row.data);
+                                    if (__fb.length) {
+                                        mcBadges = __fb;
+                                        _mcSetItemSafe('pflx_mc_badges', mcBadges);
+                                        window.pflxRowSeen(row.key, row.updated_at);
+                                        try { if (typeof mcRefreshBadgePickers === 'function') mcRefreshBadgePickers(); } catch (e2) {}
+                                        _mcAfterCloudChange(['badges']);
+                                        console.log('[MC cloud] ← realtime update: badge catalog');
+                                    }
+                                }
+                                return;
+                            }
+                            // v216 -- remember which copy this tab applied, so the
+                            // backup pull doesn't download it again. Only when the
+                            // payload really carries the row (oversized rows can
+                            // arrive without data -- the backup pull fetches those).
+                            if (String(row.key).indexOf('pflx_mc_') === 0 && row.data !== undefined && row.data !== null) {
+                                window.pflxRowSeen(row.key, row.updated_at);
+                            }
                             // Organization / cohort-access config
                             if (row.key === 'pflx_organizations') {
                                 if (typeof window.hmcApplyCloudOrgs === 'function' && window.hmcApplyCloudOrgs(row.data)) {
@@ -27796,8 +27943,7 @@
                                 _mcAfterCloudChange([t]);
                             }
                         } catch (e) { console.warn('[MC cloud] realtime payload error', e); }
-                    })
-                    .subscribe(function (status) {
+                    }, function (status) {
                         if (status === 'SUBSCRIBED') console.log('[MC cloud] ✓ Realtime live');
                     });
             } catch (e) { console.warn('[MC cloud] realtime setup failed', e); }
@@ -72857,11 +73003,7 @@ RESPONSE RULES:
             var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
             if (!client || typeof client.channel !== 'function') return;
             try {
-                _pflxRosterChannel = client
-                    .channel('pflx-roster')
-                    .on('postgres_changes', {
-                        event: '*', schema: 'public', table: 'app_data'
-                    }, function (payload) {
+                _pflxRosterChannel = window.pflxAppDataFeed('pflx-roster', function (payload) {   // v216 shared feed
                         try {
                             var row = payload && (payload.new || payload.record);
                             if (!row || !row.key) return;
@@ -73021,7 +73163,12 @@ RESPONSE RULES:
                                     // Reward toast — only when XC actually grew
                                     // or badges grew. A "data sync" no-op
                                     // (same values pushed back) won't fire.
-                                    if (dxc > 0 || dbadges > 0) {
+                                    // v216 -- LIVE reward scenes: the host's approval queued
+                                    // popup events on this record; show them now (once) and
+                                    // let them replace the plain toasts.
+                                    var __livePopups = 0;
+                                    try { if (window.pflxNotify && Array.isArray(p.pendingXcoinEvents) && p.pendingXcoinEvents.length) __livePopups = window.pflxNotify.liveDeliver(p.id, p.pendingXcoinEvents) || 0; } catch (eLive) {}
+                                    if (!__livePopups && (dxc > 0 || dbadges > 0)) {
                                         var parts = [];
                                         if (dxc > 0)     parts.push('+' + dxc.toLocaleString() + ' XC');
                                         if (dbadges > 0) parts.push('+' + dbadges + ' Badge' + (dbadges === 1 ? '' : 's'));
@@ -73041,7 +73188,7 @@ RESPONSE RULES:
                                     // without it feeling like a celebration.
                                     // A small absolute threshold (>= 1) keeps
                                     // float jitter from misfiring.
-                                    if (dxc <= -1) {
+                                    if (!__livePopups && dxc <= -1) {
                                         var loss = Math.abs(dxc).toLocaleString();
                                         // Try to read the most recent activity
                                         // entry the host (or the rule engine)
@@ -73076,8 +73223,7 @@ RESPONSE RULES:
                                 }
                             } catch (e) { console.warn('[roster] reward delivery failed', e); }
                         } catch (e) { console.warn('[roster] realtime payload error', e); }
-                    })
-                    .subscribe(function (status) {
+                    }, function (status) {
                         if (status === 'SUBSCRIBED') console.log('[roster] ✓ Realtime channel live');
                         else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
                             console.warn('[roster] realtime status:', status, '— boot/reload fetch still covers it');
@@ -74932,6 +75078,7 @@ RESPONSE RULES:
                 }
                 var totalXcDelta = deltaXC + (typeof badgeXcDelta === 'number' ? badgeXcDelta : 0);
                 if (Object.keys(changes).length === 0) return Object.assign({}, p);
+                var _xcBeforeAward = p.xc || 0;   // v216: applyUpdate mutates p in place
                 var updated = applyUpdate(playerId, changes, awardObj.source || 'award');
                 // Emit canonical award event for sub-app animations / feed entries
                 var txId = 'tx-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
@@ -75010,7 +75157,7 @@ RESPONSE RULES:
                 // modifiers, sub-app messages).
                 try {
                     if (typeof getRankForXC === 'function') {
-                        var _rankBefore = getRankForXC(p.xc || 0);
+                        var _rankBefore = getRankForXC(_xcBeforeAward);
                         var _rankAfter = getRankForXC(updated.xc || 0);
                         if (_rankAfter && (!_rankBefore || (_rankAfter.level || 0) > (_rankBefore.level || 0))) {
                             if (typeof window.pflxEmitXcoinEvent === 'function') {
@@ -75854,49 +76001,98 @@ RESPONSE RULES:
                 return (typeof activeSession !== 'undefined' && activeSession && activeSession.id) ? activeSession.id : null;
             }
 
+            // ── v216: shown-once bookkeeping (per device) ──
+            // Every reward event carries a txId. A device remembers the txIds
+            // it has already shown, so a replayed or re-sent event (stale host
+            // tab, second login, realtime + login racing) is never shown twice.
+            var SEEN_LS = 'pflx_reward_seen_v1';
+            function seenMap() { try { return JSON.parse(localStorage.getItem(SEEN_LS) || '{}') || {}; } catch (e) { return {}; } }
+            function wasSeen(pid, txId) { var m = seenMap(); return !!(txId && Array.isArray(m[pid]) && m[pid].indexOf(txId) >= 0); }
+            function markSeen(pid, txId) {
+                if (!pid || !txId) return;
+                try {
+                    var m = seenMap(); var l = Array.isArray(m[pid]) ? m[pid] : [];
+                    if (l.indexOf(txId) < 0) l.push(txId);
+                    m[pid] = l.slice(-200);
+                    localStorage.setItem(SEEN_LS, JSON.stringify(m));
+                } catch (e) {}
+            }
+
             // Persist an unseen event onto the player's record so it replays at
-            // next login (any device). Deduped by txId, capped at 20.
+            // next login (any device). Deduped by txId, capped at 20. v216:
+            // multi-MB uploaded artwork (data: URLs) is not copied into the
+            // player record -- the popup looks the badge art up by name.
             function enqueueToRecord(ev) {
                 try {
                     if (typeof PLAYERS === 'undefined') return;
                     var p = PLAYERS.find(function (x) { return x && x.id === ev.playerId; });
                     if (!p) return;
                     var list = Array.isArray(p.pendingXcoinEvents) ? p.pendingXcoinEvents : [];
-                    if (list.some(function (e) { return e.txId === ev.txId; })) return;
-                    list.push(ev);
+                    if (list.some(function (e) { return e && e.txId === ev.txId; })) return;
+                    var slim = Object.assign({}, ev);
+                    if (typeof slim.image === 'string' && /^data:/i.test(slim.image) && slim.image.length > 4096) slim.image = '';
+                    list.push(slim);
                     if (list.length > 20) list = list.slice(-20);
                     p.pendingXcoinEvents = list;
                     if (typeof persistPlayers === 'function') persistPlayers([p.id]);
                 } catch (e) {}
             }
 
-            function clearRecord(playerId) {
+            // v216: remove ONLY the delivered events, via a fresh read of the
+            // cloud row -- never re-upload this device's whole (possibly stale)
+            // copy of the player record.
+            var _clearing = {};
+            function clearRecord(playerId, txIds) {
                 try {
-                    if (typeof PLAYERS === 'undefined') return;
-                    var p = PLAYERS.find(function (x) { return x && x.id === playerId; });
-                    if (p && p.pendingXcoinEvents && p.pendingXcoinEvents.length) {
-                        p.pendingXcoinEvents = [];
-                        if (typeof persistPlayers === 'function') persistPlayers([playerId]);
+                    if (!playerId || !Array.isArray(txIds) || !txIds.length) return;
+                    if (typeof PLAYERS !== 'undefined') {
+                        var p = PLAYERS.find(function (x) { return x && x.id === playerId; });
+                        if (p && Array.isArray(p.pendingXcoinEvents)) {
+                            p.pendingXcoinEvents = p.pendingXcoinEvents.filter(function (e) { return !(e && txIds.indexOf(e.txId) >= 0); });
+                        }
                     }
+                    var c = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                    if (!c) return;
+                    var key = 'pflx_player_' + playerId;
+                    _clearing[playerId] = (_clearing[playerId] || Promise.resolve()).then(function () {
+                        return c.from('app_data').select('data').eq('key', key).limit(1).then(function (res) {
+                            var row = res && res.data && res.data[0] && res.data[0].data;
+                            if (!row || !Array.isArray(row.pendingXcoinEvents)) return;
+                            var keep = row.pendingXcoinEvents.filter(function (e) { return !(e && txIds.indexOf(e.txId) >= 0); });
+                            if (keep.length === row.pendingXcoinEvents.length) return;
+                            row.pendingXcoinEvents = keep;
+                            row.updatedAt = Date.now();
+                            return c.from('app_data').upsert({ key: key, data: row, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+                        });
+                    }).catch(function (e) { console.warn('[pflxNotify] clear failed', e); });
                 } catch (e) {}
             }
 
-            function kindMeta(kind) {
+            function kindMeta(kind, ev) {
                 if (kind === 'fine') return { sfx: 'fine', color: '#ef4444', glow: 'rgba(239,68,68,0.55)', label: 'PENALTY APPLIED', fallback: '⚠️' };
                 if (kind === 'upgrade') return { sfx: 'upgrade', color: '#22d3ee', glow: 'rgba(34,211,238,0.55)', label: 'UPGRADE ACTIVATED', fallback: '⚡' };
+                if (kind === 'rank') return { sfx: 'badge', color: '#a78bfa', glow: 'rgba(167,139,250,0.6)', label: 'RANK UP', fallback: '⭐' };
+                if (kind === 'xc') {
+                    if ((ev && ev.xc) < 0) return { sfx: 'error', color: '#ef4444', glow: 'rgba(239,68,68,0.55)', label: 'X-COIN DEDUCTED', fallback: '📉' };
+                    return { sfx: 'success', color: '#4ade80', glow: 'rgba(74,222,128,0.55)', label: 'X-COIN EARNED', fallback: '💰' };
+                }
                 return { sfx: 'badge', color: '#f5c842', glow: 'rgba(245,200,66,0.55)', label: 'BADGE EARNED', fallback: '🏅' };
             }
 
             function render(ev) {
                 _showing = true;
-                var meta = kindMeta(ev.kind);
+                var meta = kindMeta(ev.kind, ev);
+                var __img = ev.image;   // v216: badge art looked up by name when the event carries none
+                if (!__img && ev.kind === 'badge' && typeof mcFindBadge === 'function') {
+                    try { var __bb = mcFindBadge({ name: ev.title }); if (__bb && __bb.image) __img = __bb.image; } catch (e) {}
+                }
                 var overlay = document.createElement('div');
                 overlay.className = 'pflx-xcoin-note-overlay';
                 overlay.style.cssText = 'position:fixed;inset:0;z-index:100050;background:rgba(2,6,23,0.82);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;animation:pflxNoteFade .25s ease;';
                 var xc = ev.xc || 0;
                 var xcHtml = xc ? ('<div style="font-family:\'Share Tech Mono\',monospace;font-size:20px;font-weight:700;color:' + (xc < 0 ? '#ef4444' : '#4ade80') + ';margin-top:6px;">' + (xc < 0 ? '' : '+') + xc.toLocaleString() + ' XC</div>') : '';
-                var art = (ev.image && /^(https?:|data:)/i.test(ev.image))
-                    ? '<img src="' + ev.image + '" alt="" style="width:120px;height:120px;object-fit:cover;border-radius:18px;border:2px solid ' + meta.color + ';box-shadow:0 0 32px ' + meta.glow + ';">'
+                var art = (__img && /^(https?:|data:)/i.test(__img))
+                    ? '<img src="' + __img + '" alt="" style="width:120px;height:120px;object-fit:cover;border-radius:18px;border:2px solid ' + meta.color + ';box-shadow:0 0 32px ' + meta.glow + ';">'
                     : '<div style="width:120px;height:120px;border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:60px;background:rgba(255,255,255,0.05);border:2px solid ' + meta.color + ';box-shadow:0 0 32px ' + meta.glow + ';">' + (ev.icon || meta.fallback) + '</div>';
                 var card = document.createElement('div');
                 card.style.cssText = 'position:relative;background:linear-gradient(150deg,#0a1228,#0d1730);border:1px solid ' + meta.color + '66;border-radius:22px;padding:34px 40px 30px;width:min(420px,90vw);text-align:center;box-shadow:0 24px 80px rgba(0,0,0,0.7),0 0 60px ' + meta.glow + ';animation:pflxNotePop .35s cubic-bezier(.2,1.3,.5,1);';
@@ -75933,7 +76129,16 @@ RESPONSE RULES:
             }
 
             // Show live to the current player (queues behind any active popup).
-            function show(ev) { _queue.push(ev); next(); }
+            // v216: never twice on this device.
+            function show(ev) {
+                if (!ev) return false;
+                var pid = ev.playerId || currentId();
+                if (ev.txId && wasSeen(pid, ev.txId)) return false;
+                if (ev.txId && _queue.some(function (q) { return q && q.txId === ev.txId; })) return false;
+                markSeen(pid, ev.txId);
+                _queue.push(ev); next();
+                return true;
+            }
 
             // Route an incoming event: show live if it's the current player on
             // this client, else stash on their record for next login.
@@ -75943,22 +76148,53 @@ RESPONSE RULES:
                 else { enqueueToRecord(ev); }
             }
 
-            // Replay everything queued on the current player's record (called at
-            // login). Clears the record once surfaced on this client.
+            // v216: deliver a list of queued events for the current player --
+            // shows the unseen ones, then removes all of them from the cloud row.
+            function deliver(playerId, list) {
+                if (!playerId || playerId !== currentId() || !Array.isArray(list) || !list.length) return 0;
+                var shown = 0, done = [];
+                list.slice().sort(function (a, b) { return ((a && a.ts) || 0) - ((b && b.ts) || 0); }).forEach(function (ev) {
+                    if (!ev || !ev.txId) return;
+                    done.push(ev.txId);
+                    if (show(Object.assign({ playerId: playerId }, ev))) shown++;
+                });
+                if (done.length) clearRecord(playerId, done);
+                return shown;
+            }
+
+            // LIVE: the player's own record just arrived over realtime (a host
+            // approved/awarded something from another device).
+            function liveDeliver(playerId, list) { return deliver(playerId, list); }
+
+            // LOGIN: replay everything queued while the player was away. v216
+            // reads the player's row fresh from the cloud first, so it never
+            // runs against a stale local copy (the old 1.2s timer could fire
+            // before the roster had loaded, skipping or repeating popups).
             function drainForCurrent() {
                 var id = currentId();
-                if (!id || typeof PLAYERS === 'undefined') return;
-                var p = PLAYERS.find(function (x) { return x && x.id === id; });
-                if (!p || !Array.isArray(p.pendingXcoinEvents) || !p.pendingXcoinEvents.length) return;
-                var pend = p.pendingXcoinEvents.slice();
-                clearRecord(id);
-                pend.forEach(function (ev) { _queue.push(ev); });
-                next();
+                if (!id) return Promise.resolve(0);
+                var local = (typeof PLAYERS !== 'undefined') ? PLAYERS.find(function (x) { return x && x.id === id; }) : null;
+                var localList = (local && Array.isArray(local.pendingXcoinEvents)) ? local.pendingXcoinEvents.slice() : [];
+                var c = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                var fetchRow = c
+                    ? c.from('app_data').select('data').eq('key', 'pflx_player_' + id).limit(1).then(function (res) {
+                        return (res && res.data && res.data[0] && res.data[0].data) || null;
+                    }, function () { return null; })
+                    : Promise.resolve(null);
+                return fetchRow.then(function (row) {
+                    if (id !== currentId()) return 0;
+                    var cloudList = (row && Array.isArray(row.pendingXcoinEvents)) ? row.pendingXcoinEvents : [];
+                    var byTx = {};
+                    cloudList.concat(localList).forEach(function (ev) { if (ev && ev.txId && !byTx[ev.txId]) byTx[ev.txId] = ev; });
+                    var all = Object.keys(byTx).map(function (k) { return byTx[k]; });
+                    return deliver(id, all);
+                });
             }
 
             window.addEventListener('pflx_xcoin_event', function (e) { try { route(e.detail); } catch (err) {} });
 
-            return { show: show, route: route, drainForCurrent: drainForCurrent };
+            return { show: show, route: route, drainForCurrent: drainForCurrent, liveDeliver: liveDeliver,
+                     _seen: function (pid) { return (seenMap()[pid] || []).slice(); } };
         })();
 
         // ── Activity log: append to player's journey ──
