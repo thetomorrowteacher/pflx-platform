@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 229;
+      window.PFLX_PATCH   = 230;
       window.PFLX_BUILD   = '2026.09';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -58589,12 +58589,38 @@ function ppRenderCheckpoints(el) {
         let xbotCurrentMode = 'chat';
         let xbotSpeechRecognition = null;
         let xbotCurrentAudio = null;
-        // ElevenLabs — read from localStorage (unified key), fallback to hardcoded default
+        // ElevenLabs — read from localStorage (unified key), no built-in key (v230: the key lives on the PFLX server)
         function getElevenLabsKey() {
-            return localStorage.getItem('pflx_xbot_elevenlabs_key') || 'sk_f5083e547aefcacceff0f01584844da8809f76876f6c5975';
+            return localStorage.getItem('pflx_xbot_elevenlabs_key') || '';
         }
         function getElevenLabsVoice() {
             return localStorage.getItem('pflx_xbot_voice_id') || '21m00Tcm4TlvDq8ikWAM';
+        }
+
+        // v230: ElevenLabs through the PFLX server (ELEVENLABS_API_KEY in Vercel env).
+        // Returns an mp3 Blob, or null (no server key / busy / out of credits / offline).
+        window.pflxServerTts = async function (text) {
+            if (window.__pflxTtsOffUntil && Date.now() < window.__pflxTtsOffUntil) return null;
+            const url = (typeof XBOT_AI !== 'undefined' && XBOT_AI.PROXY_URL) || 'https://pflx-pathway-portal.vercel.app/api/pflx-ai';
+            try {
+                const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'tts', text: String(text || '').replace(/[•📊🎯❓⚔️📚💬🏆]/g, '').substring(0, 500), voiceId: getElevenLabsVoice() }) });
+                const ct = (r.headers && r.headers.get && r.headers.get('content-type')) || '';
+                if (r.ok && /audio/.test(ct)) return await r.blob();
+                // no key / out of credits / blocked: stop asking for a while; busy: a minute
+                window.__pflxTtsOffUntil = Date.now() + (r.status === 429 ? 60000 : 600000);
+            } catch (e) { window.__pflxTtsOffUntil = Date.now() + 60000; }
+            return null;
+        };
+        // v230: the built-in voice (Kokoro / browser) for voice chat, then listen again
+        function xbotSpeakLocal(text, status) {
+            const again = function () {
+                if (!xbotVoiceActive) return;
+                status.textContent = 'Listening...';
+                if (xbotSpeechRecognition) { try { xbotSpeechRecognition.start(); } catch (e) {} }
+            };
+            if (window.pflxVoice) window.pflxVoice.speak(text, { mode: 'voice', onend: again });
+            else again();
         }
 
         function toggleXBotPanel() {
@@ -61271,16 +61297,22 @@ function ppRenderCheckpoints(el) {
             }
 
             try {
+                const personalKey = getElevenLabsKey();   // v230: a host's own key, saved in this browser only
+                let audioBlob = null;
+                if (!personalKey) {
+                    audioBlob = await window.pflxServerTts(text);
+                    if (!audioBlob) { xbotSpeakLocal(text, status); return; }
+                } else {
                 const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${getElevenLabsVoice()}`, {
                     method: 'POST',
                     headers: {
                         'Accept': 'audio/mpeg',
                         'Content-Type': 'application/json',
-                        'xi-api-key': getElevenLabsKey()
+                        'xi-api-key': personalKey
                     },
                     body: JSON.stringify({
                         text: text.replace(/[•📊🎯❓⚔️📚💬🏆]/g, '').substring(0, 500),
-                        model_id: 'eleven_monolingual_v1',
+                        model_id: 'eleven_flash_v2_5',   // v230: eleven_monolingual_v1 is retired
                         voice_settings: {
                             stability: 0.5,
                             similarity_boost: 0.75
@@ -61290,11 +61322,11 @@ function ppRenderCheckpoints(el) {
 
                 if (!response.ok) {
                     console.log('[X-Bot] ElevenLabs error:', response.status);
-                    status.textContent = 'Listening...';
+                    xbotSpeakLocal(text, status);   // v230: the built-in voice instead of silence
                     return;
                 }
-
-                const audioBlob = await response.blob();
+                audioBlob = await response.blob();
+                }
                 const audioUrl = URL.createObjectURL(audioBlob);
                 xbotCurrentAudio = new Audio(audioUrl);
                 // Apply voice mixer volume from mastering mixer
@@ -61313,10 +61345,10 @@ function ppRenderCheckpoints(el) {
                     }
                 };
 
-                xbotCurrentAudio.play();
+                const _xp = xbotCurrentAudio.play(); if (_xp && _xp.catch) _xp.catch(function () {});   // v230
             } catch (err) {
                 console.log('[X-Bot] TTS error:', err);
-                status.textContent = 'Listening...';
+                xbotSpeakLocal(text, status);   // v230
             }
         }
 
@@ -75059,7 +75091,7 @@ RESPONSE RULES:
                 var e = prefs().engine;
                 var g = S.gpu === null ? 'checking this device…' : (S.gpu ? 'graphics card found (WebGPU)' : 'no WebGPU graphics card');
                 if (e === 'browser') return ['Browser voice — instant, sounds different on each device.', ''];
-                if (e === 'elevenlabs') return ['Voice chat uses ElevenLabs, read-aloud uses the browser voice.', ''];
+                if (e === 'elevenlabs') return ['Voice chat uses ElevenLabs (through the PFLX server, or your own key in AI Engine Keys); read-aloud uses the browser voice.', ''];
                 if (S.state === 'loading') return ['Downloading the voice model… ' + S.pct + '% (one time, ' + (S.gpu ? 'about 330 MB' : 'about 90 MB') + '). The browser voice speaks until it is ready.', 'busy'];
                 if (S.state === 'ready') return ['Kokoro ready on this device (' + (S.device === 'webgpu' ? 'graphics card' : 'CPU') + ')' + (S.err ? ' — ' + S.err : '') + '.', 'ok'];
                 if (S.state === 'error') return ['Kokoro could not start here (' + S.err + '). Using the browser voice.', 'bad'];
