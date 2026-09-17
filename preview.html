@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 230;
+      window.PFLX_PATCH   = 231;
       window.PFLX_BUILD   = '2026.09';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -31205,12 +31205,26 @@
             var s = window.activeSession || {};
             var cohort = s.cohort || '';
             if (!cohort) return '';
+            // PATCH PLATFORM -- a player's cohort field can be a comma-joined
+            // multi-cohort string (e.g. "Falcon Studios, Global Digital
+            // Intern"), which never exact-matched a single-name entry in an
+            // org's cohorts[] array below, so the org card silently never
+            // rendered for most multi-cohort ASD players. Split/trim/
+            // lowercase and match on ANY token, the same approach X-Live's
+            // classRoster() already uses for the identical multi-cohort
+            // shape (Ennis: "MC Dash not showing organization as I
+            // previously designed").
+            var cohortTokens = String(cohort).split(',').map(function (c) { return c.trim().toLowerCase(); }).filter(Boolean);
             var org = null;
             try {
                 var keys = Object.keys(ORGANIZATIONS);
-                for (var i = 0; i < keys.length; i++) {
+                for (var i = 0; i < keys.length && !org; i++) {
                     var candidate = ORGANIZATIONS[keys[i]];
-                    if (candidate && Array.isArray(candidate.cohorts) && candidate.cohorts.indexOf(cohort) !== -1) { org = candidate; break; }
+                    if (!candidate || !Array.isArray(candidate.cohorts)) continue;
+                    var candCohortsLower = candidate.cohorts.map(function (c) { return String(c).trim().toLowerCase(); });
+                    for (var j = 0; j < cohortTokens.length; j++) {
+                        if (candCohortsLower.indexOf(cohortTokens[j]) !== -1) { org = candidate; break; }
+                    }
                 }
             } catch (e) {}
             if (!org) return '';
@@ -31465,7 +31479,7 @@
             }
 
             // ── Quick stats row ──
-            html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px;">';
+            html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;">';
             var qStats = [
                 { label: 'XC BALANCE', value: xc.toLocaleString(), icon: '🪙', color: '#f5c842' },
                 { label: 'TASKS', value: myTasks.length + ' left', icon: '📋', color: 'var(--cyan)' },
@@ -31473,30 +31487,30 @@
                 { label: 'JOBS', value: myJobs.length + ' open', icon: '💼', color: '#a78bfa' }
             ];
             qStats.forEach(function(st) {
-                html += '<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:14px;text-align:center;">' +
-                    '<div style="font-size:20px;margin-bottom:4px;">' + st.icon + '</div>' +
-                    '<div style="font-family:\'Share Tech Mono\',monospace;font-size:18px;font-weight:700;color:' + st.color + ';">' + st.value + '</div>' +
-                    '<div style="font-size:9px;color:rgba(255,255,255,0.35);letter-spacing:1px;font-weight:700;margin-top:2px;">' + st.label + '</div></div>';
+                html += '<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:22px;text-align:center;">' +
+                    '<div style="font-size:30px;margin-bottom:8px;">' + st.icon + '</div>' +
+                    '<div style="font-family:\'Share Tech Mono\',monospace;font-size:26px;font-weight:700;color:' + st.color + ';">' + st.value + '</div>' +
+                    '<div style="font-size:11px;color:rgba(255,255,255,0.35);letter-spacing:1px;font-weight:700;margin-top:5px;">' + st.label + '</div></div>';
             });
             html += '</div>';
 
             // ── Navigation cards ──
-            html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;">';
+            html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:24px;">';
 
             // Season card
-            html += '<div style="background:linear-gradient(135deg,rgba(0,240,255,0.06),rgba(139,92,246,0.06));border:1px solid rgba(0,240,255,0.15);border-radius:14px;padding:18px;cursor:pointer;transition:all 0.2s;" onclick="ppNav(\'season\')" onmouseenter="this.style.borderColor=\'rgba(0,240,255,0.4)\';this.style.transform=\'translateY(-2px)\'" onmouseleave="this.style.borderColor=\'rgba(0,240,255,0.15)\';this.style.transform=\'\'">' +
+            html += '<div style="background:linear-gradient(135deg,rgba(0,240,255,0.06),rgba(139,92,246,0.06));border:1px solid rgba(0,240,255,0.15);border-radius:16px;padding:26px;cursor:pointer;transition:all 0.2s;" onclick="ppNav(\'season\')" onmouseenter="this.style.borderColor=\'rgba(0,240,255,0.4)\';this.style.transform=\'translateY(-2px)\'" onmouseleave="this.style.borderColor=\'rgba(0,240,255,0.15)\';this.style.transform=\'\'">' +
                 '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">' +
-                '<span style="font-size:24px;">🏆</span>' +
-                '<div><div style="font-family:\'Orbitron\',sans-serif;font-size:12px;font-weight:700;color:var(--cyan);letter-spacing:1px;">SEASON PORTAL</div>' +
+                '<span style="font-size:32px;">🏆</span>' +
+                '<div><div style="font-family:\'Orbitron\',sans-serif;font-size:14px;font-weight:700;color:var(--cyan);letter-spacing:1px;">SEASON PORTAL</div>' +
                 '<div style="font-size:11px;color:rgba(255,255,255,0.4);">' + (season ? escapeHtml(season.name || 'Season 1') : 'No active season') + '</div></div></div>' +
                 '<div style="font-size:12px;color:#8a92b0;">View season details, rewards, penalties, and rankings.</div></div>';
 
             // Checkpoints card
             var cpCount = checkpoints.filter(function(c) { return c.status === 'active' || c.status === 'current' || c.status === 'upcoming'; }).length;
-            html += '<div style="background:linear-gradient(135deg,rgba(245,200,66,0.06),rgba(239,68,68,0.04));border:1px solid rgba(245,200,66,0.15);border-radius:14px;padding:18px;cursor:pointer;transition:all 0.2s;" onclick="ppNav(\'checkpoints\')" onmouseenter="this.style.borderColor=\'rgba(245,200,66,0.4)\';this.style.transform=\'translateY(-2px)\'" onmouseleave="this.style.borderColor=\'rgba(245,200,66,0.15)\';this.style.transform=\'\'">' +
+            html += '<div style="background:linear-gradient(135deg,rgba(245,200,66,0.06),rgba(239,68,68,0.04));border:1px solid rgba(245,200,66,0.15);border-radius:16px;padding:26px;cursor:pointer;transition:all 0.2s;" onclick="ppNav(\'checkpoints\')" onmouseenter="this.style.borderColor=\'rgba(245,200,66,0.4)\';this.style.transform=\'translateY(-2px)\'" onmouseleave="this.style.borderColor=\'rgba(245,200,66,0.15)\';this.style.transform=\'\'">' +
                 '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">' +
-                '<span style="font-size:24px;">🏁</span>' +
-                '<div><div style="font-family:\'Orbitron\',sans-serif;font-size:12px;font-weight:700;color:#f5c842;letter-spacing:1px;">CHECKPOINTS</div>' +
+                '<span style="font-size:32px;">🏁</span>' +
+                '<div><div style="font-family:\'Orbitron\',sans-serif;font-size:14px;font-weight:700;color:#f5c842;letter-spacing:1px;">CHECKPOINTS</div>' +
                 '<div style="font-size:11px;color:rgba(255,255,255,0.4);">' + cpCount + ' available</div></div></div>';
             if (activeCp) {
                 // cp.progress is never actually written anywhere in the
@@ -31513,18 +31527,18 @@
             html += '</div>';
 
             // Job Board card
-            html += '<div style="background:linear-gradient(135deg,rgba(167,139,250,0.06),rgba(96,165,250,0.04));border:1px solid rgba(167,139,250,0.15);border-radius:14px;padding:18px;cursor:pointer;transition:all 0.2s;" onclick="ppNav(\'jobs\')" onmouseenter="this.style.borderColor=\'rgba(167,139,250,0.4)\';this.style.transform=\'translateY(-2px)\'" onmouseleave="this.style.borderColor=\'rgba(167,139,250,0.15)\';this.style.transform=\'\'">' +
+            html += '<div style="background:linear-gradient(135deg,rgba(167,139,250,0.06),rgba(96,165,250,0.04));border:1px solid rgba(167,139,250,0.15);border-radius:16px;padding:26px;cursor:pointer;transition:all 0.2s;" onclick="ppNav(\'jobs\')" onmouseenter="this.style.borderColor=\'rgba(167,139,250,0.4)\';this.style.transform=\'translateY(-2px)\'" onmouseleave="this.style.borderColor=\'rgba(167,139,250,0.15)\';this.style.transform=\'\'">' +
                 '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">' +
-                '<span style="font-size:24px;">💼</span>' +
-                '<div><div style="font-family:\'Orbitron\',sans-serif;font-size:12px;font-weight:700;color:#a78bfa;letter-spacing:1px;">JOB BOARD</div>' +
+                '<span style="font-size:32px;">💼</span>' +
+                '<div><div style="font-family:\'Orbitron\',sans-serif;font-size:14px;font-weight:700;color:#a78bfa;letter-spacing:1px;">JOB BOARD</div>' +
                 '<div style="font-size:11px;color:rgba(255,255,255,0.4);">' + myJobs.length + ' open positions</div></div></div>' +
                 '<div style="font-size:12px;color:#8a92b0;">Browse and apply for available jobs.</div></div>';
 
             // My Tasks card
-            html += '<div style="background:linear-gradient(135deg,rgba(34,197,94,0.06),rgba(0,240,255,0.04));border:1px solid rgba(34,197,94,0.15);border-radius:14px;padding:18px;cursor:pointer;transition:all 0.2s;" onclick="ppNav(\'tasks\')" onmouseenter="this.style.borderColor=\'rgba(34,197,94,0.4)\';this.style.transform=\'translateY(-2px)\'" onmouseleave="this.style.borderColor=\'rgba(34,197,94,0.15)\';this.style.transform=\'\'">' +
+            html += '<div style="background:linear-gradient(135deg,rgba(34,197,94,0.06),rgba(0,240,255,0.04));border:1px solid rgba(34,197,94,0.15);border-radius:16px;padding:26px;cursor:pointer;transition:all 0.2s;" onclick="ppNav(\'tasks\')" onmouseenter="this.style.borderColor=\'rgba(34,197,94,0.4)\';this.style.transform=\'translateY(-2px)\'" onmouseleave="this.style.borderColor=\'rgba(34,197,94,0.15)\';this.style.transform=\'\'">' +
                 '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">' +
-                '<span style="font-size:24px;">✅</span>' +
-                '<div><div style="font-family:\'Orbitron\',sans-serif;font-size:12px;font-weight:700;color:#22c55e;letter-spacing:1px;">MY TASKS</div>' +
+                '<span style="font-size:32px;">✅</span>' +
+                '<div><div style="font-family:\'Orbitron\',sans-serif;font-size:14px;font-weight:700;color:#22c55e;letter-spacing:1px;">MY TASKS</div>' +
                 '<div style="font-size:11px;color:rgba(255,255,255,0.4);">' + completedTasks.length + '/' + tasks.length + ' completed</div></div></div>' +
                 ppProgressBar(taskPct, '#22c55e') + '</div>';
 
