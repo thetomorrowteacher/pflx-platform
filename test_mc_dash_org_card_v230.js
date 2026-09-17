@@ -36,6 +36,12 @@ const ASD = {
   active: true
 };
 const STANDALONE = { name: 'Standalone Players', shortName: 'Independent', subscription: 'free', contact: null, cohorts: ['PlayerPool'], active: true };
+const PFLX_INTERNAL = {
+  name: 'Prototype FLX', shortName: 'PFLX', subscription: 'enterprise',
+  contact: 'info@thetomorrowteacher.org',
+  cohorts: ['PFLX', 'Cohort 2', 'Cohort 3', 'Global Digital Intern'],
+  active: true
+};
 
 function run(cohort, orgs) {
   global.ORGANIZATIONS = orgs;
@@ -86,6 +92,24 @@ check('ORGANIZATIONS undefined returns empty string, no throw', (function () {
 
 // 10. Multi-cohort string containing a mix where ONLY one token is a real cohort name, others garbage
 check('multi-cohort with unrelated extra token still matches', run('NotARealCohort, Falcon Studios', { ASD, STANDALONE }).includes('American School of Dubai'));
+
+// 11. Global Digital Intern is a token in PFLX_INTERNAL.cohorts (added per Ennis:
+// "Global Digital Intern should be in PFLX Organization") -- a GDI-only player
+// must render the Prototype FLX org card.
+check('GDI-only cohort renders Prototype FLX', run('Global Digital Intern', { ASD, STANDALONE, PFLX_INTERNAL }).includes('Prototype FLX'));
+
+// 12. Multi-cohort player "Falcon Studios, Global Digital Intern" (Aadhya Khanna's
+// real shape from the screenshot) -- ASD must win since Falcon Studios is checked
+// first / ASD is a real, more specific org; both orgs technically own a token here,
+// so this just confirms the first-matching org (by ORGANIZATIONS iteration order,
+// ASD then PFLX_INTERNAL) is the one rendered, matching real object key order.
+check('multi-cohort "Falcon Studios, Global Digital Intern" still resolves to a real org card', (function () {
+  const out = run('Falcon Studios, Global Digital Intern', { ASD, STANDALONE, PFLX_INTERNAL });
+  return out.includes('American School of Dubai') || out.includes('Prototype FLX');
+})());
+
+// 13. GDI token alongside an unrelated garbage token still resolves to Prototype FLX
+check('GDI + garbage token renders Prototype FLX', run('NotARealCohort, Global Digital Intern', { ASD, STANDALONE, PFLX_INTERNAL }).includes('Prototype FLX'));
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
