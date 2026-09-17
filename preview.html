@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 225;
+      window.PFLX_PATCH   = 226;
       window.PFLX_BUILD   = '2026.09';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -5754,6 +5754,21 @@
             0%, 100% { box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.3); }
             50% { box-shadow: 0 0 0 6px rgba(255, 59, 48, 0); }
         }
+        /* v226: X-Bot image attach */
+        .xbot-attach-btn { position: relative; width: 36px; height: 36px; border-radius: 8px; background: rgba(0, 240, 255, 0.06); border: 1px solid rgba(0, 240, 255, 0.12); color: #6a7290; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.25s ease; flex-shrink: 0; }
+        .xbot-attach-btn:hover { background: rgba(0, 240, 255, 0.12); color: var(--cyan, #00f0ff); border-color: rgba(0, 240, 255, 0.3); }
+        .xbot-attach-btn.has { color: var(--cyan, #00f0ff); border-color: color-mix(in srgb, var(--cyan, #00f0ff) 55%, transparent); }
+        .xbot-attach-btn.has::after { content: attr(data-count); position: absolute; top: -5px; right: -5px; min-width: 16px; height: 16px; border-radius: 8px; background: var(--cyan, #00f0ff); color: #04101c; font: 700 10px/16px 'Rajdhani', sans-serif; text-align: center; }
+        .xbot-attach-btn.busy { opacity: 0.55; pointer-events: none; }
+        .xbot-chat-input-area { flex-wrap: wrap; }
+        #xbot-attach-tray { order: -1; flex-basis: 100%; display: none; gap: 6px; align-items: center; flex-wrap: wrap; }
+        .xbot-attach-thumb { position: relative; width: 48px; height: 48px; border-radius: 8px; overflow: hidden; border: 1px solid rgba(0, 240, 255, 0.25); background: #0a1228; }
+        .xbot-attach-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .xbot-attach-thumb button { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; border-radius: 50%; border: none; background: rgba(2, 6, 23, 0.85); color: #fff; font-size: 9px; line-height: 16px; padding: 0; cursor: pointer; }
+        .xbot-attach-note { font-size: 11px; color: #8a92b0; font-family: 'Rajdhani', sans-serif; }
+        .xbot-msg-images { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+        .xbot-msg-images img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.15); }
+        #xbot-chat-messages.xbot-drop-on { outline: 2px dashed color-mix(in srgb, var(--cyan, #00f0ff) 70%, transparent); outline-offset: -6px; }
         .xbot-chat-header {
             padding: 14px 16px;
             border-bottom: 1px solid rgba(0, 240, 255, 0.12);
@@ -14531,6 +14546,11 @@
                     <button class="xbot-mic-btn" id="xbot-mic-btn" onclick="xbotToggleVoice()" title="Voice Input">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
                     </button>
+                    <div id="xbot-attach-tray" aria-live="polite"></div>
+                    <button type="button" class="xbot-attach-btn" id="xbot-attach-btn" onclick="window.pflxXBotImages && pflxXBotImages.pick()" title="Attach a picture (or paste / drop one)" aria-label="Attach a picture">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="15" rx="2"></rect><circle cx="12" cy="12.5" r="3.5"></circle><path d="M8 5l1.5-2h5L16 5"></path></svg>
+                    </button>
+                    <input type="file" id="xbot-attach-input" accept="image/*" multiple style="display:none" onchange="window.pflxXBotImages && pflxXBotImages.onPicked(this)">
                     <input type="text" class="xbot-chat-input" id="xbot-chat-input" placeholder="Ask X-Bot anything..." autocomplete="off">
                     <button class="xbot-send-btn" id="xbot-send-btn">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
@@ -61736,7 +61756,7 @@ RESPONSE RULES:
                     body: JSON.stringify({
                         provider,
                         system: systemPrompt,
-                        messages: messages.map(m => ({ role: m.role, content: m.content })),
+                        messages: messages.map(m => (!window.pflxXBotImages ? { role: m.role, content: m.content } : provider === 'deepseek' ? { role: m.role, content: window.pflxXBotImages.textOf(m) } : window.pflxXBotImages.proxyMessage(m))),   // v226: pictures ride along (not to DeepSeek)
                         maxTokens: opts.maxTokens || 512,
                         model: opts.model || (provider === 'gemini' ? this.models.gemini : undefined),
                         temperature: (typeof opts.temperature === 'number') ? opts.temperature : undefined,
@@ -61779,7 +61799,7 @@ RESPONSE RULES:
                         max_tokens: 512,
                         messages: [
                             { role: 'system', content: systemPrompt },
-                            ...messages.map(m => ({ role: m.role, content: m.content }))
+                            ...messages.map(m => ({ role: m.role, content: (window.pflxXBotImages ? window.pflxXBotImages.textOf(m) : m.content) }))   // v226: local engines are text-only
                         ]
                     })
                 });
@@ -61806,7 +61826,7 @@ RESPONSE RULES:
                         model: this.models.claude,
                         max_tokens: 512,
                         system: systemPrompt,
-                        messages: messages.map(m => ({ role: m.role, content: m.content }))
+                        messages: messages.map(m => ({ role: m.role, content: (window.pflxXBotImages ? window.pflxXBotImages.claudeContent(m) : m.content) }))   // v226
                     })
                 });
                 if (!resp.ok) {
@@ -61827,7 +61847,7 @@ RESPONSE RULES:
                 messages.forEach(m => {
                     contents.push({
                         role: m.role === 'assistant' ? 'model' : 'user',
-                        parts: [{ text: m.content }]
+                        parts: (window.pflxXBotImages ? window.pflxXBotImages.geminiParts(m) : [{ text: m.content }])   // v226: inline pictures
                     });
                 });
                 // Gemini requires at least one user message and alternating roles
@@ -61863,7 +61883,7 @@ RESPONSE RULES:
                 if (!this.keys.openai) return this.callProxy('openai', systemPrompt, messages);
                 const oaiMessages = [
                     { role: 'system', content: systemPrompt },
-                    ...messages.map(m => ({ role: m.role, content: m.content }))
+                    ...messages.map(m => ({ role: m.role, content: (window.pflxXBotImages ? window.pflxXBotImages.openaiContent(m) : m.content) }))   // v226
                 ];
                 const resp = await fetch('https://api.openai.com/v1/chat/completions', {
                     method: 'POST',
@@ -61899,7 +61919,9 @@ RESPONSE RULES:
 
             // ── Main Entry Point ──────────────────────────────────────
             // Sends a message through the AI engine with fallback chain
-            async respond(userInput) {
+            async respond(userInput, extra) {
+                const __IMG = window.pflxXBotImages;
+                const __images = (__IMG && extra && extra.images) ? __IMG.clean(extra.images) : [];   // v226
                 // BYO-LLM: overlay the player's own key, then gate a dormant X-Bot.
                 try {
                     if (window.pflxPlayerAI) {
@@ -61912,13 +61934,14 @@ RESPONSE RULES:
                 // v218 X-Gems: the selected (or keyword-matched) X-Gem answers in its own persona
                 try {
                     const __gem = window.pflxXGems ? await window.pflxXGems.personaFor(userInput) : null;
-                    if (__gem) return await window.pflxXGems.respondAs(__gem, userInput, this);
+                    if (__gem) return await window.pflxXGems.respondAs(__gem, userInput, this, __images);
                 } catch (e) { console.warn('[X-Gems] persona failed, X-Bot answers', e); }
                 // Add to conversation history
-                this.conversationHistory.push({ role: 'user', content: userInput });
+                this.conversationHistory.push(__images.length ? { role: 'user', content: userInput, images: __images } : { role: 'user', content: userInput });
                 if (this.conversationHistory.length > this.maxHistory) {
                     this.conversationHistory = this.conversationHistory.slice(-this.maxHistory);
                 }
+                if (__IMG) __IMG.trimHistory(this.conversationHistory);
 
                 const avail = this.availableModels();
                 // No API keys configured — fall back to static responses
@@ -61929,7 +61952,11 @@ RESPONSE RULES:
                 }
 
                 const systemPrompt = this.buildSystemPrompt(userInput);
-                const primary = this.pickModel(userInput);
+                let primary = this.pickModel(userInput);
+                // v226: a picture goes to an engine that can see it (Gemini first)
+                if (__images.length && __IMG && !__IMG.canSee(this, primary)) {
+                    primary = ['gemini', 'claude', 'openai'].find(m => avail.includes(m)) || primary;
+                }
                 const chain = this.getFallbackChain(primary);
 
                 const errors = [];
@@ -61947,7 +61974,8 @@ RESPONSE RULES:
                         const cleanText = text.replace(/\[NAV:\w+\]/g, '').trim();
 
                         this.conversationHistory.push({ role: 'assistant', content: cleanText });
-                        return { text: cleanText, model: modelName, routed: true };
+                        const __note = (__images.length && __IMG && !__IMG.canSee(this, modelName)) ? __IMG.NOTE + '\n\n' : '';   // v226
+                        return { text: __note + cleanText, model: modelName, routed: true };
                     } catch (err) {
                         const errMsg = err.message || String(err);
                         console.warn(`[X-Bot AI] ${modelName} failed:`, errMsg);
@@ -63173,9 +63201,11 @@ RESPONSE RULES:
             messagesEl.scrollTop = messagesEl.scrollHeight;
 
             // Log for Chat Monitor
+            const __imgNote = (isUser && xbotAddMessage._imgNote) ? xbotAddMessage._imgNote + ' ' : '';   // v226: "📷×N", never the picture
+            xbotAddMessage._imgNote = '';
             if (activeSession) {
                 const playerId = activeSession.brand || activeSession.name;
-                xbotLogMessage(activeSession.name, playerId, text, isUser, modelName);
+                xbotLogMessage(activeSession.name, playerId, __imgNote + text, isUser, modelName);
             }
         }
 
@@ -63471,8 +63501,18 @@ RESPONSE RULES:
         async function xbotHandleSend() {
             const chatInput = document.getElementById('xbot-chat-input');
             const quickActions = document.getElementById('xbot-quick-actions');
-            const text = chatInput.value.trim();
-            if (!text) return;
+            // v226: attached pictures travel with the message
+            const __IMG = window.pflxXBotImages;
+            if (__IMG && __IMG.busy()) { try { pflxToast('Still getting your picture ready…', 'info', 2500); } catch (e) {} return; }
+            let text = chatInput.value.trim();
+            if (!text && !(__IMG && __IMG.count())) return;
+            const __images = __IMG ? __IMG.take() : [];
+            if (!text) text = __images.length === 1 ? 'Here is my picture.' : 'Here are my pictures.';
+            const __addUser = () => {
+                xbotAddMessage._imgNote = __images.length ? ('📷×' + __images.length) : '';
+                xbotAddMessage(text, true);
+                if (__images.length) __IMG.showInLastUserBubble(__images);
+            };
 
             const playerId = activeSession ? (activeSession.brand || activeSession.name) : 'unknown';
             const playerName = activeSession ? activeSession.name : 'Unknown';
@@ -63489,13 +63529,13 @@ RESPONSE RULES:
                     return;
                 }
                 // Warn but allow message through
-                xbotAddMessage(text, true);
+                __addUser();
                 chatInput.value = '';
                 quickActions.style.display = 'none';
                 xbotAddMessage(modResult.responseMsg, false, 'moderation');
                 // Still process AI response after warning
                 xbotShowTyping();
-                const result = await XBOT_AI.respond(text);
+                const result = await XBOT_AI.respond(text, { images: __images });
                 xbotRemoveTyping();
                 xbotAddMessage(result.text, false, result.model);
                 if (xbotVoiceActive || xbotCurrentMode === 'voice') xbotSpeak(result.text);
@@ -63503,12 +63543,12 @@ RESPONSE RULES:
             }
 
             // ── Normal flow (no violation) ──
-            xbotAddMessage(text, true);
+            __addUser();
             chatInput.value = '';
             quickActions.style.display = 'none';
 
             xbotShowTyping();
-            const result = await XBOT_AI.respond(text);
+            const result = await XBOT_AI.respond(text, { images: __images });
             xbotRemoveTyping();
             xbotAddMessage(result.text, false, result.model);
             // If voice mode or voice active, also speak
@@ -72615,11 +72655,14 @@ RESPONSE RULES:
                 if (!g || !canUse(g)) return Promise.resolve(null);
                 return content(g.id).then(function (c) { return { gem: g, content: c, auto: auto }; });
             }
-            async function respondAs(p, input, AI) {
+            async function respondAs(p, input, AI, images) {
                 var g = p.gem;
+                var IMG = window.pflxXBotImages;
+                images = (IMG && images) ? IMG.clean(images) : [];   // v226
                 var hist = S.hist[g.id] || (S.hist[g.id] = []);
-                hist.push({ role: 'user', content: input });
+                hist.push(images.length ? { role: 'user', content: input, images: images } : { role: 'user', content: input });
                 if (hist.length > 20) S.hist[g.id] = hist = hist.slice(-20);
+                if (IMG) IMG.trimHistory(hist);
                 var sys = buildPrompt(g, p.content);
                 var avail = AI.availableModels();
                 if (!avail.length) {
@@ -72637,7 +72680,8 @@ RESPONSE RULES:
                         text = String(text || '').replace(/\[NAV:\w+\]/g, '').trim();
                         hist.push({ role: 'assistant', content: text });
                         S.reply = { id: g.id, at: Date.now(), auto: p.auto, engine: m };
-                        return { text: (p.auto ? '↪ X-Bot connected you to ' + g.name + '\n\n' : '') + text, model: m, routed: true, xgem: g.id };
+                        var note = (images.length && IMG && !IMG.canSee(AI, m)) ? IMG.NOTE + '\n\n' : '';   // v226
+                        return { text: (p.auto ? '↪ X-Bot connected you to ' + g.name + '\n\n' : '') + note + text, model: m, routed: true, xgem: g.id };
                     } catch (e) { errors.push(m + ': ' + (e && e.message || e)); }
                 }
                 hist.pop();
@@ -72886,6 +72930,221 @@ RESPONSE RULES:
                         .then(function (rs) { rs.filter(function (r) { return r && r.text; }).forEach(function (r) { ED.files.push(r); }); drawEditor(); });
                 },
                 _state: function () { return S; }
+            };
+        })();
+    </script>
+    <script>
+        // ═══════════════════════════════════════════════════════════════════
+        // PATCH v226 -- X-BOT IMAGE ATTACH (Sep 17, Ennis)
+        //  Students and hosts can attach up to 3 pictures to an X-Bot / X-Gem
+        //  message: 📷 button, paste (Ctrl/Cmd+V) or drag-and-drop onto the chat.
+        //  Pictures are shrunk in the browser (longest side 1600px, JPEG) and
+        //  sent with the message to vision-capable engines:
+        //    Gemini (direct key or proxy), Claude + OpenAI (direct or proxy).
+        //  Local / DeepSeek can't see pictures -> the reply says so.
+        //  Pictures live ONLY in memory for the conversation: never written to
+        //  localStorage, Supabase or the Chat Monitor log (that gets "📷×N").
+        //  Only the 2 most recent picture messages keep their pixels in the
+        //  history sent to the AI; older ones become "(picture shared earlier)".
+        // ═══════════════════════════════════════════════════════════════════
+        window.pflxXBotImages = (function () {
+            var MAX_IMAGES = 3, MAX_EDGE = 1600, TARGET_B64 = 900000, MAX_B64 = 2500000, KEEP_IMAGE_TURNS = 2, TOTAL_B64 = 3200000;
+            var OK_MIME = /^image\/(png|jpe?g|webp|gif|bmp|heic|heif|avif)$/i;
+            var pending = [];
+            var uid = 0;
+
+            function toast(m, k) { try { if (typeof pflxToast === 'function') pflxToast(m, k || 'info', 4000); } catch (e) {} }
+            function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+            function validImage(im) {
+                return !!(im && typeof im.data === 'string' && im.data.length > 0 && im.data.length <= MAX_B64 &&
+                    /^image\/(jpeg|png|webp)$/.test(String(im.mimeType || '')) && /^[A-Za-z0-9+/]+={0,2}$/.test(im.data));
+            }
+            function clean(list) { return (Array.isArray(list) ? list : []).filter(validImage).slice(0, MAX_IMAGES); }
+
+            // ── decode + shrink ──
+            function loadImage(file) {
+                return new Promise(function (resolve, reject) {
+                    var url = URL.createObjectURL(file);
+                    var img = new Image();
+                    img.onload = function () { resolve({ img: img, url: url }); };
+                    img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('decode')); };
+                    img.src = url;
+                });
+            }
+            function encode(img, edge, q) {
+                var w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+                var s = Math.min(1, edge / Math.max(w, h, 1));
+                var cw = Math.max(1, Math.round(w * s)), ch = Math.max(1, Math.round(h * s));
+                var c = document.createElement('canvas'); c.width = cw; c.height = ch;
+                var x = c.getContext('2d');
+                x.fillStyle = '#ffffff'; x.fillRect(0, 0, cw, ch);   // transparent PNGs -> white, not black
+                x.drawImage(img, 0, 0, cw, ch);
+                return { url: c.toDataURL('image/jpeg', q), w: cw, h: ch };
+            }
+            function shrink(file) {
+                return loadImage(file).then(function (o) {
+                    try {
+                        var tries = [[MAX_EDGE, 0.85], [MAX_EDGE, 0.72], [1280, 0.72], [1024, 0.7], [800, 0.65]];
+                        var out = null;
+                        for (var i = 0; i < tries.length; i++) {
+                            out = encode(o.img, tries[i][0], tries[i][1]);
+                            if (out.url.length - 23 <= TARGET_B64) break;
+                        }
+                        var data = out.url.slice(out.url.indexOf(',') + 1);
+                        var th = encode(o.img, 160, 0.7);
+                        return { id: 'img' + (++uid) + '-' + Date.now().toString(36), mimeType: 'image/jpeg', data: data, w: out.w, h: out.h, name: String(file.name || 'image').slice(0, 60), thumb: th.url };
+                    } finally { URL.revokeObjectURL(o.url); }
+                });
+            }
+
+            // ── pending tray ──
+            function addFiles(files) {
+                var list = Array.prototype.slice.call(files || []).filter(function (f) { return f && (OK_MIME.test(f.type || '') || /\.(png|jpe?g|webp|gif|bmp|heic|heif|avif)$/i.test(f.name || '')); });
+                if (!list.length) { if (files && files.length) toast('Only pictures can be attached (PNG, JPG, WEBP).', 'error'); return Promise.resolve(0); }
+                var room = MAX_IMAGES - pending.length;
+                if (room <= 0) { toast('You can attach up to ' + MAX_IMAGES + ' pictures per message.', 'error'); return Promise.resolve(0); }
+                if (list.length > room) toast('Only the first ' + room + ' picture' + (room === 1 ? '' : 's') + ' were added (max ' + MAX_IMAGES + ').', 'info');
+                list = list.slice(0, room);
+                setBusy(true);
+                return Promise.all(list.map(function (f) { return shrink(f).catch(function () { return null; }); })).then(function (res) {
+                    var ok = res.filter(function (r) { return r && validImage(r); });
+                    if (ok.length < res.length) toast('One picture could not be read — try a PNG or JPG screenshot.', 'error');
+                    ok.forEach(function (r) { if (pending.length < MAX_IMAGES) pending.push(r); });
+                    setBusy(false); render();
+                    var inp = document.getElementById('xbot-chat-input'); if (inp) try { inp.focus(); } catch (e) {}
+                    return ok.length;
+                });
+            }
+            function remove(id) { pending = pending.filter(function (p) { return p.id !== id; }); render(); }
+            function clear() { pending = []; render(); }
+            function count() { return pending.length; }
+            function take() { var out = pending.map(function (p) { return { mimeType: p.mimeType, data: p.data, w: p.w, h: p.h, name: p.name, thumb: p.thumb }; }); pending = []; render(); return out; }
+            var busy = false;
+            function setBusy(b) { busy = b; var btn = document.getElementById('xbot-attach-btn'); if (btn) btn.classList.toggle('busy', !!b); }
+            function render() {
+                var tray = document.getElementById('xbot-attach-tray'); if (!tray) return;
+                if (!pending.length) { tray.innerHTML = ''; tray.style.display = 'none'; updateBtn(); return; }
+                tray.style.display = 'flex';
+                tray.innerHTML = pending.map(function (p) {
+                    return '<div class="xbot-attach-thumb" title="' + esc(p.name) + '"><img src="' + p.thumb + '" alt=""><button type="button" aria-label="Remove picture" onclick="pflxXBotImages.remove(\'' + p.id + '\')">✕</button></div>';
+                }).join('') + '<div class="xbot-attach-note">📷 ' + pending.length + ' picture' + (pending.length === 1 ? '' : 's') + ' · sends with your message</div>';
+                updateBtn();
+            }
+            function updateBtn() {
+                var btn = document.getElementById('xbot-attach-btn'); if (!btn) return;
+                btn.classList.toggle('has', pending.length > 0);
+                btn.setAttribute('data-count', pending.length ? String(pending.length) : '');
+            }
+            function pick() {
+                var f = document.getElementById('xbot-attach-input');
+                if (f) { f.value = ''; f.click(); }
+            }
+            function onPicked(inp) { var fs = inp && inp.files; addFiles(fs).then(function () { try { inp.value = ''; } catch (e) {} }); }
+
+            // ── chat bubble thumbnails ──
+            function showInLastUserBubble(images) {
+                if (!images || !images.length) return;
+                var msgs = document.querySelectorAll('#xbot-chat-messages .xbot-msg-user');
+                var last = msgs[msgs.length - 1]; if (!last) return;
+                var bubble = last.querySelector('.xbot-msg-bubble'); if (!bubble) return;
+                var row = document.createElement('div');
+                row.className = 'xbot-msg-images';
+                images.forEach(function (im) {
+                    var i = document.createElement('img');
+                    i.src = im.thumb || ('data:' + im.mimeType + ';base64,' + im.data);
+                    i.alt = im.name || 'picture';
+                    i.title = im.name || 'picture';
+                    row.appendChild(i);
+                });
+                bubble.insertBefore(row, bubble.firstChild);
+            }
+
+            // ── history ──
+            // keep pixels on the newest KEEP_IMAGE_TURNS picture messages only, and under TOTAL_B64 overall
+            function trimHistory(hist) {
+                if (!Array.isArray(hist)) return hist;
+                var seen = 0, total = 0;
+                for (var i = hist.length - 1; i >= 0; i--) {
+                    var m = hist[i];
+                    if (!m || !m.images || !m.images.length) continue;
+                    var size = m.images.reduce(function (s, im) { return s + (im.data ? im.data.length : 0); }, 0);
+                    seen++;
+                    if (seen > KEEP_IMAGE_TURNS || total + size > TOTAL_B64) {
+                        m.imagesDropped = (m.imagesDropped || 0) + m.images.length;
+                        delete m.images;
+                    } else total += size;
+                }
+                return hist;
+            }
+            function textOf(m) {
+                var t = String((m && m.content) || '');
+                if (m && m.imagesDropped) t = '(' + m.imagesDropped + ' picture' + (m.imagesDropped === 1 ? '' : 's') + ' shared earlier)\n' + t;
+                return t;
+            }
+            function has(m) { return !!(m && m.role !== 'assistant' && m.images && m.images.length); }
+            function geminiParts(m) {
+                var parts = [];
+                if (has(m)) clean(m.images).forEach(function (im) { parts.push({ inline_data: { mime_type: im.mimeType, data: im.data } }); });
+                parts.push({ text: textOf(m) || '.' });
+                return parts;
+            }
+            function claudeContent(m) {
+                if (!has(m)) return textOf(m);
+                var c = clean(m.images).map(function (im) { return { type: 'image', source: { type: 'base64', media_type: im.mimeType, data: im.data } }; });
+                c.push({ type: 'text', text: textOf(m) || '.' });
+                return c;
+            }
+            function openaiContent(m) {
+                if (!has(m)) return textOf(m);
+                var c = [{ type: 'text', text: textOf(m) || '.' }];
+                clean(m.images).forEach(function (im) { c.push({ type: 'image_url', image_url: { url: 'data:' + im.mimeType + ';base64,' + im.data } }); });
+                return c;
+            }
+            // what the proxy gets: text + (optional) images on user turns
+            function proxyMessage(m) {
+                var o = { role: m.role, content: textOf(m) };
+                if (has(m)) o.images = clean(m.images).map(function (im) { return { mimeType: im.mimeType, data: im.data }; });
+                return o;
+            }
+            function lastHasImages(hist) { var m = hist && hist[hist.length - 1]; return has(m); }
+            // engines that can see pictures on this device right now
+            function canSee(AI, engine) { return engine === 'gemini' || engine === 'claude' || engine === 'openai'; }
+            var NOTE = '📷 This AI engine can\'t see pictures, so I only read your text. Connect Gemini, Claude or OpenAI to let me read images.';
+
+            // ── wiring ──
+            function wire() {
+                var inp = document.getElementById('xbot-chat-input');
+                if (inp && !inp.__pflxImgWired) {
+                    inp.__pflxImgWired = true;
+                    inp.addEventListener('paste', function (e) {
+                        var items = (e.clipboardData && e.clipboardData.items) || [];
+                        var files = [];
+                        for (var i = 0; i < items.length; i++) { if (items[i].kind === 'file' && /^image\//.test(items[i].type)) { var f = items[i].getAsFile(); if (f) files.push(f); } }
+                        if (files.length) { e.preventDefault(); addFiles(files); }
+                    });
+                }
+                var zone = document.getElementById('xbot-chat-messages');
+                if (zone && !zone.__pflxImgWired) {
+                    zone.__pflxImgWired = true;
+                    var isFiles = function (e) { var t = e.dataTransfer && e.dataTransfer.types; return !!t && Array.prototype.indexOf.call(t, 'Files') >= 0; };
+                    zone.addEventListener('dragover', function (e) { if (!isFiles(e)) return; e.preventDefault(); zone.classList.add('xbot-drop-on'); });
+                    zone.addEventListener('dragleave', function () { zone.classList.remove('xbot-drop-on'); });
+                    zone.addEventListener('drop', function (e) {
+                        if (!isFiles(e)) return;
+                        e.preventDefault(); zone.classList.remove('xbot-drop-on');
+                        addFiles(e.dataTransfer.files);
+                    });
+                }
+            }
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire); else wire();
+            setTimeout(wire, 1500);
+
+            return {
+                MAX_IMAGES: MAX_IMAGES, NOTE: NOTE,
+                pick: pick, onPicked: onPicked, addFiles: addFiles, remove: remove, clear: clear, count: count, take: take,
+                showInLastUserBubble: showInLastUserBubble, trimHistory: trimHistory, clean: clean, validImage: validImage,
+                geminiParts: geminiParts, claudeContent: claudeContent, openaiContent: openaiContent, proxyMessage: proxyMessage,
+                lastHasImages: lastHasImages, canSee: canSee, textOf: textOf, busy: function () { return busy; }, wire: wire
             };
         })();
     </script>
