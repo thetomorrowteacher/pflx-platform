@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 226;
+      window.PFLX_PATCH   = 227;
       window.PFLX_BUILD   = '2026.09';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -72531,7 +72531,7 @@ RESPONSE RULES:
             var uid = 0;
             function mark(size, g) {
                 var id = 'xgm' + (++uid);
-                if (g && g.image && /^(data:image|https:)/.test(g.image)) {
+                if (g && g.image && /^(data:image|https:|public\/)/.test(g.image)) {   // v227: repo paths too
                     return '<img class="xgem-mark-img" src="' + esc(g.image) + '" alt="" style="width:' + size + 'px;height:' + size + 'px">';
                 }
                 return '<svg class="xgem-mark" width="' + size + '" height="' + size + '" viewBox="0 0 64 64" aria-hidden="true">' +
@@ -72547,6 +72547,7 @@ RESPONSE RULES:
                     '</svg>';
             }
             function wordmark() { return '<span class="xgem-word">X-<span class="xgem-g">G</span>em</span>'; }
+            var GRID_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h8v8H3zM13 3h8v8h-8zM3 13h8v8H3zM13 13h8v8h-8z" fill="currentColor"/></svg>';   // v227
             var OUT_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
             var CSS = '<style id="xgem-css">' +
@@ -72573,7 +72574,7 @@ RESPONSE RULES:
                 'html body .xgem-ed{width:min(760px,96vw);max-height:92vh;overflow:auto;background:linear-gradient(150deg,#0a1228,#0d1730);border:1px solid rgba(76,141,255,.3);border-radius:18px;padding:20px;color:#dfe6ff;font-family:Rajdhani,sans-serif}' +
                 'html body .xgem-ed .xgem-h{margin:0;color:#fff;font-family:Orbitron,sans-serif;font-size:14px;letter-spacing:1.5px}' +
                 'html body .xgem-ed label{display:block;font-size:11px;color:#8a92b0;margin:12px 0 4px;letter-spacing:.5px}' +
-                'html body .xgem-ed input[type=text],html body .xgem-ed input[type=url],html body .xgem-ed textarea,html body .xgem-ed select{width:100%;box-sizing:border-box;background:rgba(10,18,40,.85);border:1px solid rgba(0,240,255,.14);color:#e0e6ff;padding:8px 10px;border-radius:8px;font-family:Rajdhani,sans-serif;font-size:14px}' +
+                'html body .xgem-ed input[type=text],html body .xgem-ed input[type=url],html body .xgem-ed input[type=number],html body .xgem-ed textarea,html body .xgem-ed select{width:100%;box-sizing:border-box;background:rgba(10,18,40,.85);border:1px solid rgba(0,240,255,.14);color:#e0e6ff;padding:8px 10px;border-radius:8px;font-family:Rajdhani,sans-serif;font-size:14px}' +
                 'html body .xgem-ed textarea{min-height:140px;resize:vertical}html body .xgem-row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}' +
                 'html body .xgem-btn{padding:9px 16px;border-radius:9px;border:1px solid rgba(0,240,255,.35);background:rgba(0,240,255,.1);color:#00f0ff;font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:1.5px;cursor:pointer}' +
                 'html body .xgem-btn.gh{border-color:rgba(255,255,255,.15);background:transparent;color:#aab4d4}html body .xgem-btn.red{border-color:rgba(255,80,100,.4);color:#ff8095;background:rgba(255,80,100,.08)}' +
@@ -72582,6 +72583,9 @@ RESPONSE RULES:
                 'html body .xgem-cks label{display:flex;gap:6px;align-items:center;margin:0;color:#cfd6f0;font-size:12px}' +
                 'html body .xgem-admin-row{display:flex;gap:12px;align-items:center;padding:10px;border-radius:12px;background:rgba(10,15,30,.6);border:1px solid rgba(0,240,255,.08);margin-bottom:8px}' +
                 '@media (max-width:600px){html body .xgem-row2{grid-template-columns:1fr}}' +
+                'html body .xgem-ed input[type=color]{width:100%;height:38px;padding:2px;border-radius:8px;border:1px solid rgba(0,240,255,.14);background:rgba(10,18,40,.85);cursor:pointer}' +   // v227
+                'html body .xgem-chip.sel{gap:6px;color:#7ff3ff;font-weight:700}html body .xgem-chip.sel:hover{color:#fff;border-color:rgba(0,229,255,.7);background:rgba(0,229,255,.08)}html body .xgem-chip.sel svg{flex:none}' +   // v227
+                'html body .xgem-banner .xgem-selmark{cursor:pointer;border:0;background:transparent;padding:0;display:flex}' +   // v227
                 '</style>';
             function ensureCss() { if (!document.getElementById('xgem-css')) document.head.insertAdjacentHTML('beforeend', CSS); }
 
@@ -72742,14 +72746,15 @@ RESPONSE RULES:
                 if (!list.length && !host) { bar.innerHTML = ''; bar.classList.remove('xgem-bar'); return; }
                 bar.classList.add('xgem-bar');
                 var chips = '<button class="xgem-chip' + (!S.active ? ' on' : '') + '" onclick="pflxXGems.select(null)"><img src="public/X Official for PFLX.png" alt="" style="width:20px;height:20px;object-fit:contain"> X-Bot</button>' +
+                    '<button class="xgem-chip add sel" title="Choose an X-Gem" aria-label="Choose an X-Gem" onclick="pflxXGems.openSelect()">' + GRID_SVG + ' X-Gems</button>' +   // v227
                     list.map(function (g) {
                         return '<button class="xgem-chip' + (S.active === g.id ? ' on' : '') + (g.enabled === false ? ' off' : '') + '" title="' + esc(g.tagline || '') + '" onclick="pflxXGems.select(\'' + q1(g.id) + '\')">' + mark(20, g) + esc(g.name) + '</button>';
                     }).join('') +
-                    (host ? '<button class="xgem-chip add" onclick="pflxXGems.edit()">＋ X-Gem</button>' : '');
+                    '';   // v227: the X-Gem chip moved next to X-Bot and opens the select screen
                 var g = S.active ? byId(S.active) : null;
                 var banner = '';
                 if (g) {
-                    banner = '<div class="xgem-banner">' + mark(40, g) + '<div style="flex:1;min-width:0"><div>' + wordmark() + ' <span class="nm">· ' + esc(g.name) + '</span></div>' +
+                    banner = '<div class="xgem-banner"><button class="xgem-selmark" title="Choose another X-Gem" aria-label="Choose another X-Gem" onclick="pflxXGems.openSelect(\'' + q1(g.id) + '\')">' + mark(40, g) + '</button><div style="flex:1;min-width:0"><div>' + wordmark() + ' <span class="nm">· ' + esc(g.name) + '</span></div>' +
                         (g.tagline ? '<div class="tg">' + esc(g.tagline) + '</div>' : '') + '<div class="xgem-pw">Powered by Gemini Gems</div></div>' +
                         (shareOk(g.shareUrl) ? '<button class="xgem-ib xgem-out" title="Open outside app — this Gem in Gemini" aria-label="Open in Gemini" onclick="pflxXGems.openOutside()">' + OUT_SVG + '</button>' : '') +
                         (host ? '<button class="xgem-ib" title="Edit X-Gem" onclick="pflxXGems.edit(\'' + q1(g.id) + '\')">✎</button>' : '') + '</div>' +
@@ -72761,7 +72766,7 @@ RESPONSE RULES:
                 var inp = document.getElementById('xbot-chat-input');
                 if (inp) inp.placeholder = g ? 'Ask ' + g.name + '…' : 'Ask X-Bot anything...';
             }
-            function renderAll() { try { renderBar(); renderHeader(); } catch (e) { console.warn('[xgems] render', e); } }
+            function renderAll() { try { renderBar(); renderHeader(); } catch (e) { console.warn('[xgems] render', e); } try { if (window.pflxXGemSelect) window.pflxXGemSelect.refresh(); } catch (e) {} }
 
             // ── host editor ──
             function readFileText(f) {
@@ -72805,13 +72810,35 @@ RESPONSE RULES:
                     r.onerror = rej; r.readAsDataURL(f);
                 });
             }
+            // v227: portrait card art (4:5, cover-cropped, 480x600 webp)
+            function cardOk(u) { return /^(data:image\/(png|jpe?g|webp|gif);|https:\/\/|public\/)/i.test(String(u || '')); }
+            function shrinkCard(f) {
+                return new Promise(function (res, rej) {
+                    var r = new FileReader();
+                    r.onload = function () {
+                        var im = new Image();
+                        im.onload = function () {
+                            var W = 480, H = 600, c = document.createElement('canvas'); c.width = W; c.height = H;
+                            var x = c.getContext('2d'); var sc = Math.max(W / im.width, H / im.height);
+                            var sw = W / sc, sh = H / sc, sx = (im.width - sw) / 2, sy = Math.max(0, (im.height - sh) * 0.2);
+                            x.fillStyle = '#0a1430'; x.fillRect(0, 0, W, H);
+                            x.drawImage(im, sx, sy, sw, sh, 0, 0, W, H);
+                            var q = 0.82, d = c.toDataURL('image/webp', q);
+                            while (d.length > 140000 && q > 0.45) { q -= 0.1; d = c.toDataURL('image/webp', q); }
+                            res(d);
+                        };
+                        im.onerror = rej; im.src = r.result;
+                    };
+                    r.onerror = rej; r.readAsDataURL(f);
+                });
+            }
             var ED = null;
             function edit(id) {
                 if (!isHost()) return;
                 ensureCss();
                 var g = id ? byId(id) : null;
                 var base = g ? JSON.parse(JSON.stringify(g)) : { id: 'xg-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: '', tagline: '', emoji: '', image: '',
-                    shareUrl: '', model: 'gemini-2.5-flash', temperature: 0.4, grounding: false, keywords: [], autoRoute: false, starters: [], allCohorts: true, cohorts: [], enabled: true };
+                    shareUrl: '', model: 'gemini-2.5-flash', temperature: 0.4, grounding: false, keywords: [], autoRoute: false, starters: [], allCohorts: true, cohorts: [], enabled: true, card: '', accent: '#4c8dff', step: 0, stage: '' };
                 ED = { gem: base, isNew: !g, files: [], instructions: '' };
                 return (g ? content(g.id) : Promise.resolve({ instructions: '', files: [] })).then(function (c) {
                     ED.instructions = (c && c.instructions) || ''; ED.files = ((c && c.files) || []).slice();
@@ -72833,6 +72860,14 @@ RESPONSE RULES:
                     '<div><label>ICON — emoji inside the gem, or upload an image</label><div style="display:flex;gap:6px"><input type="text" id="xg-emoji" maxlength="4" value="' + esc(g.emoji) + '" placeholder="💡" style="width:70px">' +
                     '<button class="xgem-btn gh" onclick="document.getElementById(\'xg-img\').click()">UPLOAD</button>' + (g.image ? '<button class="xgem-btn gh" onclick="pflxXGems._clearImg()">REMOVE</button>' : '') +
                     '<input type="file" id="xg-img" accept="image/*" style="display:none" onchange="pflxXGems._img(this)"></div></div></div>' +
+                    // v227: select-screen card fields
+                    '<div class="xgem-row2"><div><label>CARD ART — portrait picture for the X-Gem select screen</label><div style="display:flex;gap:6px;align-items:center">' +
+                    (cardOk(g.card) ? '<img src="' + esc(g.card) + '" alt="" style="width:36px;height:45px;object-fit:cover;border-radius:4px;border:1px solid rgba(255,255,255,.2)">' : '<span class="xgem-note" style="margin:0">none yet</span>') +
+                    '<button class="xgem-btn gh" onclick="document.getElementById(\'xg-card\').click()">UPLOAD</button>' + (g.card ? '<button class="xgem-btn gh" onclick="pflxXGems._clearCard()">REMOVE</button>' : '') +
+                    '<input type="file" id="xg-card" accept="image/*" style="display:none" onchange="pflxXGems._card(this)"></div></div>' +
+                    '<div><label>CARD COLOR</label><input type="color" id="xg-acc" value="' + esc(/^#[0-9a-f]{6}$/i.test(g.accent || '') ? g.accent : '#4c8dff') + '"></div></div>' +
+                    '<div class="xgem-row2"><div><label>GEM CHAIN STEP — order on the select screen (blank = none)</label><input type="number" id="xg-step" min="1" max="99" value="' + (g.step > 0 ? g.step : '') + '" placeholder="e.g. 3"></div>' +
+                    '<div><label>FLX STAGE</label><select id="xg-stage"><option value="">—</option>' + ['Connection', 'Ideation', 'Creation', 'Reflection', 'Production'].map(function (s) { return '<option value="' + s + '"' + (g.stage === s ? ' selected' : '') + '>' + s + '</option>'; }).join('') + '</select></div></div>' +
                     '<label>INSTRUCTIONS — copy them from your Gem (Gemini → Gems → Edit)</label><textarea id="xg-ins" placeholder="You are ThinkTable, a friendly ideation coach…">' + esc(ED.instructions) + '</textarea>' +
                     '<label>KNOWLEDGE FILES — .txt .md .csv .json .pdf (' + chars.toLocaleString() + ' / ' + KNOWLEDGE_CAP.toLocaleString() + ' characters used)</label>' +
                     ED.files.map(function (f, i) { return '<div class="xgem-file"><span>📄 ' + esc(f.name) + ' · ' + String(f.text || '').length.toLocaleString() + ' ch</span><a style="cursor:pointer;color:#ff8095" onclick="pflxXGems._rmFile(' + i + ')">remove</a></div>'; }).join('') +
@@ -72862,6 +72897,11 @@ RESPONSE RULES:
                 g.starters = v('xg-starters').split('\n').map(function (s) { return s.trim(); }).filter(Boolean).slice(0, 4);
                 g.keywords = v('xg-keys').split(',').map(function (s) { return s.trim(); }).filter(Boolean).slice(0, 20);
                 g.cohorts = Array.prototype.slice.call(document.querySelectorAll('#xg-cks input:checked')).map(function (i) { return i.value; });
+                if (document.getElementById('xg-acc')) {   // v227
+                    g.accent = v('xg-acc') || g.accent || '';
+                    var stp = parseInt(v('xg-step'), 10); g.step = (stp > 0 && stp < 100) ? stp : 0;
+                    g.stage = v('xg-stage');
+                }
                 ED.instructions = v('xg-ins');
             }
             function closeEditor() { var o = document.getElementById('xgem-ov'); if (o) o.remove(); ED = null; }
@@ -72921,6 +72961,10 @@ RESPONSE RULES:
                 _close: closeEditor, _save: saveEditor, _delete: deleteGem,
                 _rmFile: function (i) { pullForm(); ED.files.splice(i, 1); drawEditor(); },
                 _clearImg: function () { pullForm(); ED.gem.image = ''; drawEditor(); },
+                _clearCard: function () { pullForm(); ED.gem.card = ''; drawEditor(); },   // v227
+                _card: function (inp) { var f = inp.files && inp.files[0]; if (!f) return; pullForm(); return shrinkCard(f).then(function (d) { ED.gem.card = d; drawEditor(); }, function () { toast('Could not read that image', 'error'); }); },
+                usable: function () { return gems().slice(); }, hostView: hostView, byId: byId,   // v227
+                openSelect: function (id) { if (window.pflxXGemSelect) window.pflxXGemSelect.open(id); },
                 _img: function (inp) { var f = inp.files && inp.files[0]; if (!f) return; pullForm(); shrinkImage(f).then(function (d) { ED.gem.image = d; drawEditor(); }, function () { toast('Could not read that image', 'error'); }); },
                 _files: function (inp) {
                     var fs = Array.prototype.slice.call(inp.files || []); if (!fs.length) return Promise.resolve();
@@ -72931,6 +72975,416 @@ RESPONSE RULES:
                 },
                 _state: function () { return S; }
             };
+        })();
+    </script>
+    <script>
+        // ═══════════════════════════════════════════════════════════════════
+        // PATCH v227 -- X-GEM SELECT SCREEN (Sep 17, Ennis)
+        //  A character-select screen for X-Gems, modelled on a mobile game's
+        //  character grid: framed portrait cards with a STEP badge (Gem chain
+        //  order), an FLX stage chip and a name plate; Favorites, Sort and a
+        //  stage filter; a detail panel with SELECT / Open in Gemini / Edit.
+        //  X-Gems without card art show a locked-style placeholder.
+        //  Opened from the ⊞ chip in the X-Gem bar, the X-Gem banner mark,
+        //  or pflxXGems.openSelect(). Card art: gem.card (repo path
+        //  public/xgems/... or a data URL the host uploads in the editor).
+        //  Favorites live in localStorage per user (a convenience only).
+        // ═══════════════════════════════════════════════════════════════════
+        window.pflxXGemSelect = (function () {
+            var FAV_LS = 'pflx_xgem_favs_v1', SORT_LS = 'pflx_xgem_sort_v1';
+            var STAGES = ['Connection', 'Ideation', 'Creation', 'Reflection', 'Production'];
+            var SORTS = [['chain', 'Gem chain'], ['az', 'A → Z'], ['new', 'Newest']];
+            var X_BOT = { id: '', name: 'X-Bot', tagline: 'Your PFLX guide. Ask anything about the platform.', card: 'public/X Official for PFLX.png', accent: '#00f0ff', stage: '', step: 0, xbot: true };
+            var V = { open: false, focus: null, favOnly: false, stage: '', sort: 'chain', lastFocus: null };
+            try { V.sort = localStorage.getItem(SORT_LS) || 'chain'; } catch (e) {}
+
+            function G() { return window.pflxXGems; }
+            function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+            function q1(s) { return esc(String(s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'")); }
+            function sfx(n) { try { if (typeof pflxPlaySfx === 'function') pflxPlaySfx(n); } catch (e) {} }
+            function me() { return window.activeSession || null; }
+            function favKey() { var s = me(); return FAV_LS + ':' + ((s && (s.id || s.brand)) || 'guest'); }
+            function favs() { try { return JSON.parse(localStorage.getItem(favKey()) || '[]') || []; } catch (e) { return []; } }
+            function setFavs(a) { try { localStorage.setItem(favKey(), JSON.stringify(a)); } catch (e) {} }
+            function isFav(id) { return favs().indexOf(id) >= 0; }
+            function artOk(u) { return /^(data:image\/(png|jpe?g|webp|gif);|https:\/\/|public\/)/i.test(String(u || '')); }
+            function colorOk(c) { return /^#[0-9a-f]{3,8}$/i.test(String(c || '')) ? c : ''; }
+            function stageOf(g) { var s = String((g && g.stage) || ''); return STAGES.indexOf(s) >= 0 ? s : ''; }
+            function stepOf(g) { var n = parseInt(g && g.step, 10); return n > 0 && n < 100 ? n : 0; }
+
+            function fontOnce() {
+                if (document.getElementById('xgsel-font')) return;
+                var l = document.createElement('link'); l.id = 'xgsel-font'; l.rel = 'stylesheet';
+                l.href = 'https://fonts.googleapis.com/css2?family=Audiowide&family=Exo+2:wght@500;600;700;800&display=swap';
+                document.head.appendChild(l);
+            }
+            var CSS = '<style id="xgsel-css">' +
+                'html body .xgsel{position:fixed;inset:0;z-index:100040;display:flex;flex-direction:column;color:#e7eeff;font-family:"Exo 2",Rajdhani,sans-serif;background:#040a1c;overflow:hidden;animation:xgselIn .28s ease-out both}' +
+                'html body.xgsel-open .pflx-toast{z-index:100070}' +
+                '@keyframes xgselIn{from{opacity:0;transform:scale(1.02)}to{opacity:1;transform:none}}' +
+                'html body .xgsel.out{animation:xgselOut .22s ease-in both}@keyframes xgselOut{to{opacity:0;transform:scale(.98)}}' +
+                'html body .xgsel-bg{position:absolute;inset:0;pointer-events:none;background:' +
+                    'radial-gradient(ellipse 60% 55% at 50% 58%,rgba(0,200,255,.22),transparent 70%),' +
+                    'radial-gradient(ellipse 90% 60% at 50% 110%,rgba(76,141,255,.25),transparent 70%),' +
+                    'linear-gradient(180deg,#071433 0%,#06122b 40%,#030916 100%)}' +
+                'html body .xgsel-bg:before{content:"";position:absolute;inset:0;opacity:.35;background-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2756%27 height=%2798%27%3E%3Cpath d=%27M28 66L0 50V17L28 1l28 16v33zM28 98V66%27 fill=%27none%27 stroke=%27%2300e5ff%27 stroke-opacity=%27.18%27/%3E%3C/svg%3E");' +
+                    '-webkit-mask-image:radial-gradient(ellipse 70% 70% at 50% 55%,#000 30%,transparent 80%);mask-image:radial-gradient(ellipse 70% 70% at 50% 55%,#000 30%,transparent 80%)}' +
+                'html body .xgsel-bg:after{content:"10010110 01100101 11100010 00110101 10101101 01011100 11001010 01101011";position:absolute;right:3%;top:16%;width:34%;font:600 11px/1.9 "Share Tech Mono",monospace;letter-spacing:3px;color:rgba(120,200,255,.12);word-break:break-all;transform:skewY(-4deg)}' +
+                'html body .xgsel-top{position:relative;display:flex;align-items:center;gap:12px;padding:12px 18px;background:linear-gradient(180deg,rgba(10,30,70,.95),rgba(6,18,44,.85));border-bottom:2px solid rgba(0,229,255,.35);box-shadow:0 6px 24px rgba(0,0,0,.45)}' +
+                'html body .xgsel-back{flex:none;width:64px;height:42px;border:0;cursor:pointer;color:#bfe9ff;background:linear-gradient(180deg,#1b3f7a,#0e2550);clip-path:polygon(0 0,82% 0,100% 50%,82% 100%,0 100%);display:flex;align-items:center;justify-content:center;padding-right:8px;box-shadow:inset 0 0 0 2px rgba(120,200,255,.4)}' +
+                'html body .xgsel-back:hover,html body .xgsel-back:focus-visible{color:#fff;filter:brightness(1.25)}' +
+                'html body .xgsel-title{font-family:Audiowide,Orbitron,sans-serif;font-size:26px;letter-spacing:1px;color:#fff;text-shadow:0 0 18px rgba(0,229,255,.45);white-space:nowrap}' +
+                'html body .xgsel-title .xgem-word{font-family:inherit;letter-spacing:1px}' +
+                'html body .xgsel-sp{flex:1}' +
+                'html body .xgsel-stat{display:flex;align-items:center;gap:8px;min-width:0;height:36px;padding:0 14px 0 6px;border-radius:6px;background:rgba(2,8,24,.75);border:1px solid rgba(120,200,255,.3);font:700 15px "Exo 2",sans-serif;color:#fff;white-space:nowrap}' +
+                'html body .xgsel-stat .lbl{font-family:Audiowide,sans-serif;font-size:10px;letter-spacing:1px;color:#7fb4e6}' +
+                'html body .xgsel-stat .nm{overflow:hidden;text-overflow:ellipsis;max-width:160px}' +
+                'html body .xgsel-x{flex:none;width:42px;height:42px;border-radius:50%;cursor:pointer;border:2px solid rgba(120,200,255,.55);background:rgba(2,8,24,.8);color:#dff4ff;font-size:18px;line-height:1}' +
+                'html body .xgsel-x:hover,html body .xgsel-x:focus-visible{border-color:#00e5ff;color:#fff;box-shadow:0 0 14px rgba(0,229,255,.5)}' +
+                'html body .xgsel-tools{position:relative;display:flex;align-items:center;gap:12px;padding:14px 26px 6px}' +
+                'html body .xgsel-fav{flex:none;isolation:isolate;width:92px;height:84px;border:0;cursor:pointer;background:transparent;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:#fff;font:700 13px "Exo 2",sans-serif;text-shadow:0 1px 3px #000}' +
+                'html body .xgsel-fav:before{content:"";position:absolute;left:14px;right:14px;top:0;bottom:12px;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);background:linear-gradient(160deg,#6b5a1a,#3a2f0b);box-shadow:inset 0 0 0 3px #d8b640;z-index:-1;opacity:.55;transition:opacity .15s}' +
+                'html body .xgsel-fav[aria-pressed="true"]:before{opacity:1;background:linear-gradient(160deg,#b8942a,#6b5214)}' +
+                'html body .xgsel-fav svg{margin-top:4px}html body .xgsel-fav span{margin-top:14px}' +
+                'html body .xgsel-btn{height:44px;min-width:0;padding:0 22px 0 18px;border:0;cursor:pointer;display:flex;align-items:center;gap:10px;color:#fff;font:700 17px "Exo 2",sans-serif;background:linear-gradient(180deg,#1f4d8f,#123066);clip-path:polygon(6% 0,100% 0,94% 100%,0 100%);box-shadow:inset 0 0 0 2px rgba(120,200,255,.45)}' +
+                'html body .xgsel-btn:hover,html body .xgsel-btn:focus-visible{filter:brightness(1.2)}' +
+                'html body .xgsel-btn select{appearance:none;-webkit-appearance:none;background:transparent;border:0;color:#fff;font:inherit;cursor:pointer;padding-right:4px;outline:none}' +
+                'html body .xgsel-btn select option{background:#0b1a3a;color:#fff}' +
+                'html body .xgsel-body{position:relative;flex:1;min-height:0;display:flex}' +
+                'html body .xgsel-grid{flex:1;min-width:0;overflow-y:auto;padding:8px 26px 30px;display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:24px 22px;align-content:start;scrollbar-width:thin;scrollbar-color:rgba(0,229,255,.4) transparent}' +
+                // ── card ──
+                'html body .xgc{--acc:#4c8dff;position:relative;display:block;cursor:pointer;outline:none;border-radius:4px;transition:transform .15s}' +
+                'html body .xgc:hover{transform:translateY(-3px)}' +
+                'html body .xgc-stack{position:absolute;inset:-5px -7px 5px 7px;clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);background:linear-gradient(160deg,color-mix(in srgb,var(--acc) 55%,#fff),color-mix(in srgb,var(--acc) 40%,#000));opacity:.55}' +
+                'html body .xgc-frame{position:relative;display:block;padding:5px;clip-path:polygon(12px 0,100% 0,100% calc(100% - 12px),calc(100% - 12px) 100%,0 100%,0 12px);background:linear-gradient(155deg,#fff6c9 0%,#d9b54a 18%,var(--acc) 48%,#d9b54a 82%,#8a6a1c 100%)}' +
+                'html body .xgc-in{position:relative;display:block;aspect-ratio:4/5;overflow:hidden;clip-path:polygon(9px 0,100% 0,100% calc(100% - 9px),calc(100% - 9px) 100%,0 100%,0 9px);background:' +
+                    'radial-gradient(circle,color-mix(in srgb,var(--acc) 70%,#fff) 1.2px,transparent 1.6px) 0 0/9px 9px,' +
+                    'linear-gradient(160deg,color-mix(in srgb,var(--acc) 55%,#0a1430),#0a1430 85%)}' +
+                'html body .xgc-in img.art{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 12%;transition:transform .25s}' +
+                'html body .xgc-in img.art.contain{object-fit:contain;padding:18%;box-sizing:border-box;filter:drop-shadow(0 0 16px rgba(0,229,255,.55))}' +
+                'html body .xgc:hover .xgc-in img.art,html body .xgc:focus-visible .xgc-in img.art{transform:scale(1.05)}' +
+                'html body .xgc-lock{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding-top:24%;box-sizing:border-box;gap:8px;background:radial-gradient(circle at 50% 42%,color-mix(in srgb,var(--acc) 35%,transparent),transparent 60%),linear-gradient(180deg,rgba(4,8,20,.2),rgba(4,8,20,.85))}' +
+                'html body .xgc-lock .sil{filter:brightness(0) drop-shadow(0 0 2px var(--acc)) drop-shadow(0 0 14px var(--acc));opacity:.9;animation:xgcBreath 2.8s ease-in-out infinite}' +
+                '@keyframes xgcBreath{50%{filter:brightness(0) drop-shadow(0 0 4px var(--acc)) drop-shadow(0 0 26px var(--acc))}}' +
+                'html body .xgc-lock .soon{font:10px Audiowide,sans-serif;letter-spacing:1.5px;color:#cfe3ff;background:rgba(0,0,0,.55);padding:3px 8px;border-radius:3px;border:1px solid color-mix(in srgb,var(--acc) 60%,transparent)}' +
+                'html body .xgc-step{position:absolute;left:6px;top:6px;width:46px;height:52px;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);background:linear-gradient(160deg,#ffe98a,#d39b16);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#3a2600;line-height:1;text-shadow:0 1px 0 rgba(255,255,255,.4)}' +
+                'html body .xgc-step b{font:800 20px "Exo 2",sans-serif}html body .xgc-step i{font:normal 7px Audiowide,sans-serif;letter-spacing:.5px}' +
+                'html body .xgc-fav{position:absolute;right:7px;top:7px;width:30px;height:30px;border-radius:50%;border:1px solid rgba(255,255,255,.25);background:rgba(3,8,22,.6);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:.75}' +
+                'html body .xgc-fav.on{opacity:1;color:#ffd24a;border-color:#ffd24a;background:rgba(40,28,0,.7)}' +
+                'html body .xgc-fav:hover,html body .xgc-fav:focus-visible{opacity:1;outline:none;border-color:#fff}' +
+                'html body .xgc-stars{position:absolute;left:0;right:0;bottom:44px;display:flex;justify-content:center;pointer-events:none}' +
+                'html body .xgc-stage{font:10px Audiowide,sans-serif;letter-spacing:1.2px;color:#fff;padding:3px 9px;border-radius:3px;background:linear-gradient(90deg,rgba(0,0,0,.7),color-mix(in srgb,var(--acc) 60%,rgba(0,0,0,.7)),rgba(0,0,0,.7));border:1px solid rgba(255,230,140,.55);text-shadow:0 1px 2px #000}' +
+                'html body .xgc-plate{position:absolute;left:0;right:0;bottom:0;height:42px;display:flex;align-items:center;justify-content:center;padding:0 8px;background:linear-gradient(180deg,rgba(18,34,68,.92),rgba(8,16,36,.98));border-top:2px solid color-mix(in srgb,var(--acc) 70%,#fff);font:700 18px "Exo 2",sans-serif;color:#fff;text-shadow:0 1px 3px #000;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+                'html body .xgc-plate:before,html body .xgc-plate:after{content:"";position:absolute;top:50%;width:4px;height:4px;background:#7fd6ff;border-radius:50%;box-shadow:0 0 6px #7fd6ff}html body .xgc-plate:before{left:8px}html body .xgc-plate:after{right:8px}' +
+                'html body .xgc-tag{position:absolute;right:-4px;top:62px;padding:3px 10px 3px 8px;font:10px Audiowide,sans-serif;letter-spacing:1.2px;color:#001018;background:linear-gradient(90deg,#00e5ff,#7ff7ff);clip-path:polygon(8px 0,100% 0,100% 100%,8px 100%,0 50%);box-shadow:0 0 12px rgba(0,229,255,.7)}' +
+                'html body .xgc-tag.hid{background:linear-gradient(90deg,#ff8095,#ffc0cb);color:#2a0008;box-shadow:none}' +
+                'html body .xgc.active .xgc-frame{animation:xgcGlow 1.8s ease-in-out infinite}' +
+                '@keyframes xgcGlow{0%,100%{filter:drop-shadow(0 0 4px var(--acc))}50%{filter:drop-shadow(0 0 14px var(--acc)) brightness(1.12)}}' +
+                'html body .xgc.focus .xgc-frame,html body .xgc:focus-visible .xgc-frame{background:linear-gradient(155deg,#ffffff,#9ff3ff 30%,var(--acc) 55%,#9ff3ff 80%,#ffffff)}' +
+                'html body .xgc.off .xgc-in{filter:grayscale(.7) brightness(.7)}' +
+                'html body .xgc.add .xgc-in{background:repeating-linear-gradient(135deg,rgba(0,229,255,.06) 0 10px,transparent 10px 20px),#071430;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:#7fe9ff;font:12px Audiowide,sans-serif;letter-spacing:1px}' +
+                'html body .xgc.add .xgc-frame{background:linear-gradient(155deg,rgba(0,229,255,.7),rgba(0,229,255,.2))}' +
+                'html body .xgc.add .plus{font:300 54px/1 "Exo 2",sans-serif}' +
+                'html body .xgsel-empty{grid-column:1/-1;text-align:center;padding:60px 10px;color:#8fb4dc;font-size:16px}' +
+                // ── detail ──
+                'html body .xgsel-detail{flex:none;width:340px;max-width:92vw;overflow-y:auto;padding:18px 20px 24px;background:linear-gradient(180deg,rgba(9,22,52,.96),rgba(4,10,26,.98));border-left:2px solid rgba(0,229,255,.3);box-shadow:-10px 0 30px rgba(0,0,0,.5);animation:xgdIn .22s ease-out both}' +
+                '@keyframes xgdIn{from{transform:translateX(30px);opacity:0}to{transform:none;opacity:1}}' +
+                'html body .xgsel-detail[hidden]{display:none}' +
+                'html body .xgd-art{--acc:#4c8dff;position:relative;width:170px;margin:4px auto 14px}' +
+                'html body .xgd-name{font-family:Audiowide,sans-serif;font-size:24px;color:#fff;text-align:center;letter-spacing:.5px;word-break:break-word}' +
+                'html body .xgd-pw{text-align:center;font-size:11px;color:#8fa6cf;letter-spacing:.5px;margin-top:2px}' +
+                'html body .xgd-meta{display:flex;justify-content:center;gap:6px;flex-wrap:wrap;margin:10px 0}' +
+                'html body .xgd-chip{font:10px Audiowide,sans-serif;letter-spacing:1px;padding:4px 9px;border-radius:4px;border:1px solid rgba(255,220,120,.5);color:#ffe7a3;background:rgba(40,30,0,.35)}' +
+                'html body .xgd-chip.c{border-color:rgba(0,229,255,.45);color:#9ff3ff;background:rgba(0,40,60,.35)}' +
+                'html body .xgd-tag{font-size:15px;line-height:1.4;color:#d4e2ff;text-align:center;margin:6px 0 14px}' +
+                'html body .xgd-h{font:10px Audiowide,sans-serif;letter-spacing:1.5px;color:#7fb4e6;margin:14px 0 6px}' +
+                'html body .xgd-try{display:block;width:100%;text-align:left;margin:0 0 6px;padding:8px 10px;border-radius:6px;border:1px solid rgba(0,229,255,.18);background:rgba(0,229,255,.05);color:#cfe9ff;font:600 13px "Exo 2",sans-serif;cursor:pointer}' +
+                'html body .xgd-try:hover,html body .xgd-try:focus-visible{border-color:rgba(0,229,255,.6);color:#fff;outline:none}' +
+                'html body .xgd-go{width:100%;height:52px;margin-top:6px;border:0;cursor:pointer;font:18px Audiowide,sans-serif;letter-spacing:2px;color:#001722;background:linear-gradient(180deg,#8ff8ff,#00c8ef);clip-path:polygon(12px 0,100% 0,calc(100% - 12px) 100%,0 100%);box-shadow:inset 0 -3px 0 rgba(0,0,0,.2)}' +
+                'html body .xgd-go:hover,html body .xgd-go:focus-visible{filter:brightness(1.12);outline:none}' +
+                'html body .xgd-go[disabled]{cursor:default;color:#a7f7ff;background:linear-gradient(180deg,#0c3a4a,#082634);box-shadow:inset 0 0 0 2px rgba(0,229,255,.5)}' +
+                'html body .xgd-row{display:flex;gap:8px;margin-top:8px}' +
+                'html body .xgd-sm{flex:1;height:38px;border-radius:6px;cursor:pointer;border:1px solid rgba(120,200,255,.35);background:rgba(10,30,70,.6);color:#cfe9ff;font:700 13px "Exo 2",sans-serif;display:flex;align-items:center;justify-content:center;gap:6px}' +
+                'html body .xgd-sm:hover,html body .xgd-sm:focus-visible{border-color:#00e5ff;color:#fff;outline:none}' +
+                'html body .xgd-close{float:right;border:0;background:transparent;color:#8fb4dc;font-size:20px;cursor:pointer;line-height:1}' +
+                '@media (max-width:760px){' +
+                    'html body .xgsel-top{padding:8px 10px;gap:8px}html body .xgsel-title{font-size:19px}html body .xgsel-back{width:50px;height:36px}' +
+                    'html body .xgsel-stat.act{display:none}html body .xgsel-tools{padding:10px 12px 4px;gap:8px}' +
+                    'html body .xgsel-fav{width:70px;height:66px;font-size:11px}html body .xgsel-fav:before{left:10px;right:10px}' +
+                    'html body .xgsel-btn{height:38px;padding:0 12px;font-size:14px}' +
+                    'html body .xgsel-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:16px 14px;padding:6px 14px 24px}' +
+                    'html body .xgc-plate{font-size:15px;height:36px}html body .xgc-stars{bottom:38px}html body .xgc-lock{padding-top:18%}html body .xgc-lock .soon{font-size:8px}html body .xgc-lock .sil svg{width:64px;height:64px}html body .xgc-step{width:38px;height:44px}html body .xgc-step b{font-size:16px}' +
+                    'html body .xgsel-detail{position:absolute;left:0;right:0;bottom:0;width:auto;max-width:none;max-height:78%;border-left:0;border-top:2px solid rgba(0,229,255,.35);border-radius:16px 16px 0 0;animation-name:xgdUp}' +
+                    '@keyframes xgdUp{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}' +
+                '}' +
+                '@media (prefers-reduced-motion:reduce){html body .xgsel,html body .xgsel-detail,html body .xgc.active .xgc-frame,html body .xgc-lock .sil{animation:none}html body .xgc,html body .xgc-in img.art{transition:none}}' +
+                '</style>';
+            function ensureCss() { if (!document.getElementById('xgsel-css')) document.head.insertAdjacentHTML('beforeend', CSS); fontOnce(); }
+
+            var HEART = '<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 4.5 6.8 4.5c2.2 0 3.6 1.2 5.2 3.1 1.6-1.9 3-3.1 5.2-3.1 3.8 0 5.9 3.9 4.4 7.3C19.5 16.4 12 21 12 21z" fill="currentColor"/></svg>';
+            var HEART_BIG = '<svg width="34" height="34" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 4.5 6.8 4.5c2.2 0 3.6 1.2 5.2 3.1 1.6-1.9 3-3.1 5.2-3.1 3.8 0 5.9 3.9 4.4 7.3C19.5 16.4 12 21 12 21z" fill="#ffd24a" stroke="#6b4d00" stroke-width="1.5"/></svg>';
+            var BACK = '<svg width="26" height="22" viewBox="0 0 26 22" aria-hidden="true"><path d="M10 2 2 11l8 9M3 11h12c5 0 8 2.5 8 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+            var TRI = '<svg width="16" height="12" viewBox="0 0 16 12" aria-hidden="true"><path d="M1 1h14L8 11z" fill="#00c8ff"/></svg>';
+            var FUNNEL = '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h18l-7 8.5V20l-4-2v-5.5z" fill="none" stroke="#00c8ff" stroke-width="2.2" stroke-linejoin="round"/></svg>';
+            var OUT = '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+            function all() {
+                var X = G(); if (!X) return [];
+                var list = X.usable ? X.usable() : X.list();
+                return list.filter(function (g) { return g && g.id && g.name; });
+            }
+            function byId(id) { if (!id) return X_BOT; return all().find(function (g) { return g.id === id; }) || null; }
+            function hostView() { var X = G(); return !!(X && X.hostView && X.hostView()); }
+            function activeId() { var X = G(); return (X && X.active && X.active()) || ''; }
+            function sorted() {
+                var list = all().slice();
+                var f = favs();
+                if (V.favOnly) list = list.filter(function (g) { return f.indexOf(g.id) >= 0; });
+                if (V.stage) list = list.filter(function (g) { return stageOf(g) === V.stage; });
+                var byName = function (a, b) { return String(a.name).localeCompare(String(b.name)); };
+                if (V.sort === 'az') list.sort(byName);
+                else if (V.sort === 'new') list.sort(function (a, b) { return (b.createdAt || b.updatedAt || 0) - (a.createdAt || a.updatedAt || 0) || byName(a, b); });
+                else list.sort(function (a, b) { var x = stepOf(a) || 999, y = stepOf(b) || 999; return x - y || byName(a, b); });
+                return list;
+            }
+
+            function artHtml(g, big) {
+                var X = G();
+                if (g.xbot) return '<img class="art contain" src="' + esc(g.card) + '" alt="" draggable="false">';
+                if (artOk(g.card)) return '<img class="art" src="' + esc(g.card) + '" alt="" loading="lazy" draggable="false" onerror="this.remove()">';
+                return '<span class="xgc-lock"><span class="sil">' + (X ? X.mark(big ? 96 : 84, { emoji: '' }) : '') + '</span><span class="soon">ART COMING SOON</span></span>';
+            }
+            function cardHtml(g, opts) {
+                opts = opts || {};
+                var acc = colorOk(g.accent) || '#4c8dff';
+                var on = (g.xbot ? !activeId() : activeId() === g.id);
+                var st = stageOf(g), n = stepOf(g), fav = !g.xbot && isFav(g.id);
+                var cls = 'xgc' + (on ? ' active' : '') + (V.focus === (g.id || '') ? ' focus' : '') + (g.enabled === false ? ' off' : '');
+                return '<div class="' + cls + '" style="--acc:' + acc + '" role="option" tabindex="0" aria-selected="' + on + '" data-id="' + esc(g.id || '') + '" aria-label="' + esc(g.name + (st ? ', ' + st : '') + (on ? ', active' : '')) + '">' +
+                    '<span class="xgc-stack"></span><span class="xgc-frame"><span class="xgc-in">' + artHtml(g) +
+                    (n ? '<span class="xgc-step" title="Gem chain step ' + n + '"><i>STEP</i><b>' + n + '</b></span>' : '') +
+                    (g.xbot ? '' : '<span class="xgc-fav' + (fav ? ' on' : '') + '" role="button" tabindex="0" aria-pressed="' + fav + '" aria-label="' + (fav ? 'Remove from favorites' : 'Add to favorites') + '" data-fav="' + esc(g.id) + '">' + HEART + '</span>') +
+                    (st ? '<span class="xgc-stars"><span class="xgc-stage">' + esc(st.toUpperCase()) + '</span></span>' : '') +
+                    '<span class="xgc-plate">' + esc(g.name) + '</span>' +
+                    (on ? '<span class="xgc-tag">ACTIVE</span>' : (g.enabled === false ? '<span class="xgc-tag hid">HIDDEN</span>' : '')) +
+                    '</span></span></div>';
+            }
+            function gridHtml() {
+                var list = sorted();
+                var showBot = !V.favOnly && !V.stage;
+                var html = (showBot ? cardHtml(X_BOT) : '') + list.map(function (g) { return cardHtml(g); }).join('');
+                if (hostView()) html += '<div class="xgc add" role="option" tabindex="0" data-add="1" aria-label="New X-Gem"><span class="xgc-frame"><span class="xgc-in"><span class="plus">＋</span>NEW X-GEM</span></span></div>';
+                if (!list.length && !showBot) html += '<div class="xgsel-empty">' + (V.favOnly ? 'No favorites yet. Tap the ♥ on a card to add one.' : 'No X-Gems in this stage yet.') + '</div>';
+                else if (!all().length && !hostView()) html += '<div class="xgsel-empty">No X-Gems are ready for you yet. Check back soon!</div>';
+                return html;
+            }
+            function detailHtml(g) {
+                var X = G(); if (!g) return '';
+                var acc = colorOk(g.accent) || '#4c8dff';
+                var on = g.xbot ? !activeId() : activeId() === g.id;
+                var st = stageOf(g), n = stepOf(g);
+                var share = !g.xbot && /^https:\/\/(gemini\.google\.com|g\.co)\//i.test(String(g.shareUrl || ''));
+                return '<button class="xgd-close" aria-label="Close details" data-act="undetail">✕</button>' +
+                    '<div class="xgd-art"><div class="xgc' + (on ? ' active' : '') + '" style="--acc:' + acc + ';cursor:default"><span class="xgc-stack"></span><span class="xgc-frame"><span class="xgc-in">' + artHtml(g, true) +
+                    (n ? '<span class="xgc-step"><i>STEP</i><b>' + n + '</b></span>' : '') + '</span></span></div></div>' +
+                    '<div class="xgd-name">' + esc(g.name) + '</div>' +
+                    '<div class="xgd-pw">' + (g.xbot ? 'PFLX PLATFORM GUIDE' : (X ? 'X-GEM · POWERED BY GEMINI GEMS' : '')) + '</div>' +
+                    '<div class="xgd-meta">' + (n ? '<span class="xgd-chip">GEM CHAIN · STEP ' + n + '</span>' : '') + (st ? '<span class="xgd-chip c">' + esc(st.toUpperCase()) + '</span>' : '') + (g.enabled === false ? '<span class="xgd-chip" style="color:#ffb3bf;border-color:#ff8095">HIDDEN FROM PLAYERS</span>' : '') + '</div>' +
+                    (g.tagline ? '<div class="xgd-tag">' + esc(g.tagline) + '</div>' : '') +
+                    '<button class="xgd-go" data-act="select"' + (on ? ' disabled' : '') + '>' + (on ? 'ACTIVE' : 'SELECT') + '</button>' +
+                    '<div class="xgd-row">' +
+                        (share ? '<button class="xgd-sm" data-act="outside" title="Open this Gem in Gemini">' + OUT + ' Open in Gemini</button>' : '') +
+                        (!g.xbot ? '<button class="xgd-sm" data-act="fav" aria-pressed="' + isFav(g.id) + '">' + HEART + ' ' + (isFav(g.id) ? 'Favorited' : 'Favorite') + '</button>' : '') +
+                        (!g.xbot && hostView() ? '<button class="xgd-sm" data-act="edit">✎ Edit</button>' : '') +
+                    '</div>' +
+                    ((g.starters || []).length ? '<div class="xgd-h">TRY ASKING</div>' + g.starters.slice(0, 4).map(function (s, i) {
+                        return '<button class="xgd-try" data-act="try" data-i="' + i + '">' + esc(s) + '</button>';
+                    }).join('') : '');
+            }
+
+            function el() { return document.getElementById('xgsel'); }
+            function render() {
+                var root = el(); if (!root) return;
+                var X = G();
+                var list = all();
+                var act = byId(activeId()) || X_BOT;
+                root.querySelector('.xgsel-count').textContent = String(list.filter(function (g) { return g.enabled !== false; }).length);
+                root.querySelector('.xgsel-act').innerHTML = (act.xbot ? '<img src="public/X Official for PFLX.png" alt="" style="width:26px;height:26px;object-fit:contain">' : (X ? X.mark(26, act) : '')) + '<span class="lbl">ACTIVE</span><span class="nm">' + esc(act.name) + '</span>';
+                var favBtn = root.querySelector('.xgsel-fav'); favBtn.setAttribute('aria-pressed', String(V.favOnly));
+                var sortSel = root.querySelector('#xgsel-sort'); if (sortSel) sortSel.value = V.sort;
+                var stSel = root.querySelector('#xgsel-stage');
+                if (stSel) {
+                    var have = {}; list.forEach(function (g) { var s = stageOf(g); if (s) have[s] = 1; });
+                    stSel.innerHTML = '<option value="">All stages</option>' + STAGES.filter(function (s) { return have[s] || s === V.stage; }).map(function (s) { return '<option value="' + s + '"' + (s === V.stage ? ' selected' : '') + '>' + s + '</option>'; }).join('');
+                }
+                var grid = root.querySelector('.xgsel-grid');
+                var st = grid.scrollTop;
+                grid.innerHTML = gridHtml();
+                grid.scrollTop = st;
+                renderDetail();
+            }
+            function renderDetail() {
+                var root = el(); if (!root) return;
+                var det = root.querySelector('.xgsel-detail');
+                var g = V.focus === null ? null : byId(V.focus);
+                if (g) { det.hidden = false; det.innerHTML = detailHtml(g); }
+                else { det.hidden = true; det.innerHTML = ''; if (V.focus !== null) V.focus = null; }
+                Array.prototype.forEach.call(root.querySelectorAll('.xgsel-grid .xgc[data-id]'), function (c) { c.classList.toggle('focus', c.getAttribute('data-id') === V.focus); });
+            }
+            function focusCard(id) {
+                var root = el(); if (!root) return;
+                var c = root.querySelector('.xgc[data-id="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
+                if (c) { try { c.focus({ preventScroll: false }); } catch (e) { c.focus(); } }
+            }
+            function show(id) { var same = V.focus === id; V.focus = id; if (!same) { sfx('click'); renderDetail(); } focusCard(id); }
+            function choose(id) {
+                var X = G(); if (!X) return;
+                if (id && !byId(id)) return;
+                X.select(id || null);
+                sfx('save');
+                var g = byId(id) || X_BOT;
+                try { if (typeof pflxToast === 'function') pflxToast((id ? '💎 ' : '🤖 ') + g.name + ' is ready', 'success', 2500); } catch (e) {}
+                close(true);
+            }
+            function toggleFav(id) {
+                if (!id) return;
+                var f = favs(), i = f.indexOf(id);
+                if (i >= 0) f.splice(i, 1); else f.push(id);
+                setFavs(f); sfx('click'); render();
+                if (V.focus === id) { var b = el() && el().querySelector('[data-act="fav"]'); if (b) b.focus(); } else focusCard(id);
+            }
+            function open(focusId) {
+                var X = G(); if (!X) return;
+                ensureCss();
+                var old = el(); if (old) old.remove();
+                var oc = document.getElementById('xgsel-closing'); if (oc) oc.remove();
+                V.open = true; V.lastFocus = document.activeElement;
+                V.focus = (typeof focusId === 'string') ? focusId : null;
+                var root = document.createElement('div');
+                root.id = 'xgsel'; root.className = 'xgsel'; root.setAttribute('role', 'dialog'); root.setAttribute('aria-modal', 'true'); root.setAttribute('aria-label', 'Choose an X-Gem');
+                root.innerHTML = '<div class="xgsel-bg"></div>' +
+                    '<div class="xgsel-top">' +
+                        '<button class="xgsel-back" data-act="close" aria-label="Back">' + BACK + '</button>' +
+                        '<div class="xgsel-title"><span class="xgem-word">X-<span class="xgem-g">G</span>ems</span></div>' +
+                        '<span class="xgsel-sp"></span>' +
+                        '<div class="xgsel-stat" title="X-Gems available">' + X.mark(26) + '<span class="xgsel-count">0</span></div>' +
+                        '<div class="xgsel-stat act xgsel-act"></div>' +
+                        '<button class="xgsel-x" data-act="close" aria-label="Close">✕</button>' +
+                    '</div>' +
+                    '<div class="xgsel-tools">' +
+                        '<button class="xgsel-fav" data-act="favonly" aria-pressed="false" title="Show favorites only">' + HEART_BIG + '<span>Favorites</span></button>' +
+                        '<span class="xgsel-sp"></span>' +
+                        '<label class="xgsel-btn" title="Sort">' + TRI + '<select id="xgsel-sort" aria-label="Sort X-Gems">' + SORTS.map(function (s) { return '<option value="' + s[0] + '">Sort: ' + s[1] + '</option>'; }).join('') + '</select></label>' +
+                        '<label class="xgsel-btn" title="Filter by FLX stage">' + FUNNEL + '<select id="xgsel-stage" aria-label="Filter by FLX stage"></select></label>' +
+                    '</div>' +
+                    '<div class="xgsel-body"><div class="xgsel-grid" role="listbox" aria-label="X-Gems"></div><aside class="xgsel-detail" hidden aria-live="polite"></aside></div>';
+                document.body.appendChild(root);
+                document.body.classList.add('xgsel-open');
+                root.addEventListener('click', onClick);
+                root.addEventListener('dblclick', onDbl);
+                root.addEventListener('keydown', onKey);
+                root.querySelector('#xgsel-sort').addEventListener('change', function (e) { V.sort = e.target.value; try { localStorage.setItem(SORT_LS, V.sort); } catch (x) {} sfx('click'); render(); });
+                root.querySelector('#xgsel-stage').addEventListener('change', function (e) { V.stage = e.target.value; sfx('click'); render(); });
+                sfx('nav');
+                Promise.resolve(X.load ? X.load() : null).then(function () { render(); focusCard(V.focus !== null ? V.focus : activeId()); });
+                render();
+                setTimeout(function () { focusCard(V.focus !== null ? V.focus : activeId()); }, 30);
+            }
+            function close(chose) {
+                var root = el(); if (!root) return;
+                V.open = false;
+                document.body.classList.remove('xgsel-open');
+                root.classList.add('out');
+                root.id = 'xgsel-closing'; root.removeAttribute('aria-modal');
+                setTimeout(function () { if (root.parentNode) root.remove(); }, 220);
+                if (!chose) sfx('click');
+                if (chose) {
+                    try {
+                        var p = document.getElementById('xbot-side-panel');
+                        if (p && !p.classList.contains('active') && typeof toggleXBotPanel === 'function') toggleXBotPanel();
+                        if (typeof switchXBotMode === 'function') switchXBotMode('chat');
+                        var inp = document.getElementById('xbot-chat-input'); if (inp) setTimeout(function () { try { inp.focus(); } catch (e) {} }, 260);
+                    } catch (e) {}
+                } else if (V.lastFocus && V.lastFocus.focus) { try { V.lastFocus.focus(); } catch (e) {} }
+            }
+            function onClick(e) {
+                var t = e.target;
+                var fav = t.closest('[data-fav]'); if (fav) { e.stopPropagation(); toggleFav(fav.getAttribute('data-fav')); return; }
+                var a = t.closest('[data-act]');
+                if (a) {
+                    var act = a.getAttribute('data-act'), g = byId(V.focus);
+                    if (act === 'close') return close(false);
+                    if (act === 'favonly') { V.favOnly = !V.favOnly; sfx('click'); render(); return; }
+                    if (act === 'undetail') { var f = V.focus; V.focus = null; renderDetail(); focusCard(f); return; }
+                    if (act === 'select' && g) return choose(g.xbot ? '' : g.id);
+                    if (act === 'fav' && g && !g.xbot) return toggleFav(g.id);
+                    if (act === 'outside' && g) { try { G().openOutside(g.id); } catch (x) {} return; }
+                    if (act === 'edit' && g && G().edit) { G().edit(g.id); return; }
+                    if (act === 'try' && g) {
+                        var s = (g.starters || [])[+a.getAttribute('data-i')];
+                        if (s) { choose(g.xbot ? '' : g.id); setTimeout(function () { try { G().send(s); } catch (x) {} }, 320); }
+                        return;
+                    }
+                    return;
+                }
+                if (t.closest('[data-add]')) { if (G().edit) G().edit(); return; }
+                var c = t.closest('.xgc[data-id]');
+                if (c && c.closest('.xgsel-grid')) show(c.getAttribute('data-id'));
+            }
+            function onDbl(e) {
+                if (e.target.closest('[data-fav]')) return;
+                var c = e.target.closest('.xgsel-grid .xgc[data-id]');
+                if (c) choose(c.getAttribute('data-id'));
+            }
+            function cols(grid) {
+                var cards = grid.querySelectorAll('.xgc'); if (cards.length < 2) return 1;
+                var top = cards[0].offsetTop, n = 0;
+                for (var i = 0; i < cards.length; i++) { if (cards[i].offsetTop !== top) break; n++; }
+                return Math.max(1, n);
+            }
+            function onKey(e) {
+                var root = el(); if (!root) return;
+                if (e.key === 'Escape') {
+                    if (document.getElementById('xgem-ov')) return;
+                    e.preventDefault(); e.stopPropagation();
+                    if (V.focus !== null) { var f = V.focus; V.focus = null; renderDetail(); focusCard(f); } else close(false);
+                    return;
+                }
+                var favEl = e.target.closest && e.target.closest('[data-fav]');
+                if (favEl && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); e.stopPropagation(); toggleFav(favEl.getAttribute('data-fav')); return; }
+                var card = e.target.closest && e.target.closest('.xgsel-grid .xgc');
+                if (!card) {
+                    if (e.key === 'Tab') trap(e, root);
+                    return;
+                }
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    if (card.hasAttribute('data-add')) { if (G().edit) G().edit(); return; }
+                    var id = card.getAttribute('data-id');
+                    if (V.focus === id) choose(id); else show(id);
+                    return;
+                }
+                var grid = root.querySelector('.xgsel-grid');
+                var cards = Array.prototype.slice.call(grid.querySelectorAll('.xgc'));
+                var i = cards.indexOf(card), n = cols(grid), j = -1;
+                if (e.key === 'ArrowRight') j = i + 1; else if (e.key === 'ArrowLeft') j = i - 1;
+                else if (e.key === 'ArrowDown') j = i + n; else if (e.key === 'ArrowUp') j = i - n;
+                else if (e.key === 'Home') j = 0; else if (e.key === 'End') j = cards.length - 1;
+                else if (e.key === 'Tab') { trap(e, root); return; }
+                else return;
+                e.preventDefault();
+                if (j >= 0 && j < cards.length) { cards[j].focus(); if (V.focus !== null && cards[j].hasAttribute('data-id')) { V.focus = cards[j].getAttribute('data-id'); renderDetail(); } }
+            }
+            function trap(e, root) {
+                var f = Array.prototype.slice.call(root.querySelectorAll('button:not([disabled]),select,[tabindex="0"]')).filter(function (x) { return x.offsetParent !== null; });
+                if (!f.length) return;
+                var first = f[0], last = f[f.length - 1];
+                if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+                else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+            }
+            function refresh() { if (V.open && el()) render(); }
+
+            return { open: open, close: close, refresh: refresh, isOpen: function () { return !!el(); }, _state: function () { return V; }, favorites: favs };
         })();
     </script>
     <script>
