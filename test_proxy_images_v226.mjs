@@ -24,7 +24,7 @@ async function call(body) {
   let status = 0, out = null;
   const res = { setHeader() {}, status(s) { status = s; return this; }, json(j) { out = j; return this; }, end() { return this; } };
   sent = [];
-  await handler({ method: 'POST', body, headers: {} }, res);
+  await handler({ method: 'POST', body, headers: { origin: 'https://prototypeflx.com', 'x-forwarded-for': '10.0.0.' + Math.floor(Math.random()*1e6) } }, res);
   return { status, out, up: sent[0] };
 }
 const JPG = 'QUJD'.repeat(10);

@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 227;
+      window.PFLX_PATCH   = 228;
       window.PFLX_BUILD   = '2026.09';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -61315,6 +61315,49 @@ function ppRenderCheckpoints(el) {
         // Routes each query to the best model with automatic fallback
         // ═══════════════════════════════════════════════════════════════
 
+        // ═══════════════════════════════════════════════════════════════
+        // v228 AI ERROR WORDING — the proxy now answers busy (429),
+        // billing (402), origin (403) and no-key (503) with a code; this
+        // turns those codes into sentences students and hosts can act on.
+        // ═══════════════════════════════════════════════════════════════
+        window.pflxAiErr = (function () {
+            function isHostNow() {
+                try {
+                    if (window.pflxIsHostTier) return !!window.pflxIsHostTier();
+                    var r = String((window.activeSession && activeSession.role) || '').toLowerCase();
+                    return r === 'admin' || r === 'host' || r === 'master host' || r === 'instructor' || r === 'teacher';
+                } catch (e) { return false; }
+            }
+            function codeOf(status, err) {
+                var t = String(err || '');
+                if (/^(busy|billing|origin|no-key)$/.test(t)) return t;
+                if (/prepayment credits|credits are depleted|credit balance|billing|insufficient_quota/i.test(t) || status === 402) return 'billing';
+                if (status === 429 || status === 529 || /RESOURCE_EXHAUSTED|quota|rate.?limit|overloaded/i.test(t)) return 'busy';
+                if (status === 503 && /no-key/.test(t)) return 'no-key';
+                return '';
+            }
+            // codes: one entry per engine tried. Returns { kind, text } or null (unknown failure).
+            function summary(codes, name) {
+                codes = (codes || []).filter(function (c) { return c !== undefined; });
+                if (!codes.length || codes.some(function (c) { return !c; })) return null;
+                var who = name || 'X-Bot';
+                var host = isHostNow();
+                if (codes.indexOf('billing') >= 0) return { kind: 'billing', text: host
+                    ? '💳 ' + who + ' can\'t answer: the AI account is out of credits. Top it up in Google AI Studio → Billing (PFLX Apps project).'
+                    : '⚡ ' + who + '\'s AI is offline right now. Let your host know.' };
+                if (codes.every(function (c) { return c === 'busy'; })) return { kind: 'busy', text: '⏳ ' + who + ' is busy right now (lots of people are asking at once). Try again in a minute.' };
+                if (codes.indexOf('origin') >= 0) return { kind: 'origin', text: host
+                    ? '🔒 ' + who + ' can\'t answer on this web address. Add it to PFLX_ALLOWED_ORIGINS in the pflx-pathway-portal Vercel settings.'
+                    : '⚡ ' + who + ' isn\'t available on this page. Open PFLX at prototypeflx.com.' };
+                if (codes.indexOf('no-key') >= 0) return { kind: 'no-key', text: host
+                    ? '🔑 ' + who + ' has no AI key on the server. Add GEMINI_API_KEY in the pflx-pathway-portal Vercel settings.'
+                    : '⚡ ' + who + '\'s AI is offline right now. Let your host know.' };
+                if (codes.every(function (c) { return c === 'busy' || c === 'no-key'; })) return { kind: 'busy', text: '⏳ ' + who + ' is busy right now. Try again in a minute.' };
+                return null;
+            }
+            return { codeOf: codeOf, summary: summary, _isHost: isHostNow };
+        })();
+
         const XBOT_AI = {
             keys: { claude: '', gemini: '', openai: '', localUrl: '', localModel: '', localKey: '' },
             models: {
@@ -61766,7 +61809,12 @@ RESPONSE RULES:
                     })
                 });
                 const data = await resp.json().catch(() => ({}));
-                if (!resp.ok) throw new Error(`Proxy(${provider}) ${resp.status}: ${(data.error || '').slice ? String(data.error).slice(0, 200) : ''}`);
+                if (!resp.ok) {
+                    const __e = new Error(`Proxy(${provider}) ${resp.status}: ${(data.error || '').slice ? String(data.error).slice(0, 200) : ''}`);
+                    __e.code = window.pflxAiErr ? window.pflxAiErr.codeOf(resp.status, data.error) : '';   // v228
+                    __e.retryAfter = data.retryAfter || 0;
+                    throw __e;
+                }
                 if (!data.text) throw new Error(`Proxy(${provider}): empty response`);
                 return data.text;
             },
@@ -61870,7 +61918,9 @@ RESPONSE RULES:
                         console.warn('[X-Bot AI] Gemini model ' + model + ' unavailable, retrying on gemini-flash-latest');
                         return this.callGemini(systemPrompt, messages, Object.assign({}, opts, { model: 'gemini-flash-latest', _retried: true }));
                     }
-                    throw new Error(`Gemini ${resp.status}: ${errBody.slice(0, 200)}`);
+                    const __ge = new Error(`Gemini ${resp.status}: ${errBody.slice(0, 200)}`);
+                    __ge.code = window.pflxAiErr ? window.pflxAiErr.codeOf(resp.status, errBody) : '';   // v228
+                    throw __ge;
                 }
                 const data = await resp.json();
                 const parts = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [];
@@ -61960,6 +62010,7 @@ RESPONSE RULES:
                 const chain = this.getFallbackChain(primary);
 
                 const errors = [];
+                const __codes = [];   // v228
                 for (const modelName of chain) {
                     try {
                         console.log(`[X-Bot AI] Routing to ${modelName}...`);
@@ -61980,12 +62031,20 @@ RESPONSE RULES:
                         const errMsg = err.message || String(err);
                         console.warn(`[X-Bot AI] ${modelName} failed:`, errMsg);
                         errors.push(`${modelName}: ${errMsg}`);
+                        __codes.push((err && err.code) || '');
                         continue;
                     }
                 }
 
                 // All models failed — check if quota/billing errors
                 console.error('[X-Bot AI] All models failed:', errors);
+                // v228: busy / out of credits / blocked site -> a plain-language note
+                const __friendly = window.pflxAiErr ? window.pflxAiErr.summary(__codes, 'X-Bot') : null;
+                if (__friendly) {
+                    const __resp = (__friendly.kind === 'busy' || __friendly.kind === 'billing') ? XBOT_STATIC.default(userInput) + '\n\n_' + __friendly.text + '_' : __friendly.text;
+                    this.conversationHistory.push({ role: 'assistant', content: __resp });
+                    return { text: __resp, model: 'offline', routed: false };
+                }
                 const allQuota = errors.every(e => e.includes('429') || e.includes('quota') || e.includes('credit balance') || e.includes('billing') || e.includes('rate_limit'));
                 if (allQuota) {
                     // Graceful degradation: use smart static response + subtle note
@@ -62022,12 +62081,13 @@ RESPONSE RULES:
                 const avail = XBOT_AI.availableModels();
                 if (!avail.length) throw new Error('No AI engine configured — check ⚙ Settings → X-Bot AI.');
                 const chain = (typeof XBOT_AI.getFallbackChain === 'function') ? XBOT_AI.getFallbackChain(avail[0]) : avail;
-                const errors = [];
+                const errors = [], __codes = [];   // v228
                 for (const modelName of chain) {
                     try { return await XBOT_AI.callModel(modelName, systemPrompt, [{ role: 'user', content: userText }]); }
-                    catch (e) { errors.push(modelName + ': ' + (e.message || e)); }
+                    catch (e) { errors.push(modelName + ': ' + (e.message || e)); __codes.push((e && e.code) || ''); }
                 }
-                throw new Error(errors.join(' · ') || 'AI assist failed');
+                const __fr = window.pflxAiErr ? window.pflxAiErr.summary(__codes, 'AI Assist') : null;   // v228
+                throw new Error(__fr ? __fr.text : (errors.join(' · ') || 'AI assist failed'));
             },
 
             PROMPTS: {
@@ -72676,7 +72736,7 @@ RESPONSE RULES:
                 }
                 var chain = avail.indexOf('gemini') >= 0 ? ['gemini'].concat(avail.filter(function (m) { return m !== 'gemini'; })) : avail.slice();
                 var opts = { model: g.model || 'gemini-2.5-flash', temperature: (typeof g.temperature === 'number' ? g.temperature : 0.4), grounding: !!g.grounding, maxTokens: 1024 };
-                var errors = [];
+                var errors = [], codes = [];   // v228
                 for (var i = 0; i < chain.length; i++) {
                     var m = chain[i];
                     try {
@@ -72686,9 +72746,12 @@ RESPONSE RULES:
                         S.reply = { id: g.id, at: Date.now(), auto: p.auto, engine: m };
                         var note = (images.length && IMG && !IMG.canSee(AI, m)) ? IMG.NOTE + '\n\n' : '';   // v226
                         return { text: (p.auto ? '↪ X-Bot connected you to ' + g.name + '\n\n' : '') + note + text, model: m, routed: true, xgem: g.id };
-                    } catch (e) { errors.push(m + ': ' + (e && e.message || e)); }
+                    } catch (e) { errors.push(m + ': ' + (e && e.message || e)); codes.push((e && e.code) || ''); }
                 }
                 hist.pop();
+                var fr = window.pflxAiErr ? window.pflxAiErr.summary(codes, g.name) : null;   // v228
+                if (fr) return { text: fr.text, model: 'error', routed: false };
+                if (!isHost()) return { text: '⚠️ ' + g.name + ' couldn\'t answer right now. Try again in a minute.', model: 'error', routed: false };
                 return { text: '⚠️ ' + g.name + ' couldn\'t answer right now.\n' + errors.map(function (e) { return '• ' + e; }).join('\n'), model: 'error', routed: false };
             }
             // xbotAddMessage asks once whether the reply it is drawing came from an X-Gem

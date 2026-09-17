@@ -5,7 +5,7 @@ const src = fs.readFileSync(file, 'utf8');
 let pass = 0, fail = 0;
 function check(label, cond, extra) { if (cond) { pass++; console.log('PASS: ' + label); } else { fail++; console.log('FAIL: ' + label + (extra !== undefined ? '  [' + JSON.stringify(extra).slice(0, 300) + ']' : '')); } }
 
-check('PFLX_PATCH is 226', /window\.PFLX_PATCH\s*=\s*226;/.test(src));
+check('PFLX_PATCH is 226 or later', +((/window\.PFLX_PATCH\s*=\s*(\d+);/.exec(src) || [])[1]) >= 226);
 
 // ── extract the module ──
 const start = src.indexOf('window.pflxXBotImages = (function () {');

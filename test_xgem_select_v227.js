@@ -5,7 +5,7 @@ const src = fs.readFileSync(file, 'utf8');
 let pass = 0, fail = 0;
 function check(label, cond, extra) { if (cond) { pass++; console.log('PASS: ' + label); } else { fail++; console.log('FAIL: ' + label + (extra !== undefined ? '  [' + JSON.stringify(extra).slice(0, 300) + ']' : '')); } }
 
-check('PFLX_PATCH is 227', /window\.PFLX_PATCH\s*=\s*227;/.test(src));
+check("PFLX_PATCH is 227 or later", +((/window\.PFLX_PATCH\s*=\s*(\d+);/.exec(src) || [])[1]) >= 227);
 const start = src.indexOf('window.pflxXGemSelect = (function () {');
 const end = src.indexOf('\n        })();', start);
 check('select module present exactly once', start > 0 && end > start && src.indexOf('window.pflxXGemSelect = (function () {', start + 1) < 0);
