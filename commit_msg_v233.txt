@@ -1,0 +1,53 @@
+PATCH PLATFORM v233: Story Mode — the season played as a campaign
+
+Reporter: Ennis. Ask: "build story mode. X-Live will integrate with this as
+well", with the BRANDBUILDER / THE ALTER EGO Activity Guide attached.
+
+Root cause of what this replaces: the two flagship projects lived only as a
+Google Doc checklist and a pile of Canva and Gemini links. A player had no
+single surface telling them where they were in the season, no in-platform
+place to do the work, and nothing awarded X-Coin for any of it — so the
+currency and the curriculum were running on separate rails.
+
+Story Mode is that surface. A seventh top-level view, a Home App Hub tile,
+and a 28-quest campaign across seven acts:
+
+  Act Zero   Arrival — Tessera's briefing, studio select
+  Act One    The Alter Ego — Personality Trait Inventory, Character Forge,
+             Character Profile, Brand Board, and the minted Alter Ego card
+  Act Two    BrandBuilder Phase One — client select, an RPG client interview,
+             Client Profile, a drag-and-drop Empathy Map, Checkpoint 3
+  Act Three  BrandBuilder Phase Two — the three SparkLab rounds, the combined
+             concept, Checkpoint 4
+  Act Four   The Developer's Workshop — starting state and a repeatable
+             Daily Growth Log, wired to ProtoDev AI
+  Act Five   FeedForward Force — a five-question mini course, then give and
+             take feedforward
+  Act Six    Exhibit — booth design, the ninety-second pitch, the Showcase
+             on X-Live, and self evaluation
+
+The eight clients are the leads of The Nexus Narratives, and every interview
+answer is drawn from that character's graphic-audio script, so the story a
+student listens to is literally the brief they then solve. Eight questions
+per client, two each revealing Says, Thinks, Does and Feels, so a completed
+interview fills every quadrant of the Empathy Map.
+
+Discipline notes:
+- Every quest reward goes through PflxDataBus.award(pid, {xc, source:'story'}).
+  Nothing mutates .xc directly, so modifiers, rank-up and the ticker all still
+  fire on one code path.
+- Progress is per player in app_data key pflx_story_<playerId>, mirrored to
+  localStorage, using pflxCloudKvPush / pflxCloudKvLoad like everything else.
+- Quest completion broadcasts pflx_story_progress to every sub-app iframe.
+- The Showcase quest calls navigateTo('lite'), which is the X-Live hook.
+- Module is sentinel-wrapped (PATCH PLATFORM v233) for slicing and reverting.
+- Art: 40 plates extracted from the Nexus Narratives PDF into public/story-art/.
+
+Tests: test_story_v233.js — 31 assertions, including a real vm run of the
+campaign graph (unique ids, no forward prerequisites, every quest pays) and
+of the client data (8 clients x 8 questions x four quadrants). Syntax gate
+clean at 28 blocks. The same module passed 32 browser assertions in a
+harness before it was inlined.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_0178bRc3bAmFXBGbNopm2YMR
