@@ -26,6 +26,25 @@
     S.xc += xc; S.xp += xp;
   }
   function artUrl(k) { return (window.PFLX_STORY_ART || 'public/story-art/') + k + '.jpg'; }
+
+  /* SparkLab is PFLX's Ideation Development Game. Round One is the Worst
+     Idea Technique, Round Two is the Idea Generator, Round Three is drafting
+     and sketching. It runs embedded here rather than in another tab so the
+     round and the write-up sit on one screen. */
+  var SPARK_URL = 'https://thetomorrowteacher.github.io/sparklab/';
+  function sparkEmbed(round, note) {
+    var id = 'sm-spark-' + round;
+    return '<div class="sm-spark" id="' + id + '-wrap">' +
+      '<div class="sm-sparkbar"><b>SparkLab \u00b7 Round ' + round + '</b>' +
+      '<span>' + esc(note || '') + '</span>' +
+      '<button class="sm-sparkbtn" data-sparkbig="' + id + '">Bigger</button>' +
+      '<a class="sm-sparkbtn" href="' + SPARK_URL + '" target="_blank" rel="noopener">Open in a tab \u2197</a>' +
+      '</div>' +
+      '<iframe id="' + id + '" src="' + SPARK_URL + '" title="SparkLab" loading="lazy" ' +
+      'allow="clipboard-write; camera" referrerpolicy="no-referrer-when-downgrade"></iframe>' +
+      '<div class="sm-sparkfall">If SparkLab does not load here, open it in a tab \u2014 it needs internet.</div>' +
+      '</div>';
+  }
   function toast(msg, accent) {
     var t = document.createElement('div');
     t.className = 'sm-toast'; t.style.setProperty('--c', accent || '0,240,255');
@@ -460,11 +479,13 @@
   /* ── Act Three: SparkLab ────────────────────────────────────────────── */
   function qSpark1(q) {
     var h = '<div class="sm-cap">Round One is the worst-possible-idea round. Look at your Empathy Map and write three solutions that would make it worse. Be specific. Terrible ideas are easier to flip than vague good ones.</div>';
+    h += sparkEmbed(1, 'Spin for your constraint, then write the three worst ideas it gives you.');
     for (var i = 0; i < 3; i++) h += fld('spark.r1.' + i, 'Terrible idea ' + (i + 1), S.spark.r1[i], '', 2);
     return shell(q, h, linkBtn(q) + doneBtn(q, 'Log Round One · +' + q.xc + ' XC', 'r1'));
   }
   function qSpark2(q) {
-    var h = '<div class="sm-cap">Flip each one. Take what makes the bad idea bad and invert it. ThinkTable AI can help you push each flip further.</div>';
+    var h = '<div class="sm-cap">Flip each one. Take what makes the bad idea bad and invert it. The Idea Generator in Round Two is the engine for this; ThinkTable AI can push a flip further once you have it.</div>';
+    h += sparkEmbed(2, 'The Idea Generator. Feed it a terrible idea and work the flip.');
     for (var i = 0; i < 3; i++) {
       h += '<div class="sm-flip"><div class="sm-bad">' + esc(S.spark.r1[i] || 'Idea ' + (i + 1)) + '</div>' +
         fld('spark.r2.' + i, 'Flipped into', S.spark.r2[i], '', 2) + '</div>';
@@ -473,6 +494,7 @@
   }
   function qSpark3(q) {
     var h = '<div class="sm-cap">Draw concept art for each flipped idea on paper. Photograph it in good light, crop it, brighten it until it reads as digital, then add it to your Ideation Development Form.</div>';
+    h += sparkEmbed(3, 'Round Three is on paper. Use the board to pace it, then photograph your sheets.');
     h += fld('spark.r3', 'Link to your concept art', S.spark.r3, 'Paste the link to your photos or form', 2);
     return shell(q, h, '<a class="sm-btn out" target="_blank" rel="noopener" href="' + esc(D.canva.ideationForm) +
       '">Open the Ideation Development Form ↗</a>' + doneBtn(q, 'Log Round Three · +' + q.xc + ' XC', 'r3'));
@@ -713,6 +735,14 @@
         S.brand.colors = S.brand.colors || ['#00f0ff', '#ffd700', '#ff00ff', '#0a0f1e', '#ffffff'];
         S.brand.colors[parseInt(i.getAttribute('data-col'), 10)] = i.value;
         save(); render();
+      };
+    });
+    el.querySelectorAll('[data-sparkbig]').forEach(function (b) {
+      b.onclick = function () {
+        var w = document.getElementById(b.getAttribute('data-sparkbig') + '-wrap');
+        if (!w) return;
+        var on = w.classList.toggle('big');
+        b.textContent = on ? 'Smaller' : 'Bigger';
       };
     });
     var xl = el.querySelector('[data-xlive]');

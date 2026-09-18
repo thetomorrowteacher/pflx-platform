@@ -1,0 +1,44 @@
+PATCH PLATFORM v234: SparkLab runs inside Story Mode, not in another tab
+
+Reporter: Ennis, with the Activity Guide: "The Player would then participate in
+the 'mini game' SparkLab to complete the Ideation Development Form. This version
+of SparkLab for round 1 will use the Spark Lab ideation selecter that I built
+earlier. This should all be activities within PFLX."
+
+Root cause: v233 shipped the three Ideate quests as link-outs to the Canva site.
+That breaks what was actually asked for -- the rounds are supposed to be
+activities INSIDE PFLX, on the same screen as the write-up, not a tab the
+student leaves for and forgets to come back from.
+
+FIX: all three Ideate quests now embed SparkLab from its own GitHub Pages build
+(https://thetomorrowteacher.github.io/sparklab/ -- the self-contained sellable
+version, which serves no X-Frame-Options and no frame-ancestors, so it frames
+cleanly). Each round carries the board above its own fields, with per-round
+framing copy, a Bigger toggle that takes the frame to 88vh, a lazy-loaded
+iframe so the quest list stays fast, and an open-in-a-tab fallback plus a
+visible note for anyone whose network blocks the frame.
+
+NAMING DISCIPLINE, per the canonical reference: SparkLab is PFLX's IDEATION
+DEVELOPMENT GAME and is never described as a design thinking game. Round One is
+the Worst Idea Technique, Round Two is the Idea Generator, Round Three is
+drafting and sketching. BrandBuilder is the design thinking game; SparkLab is
+the mini game inside its Ideate phase. Round Two's copy was corrected from
+v233's "use ThinkTable AI to generate refined ideas" to name the Idea Generator
+as the engine, with ThinkTable as the thing that pushes a flip further once you
+have it.
+
+The patch swaps the engine and the styles between the existing v233 sentinels
+rather than adding a parallel block, so there is still exactly one Story Mode
+module in the page. It is idempotent.
+
+VERIFIED: syntax gate clean (28 blocks). test_story_v234.js -- 16 assertions,
+including that SparkLab points at the GitHub Pages build and not Canva, that
+all three rounds embed it, that the fallback and the Bigger toggle exist, and
+that the word combination is never used. test_story_v233.js re-run against the
+patched file -- all 31 still pass, so the campaign graph, client data, award
+path and boot hook survived the swap. The module was also re-run in a browser
+harness before inlining: 34 assertions, up from 32, the two new ones covering
+the embed and the toggle.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_0178bRc3bAmFXBGbNopm2YMR

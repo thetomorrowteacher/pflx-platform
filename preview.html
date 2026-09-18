@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 233;
+      window.PFLX_PATCH   = 234;
       window.PFLX_BUILD   = '2026.09';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -7583,6 +7583,21 @@
   .sm-logrow{grid-template-columns:1fr}
   .sm-trait{flex-direction:column;align-items:flex-start;gap:9px}
 }
+
+/* SparkLab, embedded in the Ideate quests */
+.sm-spark{border:1px solid rgba(var(--c),.34);border-radius:14px;overflow:hidden;background:rgba(5,8,18,.6)}
+.sm-sparkbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:9px 12px;
+  background:rgba(var(--c),.09);border-bottom:1px solid rgba(var(--c),.22)}
+.sm-sparkbar b{font-family:'Orbitron',sans-serif;font-size:12px;color:#fff;letter-spacing:.04em}
+.sm-sparkbar span{flex:1;min-width:160px;font-size:12px;color:rgba(255,255,255,.55)}
+.sm-sparkbtn{border:1px solid rgba(255,255,255,.18);border-radius:8px;padding:5px 11px;font-size:11.5px;
+  background:rgba(255,255,255,.04);color:#fff;text-decoration:none}
+.sm-sparkbtn:hover{border-color:rgb(var(--c));color:rgb(var(--c))}
+.sm-spark iframe{display:block;width:100%;height:62vh;min-height:420px;border:0;background:#05080f}
+.sm-spark.big iframe{height:88vh}
+.sm-sparkfall{padding:8px 12px;font-size:11.5px;color:rgba(255,255,255,.35);
+  border-top:1px solid rgba(255,255,255,.06)}
+@media (max-width:860px){.sm-spark iframe{height:70vh;min-height:360px}}
 
 /* ═══ /PATCH PLATFORM v233 ═══ */
     </style>
@@ -85980,6 +85995,25 @@ window.PFLX_CLIENTS = {"version":"1.0","clients":[{"key":"aisha","name":"Aisha M
     S.xc += xc; S.xp += xp;
   }
   function artUrl(k) { return (window.PFLX_STORY_ART || 'public/story-art/') + k + '.jpg'; }
+
+  /* SparkLab is PFLX's Ideation Development Game. Round One is the Worst
+     Idea Technique, Round Two is the Idea Generator, Round Three is drafting
+     and sketching. It runs embedded here rather than in another tab so the
+     round and the write-up sit on one screen. */
+  var SPARK_URL = 'https://thetomorrowteacher.github.io/sparklab/';
+  function sparkEmbed(round, note) {
+    var id = 'sm-spark-' + round;
+    return '<div class="sm-spark" id="' + id + '-wrap">' +
+      '<div class="sm-sparkbar"><b>SparkLab \u00b7 Round ' + round + '</b>' +
+      '<span>' + esc(note || '') + '</span>' +
+      '<button class="sm-sparkbtn" data-sparkbig="' + id + '">Bigger</button>' +
+      '<a class="sm-sparkbtn" href="' + SPARK_URL + '" target="_blank" rel="noopener">Open in a tab \u2197</a>' +
+      '</div>' +
+      '<iframe id="' + id + '" src="' + SPARK_URL + '" title="SparkLab" loading="lazy" ' +
+      'allow="clipboard-write; camera" referrerpolicy="no-referrer-when-downgrade"></iframe>' +
+      '<div class="sm-sparkfall">If SparkLab does not load here, open it in a tab \u2014 it needs internet.</div>' +
+      '</div>';
+  }
   function toast(msg, accent) {
     var t = document.createElement('div');
     t.className = 'sm-toast'; t.style.setProperty('--c', accent || '0,240,255');
@@ -86414,11 +86448,13 @@ window.PFLX_CLIENTS = {"version":"1.0","clients":[{"key":"aisha","name":"Aisha M
   /* ── Act Three: SparkLab ────────────────────────────────────────────── */
   function qSpark1(q) {
     var h = '<div class="sm-cap">Round One is the worst-possible-idea round. Look at your Empathy Map and write three solutions that would make it worse. Be specific. Terrible ideas are easier to flip than vague good ones.</div>';
+    h += sparkEmbed(1, 'Spin for your constraint, then write the three worst ideas it gives you.');
     for (var i = 0; i < 3; i++) h += fld('spark.r1.' + i, 'Terrible idea ' + (i + 1), S.spark.r1[i], '', 2);
     return shell(q, h, linkBtn(q) + doneBtn(q, 'Log Round One · +' + q.xc + ' XC', 'r1'));
   }
   function qSpark2(q) {
-    var h = '<div class="sm-cap">Flip each one. Take what makes the bad idea bad and invert it. ThinkTable AI can help you push each flip further.</div>';
+    var h = '<div class="sm-cap">Flip each one. Take what makes the bad idea bad and invert it. The Idea Generator in Round Two is the engine for this; ThinkTable AI can push a flip further once you have it.</div>';
+    h += sparkEmbed(2, 'The Idea Generator. Feed it a terrible idea and work the flip.');
     for (var i = 0; i < 3; i++) {
       h += '<div class="sm-flip"><div class="sm-bad">' + esc(S.spark.r1[i] || 'Idea ' + (i + 1)) + '</div>' +
         fld('spark.r2.' + i, 'Flipped into', S.spark.r2[i], '', 2) + '</div>';
@@ -86427,6 +86463,7 @@ window.PFLX_CLIENTS = {"version":"1.0","clients":[{"key":"aisha","name":"Aisha M
   }
   function qSpark3(q) {
     var h = '<div class="sm-cap">Draw concept art for each flipped idea on paper. Photograph it in good light, crop it, brighten it until it reads as digital, then add it to your Ideation Development Form.</div>';
+    h += sparkEmbed(3, 'Round Three is on paper. Use the board to pace it, then photograph your sheets.');
     h += fld('spark.r3', 'Link to your concept art', S.spark.r3, 'Paste the link to your photos or form', 2);
     return shell(q, h, '<a class="sm-btn out" target="_blank" rel="noopener" href="' + esc(D.canva.ideationForm) +
       '">Open the Ideation Development Form ↗</a>' + doneBtn(q, 'Log Round Three · +' + q.xc + ' XC', 'r3'));
@@ -86669,6 +86706,14 @@ window.PFLX_CLIENTS = {"version":"1.0","clients":[{"key":"aisha","name":"Aisha M
         save(); render();
       };
     });
+    el.querySelectorAll('[data-sparkbig]').forEach(function (b) {
+      b.onclick = function () {
+        var w = document.getElementById(b.getAttribute('data-sparkbig') + '-wrap');
+        if (!w) return;
+        var on = w.classList.toggle('big');
+        b.textContent = on ? 'Smaller' : 'Bigger';
+      };
+    });
     var xl = el.querySelector('[data-xlive]');
     if (xl) xl.onclick = function () { try { window.navigateTo('lite'); } catch (e) {} };
 
@@ -86735,6 +86780,7 @@ window.PFLX_CLIENTS = {"version":"1.0","clients":[{"key":"aisha","name":"Aisha M
 })();
 
 </script>
+<!-- ═══ PATCH PLATFORM v234 -- SparkLab embedded in the Ideate quests ═══ -->
 <!-- ═══ /PATCH PLATFORM v233 ═══ -->
 </body>
 </html>
