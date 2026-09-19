@@ -1,0 +1,33 @@
+PATCH PLATFORM v236: the Nexus fills the top of Story Mode and fades out
+
+Reporter: Ennis, looking at the Story Mode hero and the Narratives covers:
+"The image should fill the whole top screen yet the bottom should fade out."
+
+Root cause: v235 put the right artwork in, but the hero was still built the way
+it was when the art was a placeholder -- a 46vh band with the image at 34%
+opacity under a flat dark gradient. The Ring was in there and you could not see
+it. A picture that is the setting of the entire campaign was being treated as
+texture.
+
+FIX (css only, swapped between the existing v233 style sentinels):
+- the hero grows to min(72vh, 720px) so the Ring actually fills the top
+- the image goes to 82% opacity and is MASKED instead of veiled: a
+  linear-gradient mask takes it to fully transparent at the bottom edge, so it
+  dissolves into the page rather than sitting in a box under a dark sheet
+- the copy block drops to min(34vh, 300px) of top padding, so the title emerges
+  out of the fade instead of competing with the brightest part of the image
+- narrow screens get a contrast floor: a heavier lower scrim plus text shadows
+  on the kicker, the mast and the lede, because at 390px the copy lands on the
+  lit rim of the ring
+
+VERIFIED: syntax gate clean (28 blocks). test_story_v236.js 13/13 -- asserts the
+height, both mask properties (so it fades in Safari too), that the old 34% veil
+is gone, the copy offset, the narrow-screen floor, and that the engine, the
+SparkLab embed and the campaign data all survived the css swap.
+test_story_v233.js 31/31 and test_story_v234.js 16/16 still pass. Browser
+harness re-run at 1440x900 and 390x844: 34/34, no overflow, no page errors.
+
+The same treatment shipped to both Nexus Narratives volumes (artifact v20 / v4).
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_0178bRc3bAmFXBGbNopm2YMR
