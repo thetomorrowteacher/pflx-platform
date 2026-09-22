@@ -102,7 +102,7 @@ function makeListenerSandbox() {
   const sandbox = {};
   const block = extractBetween(src,
     'var PFLX_TRUSTED_EMBED_ORIGINS',
-    "                if (msg.type === 'pflx_xlive_embed_identity' && window.self !== window.top && PFLX_TRUSTED_EMBED_ORIGINS.indexOf(ev.origin) !== -1) {\n                    pflxTryEmbedIdentityLogin(msg.brand, 2);\n                }\n            } catch (e) {}\n        });\n"
+    "                if (msg.type === 'pflx_xlive_embed_identity' && window.self !== window.top && PFLX_TRUSTED_EMBED_ORIGINS.indexOf(ev.origin) !== -1) {\n                    pflxTryEmbedIdentityLogin(msg.brand, 2, msg.targetView);\n                }\n            } catch (e) {}\n        });\n"
   );
   const wired = block
     .replace("window.addEventListener('message', function (ev) {", 'sandbox.__listener = function (ev) {')
