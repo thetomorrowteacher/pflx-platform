@@ -69,9 +69,15 @@ check('PFLX_UI_SFX_SEL includes [role="button"]', ctx1.win.PFLX_UI_SFX_SEL.inclu
 check('PFLX_UI_SFX_SEL includes select', ctx1.win.PFLX_UI_SFX_SEL.includes('select'));
 check('PFLX_UI_SFX_SEL includes input[type="checkbox"]', ctx1.win.PFLX_UI_SFX_SEL.includes('input[type="checkbox"]'));
 
-// 2. Reuses the SAME hosted sound files X-Live already uses -- no new assets needed
-check('hover clip is the same X-Live file', ctx1.win.PFLX_UI_SFX.hover === 'pflx-ui/ui_hover_soft.mp3');
-check('click clip is the same X-Live file', ctx1.win.PFLX_UI_SFX.click === 'pflx-library/01_UI_Clicks/click_007.mp3');
+// 2. Reuses the SAME hosted sound files X-Live already uses -- no new assets
+//    needed. PATCH PLATFORM v243 / PATCH X-LIVE v0.53 swapped BOTH apps to
+//    smoother, less harsh clips cut from Ennis's new UI sound packs (the
+//    old click_007.mp3 measured an 8.5 crest factor -- a sharp transient
+//    tick; click_041.mp3 measures 2.6, a rounder envelope at the same
+//    ~0.26s length) -- still the same file in both apps, just a different
+//    file than v241 shipped with.
+check('hover clip is the same X-Live file', ctx1.win.PFLX_UI_SFX.hover === 'pflx-library/01_UI_Clicks/click_030.mp3');
+check('click clip is the same X-Live file', ctx1.win.PFLX_UI_SFX.click === 'pflx-library/01_UI_Clicks/click_041.mp3');
 check('sound root matches the shared hosted path', ctx1.win.PFLX_UI_SFX_ROOT === 'https://www.prototypeflx.com/public/sounds/');
 
 // 3. Default ON (no stored pref)
