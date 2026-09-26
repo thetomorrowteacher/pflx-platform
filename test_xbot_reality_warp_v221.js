@@ -5,10 +5,16 @@ let pass = 0, fail = 0;
 function check(label, cond) { if (cond) { pass++; console.log('PASS: ' + label); } else { fail++; console.log('FAIL: ' + label); } }
 
 // 1. The 6 dock rules now reference var(--cyan/--green) via color-mix, not hardcoded hex/rgba.
-check('#pflx-dock border uses var(--cyan) via color-mix',
-  /#pflx-dock \{[^}]*border:1px solid color-mix\(in srgb, var\(--cyan, #00f0ff\) 35%, transparent\)/.test(src));
-check('#pflx-dock box-shadow glow uses var(--cyan) via color-mix',
-  /#pflx-dock \{[^}]*color-mix\(in srgb, var\(--cyan, #00f0ff\) 14%, transparent\)/.test(src));
+// PATCH PLATFORM v248 (Sep 26) updated these two opacity values -- Ennis:
+// 'X-Bot seems to blend in too much with the back screen' -- border 35%->55%,
+// and the box-shadow glow became a dual-layer 30%/45% halo instead of a
+// single 14% layer. Updated to assert the new intentional values rather
+// than the pre-v248 ones (the underlying var(--cyan) color-mix mechanism
+// this test exists to check is unchanged).
+check('#pflx-dock border uses var(--cyan) via color-mix (v248: 55%)',
+  /#pflx-dock \{[^}]*border:1px solid color-mix\(in srgb, var\(--cyan, #00f0ff\) 55%, transparent\)/.test(src));
+check('#pflx-dock box-shadow glow uses var(--cyan) via color-mix (v248: dual-layer 30%/45%)',
+  /#pflx-dock \{[^}]*color-mix\(in srgb, var\(--cyan, #00f0ff\) 30%, transparent\)[\s\S]*?color-mix\(in srgb, var\(--cyan, #00f0ff\) 45%, transparent\)/.test(src));
 check('.pflx-dock-header background uses var(--cyan) via color-mix',
   /\.pflx-dock-header \{[^}]*color-mix\(in srgb, var\(--cyan, #00f0ff\) 7%, transparent\)/.test(src));
 check('.pflx-dock-header border-bottom uses var(--cyan) via color-mix',

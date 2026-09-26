@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 247;
+      window.PFLX_PATCH   = 248;
       window.PFLX_BUILD   = '2026.09';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -5836,7 +5836,13 @@
             font-size: 13px;
             line-height: 1.5;
             color: #c8d0e8;
-            max-width: 280px;
+            /* PATCH PLATFORM v248 (Ennis: "let the chat bubble have a wider
+               range") -- was a flat 280px cap at every dock size. Now scales
+               with the dock's own width (a percentage of the message row)
+               instead of a single fixed number, so a bubble genuinely gets
+               wider as the host resizes/presets the dock larger (Wide/Studio
+               bands), capped so it never reads absurdly wide. */
+            max-width: min(78%, 640px);
         }
         .xbot-msg-user {
             flex-direction: row-reverse;
@@ -73004,7 +73010,15 @@ RESPONSE RULES:
                 return readRow(LIST_KEY).then(function (d) {
                     S.list = (d && Array.isArray(d.items)) ? d.items : [];
                     S.loaded = true;
-                    try { var a = localStorage.getItem(ACTIVE_LS); if (a && byId(a) && canUse(byId(a))) S.active = a; } catch (e) {}
+                    // PATCH PLATFORM v248 (Ennis: "Make sure that X-Bot
+                    // always restart in normal mode and not in one of the
+                    // X-Gems") -- this used to restore the last-active Gem
+                    // id from localStorage on every load(), so a fresh app
+                    // load/restart silently resumed whatever persona the
+                    // player was last chatting as. X-Bot now always starts
+                    // in plain (no Gem) mode; select() below still persists
+                    // a pick made THIS session so switching Gems mid-session
+                    // still works exactly as before.
                     renderAll();
                 });
             }
@@ -83468,8 +83482,14 @@ RESPONSE RULES:
         body.pflx-intro-playing #pflx-theater-live-chip { visibility:hidden !important; pointer-events:none !important; }
         #pflx-dock { position:fixed; z-index:100000; display:none; flex-direction:column;
             background:linear-gradient(180deg,rgba(10,15,30,0.98),rgba(8,12,24,0.98));
-            border:1px solid color-mix(in srgb, var(--cyan, #00f0ff) 35%, transparent); border-radius:14px;
-            box-shadow:0 24px 80px rgba(0,0,0,0.72),0 0 46px color-mix(in srgb, var(--cyan, #00f0ff) 14%, transparent);
+            border:1px solid color-mix(in srgb, var(--cyan, #00f0ff) 55%, transparent); border-radius:14px;
+            /* PATCH PLATFORM v248 (Ennis: "X-Bot seems to blend in too much
+               with the back screen") -- a bigger, brighter halo: a wider
+               outer glow layer plus a tighter inner one, so the dock reads
+               clearly against any background/skin instead of blending in. */
+            box-shadow:0 24px 80px rgba(0,0,0,0.72),
+                       0 0 90px color-mix(in srgb, var(--cyan, #00f0ff) 30%, transparent),
+                       0 0 34px color-mix(in srgb, var(--cyan, #00f0ff) 45%, transparent);
             overflow:hidden; min-width:320px; min-height:300px; }
         #pflx-dock.open { display:flex; }
         .pflx-dock-header { display:flex; align-items:center; gap:8px; padding:8px 10px;
