@@ -46,7 +46,7 @@ function sandbox(role) {
     PFLX_AUDIO: { stack: [], duckLevels: { loading: 20 }, liveFeedBase: 100, _lastApplied: -1, start(s) { this.stack.push(s); this.apply(); }, stop(s) { this.stack = this.stack.filter(x => x !== s); this.apply(); } }
   };
   w.window = w;
-  const doc = { els: {}, getElementById(id) { return this.els[id] || null; }, querySelectorAll() { return doc.media || []; }, querySelector() { return null; }, createElement() { return { style: {}, classList: { add() {}, remove() {}, toggle() {} }, appendChild() {}, setAttribute() {} }; }, head: { appendChild() {} }, body: { appendChild() {} }, activeElement: null };
+  const doc = { els: {}, getElementById(id) { return this.els[id] || null; }, querySelectorAll() { return doc.media || []; }, querySelector() { return null; }, createElement() { return { style: { setProperty() {} }, classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } }, appendChild() {}, setAttribute() {}, querySelector(sel) { return sel === 'em' ? { scrollWidth: 100, clientWidth: 100, classList: { add() {}, remove() {}, contains() { return false; } }, style: { setProperty() {} }, innerHTML: '' } : null; } }; }, head: { appendChild() {} }, body: { appendChild() {} }, activeElement: null };
   const ctx = { window: w, document: doc, fetch: w.fetch, setTimeout: (f) => 1, clearTimeout() {}, setInterval: () => 1, clearInterval() {}, console, Date, JSON, Math, Promise, Object, Array, String, Number, isFinite, isNaN, parseInt, encodeURIComponent };
   vm.createContext(ctx);
   vm.runInContext(block, ctx);

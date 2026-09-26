@@ -82,7 +82,12 @@ function makeApplySandbox() {
 // ---- behavioral sandbox: renderChip() ----
 function makeChipSandbox(ownsPip) {
   const store = {};
-  const chipEl = { id: '', className: '', style: { display: '' }, innerHTML: '', onclick: null };
+  // PATCH PLATFORM v251 forward-compat -- renderChip() now also calls
+  // chip.querySelector('em') to measure/scroll a long title; stub a
+  // minimal <em> so that call is a safe no-op here (this test doesn't
+  // exercise title-scroll behavior itself -- see test_v251_theater_chip_title_scroll.js for that).
+  const emEl = { scrollWidth: 100, clientWidth: 100, classList: { add: function () {}, remove: function () {}, contains: function () { return false; } }, style: { setProperty: function () {} }, innerHTML: '' };
+  const chipEl = { id: '', className: '', style: { display: '' }, innerHTML: '', onclick: null, querySelector: function (sel) { return sel === 'em' ? emEl : null; } };
   let appended = false;
   const document = {
     getElementById: function (id) { return (id === 'pflx-theater-live-chip' && appended) ? chipEl : null; },

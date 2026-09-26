@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 250;
+      window.PFLX_PATCH   = 251;
       window.PFLX_BUILD   = '2026.09';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -5611,6 +5611,14 @@
         .ptl-wrap { position:relative; }
         .ptl-src { font-size:12px; }
         .ptl-chip em { font-style:normal; overflow:hidden; text-overflow:ellipsis; }
+        .ptl-chip em.ptl-title-scroll { text-overflow:clip; }
+        .ptl-chip em .ptl-title-txt { display:inline-block; white-space:nowrap; }
+        .ptl-chip em.ptl-title-scroll .ptl-title-txt { animation: ptlTitleScroll var(--ptl-scroll-dur,8s) ease-in-out infinite; }
+        @keyframes ptlTitleScroll {
+            0%, 10%  { transform: translateX(0); }
+            45%, 55% { transform: translateX(var(--ptl-scroll-dist,0px)); }
+            90%, 100% { transform: translateX(0); }
+        }
         .ptl-live-row { display:flex; align-items:center; gap:8px; padding:9px 10px; margin-bottom:8px; border-radius:8px; background:rgba(255,0,80,0.04); border:1px solid rgba(255,0,80,0.18); }
         .ptl-live-t { font-family:'Rajdhani',sans-serif; font-size:12px; font-weight:600; color:#e0e6ff; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .ptl-muted { font-family:'Rajdhani',sans-serif; font-size:11px; color:#6a7290; padding:6px 0; }
@@ -85379,8 +85387,30 @@ RESPONSE RULES:
                 document.body.appendChild(chip);
             }
             var item = st.playlist[st.index | 0] || {};
-            chip.innerHTML = '<span class="ptl-live">● LIVE THEATER</span> <em>' + esc(item.title || '') + '</em> <b>▶ WATCH</b>';
+            var titleText = item.title || '';
+            chip.innerHTML = '<span class="ptl-live">● LIVE THEATER</span> <em>' + esc(titleText) + '</em> <b>▶ WATCH</b>';
             chip.style.display = 'flex';
+            // PATCH PLATFORM v251 -- Ennis: "The video title should scroll."
+            // A long title previously just hard-truncated with an ellipsis
+            // ("Don't skip these 6 new Canva f..."), never revealing the
+            // rest. Measure the real rendered <em> after layout; only when
+            // it genuinely doesn't fit, wrap the text in an inner span and
+            // switch on a slow back-and-forth (ping-pong) marquee so the
+            // full title eventually reads -- a short title that already
+            // fits is left completely untouched (no wrapper, no animation).
+            var titleEm = chip.querySelector('em');
+            if (titleEm) {
+                var overflowPx = titleEm.scrollWidth - titleEm.clientWidth;
+                if (overflowPx > 4) {
+                    titleEm.innerHTML = '<span class="ptl-title-txt">' + esc(titleText) + '</span>';
+                    var scrollDur = Math.max(4, Math.min(14, overflowPx / 22 + 3));
+                    titleEm.style.setProperty('--ptl-scroll-dist', (-overflowPx) + 'px');
+                    titleEm.style.setProperty('--ptl-scroll-dur', scrollDur + 's');
+                    titleEm.classList.add('ptl-title-scroll');
+                } else {
+                    titleEm.classList.remove('ptl-title-scroll');
+                }
+            }
         }
         function updateMeta(st, pos) {
             var t = document.getElementById('ptl-title'); if (t) t.textContent = pos.item.title || '';
