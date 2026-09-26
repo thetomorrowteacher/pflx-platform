@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 248;
+      window.PFLX_PATCH   = 249;
       window.PFLX_BUILD   = '2026.09';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -85363,7 +85363,13 @@ RESPONSE RULES:
         function renderChip() {
             var chip = document.getElementById('pflx-theater-live-chip');
             var st = T.state;
-            var show = !!(st && st.active && T.dismissedFor === st.id && window.pflxTheaterLiveInScope(st, viewer()));
+            // PATCH PLATFORM v249 -- the chip shows whenever a broadcast is
+            // live and the viewer hasn't opened the PIP (never opened it, or
+            // opened then closed/dismissed it) -- not only right after an
+            // explicit dismiss. Before v249 that was the only path to
+            // seeing the chip, because going live auto-opened the PIP; now
+            // "not yet opened" is the normal starting state.
+            var show = !!(st && st.active && !T.ownsPip && window.pflxTheaterLiveInScope(st, viewer()));
             if (!show) { if (chip) chip.style.display = 'none'; return; }
             if (!chip) {
                 chip = document.createElement('button');
@@ -85564,7 +85570,13 @@ RESPONSE RULES:
             } else {
                 if (!prev || prev.id !== st.id || !prev.active) T.dismissedFor = null;
                 if (T.ownsPip) sync();
-                else if (T.dismissedFor !== st.id) window.pflxTheaterLiveOpenPip(false);
+                // PATCH PLATFORM v249 (Ennis: "The live theater should start
+                // in the notification and not open already") -- going live
+                // used to force-open the floating PIP here for every viewer
+                // in scope. It no longer does: renderChip() below already
+                // surfaces the "LIVE THEATER...WATCH" chip as soon as a
+                // broadcast is live, and the viewer opens the PIP themselves
+                // with one click (pflxTheaterLiveOpenPip(true)).
                 if (typeof window.pflxDockSetTheaterPlaying === 'function') window.pflxDockSetTheaterPlaying(true);
             }
             renderChip();
@@ -85743,7 +85755,16 @@ RESPONSE RULES:
             if (window._pflxTheaterAutoStartDone) return;
             (async function () {
                 await Promise.race([_readyP, new Promise(function (r) { setTimeout(r, 6000); })]);
-                if (window.pflxTheaterLiveIsActive()) { window._pflxTheaterAutoStartDone = true; window.pflxTheaterLiveOpenPip(true); return; }
+                // PATCH PLATFORM v249 (Ennis: "The live theater should start
+                // in the notification and not open already") -- a genuinely
+                // live broadcast no longer force-opens the floating PIP on
+                // login. boot()'s own apply() call (which the await above
+                // waits on) has already rendered the "LIVE THEATER...WATCH"
+                // chip by this point; the player opens it themselves. The
+                // saved-playlist auto-play fallback below (v198, for when
+                // nothing is live) is a separate, unrelated feature and is
+                // unchanged.
+                if (window.pflxTheaterLiveIsActive()) { window._pflxTheaterAutoStartDone = true; return; }
                 _v203Auto();
             })();
         };
