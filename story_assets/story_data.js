@@ -41,7 +41,7 @@ acts: [
       blurb:"Tessera has one seat left in the Ring. It wants to know who is taking it.",
       beats:[
        {who:"TESSERA", t:"THERE ARE EIGHT OF THEM. THERE IS ROOM FOR ONE MORE."},
-       {cap:"You are standing in a room that is not a room. The Nexus is a ring-like space station, and everything in it was built by somebody who was your age when they started."},
+       {cap:"You are standing in a room that is not a room. You are aboard the PFLX station, orbiting Earth above Tessera. Through the Nexus Gate lies the Nexus, a dimension no one built. Everything on this station was built by people who were your age when they started."},
        {who:"TESSERA", t:"EIGHT PEOPLE IN EIGHT CITIES. EACH ONE CAN LEND THE OTHERS WHAT THEY KNOW. I CALL IT THE CHORD."},
        {who:"TESSERA", t:"SOMETHING IS DELETING THE ALTERNATIVES. NOT THE PEOPLE. THE OPTIONS. BY THE TIME ANYONE NOTICES, THE CHOICE IS ALREADY GONE."},
        {cap:"Behind Tessera, eight windows. Dubai. Lagos. Bangkok. Amsterdam. The Amazon basin. Tuvalu. Los Angeles. Mumbai. Each one lit, each one in trouble."},
