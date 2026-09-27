@@ -5,7 +5,7 @@
    The Nexus Narratives, so the story a player listens to is the brief they
    then have to solve.                                                      */
 window.PFLX_STORY = {
-version: "1.0",
+version: "2.0",
 canva: {
   portfolio: "https://www.canva.com/design/DAHRff57HDw/11Zx6zoAvCgOhC8q4VpAiA/view",
   clientProfile: "https://canva.link/g3swbn7quo6ywr4",
@@ -18,6 +18,18 @@ canva: {
   thinkTable: "https://gemini.google.com/gem/008e61cf5816",
   protoDev: "https://gemini.google.com/gem/13hACoHOicvsImpHROFAjDKWCJTNYTqs-",
   brandBoardHow: "https://youtu.be/aKzcVQe1Avs"
+},
+/* The Cluster Sector of Tessera: one station per Chapter on the year map.
+   x/y are % positions on the sector backdrop (public/story-art/cluster/). */
+chapters: [
+  { n:1, studio:"MindForge",   key:"mindforge", title:"Fueling Purpose, Forging Identity",   clients:["aiko","priya"],     accent:"148,163,184", x:17, y:70 },
+  { n:2, studio:"Innov8",      key:"innov8", title:"Explore the Unknown, Build What\u2019s Next",      clients:["rafi","koa"],       accent:"245,200,66",  x:41, y:38 },
+  { n:3, studio:"Gentech",     key:"gentech", title:"Invent the Future, Solve the Now",     clients:["aisha","adebayo"],  accent:"34,197,94",   x:63, y:70 },
+  { n:4, studio:"eMagination", key:"emagination", title:"Where Ideas Come to Life", clients:["elise","tiago"],    accent:"167,139,250", x:84, y:34 }
+],
+cutscenes: {
+  empathyMap: { src:"", poster:"nexus-2", title:"How to read a person",
+    caption:"ClientCall walks you through the Empathy Map: what they say, what they think, what they do, and what it does to them." }
 },
 traits: [
   { id:"maker",   name:"Maker",      q:"I would rather build the rough version than talk about it." },
@@ -38,24 +50,16 @@ acts: [
    art:"nexus-1", accent:"0,240,255",
    quests:[
     { id:"a0-brief", title:"The Nexus Opens", kind:"beat", xc:50, xp:25, mins:5,
-      blurb:"Tessera has one seat left in the Ring. It wants to know who is taking it.",
+      blurb:"X-Bot has one seat left at PFLX. It wants to know who is taking it.",
       beats:[
-       {who:"TESSERA", t:"THERE ARE EIGHT OF THEM. THERE IS ROOM FOR ONE MORE."},
+       {who:"X-BOT", t:"THERE ARE EIGHT OF THEM. THERE IS ROOM FOR ONE MORE."},
        {cap:"You are standing in a room that is not a room. You are aboard the PFLX station, orbiting Earth above Tessera. Through the Nexus Gate lies the Nexus, a dimension no one built. Everything on this station was built by people who were your age when they started."},
-       {who:"TESSERA", t:"EIGHT PEOPLE IN EIGHT CITIES. EACH ONE CAN LEND THE OTHERS WHAT THEY KNOW. I CALL IT THE CHORD."},
-       {who:"TESSERA", t:"SOMETHING IS DELETING THE ALTERNATIVES. NOT THE PEOPLE. THE OPTIONS. BY THE TIME ANYONE NOTICES, THE CHOICE IS ALREADY GONE."},
-       {cap:"Behind Tessera, eight windows. Dubai. Lagos. Bangkok. Amsterdam. The Amazon basin. Tuvalu. Los Angeles. Mumbai. Each one lit, each one in trouble."},
-       {who:"TESSERA", t:"I CANNOT SOLVE THIS. I CAN ONLY LEND. SO I NEED SOMEBODY WHO BUILDS."},
-       {who:"TESSERA", t:"BEFORE YOU TAKE A CLIENT, I NEED TO KNOW WHO YOU ARE. NOT YOUR NAME. WHAT YOU DO WHEN A ROOM GOES QUIET."},
+       {who:"X-BOT", t:"EIGHT PEOPLE IN THE LAST EIGHT CITIES ON EARTH. EACH ONE LEADS A STARTUP STUDIO. EACH ONE HAS A PROBLEM THEY CANNOT SOLVE ALONE."},
+       {who:"X-BOT", t:"SOMETHING IS DELETING THE ALTERNATIVES. NOT THE PEOPLE. THE OPTIONS. BY THE TIME ANYONE NOTICES, THE CHOICE IS ALREADY GONE."},
+       {cap:"Below the station, eight cities are lit. Dubai. Lagos. Bangkok. Amsterdam. The Amazon. Tuvalu. Los Angeles. Mumbai. The last eight on Earth, and each one is in trouble."},
+       {who:"X-BOT", t:"I CANNOT SOLVE THIS. I CAN ONLY GUIDE. SO I NEED SOMEBODY WHO BUILDS."},
+       {who:"X-BOT", t:"BEFORE YOU TAKE A CLIENT, I NEED TO KNOW WHO YOU ARE. NOT YOUR NAME. WHAT YOU DO WHEN A ROOM GOES QUIET."},
        {cap:"A panel slides open. Your file is empty."}
-      ] },
-    { id:"a0-studio", title:"Pick Your Studio", kind:"studio", xc:50, xp:25, mins:5,
-      blurb:"Four startup studios. Each one has a different way of attacking a problem.",
-      options:[
-       {id:"gentech",     name:"Gentech Studio",     line:"Media that makes people care. Storytelling, campaigns, the SDGs.", accent:"34,197,94"},
-       {id:"massive",     name:"Massive Dynamic",    line:"AI, automation and systems. You take the machine apart.",         accent:"239,68,68"},
-       {id:"emagination", name:"eMagination Studio", line:"Futuristic design and 3D. You build the thing people walk into.", accent:"167,139,250"},
-       {id:"innov8",      name:"Innov8 Inc",         line:"Entrepreneurship and civic tech. You make it work and make it last.", accent:"245,200,66"}
       ] }
    ] },
 
@@ -80,7 +84,7 @@ acts: [
       blurb:"Brand name, logo, slogan, vision, colours, type. This is the identity you sign your work with.",
       link:"brandBoardHow", cp:"Portfolio slide 4" },
     { id:"a1-mint", title:"Mint Your Alter Ego", kind:"mint", xc:250, xp:200, mins:5,
-      blurb:"Tessera writes you into the Ring. Your card is issued.",
+      blurb:"X-Bot writes you into PFLX. Your card is issued.",
       needs:["a1-traits","a1-profile","a1-board"] }
    ] },
 
@@ -89,25 +93,28 @@ acts: [
    race:true,
    quests:[
     { id:"a2-brief", title:"Client Briefing", kind:"beat", xc:75, xp:40, mins:10,
-      blurb:"Eight clients. Eight cities. You take one.",
+      blurb:"This season, one Startup Studio opens its files. Two Leads, two clients. You take one.",
       link:"briefing",
       beats:[
-       {who:"TESSERA", t:"EIGHT FILES. ONE IS YOURS."},
-       {cap:"Each file is a person with a real problem in a real city. Listen to their issue of The Nexus Narratives before you choose. The story is the brief."},
-       {who:"TESSERA", t:"YOU ARE NOT HERE TO FIX THEM. YOU ARE HERE TO UNDERSTAND THEM WELL ENOUGH THAT THE FIX IS OBVIOUS."},
-       {cap:"Phase One is a race. First team to finish takes 1000 X-Coins each. Second takes 700. Third takes 500."}
+       {who:"X-BOT", t:"TWO FILES. THIS SEASON, ONE OF THEM IS YOURS."},
+       {cap:"Every season a different Startup Studio opens its files. Its two Leads were recruited by PFLX, and each one has a real problem in a real city. Pick one, then read their Issue of The Nexus Narratives. The story is the brief."},
+       {who:"X-BOT", t:"YOU ARE NOT HERE TO FIX THEM. YOU ARE HERE TO UNDERSTAND THEM WELL ENOUGH THAT THE FIX IS OBVIOUS."},
+       {cap:"Phase One is a race between the teams on your Chapter. First team to finish takes 1000 X-Coins each. Second takes 700. Third takes 500."}
       ] },
     { id:"a2-pick", title:"Choose Your Client", kind:"pick", xc:100, xp:50, mins:10,
-      blurb:"Pick the person whose problem you actually want to live with for a season." },
+      blurb:"Two clients. Pick the person whose problem you actually want to live with for a season." },
+    { id:"a2-issue", title:"Read the Issue", kind:"issue", xc:150, xp:75, mins:10,
+      blurb:"Your client's story, as a graphic novel. When the Archive attacks, ClientCall needs your help to get through.",
+      needs:["a2-pick"] },
     { id:"a2-interview", title:"The Client Interview", kind:"interview", xc:350, xp:175, mins:30,
       blurb:"Sit down with your client. Ask eight questions. Every answer drops a clue into your Empathy Map.",
-      needs:["a2-pick"] },
+      needs:["a2-issue"] },
     { id:"a2-cprofile", title:"Client Profile", kind:"cprofile", xc:250, xp:125, mins:25,
       blurb:"Write your client up so a stranger on your team could brief someone else on them.",
       needs:["a2-interview"], link:"clientProfile", cp:"Portfolio slide 6" },
     { id:"a2-empathy", title:"Client Empathy Map", kind:"empathy", xc:400, xp:200, mins:40,
       blurb:"Says. Thinks. Does. Feels. Then one Problem Statement that holds all four.",
-      needs:["a2-interview"], link:"empathyMap", cp:"Portfolio slide 7" },
+      needs:["a2-interview"], link:"empathyMap", cutscene:"empathyMap", cp:"Portfolio slide 7" },
     { id:"a2-cp3", title:"Checkpoint 3 Submission", kind:"submit", xc:300, xp:150, mins:10,
       blurb:"Phase One: Empathize and Define. Submit in Google Classroom, then log it here.",
       needs:["a2-cprofile","a2-empathy"], cp:"Checkpoint 3" }
@@ -175,7 +182,27 @@ acts: [
       needs:["a6-pitch"], cp:"Season complete" },
     { id:"a6-eval", title:"Self Evaluation and Future Steps", kind:"eval", xc:250, xp:125, mins:30,
       blurb:"What you would do differently, and what you are taking into next season.",
-      needs:["a6-show"] }
+      needs:["a6-show"] },
+    { id:"a6-locator", title:"The Locator Key", kind:"locator", xc:150, xp:75, mins:5,
+      blurb:"The Expo is over. Your client has something for ClientCall's tracker.",
+      needs:["a6-eval"], cp:"Chapter complete" }
    ] }
-]
+],
+/* The close of every Chapter. {client} is the client's first name, {brand}
+   the player's brand, {NEXT1}/{NEXT2} the two cities of the next Chapter. */
+locator: {
+  beats: [
+    { cap:"The Atrium empties slowly. Somebody is still standing at your booth, turning the prototype over in their hands." },
+    { say:"{client}", t:"They kept asking who built it. I kept saying the same name. {brand}." },
+    { cap:"When the lights come down, the Expo judges hand {client} a key the size of a thumbnail. Not a prize. A clearance." },
+    { cc:"LOCATOR KEY UNLOCKED. TRACKER ONLINE." },
+    { cc:"TWO SIGNALS: ONE FROM {NEXT1}, ONE FROM {NEXT2}. CHOOSE ONE." },
+    { say:"{client}", t:"Then we go. Start the engines." }
+  ],
+  finale: [
+    { cap:"The Dome goes dark one section at a time. The crew is all aboard now, every client the tracker ever found." },
+    { cc:"LOCATOR KEY FOUR. NO SIGNALS LEFT TO FIND. THE NEXUS IS LISTENING." },
+    { say:"{client}", t:"Not bad for a year, {brand}." }
+  ]
+}
 };

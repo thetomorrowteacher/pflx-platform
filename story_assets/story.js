@@ -5,7 +5,7 @@
    in app_data key pflx_story_<playerId>, mirrored to localStorage.        */
 (function () {
   'use strict';
-  var D = window.PFLX_STORY, CL = window.PFLX_CLIENTS;
+  var D = window.PFLX_STORY, CL = window.PFLX_CLIENTS, IS = window.PFLX_ISSUES;
   if (!D) return;
 
   /* ── platform bridges, each with a dev fallback ─────────────────────── */
@@ -15,6 +15,17 @@
   }
   function pname() {
     try { var s = window.activeSession || {}; return s.name || s.username || 'Player'; } catch (e) { return 'Player'; }
+  }
+  /* The player is "the Brand". Issue and closing beats write {brand} (or
+     {BRAND} in ClientCall's capitals) and get the player's brand name. */
+  function brandName() {
+    var n = ((S && S.brand && S.brand.name) || '').trim();
+    if (!n) { var p = pname(); n = p && p !== 'Player' ? p : 'the Brand'; }
+    return n;
+  }
+  function brandFill(t) {
+    return String(t).replace(/\{BRAND\}/g, function () { return brandName().toUpperCase(); })
+                    .replace(/\{brand\}/g, function () { return brandName(); });
   }
   function award(xc, xp, reason) {
     try {
@@ -61,7 +72,8 @@
   var KEY = function () { return 'pflx_story_' + pid(); };
   var S = blank();
   function blank() {
-    return { v: 1, studio: '', done: {}, at: '', xc: 0, xp: 0,
+    return { v: 2, studio: '', year: 1, chapter: 1, completedClients: [], locatorKeys: [], issue: {},
+             done: {}, at: '', xc: 0, xp: 0,
              traits: {}, forge: '', hero: {}, brand: {}, client: '',
              iv: { asked: [], clues: [] }, cprofile: {},
              emp: { says: [], thinks: [], does: [], feels: [], problem: '' },
@@ -79,6 +91,9 @@
     try {
       var raw = localStorage.getItem(KEY());
       if (raw) { S = Object.assign(blank(), JSON.parse(raw)); got = true; }
+      if (!S.issue || typeof S.issue !== 'object') S.issue = {};
+      if (!Array.isArray(S.completedClients)) S.completedClients = [];
+      if (!Array.isArray(S.locatorKeys)) S.locatorKeys = [];
     } catch (e) {}
     try {
       if (window.pflxCloudKvLoad) {
@@ -111,6 +126,11 @@
     if (isDone(q.id)) { save(); return; }
     S.done[q.id] = new Date().toISOString();
     award(q.xc, q.xp, 'Story Mode: ' + q.title);
+    if (q.kind === 'locator') {
+      var n = S.chapter || 1;
+      if (S.locatorKeys.indexOf(n) < 0) S.locatorKeys.push(n);
+      if (S.client && S.completedClients.indexOf(S.client) < 0) S.completedClients.push(S.client);
+    }
     save();
     if (!silent) toast('+' + q.xc + ' X-Coin  ·  ' + q.title + ' complete', q.act.accent);
     try {
@@ -140,6 +160,7 @@
     if (view.name === 'quest' && QUESTS[view.qid]) el.innerHTML = questHtml(QUESTS[view.qid]);
     else el.innerHTML = mapHtml();
     wire(el);
+    issueMount(el);
   }
   window.pflxStoryRender = function () { render(); };
 
@@ -154,12 +175,14 @@
          '<div class="sm-hudrow">' +
            hud('Progress', p + '%') + hud('Quests', ALL.filter(isDone).length + ' / ' + ALL.length) +
            hud('Story X-Coin', S.xc) + hud('Story XP', S.xp) +
-           hud('Studio', S.studio ? studioName(S.studio) : '—') +
+           hud('Studio', playerStudio() ? studioName(playerStudio()) : '—') +
+           hud('Chapter', chapter() ? String(chapter().n) : '—') +
            hud('Client', S.client ? clientName(S.client) : '—') +
          '</div>' +
          '<div class="sm-bar"><i style="width:' + p + '%"></i></div>' +
          '</div></div>';
 
+    h += clusterHtml();
     h += '<div class="sm-path">';
     D.acts.forEach(function (a, ai) {
       var dn = actDone(a), tot = a.quests.length, open = a.quests.some(function (q) { return !locked(q); });
@@ -184,13 +207,83 @@
     h += '</div>';
     return h;
   }
+  /* ── The Cluster Sector year map ──────────────────────────────────────
+     One station per Chapter, on the sector backdrop, joined by the route the
+     player flies across the PFLX year. The player's own Studio ship marks
+     where they are. Below it, a progress rail in the style of the ranking bar. */
+  function clusterUrl(f) { return (window.PFLX_STORY_ART || 'public/story-art/') + 'cluster/' + f; }
+  function studioKey(sid) { return String(sid || '').replace(/^studio-/, '').toLowerCase(); }
+  function clusterHtml() {
+    var CH = D.chapters || []; if (!CH.length) return '';
+    var cur = S.chapter || 1, doneC = S.completedClients || [];
+    /* One ship carries the crew through every Chapter, collecting each client. */
+    var myKey = 'mindforge';
+    var MOB = [[30, 84], [70, 62], [30, 40], [70, 17]];
+    var pts = CH.map(function (c) { return c.x + ',' + c.y; }).join(' ');
+    var mpts = CH.map(function (c, i) { var m = MOB[i] || [c.x, c.y]; return m[0] + ',' + m[1]; }).join(' ');
+    var h = '<section class="sm-cluster"><div class="sm-cl-head"><div class="sm-kick">The Cluster Sector \u00b7 Tessera</div>' +
+      '<h2>PFLX Year ' + (S.year || 1) + '</h2><p>Four stations, one per season. Each one opens a Chapter: two Studio Leads, and the client you choose.</p></div>';
+    h += '<div class="sm-cl-map"><div class="sm-cl-bg" style="background-image:url(' + clusterUrl('backdrop.jpg') + ')"></div>' +
+      '<svg class="sm-cl-route" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">' +
+      '<g class="desk"><polyline points="' + pts + '" class="glow"/><polyline points="' + pts + '" class="dash"/></g>' +
+      '<g class="mob"><polyline points="' + mpts + '" class="glow"/><polyline points="' + mpts + '" class="dash"/></g></svg>';
+    CH.forEach(function (c, ci) {
+      var mp = MOB[ci] || [c.x, c.y];
+      var state = c.n < cur ? 'passed' : (c.n === cur ? 'current' : 'locked');
+      var pips = c.clients.map(function (k) {
+        var cl = client(k), ok = doneC.indexOf(k) >= 0;
+        return '<span class="sm-cl-pip' + (ok ? ' ok' : '') + '">' + (ok ? '\u2605 ' : '\u2606 ') + esc(cl ? cl.name.split(' ')[0] : k) + '</span>';
+      }).join('');
+      h += '<button class="sm-cl-st ' + state + '" style="--x:' + c.x + '%;--y:' + c.y + '%;--mx:' + mp[0] + '%;--my:' + mp[1] + '%;--cc:' + c.accent + '" data-chapter="' + c.n + '"' +
+         ' aria-label="Chapter ' + c.n + ': ' + esc(c.title) + (state === 'locked' ? ', opens in season ' + c.n : '') + '">' +
+        '<img src="' + clusterUrl('station_' + c.key + '.webp') + '" alt="" loading="lazy">' +
+        '<span class="sm-cl-tag"><b>Chapter ' + c.n + '</b><i>' + esc(c.title) + '</i></span>' +
+        '<span class="sm-cl-pips">' + pips + '</span>' +
+        (state === 'current' ? '<span class="sm-cl-ship" style="background-image:url(' + clusterUrl('ship_' + myKey + '.png') + ')"></span>' : '') +
+        (state === 'locked' ? '<span class="sm-cl-lock">Season ' + c.n + '</span>' : '') +
+        '</button>';
+    });
+    h += '</div>';
+    var chPct = 0;
+    try { var a2 = D.acts.filter(function (a) { return a.id !== 'act0' && a.id !== 'act1'; });
+      var tot = 0, dn = 0; a2.forEach(function (a) { a.quests.forEach(function (q) { tot++; if (isDone(q.id)) dn++; }); });
+      chPct = tot ? dn / tot : 0; } catch (e) {}
+    var fill = Math.min(100, ((cur - 1) + chPct) / CH.length * 100);
+    h += '<div class="sm-cl-rail"><div class="sm-cl-bar"><i style="width:' + fill + '%"></i>' +
+      '<span class="sm-cl-shipr" style="left:' + fill + '%;background-image:url(' + clusterUrl('ship_' + myKey + '.png') + ')"></span></div>' +
+      '<div class="sm-cl-ticks">' + CH.map(function (c) {
+        return '<span class="' + (c.n < cur ? 'passed' : c.n === cur ? 'current' : '') + '"><b>' + c.n + '</b>' + esc(c.title) + '</span>'; }).join('') + '</div></div>';
+    return h + '</section>';
+  }
+
   function hud(k, v) {
     return '<div class="sm-hud"><b>' + esc(v) + '</b><span>' + esc(k) + '</span></div>';
   }
-  function studioName(id) {
-    var o = (D.acts[0].quests[1].options || []).filter(function (x) { return x.id === id; })[0];
-    return o ? o.name : id;
+  /* The player's Startup Studio comes from the diagnostic and never changes
+     here. The old Act Zero studio pick is gone; S.studio is only read as a
+     fallback for anyone who picked one before this build. */
+  var STUDIO_NAMES = { 'studio-mindforge': 'MindForge', 'studio-gentech': 'Gentech',
+    'studio-emagination': 'eMagination', 'studio-innov8': 'Innov8',
+    gentech: 'Gentech', emagination: 'eMagination', innov8: 'Innov8', mindforge: 'MindForge' };
+  function playerStudio() {
+    var sid = '';
+    try { var a = window.activeSession || {}; sid = a.studioId || a.studio || ''; } catch (e) {}
+    return sid || S.studio || '';
   }
+  function studioName(id) {
+    if (!id) return '';
+    try {
+      if (typeof window.pflxStudioMeta === 'function') {
+        var m = window.pflxStudioMeta(id); if (m && m.name) return m.name;
+      }
+    } catch (e) {}
+    return STUDIO_NAMES[id] || id;
+  }
+  function chapter() {
+    var n = S.chapter || 1;
+    return (D.chapters || []).filter(function (c) { return c.n === n; })[0] || (D.chapters || [])[0] || null;
+  }
+  function issueOf(k) { return (IS && IS.issues && IS.issues[k || S.client]) || null; }
   function clientName(k) {
     var c = client(k); return c ? c.name : k;
   }
@@ -243,10 +336,10 @@
   /* ── quest bodies by kind ───────────────────────────────────────────── */
   function questHtml(q) {
     var f = { beat: qBeat, studio: qStudio, traits: qTraits, forge: qForge, charprofile: qCharProfile,
-      board: qBoard, mint: qMint, pick: qPick, interview: qInterview, cprofile: qCProfile,
+      board: qBoard, mint: qMint, pick: qPick, issue: qIssue, interview: qInterview, cprofile: qCProfile,
       empathy: qEmpathy, submit: qSubmit, spark1: qSpark1, spark2: qSpark2, spark3: qSpark3,
       merge: qMerge, logstart: qLogStart, log: qLog, build: qBuild, course: qCourse,
-      give: qGive, take: qTake, exhibit: qExhibit, pitch: qPitch, show: qShow, eval: qEval }[q.kind];
+      give: qGive, take: qTake, exhibit: qExhibit, pitch: qPitch, show: qShow, eval: qEval, locator: qLocator }[q.kind];
     return f ? f(q) : shell(q, '<p class="sm-note">This quest is being built.</p>', doneBtn(q));
   }
 
@@ -351,32 +444,236 @@
   function qMint(q) {
     var p = S.hero || {}, b = S.brand || {}, top = topTraits();
     var h = '<div class="sm-card-mint" style="--c:' + q.act.accent + '">' +
-      '<div class="sm-mint-k">Prototype FLX · Nexus Ring · Seat Nine</div>' +
+      '<div class="sm-mint-k">Prototype FLX · Seat Nine</div>' +
       '<div class="sm-mint-n">' + esc(p.name || pname()) + '</div>' +
       (p.alias ? '<div class="sm-mint-a">“' + esc(p.alias) + '”</div>' : '') +
-      '<div class="sm-mint-row"><span>Studio</span><b>' + esc(S.studio ? studioName(S.studio) : 'Unassigned') + '</b></div>' +
+      '<div class="sm-mint-row"><span>Studio</span><b>' + esc(playerStudio() ? studioName(playerStudio()) : 'Unassigned') + '</b></div>' +
       '<div class="sm-mint-row"><span>Brand</span><b>' + esc(b.name || '—') + '</b></div>' +
       '<div class="sm-mint-row"><span>Core</span><b>' + (top.length ? top.map(function (x) { return esc(x.t.name); }).join(' · ') : '—') + '</b></div>' +
       '<div class="sm-mint-row"><span>Ability</span><b>' + esc(p.power || '—') + '</b></div>' +
       (b.slogan ? '<div class="sm-mint-slo">' + esc(b.slogan) + '</div>' : '') +
       '</div>';
-    h += '<div class="sm-beats"><div class="sm-xmit"><span>TESSERA</span>YOU ARE IN THE RING. NOW PICK SOMEBODY WORTH THE SEAT.</div></div>';
+    h += '<div class="sm-beats"><div class="sm-xmit"><span>X-BOT</span>YOU ARE IN. NOW PICK SOMEBODY WORTH THE SEAT.</div></div>';
     return shell(q, h, doneBtn(q, 'Take the seat · +' + q.xc + ' XC'));
   }
 
   /* ── Act Two: the client work ───────────────────────────────────────── */
+  /* The Chapter gate. Each season one Studio opens its two Leads' files; the
+     player chooses one of the two. A client already completed (approved
+     through the Expo) shows as complete and can't be taken again. */
   function qPick(q) {
     if (!CL) return shell(q, '<p class="sm-note">Client files are loading.</p>', '');
-    var h = '<div class="sm-clients">';
-    CL.clients.forEach(function (c) {
-      h += '<button class="sm-client' + (S.client === c.key ? ' on' : '') + '" data-client="' + esc(c.key) + '">' +
+    var ch = chapter();
+    var keys = ch ? ch.clients : [];
+    var list = keys.map(function (k) { return client(k); }).filter(Boolean);
+    var doneC = S.completedClients || [];
+    var h = '<div class="sm-chap" style="--cc:' + (ch ? ch.accent : q.act.accent) + '">' +
+      '<div class="sm-chap-k">Chapter ' + (ch ? ch.n : '') + '</div>' +
+      '<div class="sm-chap-t">' + esc(ch ? ch.title : '') + '</div>' +
+      '<div class="sm-chap-s">Two Leads. Two problems. One is yours this season.</div></div>';
+    if (ch) h += '<div class="sm-cut"><div class="sm-cut-k">Cutscene \u00b7 Chapter ' + ch.n + '</div>' +
+      '<video controls playsinline preload="metadata" src="' + clusterUrl('chapter' + ch.n + '_intro.mp4') + '" poster="' + clusterUrl('backdrop.jpg') + '"></video></div>';
+    h += '<div class="sm-clients two">';
+    list.forEach(function (c) {
+      var iss = issueOf(c.key), was = doneC.indexOf(c.key) >= 0;
+      h += '<button class="sm-client' + (S.client === c.key ? ' on' : '') + (was ? ' past' : '') + '"' +
+        (was ? ' disabled' : ' data-client="' + esc(c.key) + '"') + '>' +
         '<span class="sm-cart" style="background-image:url(' + artUrl(c.art) + ')"></span>' +
         '<span class="sm-cbody"><b>' + esc(c.name) + '</b>' +
-        '<i>' + esc(c.place) + ' · ' + esc(c.studio) + '</i>' +
-        '<span>' + esc(c.tagline) + '</span></span></button>';
+        '<i>' + esc(c.place) + ' \u00b7 ' + esc(c.studio) + (iss ? ' \u00b7 ' + esc(iss.title) : '') + '</i>' +
+        '<span>' + esc(iss ? iss.teaser : c.tagline) + '</span>' +
+        (was ? '<em class="sm-cdone">Complete</em>' : '') + '</span></button>';
     });
     h += '</div>';
-    return shell(q, h, doneBtn(q, 'Take this client · +' + q.xc + ' XC', 'client'));
+    return shell(q, h, doneBtn(q, 'Take this client \u00b7 +' + q.xc + ' XC', 'client'));
+  }
+
+  /* ── The Issue reader ──────────────────────────────────────────────────
+     A graphic-novel Issue, one panel at a time. Beats fade in and the reader
+     advances on its own unless the panel holds an activity, which stops it
+     until the player clears it. Three caption voices: the series narrator,
+     the client's own flashback captions, and ClientCall in magenta; the
+     Archive breaks in on glitch plates. Progress is saved per client. */
+  function qIssue(q) {
+    var c = client(), iss = issueOf();
+    if (!c) return shell(q, '<p class="sm-note">Choose a client first.</p>', '');
+    if (!iss) return shell(q, '<p class="sm-note">' + esc(c.name) + '\u2019s Issue is being written.</p>', doneBtn(q));
+    var st = S.issue[iss.key] || {};
+    var h = '<div class="sm-ir" data-issue="' + esc(iss.key) + '" style="--c:' + q.act.accent + '">' +
+      '<div class="ir-top"><div class="ir-t"><span>' + esc(iss.issue) + '</span><b>' + esc(iss.title) + '</b></div>' +
+      '<div class="ir-ctl">' +
+        '<button class="ir-b" data-ir="prev" title="Previous panel" aria-label="Previous panel">\u2039</button>' +
+        '<button class="ir-b ir-play" data-ir="play" title="Play or pause" aria-label="Play or pause">\u275A\u275A</button>' +
+        '<button class="ir-b" data-ir="next" title="Next panel" aria-label="Next panel">\u203A</button>' +
+        '<label class="ir-auto"><input type="checkbox" data-ir="auto"' + (st.manual ? '' : ' checked') + '> Auto</label>' +
+      '</div></div>' +
+      '<div class="ir-stage" aria-live="polite"><div class="ir-art"></div><div class="ir-shade"></div>' +
+        '<div class="ir-slug"></div><div class="ir-beats"></div><div class="ir-act"></div></div>' +
+      '<div class="ir-foot"><div class="ir-dots"></div><span class="ir-n"></span></div>' +
+      (iss.audio ? '<audio class="ir-audio" preload="none" src="' + esc(iss.audio) + '"></audio>' : '') +
+      '</div>';
+    var foot = st.done ? doneBtn(q, (isDone(q.id) ? 'Back to the campaign' : 'Finish the Issue \u00b7 +' + q.xc + ' XC'), 'issue')
+                       : '<span class="sm-hint">Read to the end of the Issue to continue.</span>';
+    return shell(q, h, foot);
+  }
+
+  function issueMount(root) {
+    var box = root.querySelector('[data-issue]');
+    if (!box) return;
+    var iss = issueOf(box.getAttribute('data-issue'));
+    if (!iss) return;
+    var st = S.issue[iss.key] = S.issue[iss.key] || { panel: 0 };
+    var P = iss.panels, pi = Math.min(st.panel || 0, P.length - 1), bi = 0, timer = null;
+    var playing = !st.done, auto = !st.manual, over = !!st.done && pi >= P.length - 1;
+    var stage = box.querySelector('.ir-stage'), art = box.querySelector('.ir-art'),
+        slug = box.querySelector('.ir-slug'), beats = box.querySelector('.ir-beats'),
+        act = box.querySelector('.ir-act'), dots = box.querySelector('.ir-dots'),
+        num = box.querySelector('.ir-n'), playB = box.querySelector('[data-ir="play"]'),
+        audio = box.querySelector('.ir-audio');
+    var reduce = false;
+    try { reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+
+    dots.innerHTML = P.map(function (p, i) {
+      return '<button class="ir-dot' + (p.activity ? ' act' : '') + '" data-irp="' + i + '" aria-label="Panel ' + (i + 1) + '"></button>';
+    }).join('');
+
+    function words(b) { return String(b.cap || b.t || b.cc || b.arch || '').split(/\s+/).length; }
+    function beatHtml(b0) {
+      var b = {}; for (var k in b0) b[k] = typeof b0[k] === 'string' ? brandFill(b0[k]) : b0[k];
+      if (b.cap && b.v) return '<div class="ir-fcap"><span>' + esc(b.v) + '</span>' + esc(b.cap) + '</div>';
+      if (b.cap) return '<div class="ir-cap">' + esc(b.cap) + '</div>';
+      if (b.say) return '<div class="ir-say"><span>' + esc(b.say) + '</span>' + esc(b.t) + '</div>';
+      if (b.think) return '<div class="ir-think"><span>' + esc(b.think) + '</span>' + esc(b.t) + '</div>';
+      if (b.cc) return '<div class="ir-cc"><span>CLIENTCALL</span>' + esc(b.cc) + '</div>';
+      if (b.arch) return '<div class="ir-arch" data-g="' + esc(b.arch) + '"><span>THE ARCHIVE</span>' + esc(b.arch) + '</div>';
+      return '';
+    }
+    function stop() { if (timer) { clearTimeout(timer); timer = null; } }
+    function persist() { st.panel = pi; st.manual = !auto; save(); }
+    function setPlay(on) {
+      playing = on; playB.textContent = on ? '\u275A\u275A' : '\u25B6';
+      playB.classList.toggle('on', on);
+      if (audio) { try { on ? audio.play() : audio.pause(); } catch (e) {} }
+      stop(); if (on) schedule();
+    }
+    function cleared() { return !!(st.cleared || {})[pi]; }
+    function showPanel(i, instant) {
+      stop(); pi = Math.max(0, Math.min(i, P.length - 1)); bi = 0;
+      var p = P[pi];
+      art.style.backgroundImage = 'url(' + artUrl(p.art || iss.cover) + ')';
+      art.classList.remove('kb'); void art.offsetWidth; if (!reduce) art.classList.add('kb');
+      var fl = /^(FLASHBACK|CALLBACK)/.test(p.slug);
+      stage.classList.toggle('flash', fl);
+      stage.classList.toggle('sig', /^(SIGNAL|INTERFERENCE|FIREWALL)/.test(p.slug));
+      slug.textContent = p.slug; beats.innerHTML = ''; act.innerHTML = ''; act.classList.remove('on');
+      dots.querySelectorAll('.ir-dot').forEach(function (d, k) {
+        d.classList.toggle('on', k === pi); d.classList.toggle('seen', k < pi);
+      });
+      num.textContent = 'Panel ' + (pi + 1) + ' of ' + P.length;
+      persist();
+      if (instant) { while (bi < p.beats.length) addBeat(); afterBeats(); }
+      else if (playing) schedule(300); else { addBeat(); }
+    }
+    function addBeat() {
+      var p = P[pi]; if (bi >= p.beats.length) return false;
+      var d = document.createElement('div'); d.innerHTML = beatHtml(p.beats[bi]);
+      var el = d.firstChild; if (!el) { bi++; return true; }
+      beats.appendChild(el); requestAnimationFrame(function () { el.classList.add('in'); });
+      if (p.beats[bi].arch) { stage.classList.add('glitch'); setTimeout(function () { stage.classList.remove('glitch'); }, 700); }
+      beats.scrollTop = beats.scrollHeight;
+      bi++; return true;
+    }
+    function afterBeats() {
+      var p = P[pi];
+      if (p.activity && !cleared()) { openActivity(p.activity); return; }
+      if (pi >= P.length - 1) { finish(); return; }
+      if (playing && auto) timer = setTimeout(function () { showPanel(pi + 1); }, 2200);
+    }
+    function schedule(first) {
+      var p = P[pi];
+      if (bi >= p.beats.length) { afterBeats(); return; }
+      var b = p.beats[bi];
+      timer = setTimeout(function () {
+        addBeat();
+        if (!playing) return;
+        if (bi >= p.beats.length) { afterBeats(); return; }
+        schedule(Math.min(7000, 900 + 260 * words(b)));
+      }, first == null ? Math.min(7000, 900 + 260 * words(b)) : first);
+    }
+    function openActivity(a) {
+      stop();
+      act.classList.add('on');
+      act.innerHTML = '<div class="ir-fw"><div class="ir-fw-k">Firewall \u00b7 ' + esc(a.title) + '</div>' +
+        '<p>' + esc(a.brief) + '</p><div class="ir-fw-game"></div></div>';
+      var game = act.querySelector('.ir-fw-game');
+      function win() {
+        st.cleared = st.cleared || {}; st.cleared[pi] = true; persist();
+        try { if (window.pflxPlaySfx) window.pflxPlaySfx('badge'); } catch (e) {}
+        act.innerHTML = '<div class="ir-fw done"><div class="ir-fw-k">Firewall holding</div><p>ClientCall is through.</p></div>';
+        setTimeout(function () { act.classList.remove('on'); if (pi < P.length - 1) showPanel(pi + 1); else finish(); }, 1400);
+      }
+      var FW = window.PFLX_FIREWALL;
+      if (FW && typeof FW[a.type] === 'function') { try { FW[a.type](game, { onWin: win, issue: iss.key }); return; } catch (e) {} }
+      holdGame(game, win);
+    }
+    /* Until the Firewall puzzles land, the fallback is a hold-to-push channel:
+       keep pressing while the signal bars climb past the noise. */
+    function holdGame(g, win) {
+      g.innerHTML = '<div class="ir-bars">' + '<i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>' + '</div>' +
+        '<button class="ir-hold" type="button">Hold to push the signal through</button><div class="ir-meter"><i></i></div>';
+      var btn = g.querySelector('.ir-hold'), m = g.querySelector('.ir-meter i'), bars = g.querySelectorAll('.ir-bars i');
+      var v = 0, t = null, dn = false;
+      function tick() {
+        v = Math.max(0, Math.min(100, v + (dn ? 2.2 : -1.4)));
+        m.style.width = v + '%';
+        bars.forEach(function (b, k) { b.style.height = (18 + Math.random() * 30 + v * 0.5 * ((k % 3) + 1) / 2) + '%'; });
+        if (v >= 100) { clearInterval(t); t = null; win(); }
+      }
+      t = setInterval(tick, 50);
+      function on(e) { dn = true; btn.classList.add('dn'); if (e) e.preventDefault(); }
+      function off() { dn = false; btn.classList.remove('dn'); }
+      btn.addEventListener('pointerdown', on); btn.addEventListener('pointerup', off);
+      btn.addEventListener('pointerleave', off); btn.addEventListener('pointercancel', off);
+      btn.addEventListener('keydown', function (e) { if (e.key === ' ' || e.key === 'Enter') on(e); });
+      btn.addEventListener('keyup', off);
+      var obs = setInterval(function () { if (!document.body.contains(g)) { clearInterval(obs); if (t) clearInterval(t); } }, 1000);
+    }
+    function finish() {
+      stop(); if (playing) setPlay(false);
+      var c = client();
+      act.classList.add('on');
+      act.innerHTML = '<div class="ir-end"><div class="ir-fw-k">End of ' + esc(iss.issue) + '</div>' +
+        '<b>\u201C' + esc(iss.vision) + '\u201D</b><p>' + esc(c ? c.name : iss.lead) + '\u2019s design challenge</p>' +
+        '<i>' + esc(iss.question) + '</i></div>';
+      if (!st.done) { st.done = true; persist(); setTimeout(render, 2600); }
+    }
+    box.addEventListener('click', function (e) {
+      var t = e.target.closest('[data-ir],[data-irp]'); if (!t) return;
+      var k = t.getAttribute('data-ir');
+      if (t.hasAttribute('data-irp')) { showPanel(parseInt(t.getAttribute('data-irp'), 10), true); if (playing) setPlay(true); return; }
+      if (k === 'prev') { showPanel(pi - 1, true); }
+      else if (k === 'next') {
+        var p = P[pi];
+        if (bi < p.beats.length) { stop(); while (bi < p.beats.length) addBeat(); afterBeats(); }
+        else if (p.activity && !cleared()) openActivity(p.activity);
+        else if (pi < P.length - 1) showPanel(pi + 1, !playing);
+        else finish();
+      }
+      else if (k === 'play') setPlay(!playing);
+    });
+    var ac = box.querySelector('[data-ir="auto"]');
+    if (ac) ac.onchange = function () { auto = ac.checked; persist(); if (auto && playing) { stop(); schedule(); } };
+    box.tabIndex = 0;
+    box.addEventListener('keydown', function (e) {
+      if (e.target.closest('input,button.ir-hold')) return;
+      if (e.key === 'ArrowRight') { box.querySelector('[data-ir="next"]').click(); e.preventDefault(); }
+      if (e.key === 'ArrowLeft') { showPanel(pi - 1, true); e.preventDefault(); }
+    });
+    var watch = setInterval(function () { if (!document.body.contains(box)) { clearInterval(watch); stop(); if (audio) try { audio.pause(); } catch (e) {} } }, 800);
+    try { var r = box.getBoundingClientRect(); if (r.top > 120 && box.scrollIntoView) box.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' }); } catch (e) {}
+    playing = !st.done;
+    setPlay(playing);
+    showPanel(pi, st.done || !playing);
   }
 
   function qInterview(q) {
@@ -439,7 +736,8 @@
       return c.questions.filter(function (x) { return x.id === qid; })[0];
     }).filter(Boolean).filter(function (x) { return !used[x.clue]; });
 
-    var h = '<div class="sm-emwrap">';
+    var h = cutsceneHtml(q);
+    h += '<div class="sm-emwrap">';
     h += '<div class="sm-empool"><div class="sm-sub">Clues from the interview</div>' +
       (pool.length ? pool.map(function (x) {
         return '<div class="sm-clue ' + esc(x.reveals) + '" draggable="true" data-clue="' + esc(x.clue) +
@@ -466,6 +764,17 @@
       (full ? 'Map complete' : 'Needs 2+ in every quadrant and a problem statement') + '</b></div>';
     return shell(q, h, linkBtn(q) + doneBtn(q, 'Lock the map · +' + q.xc + ' XC', 'emp') +
       (full ? '' : '<span class="sm-hint">Two or more in every quadrant, plus the statement.</span>'));
+  }
+
+  /* A cutscene that plays before the quest's own work, e.g. the Empathy Map
+     video. Nothing renders until the host has dropped the video in. */
+  function cutsceneHtml(q) {
+    var cs = q.cutscene && D.cutscenes && D.cutscenes[q.cutscene];
+    if (!cs || !cs.src) return '';
+    return '<div class="sm-cut"><div class="sm-cut-k">Cutscene \u00b7 ' + esc(cs.title) + '</div>' +
+      '<video controls playsinline preload="metadata" src="' + esc(cs.src) + '"' +
+      (cs.poster ? ' poster="' + artUrl(cs.poster) + '"' : '') + '></video>' +
+      '<div class="sm-cap">' + esc(cs.caption) + '</div></div>';
   }
 
   function qSubmit(q) {
@@ -639,6 +948,40 @@
     return shell(q, h, doneBtn(q, 'Close the season · +' + q.xc + ' XC', 'eval'));
   }
 
+  /* ── The Locator Key: the end of a Chapter ────────────────────────────
+     The Expo is over. The client unlocks a key for ClientCall's tracker,
+     the tracker finds the next Chapter's two signals, and the ship leaves
+     the station. The departure is the next Chapter's intro: one video. */
+  function qLocator(q) {
+    var ch = chapter(), c = client(), L = D.locator || {};
+    var CH = D.chapters || [], nx = ch ? CH.filter(function (x) { return x.n === ch.n + 1; })[0] : null;
+    var places = nx ? nx.clients.map(function (k) { var x = client(k); return x ? x.place : k; }) : [];
+    var who = c ? c.name.split(' ')[0] : 'Your client';
+    function fill(t) {
+      return brandFill(String(t).replace(/\{client\}/g, who)
+        .replace(/\{NEXT1\}/g, String(places[0] || 'THE NEXT STATION').toUpperCase())
+        .replace(/\{NEXT2\}/g, String(places[1] || 'THE ONE AFTER').toUpperCase()));
+    }
+    var beats = (nx ? L.beats : L.finale) || L.beats || [];
+    var h = '<div class="sm-chap" style="--cc:' + (ch ? ch.accent : q.act.accent) + '">' +
+      '<div class="sm-chap-k">Chapter ' + (ch ? ch.n : '') + ' \u00b7 Complete</div>' +
+      '<div class="sm-chap-t">' + esc(ch ? ch.title : '') + '</div>' +
+      '<div class="sm-chap-s">' + esc(c ? c.name + ' presented your work at the Innovation Expo.' : 'The Innovation Expo is over.') + '</div></div>';
+    h += '<div class="sm-beats">' + beats.map(function (x) {
+      if (x.cap) return '<div class="sm-cap">' + esc(fill(x.cap)) + '</div>';
+      if (x.cc) return '<div class="sm-xmit cc"><span>CLIENTCALL</span>' + esc(fill(x.cc)) + '</div>';
+      return '<div class="sm-xmit"><span>' + esc(fill(x.say || x.who || '')) + '</span>' + esc(fill(x.t)) + '</div>';
+    }).join('') + '</div>';
+    var got = isDone(q.id);
+    h += '<div class="sm-key' + (got ? ' on' : '') + '" style="--cc:' + (ch ? ch.accent : q.act.accent) + '">' +
+      '<span class="sm-key-i" aria-hidden="true"></span><span class="sm-key-b"><b>Locator Key ' + (ch ? ch.n : '') + '</b>' +
+      '<i>' + esc(got ? 'In your inventory. ClientCall\u2019s tracker is online.' : 'Unlocks ClientCall\u2019s tracker for the next client.') + '</i></span></div>';
+    if (ch && nx) h += '<div class="sm-cut"><div class="sm-cut-k">Cutscene \u00b7 Departure</div>' +
+      '<video controls playsinline preload="metadata" src="' + clusterUrl('chapter' + nx.n + '_intro.mp4') + '" poster="' + clusterUrl('backdrop.jpg') + '"></video>' +
+      '<div class="sm-cap">Next stop: Chapter ' + nx.n + ', ' + esc(nx.title) + '. It opens next season.</div></div>';
+    return shell(q, h, doneBtn(q, got ? 'Back to the campaign' : 'Take the Locator Key \u00b7 +' + q.xc + ' XC'));
+  }
+
   /* ── setters ────────────────────────────────────────────────────────── */
   function setPath(path, val) {
     var parts = path.split('.'), o = S;
@@ -657,6 +1000,14 @@
     });
     var bk = el.querySelector('[data-back]'); if (bk) bk.onclick = function () { go('map'); };
 
+    el.querySelectorAll('[data-chapter]').forEach(function (b) {
+      b.onclick = function () {
+        var n = parseInt(b.getAttribute('data-chapter'), 10), cur = S.chapter || 1;
+        if (n === cur) go('quest', 'a2-pick');
+        else if (n > cur) toast('Chapter ' + n + ' opens in season ' + n + '.', '148,163,184');
+        else toast('Chapter ' + n + ' is behind you. Its other client returns next year.', '148,163,184');
+      };
+    });
     el.querySelectorAll('[data-studio]').forEach(function (b) {
       b.onclick = function () { S.studio = b.getAttribute('data-studio'); save(); render(); };
     });
@@ -779,6 +1130,7 @@
     if (g === 'hero' && !(S.hero.name || '').trim()) return bad('Your Alter Ego needs a name.');
     if (g === 'brand' && !(S.brand.name || '').trim()) return bad('Your brand needs a name.');
     if (g === 'client' && !S.client) return bad('Choose a client first.');
+    if (g === 'issue' && !((S.issue || {})[S.client] || {}).done) return bad('Read to the end of the Issue first.');
     if (g === 'cprofile' && !(S.cprofile.day || '').trim()) return bad('Describe a normal day for your client.');
     if (g === 'emp') {
       var thin = QUAD.filter(function (k) { return (S.emp[k[0]] || []).length < 2; });
