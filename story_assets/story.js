@@ -37,6 +37,43 @@
     S.xc += xc; S.xp += xp;
   }
   function artUrl(k) { return (window.PFLX_STORY_ART || 'public/story-art/') + k + '.jpg'; }
+  function gemArt(gem, kind) { return (window.PFLX_STORY_ART || 'public/story-art/').replace(/story-art\/?$/, 'xgems/') + gem + '-' + kind + '.webp'; }
+  function ccArt(kind) { return gemArt('clientcall', kind); }
+  /* The X-Gems (X-Bot-powered guides). Each level has one; a mission that
+     sends the player to a Gem shows that Gem's portrait. */
+  var GEMS = {
+    characterforge: { name: 'CharacterForge', role: 'Fuses your traits and interests into an original character.' },
+    clientcall: { name: 'ClientCall', role: 'Finds people for PFLX, and walks you through your client.' },
+    thinktable: { name: 'ThinkTable', role: 'Pushes a flipped idea further than you would alone.' },
+    protodev: { name: 'ProtoDev', role: 'Guides the build. Your hands, its map.' }
+  };
+  var ACT_GEM = { act1: 'characterforge', act2: 'clientcall', act3: 'thinktable', act4: 'protodev', act5: 'protodev' };
+  var QUEST_GEM = { 'a1-forge': 'characterforge', 'a2-brief': 'clientcall', 'a2-interview': 'clientcall', 'a3-r2': 'thinktable', 'a4-log': 'protodev', 'a4-build': 'protodev' };
+  function gemStrip(q) {
+    var g = QUEST_GEM[q.id]; if (!g || !GEMS[g]) return '';
+    var big = q.kind === 'forge';
+    return '<div class="cm-gem' + (big ? ' big' : '') + '"><img src="' + gemArt(g, big ? 'card' : 'icon') + '" alt="">' +
+      '<span><em>X-Gem guide</em><b>' + esc(GEMS[g].name) + '</b><i>' + esc(GEMS[g].role) + '</i></span></div>';
+  }
+  /* Campaign Mode type: Audiowide + Exo 2. The platform page doesn't load
+     them globally, so Story Mode brings its own. */
+  (function () {
+    try {
+      if (document.getElementById('cm-fonts')) return;
+      var l = document.createElement('link'); l.id = 'cm-fonts'; l.rel = 'stylesheet';
+      l.href = 'https://fonts.googleapis.com/css2?family=Audiowide&family=Exo+2:wght@500;600;700;800&display=swap';
+      document.head.appendChild(l);
+    } catch (e) {}
+  })();
+  function audioBase(k) { return (window.PFLX_STORY_ART || 'public/story-art/') + 'audio/' + k + '/'; }
+  var MARKS = {};
+  function loadMarks(k, cb) {
+    if (MARKS[k] !== undefined) { cb(MARKS[k]); return; }
+    try {
+      fetch(audioBase(k) + 'marks.json').then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (m) { MARKS[k] = m; cb(m); }).catch(function () { MARKS[k] = null; cb(null); });
+    } catch (e) { cb(null); }
+  }
 
   /* SparkLab is PFLX's Ideation Development Game. Round One is the Worst
      Idea Technique, Round Two is the Idea Generator, Round Three is drafting
@@ -79,7 +116,7 @@
              emp: { says: [], thinks: [], does: [], feels: [], problem: '' },
              spark: { r1: ['', '', ''], r2: ['', '', ''], r3: '', merged: '', views: [] },
              log: [], feed: { learned: '', gave: [], took: [], change: '' },
-             exhibit: {}, pitch: {}, evalr: {}, subs: {} };
+             exhibit: {}, pitch: {}, evalr: {}, subs: {}, seen: {}, sound: true };
   }
   function save() {
     S.at = new Date().toISOString();
@@ -94,6 +131,7 @@
       if (!S.issue || typeof S.issue !== 'object') S.issue = {};
       if (!Array.isArray(S.completedClients)) S.completedClients = [];
       if (!Array.isArray(S.locatorKeys)) S.locatorKeys = [];
+      if (!S.seen || typeof S.seen !== 'object') S.seen = {};
     } catch (e) {}
     try {
       if (window.pflxCloudKvLoad) {
@@ -143,7 +181,7 @@
   window.pflxStoryPct = pct;
 
   /* ── router ─────────────────────────────────────────────────────────── */
-  var view = { name: 'map', qid: '' };
+  var view = { name: 'home', qid: '' };
   window.pflxStoryGo = function (name, qid) {
     view = { name: name, qid: qid || '' };
     render();
@@ -154,75 +192,102 @@
   function go(n, q) { window.pflxStoryGo(n, q); }
 
   /* ── render ─────────────────────────────────────────────────────────── */
+  /* PATCH PLATFORM v256 -- Campaign Mode. Story Mode rebuilt as a game:
+     the Cluster map is home, each Chapter is a station, each Act is a level
+     inside it, and quests are the missions of a level. Cutscenes play full
+     screen. The quest engine and saved progress underneath are unchanged. */
   function render() {
     var el = document.getElementById('sm-root');
     if (!el) return;
-    if (view.name === 'quest' && QUESTS[view.qid]) el.innerHTML = questHtml(QUESTS[view.qid]);
-    else el.innerHTML = mapHtml();
+    var n = view.name, body;
+    if (n === 'quest' && QUESTS[view.qid]) body = questHtml(QUESTS[view.qid]);
+    else if (n === 'level' && actById(view.qid)) body = levelHtml(actById(view.qid));
+    else if (n === 'chapter') body = chapterHtml();
+    else { view.name = 'home'; body = homeHtml(); }
+    el.innerHTML = '<div class="cm cm-' + view.name + '">' + hudHtml() + body + '</div>';
     wire(el);
+    wireCampaign(el);
     issueMount(el);
   }
   window.pflxStoryRender = function () { render(); };
 
-  /* ── the campaign map ───────────────────────────────────────────────── */
-  function mapHtml() {
-    var p = pct(), h = '';
-    h += '<div class="sm-hero" style="--bg:url(' + artUrl(D.acts[0].art) + ')">' +
-         '<div class="sm-hero-in">' +
-         '<div class="sm-kick">Prototype FLX · Season Campaign</div>' +
-         '<h1 class="sm-mast">Story Mode</h1>' +
-         '<p class="sm-lede">Two projects, one campaign. Build your Alter Ego, take a client out of The Nexus Narratives, and run them through Design Thinking until the problem gives way.</p>' +
-         '<div class="sm-hudrow">' +
-           hud('Progress', p + '%') + hud('Quests', ALL.filter(isDone).length + ' / ' + ALL.length) +
-           hud('Story X-Coin', S.xc) + hud('Story XP', S.xp) +
-           hud('Studio', playerStudio() ? studioName(playerStudio()) : '—') +
-           hud('Chapter', chapter() ? String(chapter().n) : '—') +
-           hud('Client', S.client ? clientName(S.client) : '—') +
-         '</div>' +
-         '<div class="sm-bar"><i style="width:' + p + '%"></i></div>' +
-         '</div></div>';
-
-    h += clusterHtml();
-    h += '<div class="sm-path">';
-    D.acts.forEach(function (a, ai) {
-      var dn = actDone(a), tot = a.quests.length, open = a.quests.some(function (q) { return !locked(q); });
-      h += '<section class="sm-act' + (dn === tot ? ' done' : '') + '" style="--c:' + a.accent + '">';
-      h += '<div class="sm-act-art" style="background-image:url(' + artUrl(a.art) + ')"></div>';
-      h += '<div class="sm-act-head"><div class="sm-act-n">' + esc(a.n) + (a.race ? ' · RACE' : '') + '</div>' +
-           '<h2>' + esc(a.title) + '</h2><div class="sm-act-sub">' + esc(a.sub) + '</div>' +
-           '<div class="sm-act-prog">' + dn + ' of ' + tot + ' complete' +
-           (open ? '' : ' · locked') + '</div></div>';
-      h += '<div class="sm-nodes">';
-      a.quests.forEach(function (q, qi) {
-        var d = isDone(q.id), lk = locked(q);
-        h += '<button class="sm-node' + (d ? ' done' : '') + (lk ? ' lock' : '') + '" data-q="' + q.id + '">' +
-             '<span class="sm-dot">' + (d ? '✓' : (lk ? '🔒' : (qi + 1))) + '</span>' +
-             '<span class="sm-nbody"><span class="sm-ntitle">' + esc(q.title) + '</span>' +
-             '<span class="sm-nblurb">' + esc(q.blurb) + '</span>' +
-             '<span class="sm-nmeta">' + q.xc + ' XC · ' + q.xp + ' XP · ~' + q.mins + ' min' +
-             (q.cp ? ' · ' + esc(q.cp) : '') + (q.repeat ? ' · repeatable' : '') + '</span></span></button>';
-      });
-      h += '</div></section>';
-    });
-    h += '</div>';
-    return h;
+  function actById(id) { return D.acts.filter(function (a) { return a.id === id; })[0] || null; }
+  function actIndex(a) { return D.acts.indexOf(a); }
+  function actOpen(a) { return a.quests.some(function (q) { return !locked(q) || isDone(q.id); }); }
+  function prologue(a) { return a.id === 'act0' || a.id === 'act1'; }
+  /* The next mission: the first quest in campaign order that is open and not
+     done. Repeatable quests don't hold the player back once done once. */
+  function nextQuest() {
+    for (var i = 0; i < ALL.length; i++) {
+      var q = QUESTS[ALL[i]];
+      if (!isDone(q.id) && !locked(q)) return q;
+    }
+    return null;
   }
-  /* ── The Cluster Sector year map ──────────────────────────────────────
-     One station per Chapter, on the sector backdrop, joined by the route the
-     player flies across the PFLX year. The player's own Studio ship marks
-     where they are. Below it, a progress rail in the style of the ranking bar. */
+  function keysHeld() { return (S.locatorKeys || []).length; }
+  function levelLabel(a) { return prologue(a) ? 'Prologue' : 'Level ' + (actIndex(a) - 1); }
+
+  /* ── HUD: always on top, like a game's status bar ─────────────────────── */
+  function hudHtml() {
+    var st = playerStudio(), bn = ((S.brand || {}).name || '').trim();
+    var crumbs = '<button class="cm-crumb' + (view.name === 'home' ? ' on' : '') + '" data-cm="home">Cluster Map</button>';
+    if (view.name !== 'home') {
+      var ch = chapter();
+      crumbs += '<span class="cm-sep">›</span><button class="cm-crumb' + (view.name === 'chapter' ? ' on' : '') + '" data-cm="chapter">Chapter ' + (ch ? ch.n : 1) + '</button>';
+    }
+    var a = view.name === 'level' ? actById(view.qid) : (view.name === 'quest' && QUESTS[view.qid] ? QUESTS[view.qid].act : null);
+    if (a) crumbs += '<span class="cm-sep">›</span><button class="cm-crumb' + (view.name === 'level' ? ' on' : '') + '" data-cm="level:' + a.id + '">' + esc(levelLabel(a)) + '</button>';
+    return '<header class="cm-hud">' +
+      '<div class="cm-id"><span class="cm-emb">' + esc((bn || pname() || 'B').charAt(0).toUpperCase()) + '</span>' +
+        '<span class="cm-idt"><b>' + esc(bn || 'Your Brand') + '</b><i>' + esc(st ? studioName(st) : 'PFLX') + ' · Year ' + (S.year || 1) + '</i></span></div>' +
+      '<nav class="cm-crumbs" aria-label="Campaign">' + crumbs + '</nav>' +
+      '<div class="cm-stats">' +
+        '<span class="cm-stat" title="X-Coin earned in Campaign Mode"><b>' + (S.xc || 0).toLocaleString() + '</b><i>XC</i></span>' +
+        '<span class="cm-stat xp" title="XP earned in Campaign Mode"><b>' + (S.xp || 0).toLocaleString() + '</b><i>XP</i></span>' +
+        '<span class="cm-stat key" title="Locator Keys"><b>' + keysHeld() + '/4</b><i>Keys</i></span>' +
+        '<button class="cm-ico" data-cm="sound" title="' + (S.sound === false ? 'Story audio off' : 'Story audio on') + '" aria-label="Toggle story audio">' + (S.sound === false ? '🔇' : '🔊') + '</button>' +
+        '<button class="cm-btn clash" data-cm="clash" title="Evo Clash is in X-Live">⚔<span class="cm-cl-t"> Evo Clash</span></button>' +
+      '</div></header>';
+  }
+
+  /* ── HOME: the Cluster Sector ─────────────────────────────────────────── */
+  function homeHtml() {
+    var nq = nextQuest(), p = pct(), ch = chapter();
+    var h = '<section class="cm-home"><div class="cm-homegrid"><div>' + clusterHtml() + '</div><aside class="cm-side">';
+    h += '<div class="cm-mission">';
+    if (nq) {
+      h += '<div class="cm-mk">Current mission · ' + esc(prologue(nq.act) ? 'Prologue' : 'Chapter ' + (ch ? ch.n : 1)) + ' · ' + esc(nq.act.n) + '</div>' +
+        '<div class="cm-mt">' + esc(nq.title) + '</div><div class="cm-mb">' + esc(nq.blurb) + '</div>' +
+        '<div class="cm-mr"><span>+' + nq.xc + ' XC</span><span>+' + nq.xp + ' XP</span><span>~' + nq.mins + ' min</span></div>' +
+        '<button class="cm-go" data-cm="continue">' + (ALL.some(isDone) ? 'Continue' : 'Start the campaign') + ' ▶</button>';
+    } else {
+      h += '<div class="cm-mk">Chapter complete</div><div class="cm-mt">Every mission is done.</div>' +
+        '<div class="cm-mb">The ship is waiting for next season.</div>';
+    }
+    h += '</div>';
+    var ks = ''; for (var i = 1; i <= 4; i++) ks += '<i class="' + ((S.locatorKeys || []).indexOf(i) >= 0 ? 'on' : '') + '">\uD83D\uDD11</i>';
+    h += '<div class="cm-mini"><div class="cm-mk">Locator Keys</div><div class="cm-keys">' + ks + '</div>' +
+      '<p style="margin-top:9px">One per Chapter. Each key unlocks ClientCall\u2019s tracker for the next client.</p></div>';
+    h += '<div class="cm-mini"><div class="cm-mk">Evo Clash</div><p>Battle the Archive with your Evo in X-Live. Open from day one.</p>' +
+      '<button class="cm-btn clash" style="margin-top:10px" data-cm="clash">\u2694 Play Evo Clash</button></div>';
+    h += '</aside></div>';
+    h += '<div class="cm-year"><div class="cm-yk">PFLX Year ' + (S.year || 1) + ' · ' + p + '% of this Chapter’s campaign</div>' +
+      '<div class="cm-ybar"><i style="width:' + p + '%"></i></div></div>';
+    return h + '</section>';
+  }
+
+  /* The Cluster Sector map: one station per Chapter on the sector backdrop,
+     joined by the route the ship flies across the PFLX year. */
   function clusterUrl(f) { return (window.PFLX_STORY_ART || 'public/story-art/') + 'cluster/' + f; }
   function studioKey(sid) { return String(sid || '').replace(/^studio-/, '').toLowerCase(); }
   function clusterHtml() {
     var CH = D.chapters || []; if (!CH.length) return '';
     var cur = S.chapter || 1, doneC = S.completedClients || [];
-    /* One ship carries the crew through every Chapter, collecting each client. */
-    var myKey = 'mindforge';
-    var MOB = [[30, 84], [70, 62], [30, 40], [70, 17]];
+    var MOB = [[30, 74], [70, 55], [30, 35], [70, 16]];
     var pts = CH.map(function (c) { return c.x + ',' + c.y; }).join(' ');
     var mpts = CH.map(function (c, i) { var m = MOB[i] || [c.x, c.y]; return m[0] + ',' + m[1]; }).join(' ');
-    var h = '<section class="sm-cluster"><div class="sm-cl-head"><div class="sm-kick">The Cluster Sector \u00b7 Tessera</div>' +
-      '<h2>PFLX Year ' + (S.year || 1) + '</h2><p>Four stations, one per season. Each one opens a Chapter: two Studio Leads, and the client you choose.</p></div>';
+    var h = '<div class="sm-cluster cm-map"><div class="cm-maphead"><div class="sm-kick">The Convergence · Tessera · 2487</div>' +
+      '<h1 class="cm-title">Campaign</h1><p>Four stations, one per season. Each one is a Chapter: two Studio Leads, one client, one Innovation Expo.</p></div>';
     h += '<div class="sm-cl-map"><div class="sm-cl-bg" style="background-image:url(' + clusterUrl('backdrop.jpg') + ')"></div>' +
       '<svg class="sm-cl-route" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">' +
       '<g class="desk"><polyline points="' + pts + '" class="glow"/><polyline points="' + pts + '" class="dash"/></g>' +
@@ -232,32 +297,149 @@
       var state = c.n < cur ? 'passed' : (c.n === cur ? 'current' : 'locked');
       var pips = c.clients.map(function (k) {
         var cl = client(k), ok = doneC.indexOf(k) >= 0;
-        return '<span class="sm-cl-pip' + (ok ? ' ok' : '') + '">' + (ok ? '\u2605 ' : '\u2606 ') + esc(cl ? cl.name.split(' ')[0] : k) + '</span>';
+        return '<span class="sm-cl-pip' + (ok ? ' ok' : '') + '">' + (ok ? '★ ' : '☆ ') + esc(cl ? cl.name.split(' ')[0] : k) + '</span>';
       }).join('');
       h += '<button class="sm-cl-st ' + state + '" style="--x:' + c.x + '%;--y:' + c.y + '%;--mx:' + mp[0] + '%;--my:' + mp[1] + '%;--cc:' + c.accent + '" data-chapter="' + c.n + '"' +
          ' aria-label="Chapter ' + c.n + ': ' + esc(c.title) + (state === 'locked' ? ', opens in season ' + c.n : '') + '">' +
         '<img src="' + clusterUrl('station_' + c.key + '.webp') + '" alt="" loading="lazy">' +
         '<span class="sm-cl-tag"><b>Chapter ' + c.n + '</b><i>' + esc(c.title) + '</i></span>' +
-        '<span class="sm-cl-pips">' + pips + '</span>' +
-        (state === 'current' ? '<span class="sm-cl-ship" style="background-image:url(' + clusterUrl('ship_' + myKey + '.png') + ')"></span>' : '') +
+        (state === 'current' ? '<span class="cm-enter">Enter \u25B6</span>' : '<span class="sm-cl-pips">' + pips + '</span>') +
+        (state === 'current' ? '<span class="sm-cl-ship" style="background-image:url(' + clusterUrl('ship_mindforge.png') + ')"></span>' : '') +
         (state === 'locked' ? '<span class="sm-cl-lock">Season ' + c.n + '</span>' : '') +
         '</button>';
     });
-    h += '</div>';
-    var chPct = 0;
-    try { var a2 = D.acts.filter(function (a) { return a.id !== 'act0' && a.id !== 'act1'; });
-      var tot = 0, dn = 0; a2.forEach(function (a) { a.quests.forEach(function (q) { tot++; if (isDone(q.id)) dn++; }); });
-      chPct = tot ? dn / tot : 0; } catch (e) {}
-    var fill = Math.min(100, ((cur - 1) + chPct) / CH.length * 100);
-    h += '<div class="sm-cl-rail"><div class="sm-cl-bar"><i style="width:' + fill + '%"></i>' +
-      '<span class="sm-cl-shipr" style="left:' + fill + '%;background-image:url(' + clusterUrl('ship_' + myKey + '.png') + ')"></span></div>' +
-      '<div class="sm-cl-ticks">' + CH.map(function (c) {
-        return '<span class="' + (c.n < cur ? 'passed' : c.n === cur ? 'current' : '') + '"><b>' + c.n + '</b>' + esc(c.title) + '</span>'; }).join('') + '</div></div>';
-    return h + '</section>';
+    return h + '</div></div>';
+  }
+
+  /* ── CHAPTER: the station, with its levels ────────────────────────────── */
+  function chapterHtml() {
+    var ch = chapter(), c = client();
+    var h = '<section class="cm-chapter" style="--cc:' + (ch ? ch.accent : '0,240,255') + '">' +
+      '<div class="cm-chero" style="--bg:url(' + clusterUrl('backdrop.jpg') + ')">' +
+        '<img class="cm-station" src="' + clusterUrl('station_' + (ch ? ch.key : 'mindforge') + '.webp') + '" alt="">' +
+        '<div class="cm-chin"><div class="cm-chk">Chapter ' + (ch ? ch.n : 1) + '</div>' +
+        '<h1>' + esc(ch ? ch.title : '') + '</h1>' +
+        '<p>' + (c ? 'Your client: <b>' + esc(c.name) + '</b>, ' + esc(c.place) + '. ' : 'Two Studio Leads. Choose one of them as your client. ') +
+        'Build their prototype, then they present your work at the Innovation Expo.</p>' +
+        '<div class="cm-chbtns"><button class="cm-btn" data-cm="intro">▶ Chapter intro</button>' +
+        (nextQuest() ? '<button class="cm-go sm" data-cm="continue">Continue ▶</button>' : '') + '</div></div></div>';
+    h += '<ol class="cm-levels">';
+    var prev = true;
+    D.acts.forEach(function (a) {
+      var dn = actDone(a), tot = a.quests.length, open = actOpen(a), done = dn === tot;
+      var cur = open && !done && prev;
+      var stars = '';
+      for (var i = 0; i < tot; i++) stars += '<i class="' + (i < dn ? 'on' : '') + '"></i>';
+      h += '<li class="cm-lv' + (done ? ' done' : '') + (open ? '' : ' lock') + (cur ? ' cur' : '') + '" style="--c:' + a.accent + '">' +
+        '<button data-cm="level:' + a.id + '"' + (open ? '' : ' aria-disabled="true"') + '>' +
+        '<span class="cm-lvart" style="background-image:url(' + artUrl(a.art) + ')"></span>' +
+        '<span class="cm-lvnum">' + (done ? '✓' : (open ? (prologue(a) ? 'P' + actIndex(a) : String(actIndex(a) - 1)) : '🔒')) + '</span>' +
+        '<span class="cm-lvbody"><span class="cm-lvk">' + esc(levelLabel(a)) + ' · ' + esc(a.n) + '</span>' +
+        '<b>' + esc(a.title) + '</b><span class="cm-lvs">' + esc(a.sub) + '</span>' +
+        '<span class="cm-stars" aria-label="' + dn + ' of ' + tot + ' missions">' + stars + '<em>' + dn + '/' + tot + '</em></span></span>' +
+        '</button></li>';
+      if (!done) prev = false;
+    });
+    var got = keysHeld() >= (ch ? ch.n : 1);
+    h += '<li class="cm-lv key' + (got ? ' done' : '') + '"><button data-cm="locator"><span class="cm-lvnum">🔑</span>' +
+      '<span class="cm-lvbody"><span class="cm-lvk">Chapter finale</span><b>The Locator Key</b>' +
+      '<span class="cm-lvs">' + (got ? 'In your inventory. ClientCall’s tracker is online.' : 'Earned after the Innovation Expo. It unlocks ClientCall’s tracker for the next client.') + '</span></span></button></li>';
+    return h + '</ol></section>';
+  }
+
+  /* ── LEVEL: one Act, its missions ─────────────────────────────────────── */
+  function levelHtml(a) {
+    var dn = actDone(a), tot = a.quests.length;
+    var h = '<section class="cm-level" style="--c:' + a.accent + '">' +
+      '<div class="cm-lvhero" style="background-image:url(' + artUrl(a.art) + ')"><div class="cm-lvhin">' +
+      '<div class="cm-chk">' + esc(levelLabel(a)) + ' · ' + esc(a.n) + (a.race ? ' · RACE' : '') + '</div>' +
+      '<h1>' + esc(a.title) + '</h1><p>' + esc(a.sub) + '</p>' +
+      '<div class="cm-ybar"><i style="width:' + Math.round(100 * dn / tot) + '%"></i></div>' +
+      '<div class="cm-lvp">' + dn + ' of ' + tot + ' missions complete</div></div>' +
+      (ACT_GEM[a.id] ? '<div class="cm-guide"><img src="' + gemArt(ACT_GEM[a.id], 'card') + '" alt=""><span><em>X-Gem guide</em><b>' + esc(GEMS[ACT_GEM[a.id]].name) + '</b></span></div>' : '') +
+      '</div>';
+    h += '<div class="cm-missions">';
+    var nq = nextQuest();
+    a.quests.forEach(function (q, qi) {
+      var d = isDone(q.id), lk = locked(q), nx = nq && nq.id === q.id;
+      h += '<button class="cm-ms' + (d ? ' done' : '') + (lk ? ' lock' : '') + (nx ? ' next' : '') + '" data-q="' + q.id + '">' +
+        '<span class="cm-msn">' + (d ? '✓' : (lk ? '🔒' : (qi + 1))) + '</span>' +
+        '<span class="cm-msb"><b>' + esc(q.title) + '</b><span>' + esc(q.blurb) + '</span>' +
+        '<em>' + q.xc + ' XC · ' + q.xp + ' XP · ~' + q.mins + ' min' + (q.cp ? ' · ' + esc(q.cp) : '') + (q.repeat ? ' · repeatable' : '') + '</em></span>' +
+        (nx ? '<span class="cm-tag">Next</span>' : '') + '</button>';
+    });
+    return h + '</div></section>';
   }
 
   function hud(k, v) {
     return '<div class="sm-hud"><b>' + esc(v) + '</b><span>' + esc(k) + '</span></div>';
+  }
+
+  /* ── cutscenes: full screen, skippable, remembered ───────────────────── */
+  function playCutscene(src, title, onEnd) {
+    var old = document.getElementById('cm-cut'); if (old) old.remove();
+    var o = document.createElement('div');
+    o.id = 'cm-cut'; o.className = 'cm-cut';
+    o.innerHTML = '<video playsinline autoplay src="' + esc(src) + '"></video>' +
+      '<div class="cm-cutbar"><span>' + esc(title || '') + '</span><button type="button" class="cm-btn">Skip ⏭</button></div>';
+    document.body.appendChild(o);
+    var v = o.querySelector('video'), done = false;
+    function end() { if (done) return; done = true; try { v.pause(); } catch (e) {} o.remove(); if (onEnd) onEnd(); }
+    v.addEventListener('ended', end);
+    /* no playable video (old browser, missing file): show a title card
+       over the sector instead, and let the player continue */
+    v.addEventListener('error', function () {
+      if (done) return;
+      o.classList.add('nov');
+      var c = document.createElement('div'); c.className = 'cm-cutcard';
+      c.style.backgroundImage = 'url(' + clusterUrl('backdrop.jpg') + ')';
+      c.innerHTML = '<b>' + esc(title || 'Cutscene') + '</b>';
+      o.insertBefore(c, o.firstChild);
+      o.querySelector('.cm-cutbar button').textContent = 'Continue \u25B6';
+    });
+    o.querySelector('button').onclick = end;
+    o.addEventListener('keydown', function (e) { if (e.key === 'Escape') end(); });
+    try { var pr = v.play(); if (pr && pr.catch) pr.catch(function () { v.muted = true; v.play().catch(function () {}); }); } catch (e) {}
+    return o;
+  }
+  window.pflxStoryCutscene = playCutscene;
+  function enterChapter() {
+    var ch = chapter(), key = 'ch' + (ch ? ch.n : 1) + '_intro';
+    S.seen = S.seen || {};
+    if (!S.seen[key]) {
+      S.seen[key] = new Date().toISOString(); save();
+      playCutscene(clusterUrl('chapter' + (ch ? ch.n : 1) + '_intro.mp4'), 'Chapter ' + (ch ? ch.n : 1) + ' · ' + (ch ? ch.title : ''),
+        function () { go('chapter'); });
+    } else go('chapter');
+  }
+  function openEvoClash() {
+    try {
+      if (typeof window.navigateTo === 'function') { window.navigateTo('lite'); toast('Evo Clash is in X-Live: open the Studio Hub and tap EVO CLASH.', '0,240,255'); return; }
+    } catch (e) {}
+    window.open('https://thetomorrowteacher.github.io/x-live/', '_blank', 'noopener');
+  }
+
+  function wireCampaign(el) {
+    el.querySelectorAll('[data-cmcut]').forEach(function (b) {
+      b.addEventListener('click', function () { playCutscene(b.getAttribute('data-cmcut'), 'Departure'); });
+    });
+    el.querySelectorAll('[data-cm]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var k = b.getAttribute('data-cm');
+        if (k === 'home') go('home');
+        else if (k === 'chapter') go('chapter');
+        else if (k.indexOf('level:') === 0) {
+          var a = actById(k.slice(6));
+          if (a && !actOpen(a)) { toast('Finish the level before it to open ' + a.title + '.', '148,163,184'); return; }
+          go('level', k.slice(6));
+        }
+        else if (k === 'continue') { var q = nextQuest(); if (q) go('quest', q.id); }
+        else if (k === 'intro') { var ch = chapter(); playCutscene(clusterUrl('chapter' + (ch ? ch.n : 1) + '_intro.mp4'), 'Chapter ' + (ch ? ch.n : 1)); }
+        else if (k === 'locator') go('quest', 'a6-locator');
+        else if (k === 'sound') { S.sound = S.sound === false; save(); render(); }
+        else if (k === 'clash') openEvoClash();
+      });
+    });
   }
   /* The player's Startup Studio comes from the diagnostic and never changes
      here. The old Act Zero studio pick is gone; S.studio is only read as a
@@ -296,7 +478,7 @@
   function shell(q, body, footer) {
     var lk = locked(q), d = isDone(q.id);
     var h = '<div class="sm-qwrap" style="--c:' + q.act.accent + '">';
-    h += '<div class="sm-qtop"><button class="sm-back" data-back="1">← Campaign map</button>' +
+    h += '<div class="sm-qtop"><button class="sm-back" data-cm="level:' + q.act.id + '">\u2190 ' + esc(levelLabel(q.act)) + ': ' + esc(q.act.title) + '</button>' +
          '<span class="sm-qact">' + esc(q.act.n) + ' · ' + esc(q.act.title) + '</span>' +
          (d ? '<span class="sm-badge done">Complete</span>' : '') + '</div>';
     h += '<div class="sm-qhero" style="background-image:url(' + artUrl(q.act.art) + ')"></div>';
@@ -308,7 +490,7 @@
            .map(function (n) { return '<b>' + esc(QUESTS[n] ? QUESTS[n].title : n) + '</b>'; }).join(' and ') +
            ' to open this.</div>';
     } else {
-      h += '<div class="sm-qbody">' + body + '</div>';
+      h += '<div class="sm-qbody">' + gemStrip(q) + body + '</div>';
       if (footer) h += '<div class="sm-qfoot">' + footer + '</div>';
     }
     return h + '</div>';
@@ -346,7 +528,7 @@
   function qBeat(q) {
     var b = (q.beats || []).map(function (x) {
       if (x.cap) return '<div class="sm-cap">' + esc(x.cap) + '</div>';
-      return '<div class="sm-xmit"><span>' + esc(x.who) + '</span>' + esc(x.t) + '</div>';
+      return '<div class="sm-xmit' + (/clientcall/i.test(x.who) ? ' cc' : '') + '"><span>' + (/clientcall/i.test(x.who) ? '<img class="ir-ccav" src="' + ccArt('icon') + '" alt="">' : '') + esc(x.who) + '</span>' + esc(x.t) + '</div>';
     }).join('');
     return shell(q, '<div class="sm-beats">' + b + '</div>', linkBtn(q) + doneBtn(q, 'Continue · +' + q.xc + ' XC'));
   }
@@ -471,8 +653,6 @@
       '<div class="sm-chap-k">Chapter ' + (ch ? ch.n : '') + '</div>' +
       '<div class="sm-chap-t">' + esc(ch ? ch.title : '') + '</div>' +
       '<div class="sm-chap-s">Two Leads. Two problems. One is yours this season.</div></div>';
-    if (ch) h += '<div class="sm-cut"><div class="sm-cut-k">Cutscene \u00b7 Chapter ' + ch.n + '</div>' +
-      '<video controls playsinline preload="metadata" src="' + clusterUrl('chapter' + ch.n + '_intro.mp4') + '" poster="' + clusterUrl('backdrop.jpg') + '"></video></div>';
     h += '<div class="sm-clients two">';
     list.forEach(function (c) {
       var iss = issueOf(c.key), was = doneC.indexOf(c.key) >= 0;
@@ -506,11 +686,13 @@
         '<button class="ir-b ir-play" data-ir="play" title="Play or pause" aria-label="Play or pause">\u275A\u275A</button>' +
         '<button class="ir-b" data-ir="next" title="Next panel" aria-label="Next panel">\u203A</button>' +
         '<label class="ir-auto"><input type="checkbox" data-ir="auto"' + (st.manual ? '' : ' checked') + '> Auto</label>' +
+        '<button class="ir-b" data-ir="full" title="Full screen" aria-label="Full screen">\u26F6</button>' +
       '</div></div>' +
       '<div class="ir-stage" aria-live="polite"><div class="ir-art"></div><div class="ir-shade"></div>' +
+        '<div class="ir-ccport" aria-hidden="true"><img src="' + ccArt('card') + '" alt=""><span><b>ClientCall</b><i>PFLX X-Gem \u00b7 finds people</i></span></div>' +
         '<div class="ir-slug"></div><div class="ir-beats"></div><div class="ir-act"></div></div>' +
       '<div class="ir-foot"><div class="ir-dots"></div><span class="ir-n"></span></div>' +
-      (iss.audio ? '<audio class="ir-audio" preload="none" src="' + esc(iss.audio) + '"></audio>' : '') +
+      '<button class="ir-tap" type="button" data-ir="tap" hidden>\u25B6 Tap to play the Issue with sound</button>' +
       '</div>';
     var foot = st.done ? doneBtn(q, (isDone(q.id) ? 'Back to the campaign' : 'Finish the Issue \u00b7 +' + q.xc + ' XC'), 'issue')
                        : '<span class="sm-hint">Read to the end of the Issue to continue.</span>';
@@ -529,7 +711,23 @@
         slug = box.querySelector('.ir-slug'), beats = box.querySelector('.ir-beats'),
         act = box.querySelector('.ir-act'), dots = box.querySelector('.ir-dots'),
         num = box.querySelector('.ir-n'), playB = box.querySelector('[data-ir="play"]'),
-        audio = box.querySelector('.ir-audio');
+        tapB = box.querySelector('.ir-tap');
+    /* Graphic audio (PATCH PLATFORM v256): one clip per scene, with per-beat
+       timings in marks.json. While a clip plays, each caption appears when
+       its line is spoken and the line being spoken is lit. The clip ending
+       advances the panel; a Firewall scene hands off to its mini-game. With
+       story audio off, or no audio for this Issue, the timed reader runs. */
+    var M = null, au = null;
+    function audioOn() { return !!(au && M && S.sound !== false); }
+    function mk(i) { return M && M.panels[i]; }
+    if (S.sound !== false) loadMarks(iss.key, function (m) { setTimeout(function () {
+      if (!m || !m.panels || m.panels.length !== P.length || !document.body.contains(box)) return;
+      M = m; au = new Audio(); au.preload = 'auto';
+      au.addEventListener('timeupdate', onTime);
+      au.addEventListener('ended', onEnded);
+      box.classList.add('has-audio');
+      if (playing && !over) showPanel(pi);
+    }, 0); });
     var reduce = false;
     try { reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
 
@@ -544,17 +742,66 @@
       if (b.cap) return '<div class="ir-cap">' + esc(b.cap) + '</div>';
       if (b.say) return '<div class="ir-say"><span>' + esc(b.say) + '</span>' + esc(b.t) + '</div>';
       if (b.think) return '<div class="ir-think"><span>' + esc(b.think) + '</span>' + esc(b.t) + '</div>';
-      if (b.cc) return '<div class="ir-cc"><span>CLIENTCALL</span>' + esc(b.cc) + '</div>';
+      if (b.cc) return '<div class="ir-cc"><span><img class="ir-ccav" src="' + ccArt('icon') + '" alt="">CLIENTCALL</span>' + esc(b.cc) + '</div>';
       if (b.arch) return '<div class="ir-arch" data-g="' + esc(b.arch) + '"><span>THE ARCHIVE</span>' + esc(b.arch) + '</div>';
       return '';
     }
-    function stop() { if (timer) { clearTimeout(timer); timer = null; } }
+    /* ClientCall steps into the story: the first line in an Issue brings the
+       full portrait in with a signal flare; later lines keep it on stage. */
+    function ccEnter() {
+      if (stage.classList.contains('cc-on')) return;
+      stage.classList.add('cc-on');
+      if (!st.ccMet) {
+        st.ccMet = true; persist();
+        stage.classList.add('cc-enter');
+        try { if (window.pflxPlaySfx) window.pflxPlaySfx('notify'); } catch (e) {}
+        setTimeout(function () { stage.classList.remove('cc-enter'); }, 2600);
+      }
+    }
+    function stop() { if (timer) { clearTimeout(timer); timer = null; } if (au) { try { au.pause(); } catch (e) {} } }
+    function startAudio() {
+      var m = mk(pi); if (!m) { schedule(300); return; }
+      tapB.hidden = true;
+      au.src = audioBase(iss.key) + m.file; au.currentTime = 0;
+      var pr; try { pr = au.play(); } catch (e) { pr = null; }
+      if (pr && pr.catch) pr.catch(function () {
+        /* the browser wants a tap before sound: offer one, and wait */
+        stop(); playing = false; playB.textContent = '\u25B6'; playB.classList.remove('on');
+        tapB.hidden = false;
+      });
+    }
+    function onTime() {
+      var m = mk(pi); if (!m) return;
+      var t = au.currentTime;
+      while (bi < P[pi].beats.length && m.beats[bi] && t >= m.beats[bi].start - 0.08) addBeat();
+      var els = beats.children;
+      for (var k = 0; k < els.length; k++) {
+        var b = m.beats[k]; els[k].classList.toggle('now', !!b && t >= b.start - 0.08 && t <= b.end + 0.35);
+      }
+    }
+    function onEnded() {
+      var els = beats.children; for (var k = 0; k < els.length; k++) els[k].classList.remove('now');
+      while (bi < P[pi].beats.length) addBeat();
+      if (!playing) return;
+      var p = P[pi];
+      if (p.activity && !cleared()) { openActivity(p.activity); return; }
+      if (pi >= P.length - 1) { finish(); return; }
+      if (auto) timer = setTimeout(function () { showPanel(pi + 1); }, 700);
+    }
     function persist() { st.panel = pi; st.manual = !auto; save(); }
     function setPlay(on) {
       playing = on; playB.textContent = on ? '\u275A\u275A' : '\u25B6';
       playB.classList.toggle('on', on);
-      if (audio) { try { on ? audio.play() : audio.pause(); } catch (e) {} }
-      stop(); if (on) schedule();
+      stop();
+      if (!on) return;
+      if (audioOn()) {
+        var mid = au.src && !au.ended && au.currentTime > 0 && bi < P[pi].beats.length;
+        if (mid) { try { au.play(); } catch (e) {} }
+        else if (bi < P[pi].beats.length) startAudio();
+        else afterBeats();
+        return;
+      }
+      schedule();
     }
     function cleared() { return !!(st.cleared || {})[pi]; }
     function showPanel(i, instant) {
@@ -565,13 +812,14 @@
       var fl = /^(FLASHBACK|CALLBACK)/.test(p.slug);
       stage.classList.toggle('flash', fl);
       stage.classList.toggle('sig', /^(SIGNAL|INTERFERENCE|FIREWALL)/.test(p.slug));
-      slug.textContent = p.slug; beats.innerHTML = ''; act.innerHTML = ''; act.classList.remove('on');
+      slug.textContent = p.slug; beats.innerHTML = ''; stage.classList.remove('cc-on', 'cc-enter'); act.innerHTML = ''; act.classList.remove('on');
       dots.querySelectorAll('.ir-dot').forEach(function (d, k) {
         d.classList.toggle('on', k === pi); d.classList.toggle('seen', k < pi);
       });
       num.textContent = 'Panel ' + (pi + 1) + ' of ' + P.length;
       persist();
       if (instant) { while (bi < p.beats.length) addBeat(); afterBeats(); }
+      else if (playing && audioOn()) startAudio();
       else if (playing) schedule(300); else { addBeat(); }
     }
     function addBeat() {
@@ -579,12 +827,14 @@
       var d = document.createElement('div'); d.innerHTML = beatHtml(p.beats[bi]);
       var el = d.firstChild; if (!el) { bi++; return true; }
       beats.appendChild(el); requestAnimationFrame(function () { el.classList.add('in'); });
+      if (p.beats[bi].cc) ccEnter();
       if (p.beats[bi].arch) { stage.classList.add('glitch'); setTimeout(function () { stage.classList.remove('glitch'); }, 700); }
       beats.scrollTop = beats.scrollHeight;
       bi++; return true;
     }
     function afterBeats() {
       var p = P[pi];
+      if (audioOn() && playing && au.src && !au.paused && !au.ended) return;
       if (p.activity && !cleared()) { openActivity(p.activity); return; }
       if (pi >= P.length - 1) { finish(); return; }
       if (playing && auto) timer = setTimeout(function () { showPanel(pi + 1); }, 2200);
@@ -650,8 +900,9 @@
     box.addEventListener('click', function (e) {
       var t = e.target.closest('[data-ir],[data-irp]'); if (!t) return;
       var k = t.getAttribute('data-ir');
-      if (t.hasAttribute('data-irp')) { showPanel(parseInt(t.getAttribute('data-irp'), 10), true); if (playing) setPlay(true); return; }
-      if (k === 'prev') { showPanel(pi - 1, true); }
+      if (t.hasAttribute('data-irp')) { showPanel(parseInt(t.getAttribute('data-irp'), 10), !(playing && audioOn())); if (playing && !audioOn()) setPlay(true); return; }
+      if (k === 'tap') { tapB.hidden = true; playing = true; playB.textContent = '\u275A\u275A'; playB.classList.add('on'); showPanel(pi); return; }
+      if (k === 'prev') { showPanel(pi - 1, !(playing && audioOn())); }
       else if (k === 'next') {
         var p = P[pi];
         if (bi < p.beats.length) { stop(); while (bi < p.beats.length) addBeat(); afterBeats(); }
@@ -660,6 +911,7 @@
         else finish();
       }
       else if (k === 'play') setPlay(!playing);
+      else if (k === 'full') { box.classList.toggle('ir-full'); }
     });
     var ac = box.querySelector('[data-ir="auto"]');
     if (ac) ac.onchange = function () { auto = ac.checked; persist(); if (auto && playing) { stop(); schedule(); } };
@@ -668,8 +920,9 @@
       if (e.target.closest('input,button.ir-hold')) return;
       if (e.key === 'ArrowRight') { box.querySelector('[data-ir="next"]').click(); e.preventDefault(); }
       if (e.key === 'ArrowLeft') { showPanel(pi - 1, true); e.preventDefault(); }
+      if (e.key === 'Escape' && box.classList.contains('ir-full')) { box.classList.remove('ir-full'); e.preventDefault(); }
     });
-    var watch = setInterval(function () { if (!document.body.contains(box)) { clearInterval(watch); stop(); if (audio) try { audio.pause(); } catch (e) {} } }, 800);
+    var watch = setInterval(function () { if (!document.body.contains(box)) { clearInterval(watch); stop(); if (au) { try { au.pause(); au.src = ''; } catch (e) {} } } }, 800);
     try { var r = box.getBoundingClientRect(); if (r.top > 120 && box.scrollIntoView) box.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' }); } catch (e) {}
     playing = !st.done;
     setPlay(playing);
@@ -969,16 +1222,15 @@
       '<div class="sm-chap-s">' + esc(c ? c.name + ' presented your work at the Innovation Expo.' : 'The Innovation Expo is over.') + '</div></div>';
     h += '<div class="sm-beats">' + beats.map(function (x) {
       if (x.cap) return '<div class="sm-cap">' + esc(fill(x.cap)) + '</div>';
-      if (x.cc) return '<div class="sm-xmit cc"><span>CLIENTCALL</span>' + esc(fill(x.cc)) + '</div>';
+      if (x.cc) return '<div class="sm-xmit cc"><span><img class="ir-ccav" src="' + ccArt('icon') + '" alt="">CLIENTCALL</span>' + esc(fill(x.cc)) + '</div>';
       return '<div class="sm-xmit"><span>' + esc(fill(x.say || x.who || '')) + '</span>' + esc(fill(x.t)) + '</div>';
     }).join('') + '</div>';
     var got = isDone(q.id);
     h += '<div class="sm-key' + (got ? ' on' : '') + '" style="--cc:' + (ch ? ch.accent : q.act.accent) + '">' +
       '<span class="sm-key-i" aria-hidden="true"></span><span class="sm-key-b"><b>Locator Key ' + (ch ? ch.n : '') + '</b>' +
       '<i>' + esc(got ? 'In your inventory. ClientCall\u2019s tracker is online.' : 'Unlocks ClientCall\u2019s tracker for the next client.') + '</i></span></div>';
-    if (ch && nx) h += '<div class="sm-cut"><div class="sm-cut-k">Cutscene \u00b7 Departure</div>' +
-      '<video controls playsinline preload="metadata" src="' + clusterUrl('chapter' + nx.n + '_intro.mp4') + '" poster="' + clusterUrl('backdrop.jpg') + '"></video>' +
-      '<div class="sm-cap">Next stop: Chapter ' + nx.n + ', ' + esc(nx.title) + '. It opens next season.</div></div>';
+    if (ch && nx) h += '<div class="sm-cap">' + (got ? 'Next stop: Chapter ' + nx.n + ', ' + esc(nx.title) + '. It opens next season.' : 'Take the key and the ship leaves for Chapter ' + nx.n + ', ' + esc(nx.title) + '.') + '</div>' +
+      (got ? '<button class="cm-btn" data-cmcut="' + clusterUrl('chapter' + nx.n + '_intro.mp4') + '">\u25B6 Watch the departure</button>' : '');
     return shell(q, h, doneBtn(q, got ? 'Back to the campaign' : 'Take the Locator Key \u00b7 +' + q.xc + ' XC'));
   }
 
@@ -998,12 +1250,12 @@
     el.querySelectorAll('[data-q]').forEach(function (b) {
       b.onclick = function () { go('quest', b.getAttribute('data-q')); };
     });
-    var bk = el.querySelector('[data-back]'); if (bk) bk.onclick = function () { go('map'); };
+    var bk = el.querySelector('[data-back]'); if (bk) bk.onclick = function () { go('home'); };
 
     el.querySelectorAll('[data-chapter]').forEach(function (b) {
       b.onclick = function () {
         var n = parseInt(b.getAttribute('data-chapter'), 10), cur = S.chapter || 1;
-        if (n === cur) go('quest', 'a2-pick');
+        if (n === cur) enterChapter();
         else if (n > cur) toast('Chapter ' + n + ' opens in season ' + n + '.', '148,163,184');
         else toast('Chapter ' + n + ' is behind you. Its other client returns next year.', '148,163,184');
       };
@@ -1116,7 +1368,14 @@
         if (!guard(g, q)) return;
         var was = isDone(q.id);
         complete(q);
-        if (!was) go('map'); else { toast('Saved.', q.act.accent); render(); }
+        if (was) { toast('Saved.', q.act.accent); render(); return; }
+        if (q.kind === 'locator') {
+          var ch = chapter(), nx = ch ? (D.chapters || []).filter(function (c) { return c.n === ch.n + 1; })[0] : null;
+          if (nx) { playCutscene(clusterUrl('chapter' + nx.n + '_intro.mp4'), 'Departure \u00b7 Chapter ' + nx.n + ' opens next season', function () { go('home'); }); return; }
+          go('home'); return;
+        }
+        if (actDone(q.act) === q.act.quests.length) { toast(q.act.title + ' complete. Next level open.', q.act.accent); go('chapter'); }
+        else go('level', q.act.id);
       };
     });
   }
