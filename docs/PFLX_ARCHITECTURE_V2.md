@@ -19,7 +19,7 @@ PFLX is a **platform + ecosystem**, not a four-app suite.
 - **Mission Control** — tasks, projects, cohorts, internships, partner programs
 - **X-Coin (UI)** — wallet, transactions, badges display, store. Console renders the X-Coin views; the X-Coin BACKEND stays separate (see below)
 - **Portfolio** — public player pages
-- **Master Settings** — host controls, profile management, Evolution Rankings, X-Bot
+- **Master Settings** — host controls, profile management, Pro Rankings, X-Bot
 
 The Console is the only place a player ever logs in. It is the only place Master Hosts manage rosters, ranks, badges, and access. It hosts the iframe slots for the Experience Apps.
 

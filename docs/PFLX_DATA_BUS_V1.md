@@ -294,7 +294,7 @@ End state: one match win, one round-trip, every surface live within ~5ms.
    - `PflxDataBus.award(submitterId, { xc: task.xcReward, source: 'mc', reason: 'task:' + task.id })`
    - For each `task.rewardBadges[i]`: `PflxDataBus.award(submitterId, { badge: i, source: 'mc', reason: 'task:' + task.id })`
 3. Each award fires `pflx_player_changed` + `pflx_award_granted`.
-4. Sub-apps update: X-Coin home shows the new XC balance, Pathways card recalculates Evo Rank, DarkCampus feed gets "task approved" entry, Console toolbar/hero/portfolio refresh.
+4. Sub-apps update: X-Coin home shows the new XC balance, Pathways card recalculates Pro Rank, DarkCampus feed gets "task approved" entry, Console toolbar/hero/portfolio refresh.
 5. `mcSaveData('tasks')` runs → `pflx_mc_changed` for key `tasks` → X-Coin home re-renders the "your tasks" list with the task now marked approved.
 
 ## Legacy types (still supported)

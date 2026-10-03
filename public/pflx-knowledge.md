@@ -17,7 +17,7 @@ economy + badges + modifiers).
 2. Open X-Bot (the floating icon) for help any time — it knows the platform.
 3. Check Mission Control / your task list for what's assigned to you.
 4. Submit tasks for host approval; approved tasks award XC and badges.
-5. Track your rank in Evolution Rankings; climb by earning total XC.
+5. Track your rank in Pro Rankings; climb by earning total XC.
 
 ## Ranks (unlock by total XC)
 1 Player 1,000 · 2 Advanced Player 5,000 · 3 Apprentice 15,000 · 4 Manager/Head
