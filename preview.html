@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 264;
+      window.PFLX_PATCH   = 265;
       window.PFLX_BUILD   = '2026.10';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -8444,11 +8444,24 @@
                         <div class="login-step" id="step-claim-email">
                             <div class="login-panel">
                                 <div class="login-panel-label">Claim Player Account</div>
-                                <div class="step-description">Enter your email address. If your account has been imported by your host, we'll find it and generate your access PIN.</div>
+                                <div class="step-description">Enter your email address. If your host added you to the roster, we'll email you a 6-digit code to confirm it's you.</div>
                                 <input type="email" class="login-input" id="claim-email" placeholder="Email Address">
                                 <button class="login-btn" id="claim-email-btn">Search Account</button>
                                 <div class="login-divider">Already have a Brand?</div>
                                 <button class="login-btn-outline" id="back-to-login-btn">Back to Login</button>
+                            </div>
+                        </div>
+
+                        <!-- STEP 2B (v265): email code verification -->
+                        <div class="login-step" id="step-claim-code">
+                            <div class="login-panel">
+                                <div class="login-panel-label">Check Your Email</div>
+                                <div class="step-description" id="claim-code-desc">Sending your code...</div>
+                                <input type="text" class="login-input" id="claim-code-input" placeholder="6-digit code" maxlength="6" inputmode="numeric" autocomplete="one-time-code" style="text-align:center;letter-spacing:8px;font-size:20px;">
+                                <div id="claim-code-msg" style="min-height:18px;font-size:12px;margin:6px 0;color:var(--gold);"></div>
+                                <button class="login-btn" id="claim-code-verify-btn">Verify Code</button>
+                                <button class="login-btn-outline" id="claim-code-resend-btn" disabled>Resend code</button>
+                                <button class="login-btn-outline" id="claim-code-back-btn">Back</button>
                             </div>
                         </div>
 
@@ -8457,8 +8470,8 @@
                             <div class="login-panel">
                                 <div class="step-success-icon">&#x2705;</div>
                                 <div class="login-panel-label">Account Found</div>
-                                <div class="step-description">Your account was imported by your host. Here's your temporary access PIN:</div>
-                                <div class="temp-pin-display" id="imported-temp-pin">----</div>
+                                <div class="step-description" id="imported-desc">Your email is verified. Your account was imported by your host.</div>
+                                <div id="imported-legacy-pin" style="display:none;"><div class="step-description">Email sending isn't set up yet, so here is your temporary access PIN:</div><div class="temp-pin-display" id="imported-temp-pin">----</div></div>
                                 <div style="background:rgba(0,240,255,0.05);border:1px solid rgba(0,240,255,0.15);border-radius:10px;padding:16px;margin:12px 0;text-align:left;">
                                     <div style="font-family:'Jura',sans-serif;font-size:10px;color:#8a92b0;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Player</div>
                                     <div id="imported-name" style="font-family:'Rajdhani',sans-serif;font-size:16px;color:#e0e6ff;margin-bottom:10px;"></div>
@@ -22023,16 +22036,152 @@
                 showStep('step-temp-pin');
             });
 
+            // ===== PATCH PLATFORM v265 -- verified claim (email code via Supabase Edge Function) =====
+            // The code is generated, hashed, emailed and checked ON THE SERVER; the browser
+            // never sees it. Free stack: Supabase Edge Function + Gmail SMTP.
+            function pflxMaskEmail(e) {
+                var s = String(e || '').trim().toLowerCase(), at = s.indexOf('@');
+                if (at < 1) return '';
+                var local = s.slice(0, at), keep = Math.min(2, Math.max(1, local.length - 1));
+                return local.slice(0, keep) + '*****' + s.slice(at);
+            }
+            async function pflxClaimApi(action, payload, fetchImpl) {
+                var f = fetchImpl || fetch;
+                var anon = window.PFLX_SUPABASE_ANON || '';
+                try {
+                    var r = await f((window.PFLX_SUPABASE_URL || '') + '/functions/v1/pflx-claim-code', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'apikey': anon, 'Authorization': 'Bearer ' + anon },
+                        body: JSON.stringify(Object.assign({ action: action }, payload || {}))
+                    });
+                    var j = null;
+                    try { j = await r.json(); } catch (e) { j = null; }
+                    if (!j || typeof j !== 'object') j = { ok: false, error: 'server_error' };
+                    if (!j.ok && !j.error) j.error = 'server_error';
+                    j.status = r.status;
+                    return j;
+                } catch (e) {
+                    return { ok: false, error: 'network' };
+                }
+            }
+            var _pflxClaimTimer = null;
+            function pflxClaimMsg(txt) { var m = document.getElementById('claim-code-msg'); if (m) m.textContent = txt || ''; }
+            function pflxClaimCountdown(sec) {
+                var b = document.getElementById('claim-code-resend-btn');
+                if (_pflxClaimTimer) clearInterval(_pflxClaimTimer);
+                var left = Math.max(0, Math.ceil(sec || 0));
+                function tick() {
+                    if (!b) return;
+                    if (left <= 0) { b.disabled = false; b.textContent = 'Resend code'; if (_pflxClaimTimer) { clearInterval(_pflxClaimTimer); _pflxClaimTimer = null; } return; }
+                    b.disabled = true; b.textContent = 'Resend code (' + left + 's)'; left--;
+                }
+                tick();
+                if (left > 0) _pflxClaimTimer = setInterval(tick, 1000);
+            }
+            function pflxClaimErrorText(r) {
+                switch (r && r.error) {
+                    case 'too_many': return 'Too many codes requested. Wait about 15 minutes, or ask your host to reset your PIN.';
+                    case 'send_failed': return "We couldn't send the email right now. Try again in a minute, or ask your host to reset your PIN.";
+                    case 'no_match': return "We couldn't match that email to the roster. Ask your host to check the email on your account.";
+                    case 'network': return "Couldn't reach the server. Check your connection and try again.";
+                    default: return 'Something went wrong. Try again, or ask your host to reset your PIN.';
+                }
+            }
+            async function pflxSendClaimCode() {
+                var ctx = newPlayerData._claimCtx;
+                if (!ctx) return;
+                var desc = document.getElementById('claim-code-desc');
+                var rb = document.getElementById('claim-code-resend-btn');
+                rb.disabled = true;
+                pflxClaimMsg('Sending your code...');
+                var r = await pflxClaimApi('request', { email: ctx.email, playerId: ctx.player && ctx.player.id });
+                if (r.ok || r.error === 'cooldown') {
+                    desc.textContent = 'We sent a 6-digit code to ' + (r.masked || pflxMaskEmail(ctx.email)) + '. It expires in 10 minutes.';
+                    pflxClaimMsg(r.ok ? '' : 'A code was just sent - check your inbox (and spam folder).');
+                    pflxClaimCountdown(r.ok ? (r.resendInSec || 45) : (r.retryAfterSec || 45));
+                    var inp = document.getElementById('claim-code-input'); if (inp) inp.focus();
+                    return;
+                }
+                if (r.error === 'email_not_configured') {
+                    // Host has not set the Gmail secrets yet -> keep the old behaviour so claiming never dead-ends.
+                    console.warn('[claim] email sending not configured; legacy temp-PIN fallback');
+                    var done = ctx.onVerified; newPlayerData._claimCtx = null;
+                    done(true);
+                    return;
+                }
+                desc.textContent = 'We could not send a code to ' + pflxMaskEmail(ctx.email) + '.';
+                pflxClaimMsg(pflxClaimErrorText(r));
+                pflxClaimCountdown(5);
+            }
+            function pflxBeginClaimVerify(player, typedEmail, onVerified) {
+                var email = (player && player.email) ? String(player.email).trim() : '';
+                if (!email) {
+                    alert("Your host hasn't added an email to your account yet, so we can't send you a code. Ask your host to add your email (or reset your PIN), then try again.");
+                    showStep('step-login');
+                    return;
+                }
+                newPlayerData._claimCtx = { player: player, email: email, onVerified: onVerified };
+                document.getElementById('claim-code-input').value = '';
+                document.getElementById('claim-code-desc').textContent = 'Sending your code...';
+                pflxClaimMsg('');
+                showStep('step-claim-code');
+                pflxSendClaimCode();
+            }
+            document.getElementById('claim-code-resend-btn').addEventListener('click', function () { pflxSendClaimCode(); });
+            document.getElementById('claim-code-back-btn').addEventListener('click', function () {
+                if (_pflxClaimTimer) { clearInterval(_pflxClaimTimer); _pflxClaimTimer = null; }
+                newPlayerData._claimCtx = null;
+                showStep('step-claim-email');
+            });
+            document.getElementById('claim-code-input').addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') document.getElementById('claim-code-verify-btn').click();
+            });
+            document.getElementById('claim-code-verify-btn').addEventListener('click', async function () {
+                var ctx = newPlayerData._claimCtx;
+                if (!ctx) { showStep('step-claim-email'); return; }
+                var inp = document.getElementById('claim-code-input');
+                var code = inp.value.replace(/\D/g, '');
+                if (code.length !== 6) { shakeEl(inp); return; }
+                var vb = document.getElementById('claim-code-verify-btn');
+                vb.disabled = true;
+                var r = await pflxClaimApi('verify', { email: ctx.email, code: code });
+                vb.disabled = false;
+                if (r.ok) {
+                    if (_pflxClaimTimer) { clearInterval(_pflxClaimTimer); _pflxClaimTimer = null; }
+                    newPlayerData._claimCtx = null;
+                    inp.value = '';
+                    ctx.onVerified(false);
+                    return;
+                }
+                inp.value = ''; shakeEl(inp);
+                if (r.error === 'wrong_code') pflxClaimMsg("That code isn't right. " + r.attemptsLeft + ' ' + (r.attemptsLeft === 1 ? 'try' : 'tries') + ' left.');
+                else if (r.error === 'expired') pflxClaimMsg('That code expired. Tap Resend for a new one.');
+                else if (r.error === 'locked') pflxClaimMsg('Too many wrong tries. Wait a moment, then tap Resend for a new code.');
+                else pflxClaimMsg(pflxClaimErrorText(r));
+            });
+
             // Shared claim-flow entry (July 15): every path that discovers a
             // pre-entered account funnels here — one way in, zero duplicates.
+            // PATCH PLATFORM v265 -- every claim now needs an emailed code first.
             function pflxEnterClaimFlow(found) {
+                pflxBeginClaimVerify(found, newPlayerData.email, function (legacy) {
+                    newPlayerData._legacyClaim = !!legacy;
+                    pflxShowClaimFound(found);
+                });
+            }
+            function pflxShowClaimFound(found) {
                 newPlayerData.isImported = true;
                 newPlayerData.importedPlayer = found;
                 newPlayerData.fullName = found.name;
                 newPlayerData.cohort = found.cohort;
                 if (!newPlayerData.email) newPlayerData.email = found.email || '';
                 newPlayerData.tempPin = generateTempPin();
-                document.getElementById('imported-temp-pin').textContent = newPlayerData.tempPin;
+                // Temp PIN is only ever shown in the legacy fallback (email not configured yet).
+                document.getElementById('imported-temp-pin').textContent = newPlayerData._legacyClaim ? newPlayerData.tempPin : '----';
+                document.getElementById('imported-legacy-pin').style.display = newPlayerData._legacyClaim ? '' : 'none';
+                document.getElementById('imported-desc').textContent = newPlayerData._legacyClaim
+                    ? 'Your account was imported by your host.'
+                    : 'Your email is verified. Your account was imported by your host.';
                 document.getElementById('imported-name').textContent = found.name;
                 document.getElementById('imported-cohort').textContent = found.cohort || 'PlayerPool';
                 // Populate imported brand select — show player's own brand first, then create-new option
@@ -22070,17 +22219,24 @@
                         'If that\'s you and you can\'t log in, press OK to RESET YOUR PIN now.\n' +
                         'Press Cancel to go back to the login screen instead.');
                     if (!__wantsReset) { showStep('step-login'); return; }
-                    newPlayerData.resetPlayer = found;
-                    newPlayerData.isImported = false;
-                    newPlayerData.importedPlayer = null;
-                    newPlayerData.fullName = found.name || '';
-                    newPlayerData.tempPin = generateTempPin();
-                    document.getElementById('temp-pin-value').textContent = newPlayerData.tempPin;
-                    document.getElementById('verify-email').value = '';
-                    document.getElementById('verify-pin').value = '';
-                    var __ro = document.getElementById('signup-email-readonly');
-                    if (__ro) __ro.value = email;
-                    showStep('step-temp-pin');
+                    // PATCH PLATFORM v265 -- a reset now needs the emailed code; the temp PIN is no longer shown.
+                    pflxBeginClaimVerify(found, email, function (legacy) {
+                        newPlayerData.resetPlayer = found;
+                        newPlayerData.isImported = false;
+                        newPlayerData.importedPlayer = null;
+                        newPlayerData.fullName = found.name || '';
+                        if (legacy) {
+                            newPlayerData.tempPin = generateTempPin();
+                            document.getElementById('temp-pin-value').textContent = newPlayerData.tempPin;
+                            document.getElementById('verify-email').value = '';
+                            document.getElementById('verify-pin').value = '';
+                            var __ro = document.getElementById('signup-email-readonly');
+                            if (__ro) __ro.value = email;
+                            showStep('step-temp-pin');
+                        } else {
+                            showStep('step-change-pin');
+                        }
+                    });
                 } else {
                     // No email match — collect their name next; the name step
                     // gets another chance to find their pre-entered account.
