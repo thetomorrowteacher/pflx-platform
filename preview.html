@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 266;
+      window.PFLX_PATCH   = 267;
       window.PFLX_BUILD   = '2026.10';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -22174,7 +22174,11 @@
                 newPlayerData.importedPlayer = found;
                 newPlayerData.fullName = found.name;
                 newPlayerData.cohort = found.cohort;
-                if (!newPlayerData.email) newPlayerData.email = found.email || '';
+                // PATCH PLATFORM v267 -- the code went to the HOST-ENTERED email, so that is the
+                // verified one. A different address typed during sign-up (a personal Gmail)
+                // must never replace it: the roster email is what future codes are matched on.
+                if (found.email) newPlayerData.email = found.email;
+                else if (!newPlayerData.email) newPlayerData.email = '';
                 newPlayerData.tempPin = generateTempPin();
                 // Temp PIN is only ever shown in the legacy fallback (email not configured yet).
                 document.getElementById('imported-temp-pin').textContent = newPlayerData._legacyClaim ? newPlayerData.tempPin : '----';
@@ -23325,6 +23329,24 @@
                     pathway: (Array.isArray(newPlayerData.diagnosticTopPathways) && newPlayerData.diagnosticTopPathways[0]) || '',
                     updatedAt: Date.now()
                 };
+                // PATCH PLATFORM v267 -- claiming a host-entered account must KEEP what the host
+                // gave it. newPlayer is built with fresh-signup defaults (xc 0, role player,
+                // level 1 ...); Object.assign'ing those over the roster record wiped the
+                // player's earned XC / level / badge count, demoted instructors, and replaced
+                // a host-assigned studio. Carry the existing values forward (the cohort rule
+                // above already keeps the host cohort).
+                if (newPlayerData.isImported && newPlayerData.importedPlayer) {
+                    try {
+                        var __ex = newPlayerData.importedPlayer;
+                        ['xc', 'totalXcoin', 'digitalBadges', 'level', 'evoRank', 'rankOverride', 'godTier', 'role', 'roleDisplay'].forEach(function (k) {
+                            if (__ex[k] !== undefined && __ex[k] !== null) newPlayer[k] = __ex[k];
+                        });
+                        if (__ex.studioId) { newPlayer.studioId = __ex.studioId; if (__ex.studioName) newPlayer.studioName = __ex.studioName; }
+                        if (!newPlayer.pathway && __ex.pathway) newPlayer.pathway = __ex.pathway;
+                        if (!newPlayer.slogan && __ex.slogan) newPlayer.slogan = __ex.slogan;
+                        if ((!newPlayer.interests || !newPlayer.interests.length) && Array.isArray(__ex.interests)) newPlayer.interests = __ex.interests;
+                    } catch (e) { console.warn('[claim] preserve host fields failed', e); }
+                }
                 // If imported, update existing record
                 if (newPlayerData.isImported && newPlayerData.importedPlayer) {
                     Object.assign(newPlayerData.importedPlayer, newPlayer);
@@ -23335,6 +23357,30 @@
                 // Persist to localStorage so PLAYERS / BRANDS rehydrate on the next load
                 try { if (typeof pflxIdentityPersistNewPlayer === 'function') pflxIdentityPersistNewPlayer(newPlayer); } catch(e) {}
                 try { if (typeof pflxIdentityPersist === 'function') pflxIdentityPersist(newPlayer); } catch(e) {}
+                // PATCH PLATFORM v267 -- write the claim into the host roster (mcPlayers ->
+                // pflx_mc_players + the X-Coin 'users' copy) BY ID. Relying on the claimed
+                // record being the same object as the roster entry broke whenever a cloud pull
+                // swapped the mcPlayers objects during the (minutes-long) onboarding: the player
+                // row said claimed + new PIN while the host roster still said unclaimed + old PIN.
+                // Earnings (xc / totalXcoin) are deliberately NOT copied -- the earnings-safe
+                // merge owns those.
+                if (newPlayerData.isImported && newPlayerData.importedPlayer) {
+                    try {
+                        if (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) {
+                            var __cid = newPlayer.id, __now2 = Date.now();
+                            var __mp2 = mcPlayers.find(function (x) { return x && x.id === __cid; });
+                            if (__mp2) {
+                                ['pin', 'claimed', 'brand', 'brandName', 'email', 'slogan', 'interests', 'studioId', 'studioName',
+                                 'pathway', 'brandType', 'visionStatement', 'diagnosticScores', 'diagnosticTopPathways',
+                                 'diagnosticStyle', 'diagnosticComplete', 'onboardingComplete', 'role', 'roleDisplay'].forEach(function (k) {
+                                    if (newPlayer[k] !== undefined && newPlayer[k] !== null) __mp2[k] = newPlayer[k];
+                                });
+                                __mp2.updatedAt = __now2;
+                                if (typeof mcSaveData === 'function') mcSaveData('players');
+                            }
+                        }
+                    } catch (e) { console.warn('[claim] roster sync failed', e); }
+                }
                 populateBrandSelect();
                 loginUser(newPlayerData.brandName);
             });
