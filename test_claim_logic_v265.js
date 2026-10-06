@@ -10,7 +10,7 @@ function ok(c, m) { if (c) { pass++; console.log('PASS', m); } else { fail++; co
   ok(L.isValidEmail('a@b.co') && !L.isValidEmail('a@b') && !L.isValidEmail('a b@c.d') && !L.isValidEmail(''), 'isValidEmail');
   ok(L.maskEmail('ennis@asdubai.org') === 'en*****@asdubai.org', 'maskEmail normal');
   ok(L.maskEmail('a@x.org') === 'a*****@x.org' && L.maskEmail('ab@x.org') === 'a*****@x.org' && L.maskEmail('nope') === '', 'maskEmail short/invalid');
-  ok(L.generateCode(0) === '000000' && L.generateCode(1234567) === '234567' && L.generateCode(4294967295) === '967295', 'generateCode 6 digits, zero-padded');
+  ok(L.generateCode(0) === '0000' && L.generateCode(1234567) === '4567' && L.generateCode(4294967295) === '7295', 'generateCode 4 digits, zero-padded');
   const h1 = await L.hashCode('123456', 's', 'A@b.co'), h2 = await L.hashCode('123456', 's', 'a@b.co'), h3 = await L.hashCode('123457', 's', 'a@b.co'), h4 = await L.hashCode('123456', 't', 'a@b.co');
   ok(h1 === h2 && /^[0-9a-f]{64}$/.test(h1), 'hashCode deterministic, 64 hex, email-normalised');
   ok(h1 !== h3 && h1 !== h4, 'hashCode changes with code and salt');

@@ -13,7 +13,7 @@ function grab(name, async_) {
 }
 // ---- structural
 ok(/id="step-claim-code"/.test(html), 'step-claim-code exists');
-ok(/PFLX_PATCH\s*=\s*265;/.test(html), 'PFLX_PATCH = 265');
+ok(/PFLX_PATCH\s*=\s*26[5-9];/.test(html), "PFLX_PATCH >= 265");
 const enter = grab('pflxEnterClaimFlow');
 ok(/pflxBeginClaimVerify\(/.test(enter) && !/showStep\('step-imported-found'\)/.test(enter), 'pflxEnterClaimFlow is gated by verification');
 const show = grab('pflxShowClaimFound');

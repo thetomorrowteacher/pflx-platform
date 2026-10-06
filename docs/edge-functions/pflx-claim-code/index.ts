@@ -1,6 +1,6 @@
 // PFLX claim-code Edge Function (PATCH PLATFORM v261).
 // Proves a player owns the email on their roster entry before they can claim
-// the account: emails a 6-digit code (Gmail SMTP), verifies it server-side.
+// the account: emails a 4-digit code (Gmail SMTP), verifies it server-side.
 // Secrets (set by the host in Supabase > Edge Functions > Secrets):
 //   GMAIL_USER, GMAIL_APP_PASSWORD   (Supabase injects SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -101,7 +101,7 @@ async function handleRequest(body: any) {
 async function handleVerify(body: any) {
   const email = normalizeEmail(body.email);
   const code = String(body.code || "").replace(/\s+/g, "");
-  if (!isValidEmail(email) || !/^\d{6}$/.test(code)) return json({ ok: false, error: "invalid_input" }, 400);
+  if (!isValidEmail(email) || !/^\d{4}$/.test(code)) return json({ ok: false, error: "invalid_input" }, 400);
   const sb = db();
   const { data: rows } = await sb.from("pflx_claim_codes").select("*").eq("email", email).eq("used", false)
     .order("created_at", { ascending: false }).limit(1);

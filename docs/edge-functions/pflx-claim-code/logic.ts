@@ -30,7 +30,7 @@ export function maskEmail(e) {
 
 // rand32: an unsigned 32-bit integer from crypto.getRandomValues.
 export function generateCode(rand32) {
-  return String(Number(rand32) % 1000000).padStart(6, '0');
+  return String(Number(rand32) % 10000).padStart(4, '0');
 }
 
 export async function hashCode(code, salt, email) {
