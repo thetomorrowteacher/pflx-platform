@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 263;
+      window.PFLX_PATCH   = 264;
       window.PFLX_BUILD   = '2026.10';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -8742,6 +8742,10 @@
                                      label changes here. -->
                                 <button class="mc-nav-btn" data-mc="pitches" onclick="mcNav('pitches')">
                                     <span class="mc-icon">&#x1F4A1;</span> Proposals
+                                </button>
+                                <!-- PATCH PLATFORM v264 -- the ONE connected marketplace (platform + game + session upgrades, taxes & fines). Opens in X-Coin. -->
+                                <button class="mc-nav-btn" data-mc="marketplace" onclick="if(typeof pflxOpenMarket==='function'){pflxOpenMarket('xcoin',{tab:'all'});}">
+                                    <span class="mc-icon">&#x1F6D2;</span> Marketplace
                                 </button>
                                 <!-- Sept 12 (Ennis, MC Player Dashboard redesign mockup) --
                                      real account Settings, reachable from the sidebar like
@@ -66479,6 +66483,48 @@ RESPONSE RULES:
             _pflxDeepLinkToApp('xcoin', path);
         };
 
+        // PATCH PLATFORM v264 -- ONE connected marketplace (Ennis: "There should be
+        // 1 connected marketplace ... accessible in MC, Core Pathways, Battle Arena
+        // and X-Live"). Platform upgrades + taxes/fines live in X-Coin, game upgrades
+        // in Battle Arena, session upgrades in X-Live; every one of them draws all
+        // four kinds with the shared card module and, for a kind it does not sell,
+        // asks the Console to open the app that does:
+        //     sub-app -> Console   { type:'pflx_open_app', app, tab, itemId, edit }
+        //     Console -> sub-app   { type:'pflx_market_open', tab, itemId, edit }
+        // The Console never touches a wallet or a catalog -- it only routes.
+        window.pflxOpenMarket = function (app, o) {
+            o = o || {};
+            try {
+                app = String(app || '').toLowerCase();
+                if (app === 'xlive' || app === 'x-live') app = 'lite';
+                if (app === 'x-coin') app = 'xcoin';
+                if (app === 'battle-arena') app = 'arena';
+                if (app !== 'xcoin' && app !== 'arena' && app !== 'lite') return;
+                // Cohort gate first -- a locked app shows its Access Locked modal, nothing else moves.
+                if (typeof pflxPlayerCanAccessApp === 'function' && !pflxPlayerCanAccessApp(app)) {
+                    if (typeof navigateTo === 'function') navigateTo(app);
+                    return;
+                }
+                if (app === 'xcoin') {
+                    // X-Coin is a routed app: land on its marketplace page (hosts get the editor + combined view).
+                    _pflxDeepLinkToApp('xcoin', _pflxRoleIsHost() ? '/admin/modifiers' : '/player/marketplace');
+                } else if (typeof navigateTo === 'function') {
+                    navigateTo(app);
+                }
+                // Tell the app which tab / item to show. A freshly loaded iframe is not listening yet,
+                // so resend a few times; every receiver treats a repeat as a no-op.
+                var msg = { type: 'pflx_market_open', tab: o.tab || null, itemId: o.itemId || null, edit: !!o.edit };
+                [700, 2000, 4500, 8000].forEach(function (ms) {
+                    setTimeout(function () {
+                        try {
+                            var f = document.querySelector('iframe[data-app="' + app + '"]');
+                            if (f && f.contentWindow && f.src && f.src !== 'about:blank') f.contentWindow.postMessage(msg, '*');
+                        } catch (e) {}
+                    }, ms);
+                });
+            } catch (e) { console.warn('[PFLX] pflxOpenMarket failed', e); }
+        };
+
         window.pflxOpenTasksShortcut = function () {
             try { pflxCloseProfileDropdown(); } catch (e) {}
             try {
@@ -71766,6 +71812,24 @@ RESPONSE RULES:
                                 window.location.href = u;
                             }
                         } catch (e) { console.warn('[PFLX] pflx_navigate failed', e); }
+                    }
+
+                    // PATCH PLATFORM v264 -- connected marketplace routing (see pflxOpenMarket).
+                    if (msg.type === 'pflx_open_app' && msg.app) {
+                        try { if (typeof window.pflxOpenMarket === 'function') window.pflxOpenMarket(String(msg.app), { tab: msg.tab, itemId: msg.itemId, edit: msg.edit }); }
+                        catch (e) { console.warn('[PFLX] pflx_open_app failed', e); }
+                    }
+                    // Core Pathways has always posted { type:'pflx_navigate', target, path } for its
+                    // Ship Bay / Marketplace buttons; this listener only understood { url }, so the click
+                    // did nothing. Honour the target+path form too (known apps, same-app paths only).
+                    if (msg.type === 'pflx_navigate' && !msg.url && msg.target) {
+                        try {
+                            var _t = String(msg.target).toLowerCase(), _p = String(msg.path || '');
+                            if ((_t === 'xcoin' || _t === 'arena' || _t === 'lite' || _t === 'pathways') && (!_p || /^\/[A-Za-z0-9_\-\/]*$/.test(_p))) {
+                                if (_p && typeof _pflxDeepLinkToApp === 'function') _pflxDeepLinkToApp(_t, _p);
+                                else if (typeof navigateTo === 'function') navigateTo(_t);
+                            }
+                        } catch (e) { console.warn('[PFLX] pflx_navigate(target) failed', e); }
                     }
 
                     // v1.73.1 (Ennis: "It should open directly with no middle
