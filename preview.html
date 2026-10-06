@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 267;
+      window.PFLX_PATCH   = 268;
       window.PFLX_BUILD   = '2026.10';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -23381,8 +23381,29 @@
                         }
                     } catch (e) { console.warn('[claim] roster sync failed', e); }
                 }
+                // PATCH PLATFORM v268 -- finishing onboarding is the moment the PFLX User Certification
+                // is earned. It used to be granted only as a side effect of loginUser(), which
+                // returns early for X-Live-only accounts (they were redirected before the award
+                // ran). Grant it here, by id, before logging in. Idempotent (no double award) and
+                // skipped for host/teacher/instructor/admin roles, same as the login-time grant.
+                try {
+                    if (!/admin|host|teacher|instructor/i.test(String(newPlayer.role || ''))) {
+                        var __prevSes = window.activeSession;
+                        pflxAwardOnboardingSignature({ id: newPlayer.id, brand: newPlayer.brand, name: newPlayer.name,
+                            email: newPlayer.email, pin: newPlayer.pin, cohort: newPlayer.cohort, role: newPlayer.role,
+                            studioId: newPlayer.studioId, pathway: newPlayer.pathway, xc: newPlayer.xc, level: newPlayer.level });
+                        window.activeSession = __prevSes;
+                    }
+                } catch (e) { console.warn('[PFLX] onboarding cert award failed', e); }
                 populateBrandSelect();
-                loginUser(newPlayerData.brandName);
+                // X-Live-only accounts are redirected away by loginUser() the instant it runs, which
+                // used to cut off the debounced cloud save of the claim + the cert. Flush now and
+                // give the writes a moment to land before leaving the page.
+                var __xlOnly = false;
+                try { __xlOnly = typeof window.pflxPlayerRecordIsXLiveOnly === 'function' && !!window.pflxPlayerRecordIsXLiveOnly(newPlayer); } catch (e) {}
+                try { if (typeof _mcCloudFlush === 'function') _mcCloudFlush(); } catch (e) {}
+                if (__xlOnly) { setTimeout(function () { loginUser(newPlayerData.brandName); }, 2500); }
+                else loginUser(newPlayerData.brandName);
             });
         }
 
@@ -35685,6 +35706,13 @@ function ppRenderCheckpoints(el) {
             p.xc = (p.xc || 0) + resolvedXc;
             p.xcoin = (p.xcoin || 0) + resolvedXc;
             p.totalXcoin = (p.totalXcoin || 0) + resolvedXc;
+            // PATCH PLATFORM v268 -- the badge list got the cert but the counters X-Coin and the
+            // toolbar read (digitalBadges, badgeCounts.signature) stayed at 0 on the roster/X-Coin
+            // copy. Keep them in step so the badge is visible everywhere it is shown.
+            if (!Array.isArray(p.digitalBadges)) p.digitalBadges = (Number(p.digitalBadges) || 0) + 1;
+            if (!p.badgeCounts || typeof p.badgeCounts !== 'object') p.badgeCounts = { premium: 0, primary: 0, executive: 0, signature: 0 };
+            p.badgeCounts.signature = (Number(p.badgeCounts.signature) || 0) + 1;
+            p.updatedAt = Date.now();
             try { mcSaveData('players'); } catch(e) {}
 
             // Broadcast to sub-apps so X-Coin updates the wallet/leaderboard.
