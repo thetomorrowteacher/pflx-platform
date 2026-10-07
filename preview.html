@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 268;
+      window.PFLX_PATCH   = 269;
       window.PFLX_BUILD   = '2026.10';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -26781,6 +26781,98 @@
         // XC is credited, badgeCounts increments (correct category key) and the
         // artwork image flows through. Used by EVERY award path (task, checkpoint,
         // project, module/node completion, automation).
+        // ═══════════════════════════════════════════════════════════════════
+        //  PATCH PLATFORM v269 -- EMAIL NOTIFICATIONS (Ennis, Oct 7):
+        //  "each player [should] receive an email when a task is approved and
+        //  when they receive a digital coin". The browser only REPORTS the event
+        //  (kind + playerId + taskId/badgeId) to the pflx-notify Edge Function,
+        //  which re-verifies it against the cloud data, writes the email text
+        //  itself, de-duplicates (one email per approved task / per coin), rate
+        //  limits, and honours the player's opt-out. Calls are queued in
+        //  localStorage and retried because the cloud copy of the approval/badge
+        //  lands a few seconds after the click. (Named pflxEmailNotify -- NOT
+        //  pflxNotify, which is the in-app X-Coin popup system.)
+        // ═══════════════════════════════════════════════════════════════════
+        (function () {
+            var QKEY = 'pflx_email_notify_queue_v1';
+            var DELAYS = [8000, 25000, 70000, 150000];
+            var DROP = { no_email: 1, no_player: 1, invalid_input: 1, bad_action: 1, gave_up: 1, email_not_configured: 1 };
+            var busy = {};
+            function off() {
+                try { if (window.PFLX_EMAIL_NOTIFY_DISABLED) return true; return localStorage.getItem('pflx_email_notify_off') === '1'; } catch (e) { return false; }
+            }
+            function load() { try { var q = JSON.parse(localStorage.getItem(QKEY) || '[]'); return Array.isArray(q) ? q : []; } catch (e) { return []; } }
+            function save(q) { try { localStorage.setItem(QKEY, JSON.stringify(q.slice(-200))); } catch (e) {} }
+            function remove(k) { save(load().filter(function (x) { return x.k !== k; })); }
+            function update(j) { var q = load().filter(function (x) { return x.k !== j.k; }); q.push(j); save(q); }
+            async function post(body) {
+                var anon = window.PFLX_SUPABASE_ANON || '';
+                try {
+                    var r = await fetch((window.PFLX_SUPABASE_URL || '') + '/functions/v1/pflx-notify', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'apikey': anon, 'Authorization': 'Bearer ' + anon },
+                        body: JSON.stringify(body)
+                    });
+                    var j = null;
+                    try { j = await r.json(); } catch (e) { j = null; }
+                    return (j && typeof j === 'object') ? j : { ok: false, error: 'server_error' };
+                } catch (e) { return { ok: false, error: 'network' }; }
+            }
+            async function run(j) {
+                if (!j || busy[j.k]) return;
+                // Already sent/dropped by an earlier timer (or the next-load resume)? Don't call again.
+                if (!load().some(function (x) { return x.k === j.k; })) return;
+                busy[j.k] = 1;
+                try {
+                    var body = { action: j.action, playerId: j.playerId };
+                    if (j.taskId) body.taskId = j.taskId;
+                    if (j.badgeId) body.badgeId = j.badgeId;
+                    var r = await post(body);
+                    if (r.ok || DROP[r.error]) { remove(j.k); return; }
+                    j.tries = (j.tries || 0) + 1;
+                    if (j.tries >= DELAYS.length) { remove(j.k); return; }
+                    update(j);
+                    setTimeout(function () { run(j); }, DELAYS[j.tries]);
+                } finally { busy[j.k] = 0; }
+            }
+            // kind: 'task_approved' (ref = taskId) | 'coin' (ref = badgeId)
+            window.pflxEmailNotify = function (kind, playerId, ref) {
+                try {
+                    if (off() || !playerId || !ref) return;
+                    if (kind !== 'task_approved' && kind !== 'coin') return;
+                    var j = { k: kind + ':' + playerId + ':' + ref, action: kind, playerId: String(playerId), tries: 0 };
+                    if (kind === 'task_approved') j.taskId = String(ref); else j.badgeId = String(ref);
+                    if (load().some(function (x) { return x.k === j.k; }) || busy[j.k]) return;
+                    update(j);
+                    setTimeout(function () { run(j); }, DELAYS[0]);
+                } catch (e) {}
+            };
+            // Anything queued when the tab closed is picked up on the next load.
+            setTimeout(function () {
+                try {
+                    if (off()) return;
+                    load().forEach(function (j, i) { setTimeout(function () { run(j); }, i * 700); });
+                } catch (e) {}
+            }, 9000);
+            // One-click "Stop these emails" link from the email: /?pflx_unsub=<id>&t=<token>
+            function handleUnsub() {
+                try {
+                    var q = new URLSearchParams(location.search);
+                    var u = q.get('pflx_unsub'), t = q.get('t');
+                    if (!u || !t) return;
+                    post({ action: 'unsubscribe', playerId: u, token: t }).then(function (r) {
+                        var box = document.createElement('div');
+                        box.style.cssText = 'position:fixed;left:50%;top:18px;transform:translateX(-50%);z-index:2147483000;background:#0b1020;color:#fff;border:1px solid #3a4a7a;border-radius:10px;padding:12px 18px;font:14px Arial,sans-serif;max-width:90vw;text-align:center;box-shadow:0 6px 24px rgba(0,0,0,.5)';
+                        box.textContent = r && r.ok ? 'You will no longer get PFLX email notifications.' : 'That link could not be used. Ask your host to turn off your email notifications.';
+                        document.body.appendChild(box);
+                        setTimeout(function () { try { box.remove(); } catch (e) {} }, 9000);
+                        try { history.replaceState(null, '', location.pathname); } catch (e) {}
+                    });
+                } catch (e) {}
+            }
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', handleUnsub); else handleUnsub();
+        })();
+
         function _pflxResolveAwardBadge(badgeRef) {
             var cat = (typeof mcFindBadge === 'function') ? mcFindBadge(badgeRef) : null;
             var raw = (badgeRef && typeof badgeRef === 'object') ? badgeRef : {};
@@ -35714,6 +35806,8 @@ function ppRenderCheckpoints(el) {
             p.badgeCounts.signature = (Number(p.badgeCounts.signature) || 0) + 1;
             p.updatedAt = Date.now();
             try { mcSaveData('players'); } catch(e) {}
+            // v269 -- the onboarding certification is a digital coin too: email it.
+            try { if (typeof window.pflxEmailNotify === 'function') window.pflxEmailNotify('coin', p.id, BADGE_ID); } catch(e) {}
 
             // Broadcast to sub-apps so X-Coin updates the wallet/leaderboard.
             try {
@@ -43310,6 +43404,8 @@ function ppRenderCheckpoints(el) {
                     try { _mcSpawnRecurringNext(task); } catch (e) {}
                 }
             } catch (e) {}
+            // v269 -- email the player that this task was approved (server re-verifies + dedupes).
+            try { if (typeof window.pflxEmailNotify === 'function') window.pflxEmailNotify('task_approved', pid, task.id); } catch (e) {}
             mcSaveData('tasks'); mcSaveData('players');
             try { mcRenderTasks(); } catch (e) {}
             try { if (typeof renderApprovalsCard === 'function') renderApprovalsCard(); } catch (e) {}
@@ -43548,6 +43644,8 @@ function ppRenderCheckpoints(el) {
                 }
             } catch (eMod) {}
 
+            // v269 -- email the submitter that this task was approved.
+            try { if (submitterId && typeof window.pflxEmailNotify === 'function') window.pflxEmailNotify('task_approved', submitterId, task.id); } catch (eMail) {}
             // Save task list (and propagate via pflx_mc_changed automatically)
             mcSaveData('tasks');
             mcSaveData('players');
@@ -79921,6 +80019,8 @@ RESPONSE RULES:
                     player: updated
                 });
                 try { logActivity(playerId, 'award_granted', { xc: totalXcDelta, badge: awardObj.badge ? awardObj.badge.id : null, source: awardObj.source, reason: awardObj.reason, txId: txId }); } catch (e) {}
+                // v269 -- email the player about the new digital coin (server re-verifies + dedupes).
+                if (awardObj.badge && awardObj.badge.id) { try { if (typeof window.pflxEmailNotify === 'function') window.pflxEmailNotify('coin', playerId, awardObj.badge.id); } catch (eMailCoin) {} }
                 // Canonical X-Coin event for a BADGE grant — the single choke
                 // point every badge award (task/checkpoint/project/node/xcoin/
                 // coinsub) funnels through, so the per-player popup + ticker fire
