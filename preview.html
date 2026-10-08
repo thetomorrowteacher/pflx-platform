@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 277;
+      window.PFLX_PATCH   = 278;
       window.PFLX_BUILD   = '2026.10';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -12301,6 +12301,15 @@
                         <!-- Studio Identity -->
                         <div id="portfolio-studio-section" style="margin-bottom:24px; display:none;"></div>
 
+                        <!-- ═══ BADGE PORTFOLIO ═══ -->
+                        <div id="portfolio-badges-section" style="margin-bottom:32px;">
+                            <div style="display:flex; align-items:center; gap:10px; margin-bottom:18px;">
+                                <span style="font-size:16px;">&#x1F3C5;</span>
+                                <h3 style="margin:0; font-size:14px; font-weight:800; color:#f5c842; letter-spacing:0.08em; font-family:'Orbitron',sans-serif;">BADGE PORTFOLIO</h3>
+                            </div>
+                            <div id="portfolio-badges-grid" style="display:flex; flex-direction:column; gap:28px;"></div>
+                        </div>
+
                         <!-- ═══ PROJECTS & LINKS ═══ -->
                         <div id="portfolio-projects-section" style="margin-bottom:32px;">
                             <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
@@ -12325,15 +12334,7 @@
                             <div id="portfolio-tasks-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:14px;"></div>
                         </div>
 
-                        <!-- ═══ BADGE PORTFOLIO ═══ -->
-                        <div id="portfolio-badges-section">
-                            <div style="display:flex; align-items:center; gap:10px; margin-bottom:18px;">
-                                <span style="font-size:16px;">&#x1F3C5;</span>
-                                <h3 style="margin:0; font-size:14px; font-weight:800; color:#f5c842; letter-spacing:0.08em; font-family:'Orbitron',sans-serif;">BADGE PORTFOLIO</h3>
-                            </div>
-                            <div id="portfolio-badges-grid" style="display:flex; flex-direction:column; gap:28px;"></div>
-                        </div>
-
+                        
                     </div>
                 </div>
 
@@ -26983,6 +26984,34 @@
                 if (c[k] !== undefined) c[k]++;
             });
             return c;
+        };
+        // v278: a signed-in browser could end up with a catalog that lacks the retired (legacy) badges and the
+        // CritterCoin stubs, so a player's badges silently vanished from the portfolio. When badge refs cannot be
+        // resolved we re-read the catalog straight from the cloud (not gated by the "row changed" shortcut), once a minute at most.
+        window.pflxHealBadgeCatalog = function () {
+            var now = Date.now();
+            if (window._pflxHealAt && now - window._pflxHealAt < 60000) return;
+            window._pflxHealAt = now;
+            try {
+                var client = (typeof window.pflxSupabase === 'function') ? window.pflxSupabase() : null;
+                if (!client) return;
+                client.from('app_data').select('key,data').in('key', ['coinCategories', 'pflx_mc_badges']).then(function (res) {
+                    try {
+                        var rows = (res && res.data) || [], cc = null, flat = null;
+                        rows.forEach(function (r) {
+                            if (r.key === 'coinCategories') cc = r.data;
+                            else if (r.key === 'pflx_mc_badges') flat = (r.data && r.data.items) ? r.data.items : r.data;
+                        });
+                        if (!Array.isArray(cc)) return;
+                        var fresh = pflxMergeKeepImported(mcNormalizeBadges(cc), Array.isArray(flat) ? flat : mcBadges);
+                        if (!fresh.length) return;
+                        var before = (mcBadges || []).length;
+                        mcBadges = fresh;
+                        _mcSetItemSafe('pflx_mc_badges', mcBadges);
+                        if (fresh.length !== before) _mcAfterCloudChange(['badges']);
+                    } catch (e) { console.warn('[PFLX] badge catalog heal failed', e); }
+                }, function () {});
+            } catch (e) {}
         };
         window.pflxBadgeTrailHtml = function (groups, total) {
             var defs = [
@@ -66624,6 +66653,7 @@ RESPONSE RULES:
             // lives only on the player's stored ref, not the catalog entry
             // — so it has to be merged onto the resolved object here or the
             // tile/popup would have no way to see it.
+            try { var __un0 = (Array.isArray(activeSession && activeSession.badges) ? activeSession.badges : []).filter(function (r) { return r && !mcFindBadge(r) && !(typeof r === 'object' && r.name); }).length; if (__un0) window.pflxHealBadgeCatalog(); } catch (e) {}
             var __hid = pflxHiddenBadgeSet(activeSession); var __hasHid = Object.keys(__hid).length > 0; var earned = earnedRefs.map(function (r) {
                 var found = (typeof mcFindBadge === 'function') ? mcFindBadge(r) : (r && typeof r === 'object' ? r : null);
                 if (!found && r && typeof r === 'object' && r.name) found = { id: r.id, name: r.name, icon: r.icon || '\uD83C\uDF93', xc: Number(r.xcValue || r.xc) || 0, tier: r.type || '', category: r.category || r.type || '', description: r.description || '', image: r.image || '' };
@@ -66925,16 +66955,16 @@ RESPONSE RULES:
                 '</div>') : '') +
                 '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));gap:12px;margin-bottom:24px;">' + statsHtml + '</div>' +
                 '<div style="margin-bottom:32px;">' +
+                    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;"><span style="font-size:16px;">&#x1F3C5;</span><h3 style="margin:0;font-size:14px;font-weight:800;color:#f5c842;letter-spacing:0.08em;font-family:\'Orbitron\',sans-serif;">BADGE PORTFOLIO</h3></div>' +
+                    __badgesHtml +
+                '</div>' +
+                '<div style="margin-bottom:32px;">' +
                     '<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;"><span style="font-size:16px;">&#x1F4BC;</span><h3 style="margin:0;font-size:14px;font-weight:800;color:var(--cyan);letter-spacing:0.08em;font-family:\'Orbitron\',sans-serif;">PROJECTS & LINKS</h3></div>' +
                     projectsHtml +
                 '</div>' +
                 '<div style="margin-bottom:32px;">' +
                     '<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;"><span style="font-size:16px;">&#x2705;</span><h3 style="margin:0;font-size:14px;font-weight:800;color:#22c55e;letter-spacing:0.08em;font-family:\'Orbitron\',sans-serif;">COMPLETED TASKS</h3></div>' +
                     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">' + pflxPlayerCompletedTasksHtml(player) + '</div>' +
-                '</div>' +
-                '<div>' +
-                    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;"><span style="font-size:16px;">&#x1F3C5;</span><h3 style="margin:0;font-size:14px;font-weight:800;color:#f5c842;letter-spacing:0.08em;font-family:\'Orbitron\',sans-serif;">BADGE PORTFOLIO</h3></div>' +
-                    __badgesHtml +
                 '</div>';
         }
 
@@ -67081,6 +67111,7 @@ RESPONSE RULES:
             // grants of the same badge, e.g. "Video Editor x5") through to
             // the resolved catalog object — see the matching comment in
             // portfolioRenderBadges above.
+            try { var __un1 = (Array.isArray(player && player.badges) ? player.badges : []).filter(function (r) { return r && !mcFindBadge(r) && !(typeof r === 'object' && r.name); }).length; if (__un1) window.pflxHealBadgeCatalog(); } catch (e) {}
             var __hid = pflxHiddenBadgeSet(player); var __hasHid = Object.keys(__hid).length > 0; var earned = earnedRefs.map(function (r) {
                 try {
                     var found = (typeof mcFindBadge === 'function') ? mcFindBadge(r) : (r && typeof r === 'object' ? r : null);
