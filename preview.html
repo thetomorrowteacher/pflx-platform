@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 271;
+      window.PFLX_PATCH   = 272;
       window.PFLX_BUILD   = '2026.10';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -13128,7 +13128,9 @@
                                         </div>
                                     </div>
 
-                                    <!-- Badge Requirements -->
+                                    <!-- Requirement enforcement / bypass (v272) -->
+<div style="display:flex;gap:18px;flex-wrap:wrap;margin:14px 0 4px;padding:10px 12px;background:rgba(245,200,66,0.04);border:1px solid rgba(245,200,66,0.15);border-radius:8px;"><label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#e0e6ff;cursor:pointer;"><input type="checkbox" id="mc-rank-enforce" checked> Enforce badge &amp; checkpoint requirements <span style="color:rgba(255,255,255,0.35);">(uncheck = XC only, bypass)</span></label><label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#e0e6ff;cursor:pointer;"><input type="checkbox" id="mc-rank-stack" checked> Stack requirements from lower ranks</label></div>
+<!-- Badge Requirements -->
                                     <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:0.1em;margin:16px 0 8px;text-transform:uppercase;">Badge Requirements</div>
                                     <div style="background:rgba(0,212,255,0.03);border:1px solid rgba(0,212,255,0.08);border-radius:8px;padding:12px;margin-bottom:12px;">
                                         <label style="display:block;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em;">&#x1F3C5; Badge Type Requirements</label>
@@ -16862,7 +16864,7 @@
         // Checks if a player's cohort + rank grants access to a feature
         function hasFeatureAccess(player, feature) {
             const cohort = COHORTS[player.cohort] || COHORTS['PlayerPool'];
-            const rank = getRankForXC(player.xc || 0);
+            const rank = getRankForXC(player);
             // Feature-level access from cohort
             if (feature === 'seasons' && !cohort.seasons) return false;
             if (feature === 'projects' && !cohort.projects) return false;
@@ -17307,18 +17309,297 @@
             { level: 10, name: 'Partner',            icon: '🦅', xcUnlock: 1000000 }
         ];
 
-        function getRankForXC(xc) {
+                /* PflxRankEngine v1 — shared by Console (preview.html) and X-Coin (app/lib/pflxRankEngine.ts mirrors this).
+         * Pure functions, no DOM, no storage. Keep both copies identical in behaviour. */
+        var PflxRankEngine = (function () {
+            var MASTER_IDS = ['admin-0', 'admin-1'];   // PrototypeFLX (PFLX HOST) + Mr. Johnson (THETOMORROWTEACHER)
+            var ALIASES = {
+                'personal branding': 'personal branding l1',
+                'e portfolio starter': 'portfolio starter',
+                'digital citizen': 'digital citizen l1',
+                'digital citizen cybersecurity': 'digital citizen l1',
+                'pflx user certification': 'pflx user cert',
+                'brand builder': 'brandbuilder'
+            };
+            function norm(s) {
+                var t = String(s == null ? '' : s).toLowerCase().replace(/&/g, ' and ').replace(/\band\b/g, ' ');
+                t = t.replace(/\blevel\s*(\d+)/g, 'l$1').replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+                return ALIASES[t] || t;
+            }
+            function isMasterHost(p) {
+                if (!p) return false;
+                var id = String(p.id || p.playerId || '');
+                return MASTER_IDS.indexOf(id) >= 0;
+            }
+            function ladder(ranks) {
+                return (ranks || []).filter(function (r) { return r && !r.godTier && !r.masterOnly; })
+                    .sort(function (a, b) { return (a.level || 0) - (b.level || 0); });
+            }
+            function masterRank(ranks) {
+                for (var i = 0; i < (ranks || []).length; i++) if (ranks[i] && (ranks[i].godTier || ranks[i].masterOnly)) return ranks[i];
+                return null;
+            }
+            function uniq(arr) {
+                var seen = {}, out = [];
+                arr.forEach(function (x) { var k = norm(x); if (k && !seen[k]) { seen[k] = 1; out.push(x); } });
+                return out;
+            }
+            // Requirements a rank effectively demands: own + (stacking) everything from lower ranks.
+            function effectiveReqs(rank, ranks) {
+                var types = [], specifics = [];
+                var pool = rank.stackRequirements === false ? [rank] : ladder(ranks).filter(function (r) { return (r.level || 0) <= (rank.level || 0); });
+                if (pool.indexOf(rank) < 0) pool.push(rank);
+                pool.forEach(function (r) {
+                    (r.badgeTypeRequirements || []).forEach(function (t) { types.push(t); });
+                    (r.specificBadgeRequirements || []).forEach(function (s) { specifics.push(s); });
+                });
+                return { types: uniq(types), specifics: uniq(specifics) };
+            }
+            function enforced(rank, player) {
+                if (player && player.rankBypass) return false;
+                return rank.enforceRequirements !== false;
+            }
+            function altsOf(req) { return String(req).split('|').map(function (s) { return s.trim(); }).filter(Boolean); }
+            function holdsBadge(req, facts) {
+                var keys = (facts && facts.badgeKeys) || {};
+                var alts = altsOf(req);
+                for (var i = 0; i < alts.length; i++) if (keys[norm(alts[i])]) return alts[i];
+                return null;
+            }
+            function cpCount(facts) {
+                if (!facts) return 0;
+                var c = facts.checkpoints;
+                if (typeof c === 'function') { try { c = c(); } catch (e) { c = 0; } facts.checkpoints = c; }
+                return Number(c) || 0;
+            }
+            /** Full checklist for one rank. met = every enforced check passes. */
+            function evaluate(rank, facts, ranks, player) {
+                var checks = [];
+                var xc = Number(facts && facts.xc) || 0;
+                var need = Number(rank.xcoinUnlock) || 0;
+                checks.push({ kind: 'xc', label: 'Lifetime XC', have: xc, need: need, met: xc >= need, enforced: true });
+                var enf = enforced(rank, player);
+                var cpNeed = Number(rank.checkpointsRequired) || 0;
+                if (cpNeed > 0) {
+                    var have = cpCount(facts);
+                    checks.push({ kind: 'checkpoints', label: 'Checkpoints completed', have: have, need: cpNeed, met: have >= cpNeed, enforced: enf });
+                }
+                var req = effectiveReqs(rank, ranks);
+                var tiers = (facts && facts.tiers) || {};
+                req.types.forEach(function (t) {
+                    var n = Number(tiers[String(t).toLowerCase()]) || 0;
+                    checks.push({ kind: 'type', label: t + ' badge', have: n, need: 1, met: n >= 1, enforced: enf });
+                });
+                req.specifics.forEach(function (s) {
+                    var alts = altsOf(s), got = holdsBadge(s, facts);
+                    checks.push({ kind: 'badge', label: alts.join(' or '), alts: alts, have: got ? 1 : 0, need: 1, met: !!got, via: got, enforced: enf });
+                });
+                var met = checks.every(function (c) { return c.met || !c.enforced; });
+                return { met: met, checks: checks, rank: rank };
+            }
+            /** Resolve current + next rank for a player. */
+            function resolve(player, facts, ranks, opts) {
+                var lad = ladder(ranks);
+                var out = { current: lad[0] || null, next: null, nextEval: null, master: false, overridden: false, bypassed: !!(player && player.rankBypass) };
+                if (!lad.length) return out;
+                if (isMasterHost(player)) {
+                    var m = masterRank(ranks);
+                    if (m) { out.current = m; out.master = true; return out; }
+                }
+                var ov = player && player.rankOverride;
+                if (ov !== undefined && ov !== null && ov !== '') {
+                    var o = lad.filter(function (r) { return r.id === ov || r.level === ov || r.level === Number(ov) || r.name === ov; })[0];
+                    if (o) { out.current = o; out.overridden = true; }
+                }
+                if (!out.overridden) {
+                    var cur = lad[0];
+                    for (var i = lad.length - 1; i >= 0; i--) {
+                        if (i === 0) { cur = lad[0]; break; }   // rank 1 is the floor
+                        if ((Number(facts && facts.xc) || 0) < (Number(lad[i].xcoinUnlock) || 0)) continue;   // cheap XC gate first (keeps checkpoint calc lazy)
+                        var ev = evaluate(lad[i], facts, ranks, player);
+                        if (ev.met) { cur = lad[i]; break; }
+                    }
+                    out.current = cur;
+                }
+                var idx = lad.indexOf(out.current);
+                out.next = idx >= 0 && idx < lad.length - 1 ? lad[idx + 1] : null;
+                if (out.next && !(opts && opts.skipNext)) out.nextEval = evaluate(out.next, facts, ranks, player);
+                return out;
+            }
+            /** 0..1 progress toward next rank = share of its enforced checks already met (xc counted fractionally). */
+            function progress(ev) {
+                if (!ev) return 1;
+                var cs = ev.checks.filter(function (c) { return c.enforced; });
+                if (!cs.length) return 1;
+                var sum = 0;
+                cs.forEach(function (c) {
+                    if (c.met) sum += 1;
+                    else if (c.kind === 'xc' || c.kind === 'checkpoints') sum += Math.max(0, Math.min(1, c.have / (c.need || 1)));
+                });
+                return sum / cs.length;
+            }
+            /** Build facts from raw pieces: badges = array of {name,id,tier,type}; tierCounts optional. */
+            function buildFacts(opts) {
+                var keys = {}, tiers = {};
+                (opts.badges || []).forEach(function (b) {
+                    if (!b) return;
+                    [b.name, b.id && String(b.id).replace(/^badge[-_]/, '').replace(/[-_]+/g, ' ')].forEach(function (nm) {
+                        if (nm) keys[norm(nm)] = true;
+                    });
+                    var t = String(b.tier || b.type || '').toLowerCase();
+                    if (t) tiers[t] = (tiers[t] || 0) + 1;
+                });
+                var tc = opts.tierCounts || {};
+                Object.keys(tc).forEach(function (k) { var v = Number(tc[k]) || 0; k = k.toLowerCase(); if (v > (tiers[k] || 0)) tiers[k] = v; });
+                return { xc: Number(opts.xc) || 0, checkpoints: opts.checkpoints, badgeKeys: keys, tiers: tiers };
+            }
+            return { MASTER_IDS: MASTER_IDS, norm: norm, isMasterHost: isMasterHost, ladder: ladder, masterRank: masterRank,
+                effectiveReqs: effectiveReqs, evaluate: evaluate, resolve: resolve, progress: progress, buildFacts: buildFacts, holdsBadge: holdsBadge };
+        })();
+
+        // ── Pro Rank engine glue (v272): lifetime XC + enforced, stacked badge/checkpoint requirements ──
+        var _pflxRankFactsCache = {};
+        var _pflxRankCatCache = { ref: null, len: -1, map: {} };
+        function pflxRankRec(p) {
+            try {
+                if (!p || !p.id) return null;
+                var pool = (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) ? mcPlayers : (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS) ? PLAYERS : []);
+                for (var i = 0; i < pool.length; i++) if (pool[i] && pool[i].id === p.id) return pool[i];
+            } catch (e) {}
+            return null;
+        }
+        // Rank rows the player is eligible for (cohort scoping), falling back to the legacy table.
+        function pflxRankList(p) {
+            var rows = null;
+            try { if (typeof mcPflxRanks !== 'undefined' && Array.isArray(mcPflxRanks) && mcPflxRanks.length) rows = mcPflxRanks; } catch (e) {}
+            if (!rows) return PFLX_RANKS.map(function (r) { return { id: 'rank-' + r.level, level: r.level, name: r.name, icon: r.icon, xcoinUnlock: r.xcUnlock, enforceRequirements: false, stackRequirements: false }; });
+            var eligible = rows.filter(function (r) {
+                if (r.allCohorts !== false) return true;
+                if (!p || !p.cohort) return false;
+                if (!r.cohorts || r.cohorts.length === 0) return false;
+                return r.cohorts.some(function (cid) {
+                    var cg = (typeof mcCohortGroups !== 'undefined' ? mcCohortGroups : []).find(function (g) { return g.id === cid; });
+                    return cg && (cg.name === p.cohort || (cg.members || []).indexOf(p.id) >= 0);
+                });
+            });
+            return eligible.length ? eligible : rows;
+        }
+        function pflxRankFacts(p, opts) {
+            opts = opts || {};
+            var id = p && p.id;
+            var ck = id + '|' + (opts.xcDelta || 0) + '|' + (opts.excludeBadge || '');
+            var hit = !opts.nocache && id && _pflxRankFactsCache[ck];
+            if (hit && Date.now() - hit.at < 3000) return hit.f;
+            var rec = pflxRankRec(p);
+            var xc = Math.max(+(p && p.totalXcoin) || 0, +(p && p.xc) || 0, rec ? (+rec.totalXcoin || 0) : 0, rec ? (+rec.xc || 0) : 0);
+            if (opts.xcDelta) xc = Math.max(0, xc - opts.xcDelta);
+            var cat = _pflxRankCatCache.map;
+            try {
+                if (_pflxRankCatCache.ref !== mcBadges || _pflxRankCatCache.len !== mcBadges.length) {
+                    cat = {}; mcBadges.forEach(function (b) { if (b && b.id) cat[b.id] = b; });
+                    _pflxRankCatCache = { ref: mcBadges, len: mcBadges.length, map: cat };
+                }
+            } catch (e) {}
+            var seen = {}, badges = [];
+            function addAll(list) {
+                (Array.isArray(list) ? list : []).forEach(function (e) {
+                    if (!e) return;
+                    var bid = typeof e === 'string' ? e : (e.id || e.badgeId || '');
+                    var key = bid || (e.name || '');
+                    if (!key || seen[key] || (opts.excludeBadge && bid === opts.excludeBadge)) return;
+                    seen[key] = 1;
+                    var obj = typeof e === 'object' ? e : {};
+                    var c = cat[bid];
+                    var tier = (c && c.tier) || obj.tier || obj.type || '';
+                    if (!tier) { var m = /^legacy-(primary|premium|executive|signature)-/.exec(String(bid)); if (m) tier = m[1]; }
+                    badges.push({ id: bid, name: (c && c.name) || obj.name || '', tier: tier });
+                });
+            }
+            addAll(p && p.badges); if (rec) addAll(rec.badges);
+            var tc = {}, a = (p && p.badgeCounts) || {}, b2 = (rec && rec.badgeCounts) || {};
+            ['primary', 'premium', 'executive', 'signature'].forEach(function (k) { tc[k] = Math.max(+a[k] || 0, +b2[k] || 0); });
+            var cpFn = function () {
+                var n = 0, pl = rec || p;
+                try {
+                    (mcCheckpoints || []).forEach(function (cp) {
+                        if (!cp || !cp.id || cp.status === 'inactive') return;
+                        var pr = pflxPlayerCheckpointProgress(cp, pl);
+                        if (pr && pr.total > 0 && pr.approved >= pr.total) n++;
+                    });
+                } catch (e) {}
+                return n;
+            };
+            var f = PflxRankEngine.buildFacts({ xc: xc, badges: badges, tierCounts: tc, checkpoints: cpFn });
+            if (id) _pflxRankFactsCache[ck] = { at: Date.now(), f: f };
+            return f;
+        }
+        // Full resolution: { current, next, nextEval, master, overridden, bypassed, facts }
+        function pflxResolveRank(p, opts) {
+            opts = opts || {};
+            var rec = pflxRankRec(p) || {};
+            var pl = { id: p && p.id, rankOverride: (p && p.rankOverride != null && p.rankOverride !== '') ? p.rankOverride : rec.rankOverride, rankBypass: !!((p && p.rankBypass) || rec.rankBypass) };
+            var ranks = pflxRankList(p);
+            var facts = pflxRankFacts(p, opts);
+            var res = PflxRankEngine.resolve(pl, facts, ranks, { skipNext: !!opts.skipNext });
+            res.facts = facts; res.ranks = ranks;
+            return res;
+        }
+        window.pflxResolveRank = pflxResolveRank;
+        function pflxRankSlim(r) {
+            return r ? { id: r.id, level: r.level, name: r.name, icon: r.icon || '', image: r.image || '', color: r.color || '', group: r.group || '', xcoinUnlock: r.xcoinUnlock || 0, enforceRequirements: r.enforceRequirements !== false } : null;
+        }
+        // JSON-safe snapshot of one player's rank state for the X-Coin Pro Rank panel.
+        function pflxRankReport(p) {
+            var res = pflxResolveRank(p, { nocache: true });
+            var lad = PflxRankEngine.ladder(res.ranks), cur = res.current, f = res.facts;
+            var cpDone = (typeof f.checkpoints === 'function') ? f.checkpoints() : f.checkpoints;
+            f.checkpoints = cpDone;
+            var curLevel = cur ? (cur.level || 0) : 0;
+            return {
+                playerId: p && p.id, at: Date.now(), master: !!res.master, bypassed: !!res.bypassed, overridden: !!res.overridden,
+                lifetimeXc: f.xc, checkpointsDone: cpDone,
+                current: pflxRankSlim(cur), next: pflxRankSlim(res.next),
+                checks: res.nextEval ? res.nextEval.checks : [],
+                progress: res.next ? PflxRankEngine.progress(res.nextEval) : 1,
+                ladder: lad.map(function (r) { var o = pflxRankSlim(r); o.unlocked = (r.level || 0) <= curLevel && !res.master ? true : !!res.master; o.current = !!(cur && r.id === cur.id); return o; }),
+                master_rank: res.master ? pflxRankSlim(cur) : null
+            };
+        }
+        function pflxRankIndex() {
+            var out = {};
+            try { (mcPlayers || []).forEach(function (p) { try { var r = pflxResolveRank(p, { skipNext: true }).current; if (r) out[p.id] = { id: r.id, level: r.level }; } catch (e) {} }); } catch (e) {}
+            return out;
+        }
+        window.pflxRankReport = pflxRankReport;
+        window.pflxRankIndex = pflxRankIndex;
+        function pflxRankLegacyShape(r) {
+            if (!r) return PFLX_RANKS[0];
+            var o = Object.assign({}, r);
+            if (o.xcUnlock == null) o.xcUnlock = r.xcoinUnlock || 0;
+            return o;
+        }
+        // Accepts a player/session object (enforces badges + checkpoints + lifetime XC) or a bare XC number (XC-only legacy path).
+        function getRankForXC(arg, opts) {
+            if (arg && typeof arg === 'object') {
+                try { return pflxRankLegacyShape(pflxResolveRank(arg, Object.assign({ skipNext: true }, opts || {})).current); } catch (e) { console.warn('[rank] resolve failed', e); arg = +(arg.totalXcoin || arg.xc) || 0; }
+            }
             let rank = PFLX_RANKS[0];
             for (const r of PFLX_RANKS) {
-                if (xc >= r.xcUnlock) rank = r;
+                if (arg >= r.xcUnlock) rank = r;
                 else break;
             }
             return rank;
         }
-
         function getNextRank(currentRank) {
+            try {
+                if (currentRank && currentRank.id) {
+                    var lad = PflxRankEngine.ladder(pflxRankList(null));
+                    var i = lad.findIndex(function (r) { return r.id === currentRank.id; });
+                    if (i >= 0) return i < lad.length - 1 ? pflxRankLegacyShape(lad[i + 1]) : null;
+                }
+            } catch (e) {}
             const idx = PFLX_RANKS.findIndex(r => r.level === currentRank.level);
-            return idx < PFLX_RANKS.length - 1 ? PFLX_RANKS[idx + 1] : null;
+            return idx >= 0 && idx < PFLX_RANKS.length - 1 ? PFLX_RANKS[idx + 1] : null;
         }
 
         /**
@@ -17425,7 +17706,7 @@
                 }
             } catch (e) {}
             // 3) Fallback: derive from XC
-            if (!rank) rank = getRankForXC(xc);
+            if (!rank) rank = getRankForXC((typeof activeSession === 'object' && activeSession) ? activeSession : xc);
             const nextRank = getNextRank(rank);
             let xcPct = 100;
             if (nextRank) {
@@ -19525,7 +19806,7 @@
                     id: playerId, brand: p.brand || '', name: p.name || '',
                     email: p.email || '', cohort: p.cohort || '', xc: p.xc || 0,
                     checkpoint: p.checkpoint || p.currentCheckpoint || '—',
-                    rank: (typeof getRankForXC === 'function' ? getRankForXC(p.xc || 0).name : '—')
+                    rank: (typeof getRankForXC === 'function' ? getRankForXC(p).name : '—')
                 },
                 firstSeen, lastSeen,
                 totalMinutes: totals.minutes, totalSessions: totals.sessions,
@@ -20505,7 +20786,7 @@
 
             if (!tbody) return;
             tbody.innerHTML = players.map(p => {
-                const rank = getRankForXC(p.xc || 0);
+                const rank = getRankForXC(p);
                 return `<tr onclick="hmcShowPlayerDetail('${p.id}')">
                     <td>${p.brand || '—'}</td>
                     <td>${p.name || '—'}</td>
@@ -20540,7 +20821,7 @@
             const grid = document.getElementById('hmc-detail-grid');
             const title = document.getElementById('hmc-detail-title');
             if (!detail || !grid) return;
-            const rank = getRankForXC(player.xc || 0);
+            const rank = getRankForXC(player);
             const nextRank = getNextRank(rank);
 
             title.textContent = `${player.brand || player.name} — Player Profile`;
@@ -20616,7 +20897,7 @@
         function hmcPromotePlayer(id) {
             const player = window.PflxDataBus ? window.PflxDataBus.get(id) : PLAYERS.find(p => p.id === id);
             if (!player) return;
-            const rank = getRankForXC(player.xc || 0);
+            const rank = getRankForXC(player);
             const nextRank = getNextRank(rank);
             if (!nextRank) { alert('Player is already at max rank!'); return; }
             const updated = window.PflxDataBus.update(id, { xc: nextRank.xcUnlock }, 'hmc_promote');
@@ -21567,7 +21848,7 @@
         function pflxPlayerEvoRank() {
             var s = window.activeSession || {};
             var lvl = 0;
-            try { lvl = (typeof getRankForXC === 'function') ? ((getRankForXC(s.totalXcoin || s.xc || 0) || {}).level || 0) : 0; } catch (e) {}
+            try { lvl = (typeof getRankForXC === 'function') ? ((getRankForXC(s) || {}).level || 0) : 0; } catch (e) {}
             try { var er = parseInt(s.evoRank, 10) || 0; if (er > lvl) lvl = er; } catch (e) {}
             return lvl;
         }
@@ -23530,9 +23811,9 @@
             try {
                 let _r = null;
                 if (activeSession.rankOverride && typeof mcPflxRanks !== 'undefined' && Array.isArray(mcPflxRanks)) {
-                    _r = mcPflxRanks.find(function (r) { return r.id === activeSession.rankOverride; });
+                    _r = mcPflxRanks.find(function (r) { return r.id === activeSession.rankOverride && (!r.godTier || PflxRankEngine.isMasterHost(activeSession)); });
                 }
-                if (!_r && typeof getRankForXC === 'function') _r = getRankForXC(activeSession.xc || 0);
+                if (!_r && typeof getRankForXC === 'function') _r = getRankForXC(activeSession);
                 if (_r) {
                     activeSession.rank = _r.id || null;
                     activeSession.rankIcon = _r.icon || '';
@@ -23862,8 +24143,8 @@
 
             // ── Goal 1: rank progression ──
             try {
-                var xcNow = (s.xc || (p && p.xc) || 0);
-                var rank = (typeof getRankForXC === 'function') ? getRankForXC(xcNow) : null;
+                var xcNow = Math.max(+s.totalXcoin || 0, +(p && p.totalXcoin) || 0, +s.xc || 0, +(p && p.xc) || 0);
+                var rank = (typeof getRankForXC === 'function') ? getRankForXC(p || s) : null;
                 var next = rank && typeof getNextRank === 'function' ? getNextRank(rank) : null;
                 if (rank && next) {
                     var span = (next.xcUnlock || 0) - (rank.xcUnlock || 0);
@@ -27324,7 +27605,7 @@
             // Seed Pro Rankings with authoritative 10-tier system if empty
             if (mcPflxRanks.length === 0) {
                 mcPflxRanks = [
-                    { id:'rank-1',  level:1,  name:'Player',           icon:'👤', image:'', color:'#6a7290', group:'FOUNDATION', xcoinUnlock:1000,    xcoinMaintain:0,      checkpointsRequired:0,  badgeTypeRequirements:'Signature', specificBadgeRequirements:['Personal Branding L1','Portfolio Starter','Design Thinker L1','Digital Citizen L1','PFLX User Cert'], autoApply:{ enabled:false, trigger:'xc_threshold', effect:'auto_promote', scope:'all' }, hostControls:{ canPromote:true, canDemote:true, canOverride:true, canFreeze:false }, cohorts:[], allCohorts:true },
+                    { id:'rank-1',  level:1,  name:'Player',           icon:'👤', image:'', color:'#6a7290', group:'FOUNDATION', xcoinUnlock:1000,    xcoinMaintain:0,      checkpointsRequired:0,  badgeTypeRequirements:'Signature', specificBadgeRequirements:['Personal Branding L1','Portfolio Starter','Design Thinker L1|BrandBuilder','Digital Citizen L1','PFLX User Cert'], autoApply:{ enabled:false, trigger:'xc_threshold', effect:'auto_promote', scope:'all' }, hostControls:{ canPromote:true, canDemote:true, canOverride:true, canFreeze:false }, cohorts:[], allCohorts:true },
                     { id:'rank-2',  level:2,  name:'Advanced Player',  icon:'🛡️', image:'', color:'#4f8ef7', group:'FOUNDATION', xcoinUnlock:5000,    xcoinMaintain:3500,   checkpointsRequired:3,  badgeTypeRequirements:'Primary', specificBadgeRequirements:[], autoApply:{ enabled:false, trigger:'xc_threshold', effect:'auto_promote', scope:'all' }, hostControls:{ canPromote:true, canDemote:true, canOverride:true, canFreeze:false }, cohorts:[], allCohorts:true },
                     { id:'rank-3',  level:3,  name:'Apprentice',       icon:'🔧', image:'', color:'#a78bfa', group:'FOUNDATION', xcoinUnlock:15000,   xcoinMaintain:10000,  checkpointsRequired:5,  badgeTypeRequirements:'Primary, Premium', specificBadgeRequirements:[], autoApply:{ enabled:false, trigger:'xc_threshold', effect:'auto_promote', scope:'all' }, hostControls:{ canPromote:true, canDemote:true, canOverride:true, canFreeze:false }, cohorts:[], allCohorts:true },
                     { id:'rank-4',  level:4,  name:'Manager/Head',     icon:'📋', image:'', color:'#f5c842', group:'PRODUCTION', xcoinUnlock:50000,   xcoinMaintain:35000,  checkpointsRequired:7,  badgeTypeRequirements:'Primary, Premium, Executive', specificBadgeRequirements:[], autoApply:{ enabled:false, trigger:'xc_threshold', effect:'auto_promote', scope:'all' }, hostControls:{ canPromote:true, canDemote:true, canOverride:true, canFreeze:false }, cohorts:[], allCohorts:true },
@@ -35071,6 +35352,12 @@ function ppRenderCheckpoints(el) {
         // Returns the highest rank the player qualifies for based on XC threshold.
         // Respects per-rank cohort scoping + hostControls + player overrides.
         function mcGetEvoRankObj(player) {
+            if (player && typeof player === 'object') {
+                try { var _rr = pflxResolveRank(player, { skipNext: true }).current; if (_rr) return _rr; } catch (e) { console.warn('[rank] mcGetEvoRankObj failed', e); }
+            }
+            return _mcGetEvoRankObjXcOnly(player);
+        }
+        function _mcGetEvoRankObjXcOnly(player) {
             if (!mcPflxRanks || mcPflxRanks.length === 0) return null;
             var p = (typeof player === 'object' && player) ? player : null;
             var xc = p ? (p.totalXc || p.xc || 0) : (typeof player === 'number' ? player : 0);
@@ -35404,7 +35691,7 @@ function ppRenderCheckpoints(el) {
                     if (studioVal === 'none') { if (p.studioId) return false; }
                     else if (p.studioId !== studioVal) return false;
                 }
-                if (evoVal !== 'all' && mcGetEvoRank(p.xc) !== evoVal) return false;
+                if (evoVal !== 'all' && mcGetEvoRank(p) !== evoVal) return false;
                 if (roleVal !== 'all' && p.role !== roleVal) return false;
                 if (!isNaN(xcMin) && (p.xc || 0) < xcMin) return false;
                 if (!isNaN(xcMax) && (p.xc || 0) > xcMax) return false;
@@ -35427,7 +35714,7 @@ function ppRenderCheckpoints(el) {
                 switch (mcPlayerSortField) {
                     case 'favorite': va = a.favorite ? 1 : 0; vb = b.favorite ? 1 : 0; break;
                     case 'xc': va = a.xc || 0; vb = b.xc || 0; break;
-                    case 'evo': va = EVO_ORDER[mcGetEvoRank(a.xc)] || 0; vb = EVO_ORDER[mcGetEvoRank(b.xc)] || 0; break;
+                    case 'evo': va = EVO_ORDER[mcGetEvoRank(a)] || 0; vb = EVO_ORDER[mcGetEvoRank(b)] || 0; break;
                     case 'brand': va = (a.brand||'').toLowerCase(); vb = (b.brand||'').toLowerCase(); break;
                     case 'email': va = (a.email||'').toLowerCase(); vb = (b.email||'').toLowerCase(); break;
                     case 'cohort': va = (a.cohort||'').toLowerCase(); vb = (b.cohort||'').toLowerCase(); break;
@@ -50049,9 +50336,14 @@ function ppRenderCheckpoints(el) {
             }
 
             var currentGroup = '';
-            var html = '';
+            var _enfOn = ranks.filter(function(r) { return !r.godTier && !r.masterOnly && r.enforceRequirements !== false; }).length, _enfAll = ranks.filter(function(r) { return !r.godTier && !r.masterOnly; }).length;
+            var html = '<div style="grid-column:1/-1;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 14px;border-radius:12px;background:rgba(245,200,66,0.05);border:1px solid rgba(245,200,66,0.2);margin-bottom:6px;">' +
+                '<div style="flex:1;min-width:220px;"><div style="font-size:11px;font-weight:900;color:#f5c842;letter-spacing:0.1em;">RANK REQUIREMENTS</div>' +
+                '<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:2px;">' + (_enfOn === _enfAll ? 'Enforced on every rank: Lifetime XC + checkpoints + badges (stacking up the ladder).' : (_enfOn === 0 ? 'BYPASSED: ranks are decided by Lifetime XC only.' : 'Enforced on ' + _enfOn + ' of ' + _enfAll + ' ranks.')) + ' Per-rank toggles are in each rank; per-player bypass is in the player editor. The Master rank is reserved for the two Master Host accounts.</div></div>' +
+                '<button onclick="mcRankSetEnforceAll(false)" style="font-size:11px;padding:7px 12px;border-radius:8px;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.35);color:#f87171;cursor:pointer;font-weight:700;">Bypass all (XC only)</button>' +
+                '<button onclick="mcRankSetEnforceAll(true)" style="font-size:11px;padding:7px 12px;border-radius:8px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.35);color:#4ade80;cursor:pointer;font-weight:700;">Enforce all</button></div>';
             ranks.forEach(function(t, idx) {
-                var count = mcPlayers.filter(function(p) { return (p.xc || 0) >= (t.xcoinUnlock || 0); }).length;
+                var count = (t.godTier || t.masterOnly) ? mcPlayers.filter(function(p) { return PflxRankEngine.isMasterHost(p); }).length : mcPlayers.filter(function(p) { try { return ((mcGetEvoRankObj(p) || {}).level || 0) >= (t.level || 0); } catch (e) { return false; } }).length;
                 if (t.group !== currentGroup) {
                     currentGroup = t.group;
                     html += '<div style="grid-column:1/-1;font-size:11px;font-weight:900;color:rgba(255,255,255,0.25);letter-spacing:0.15em;margin:8px 0 2px;padding-left:4px;">' + escapeHtml(t.group || '') + '</div>';
@@ -50135,7 +50427,9 @@ function ppRenderCheckpoints(el) {
                 }
 
                 var specificReqs = Array.isArray(t.specificBadgeRequirements) ? t.specificBadgeRequirements : (t.specificBadgeRequirements ? String(t.specificBadgeRequirements).split(',').map(function(s){return s.trim();}).filter(Boolean) : []);
-                var specificLine = specificReqs.length > 0 ? '<div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:4px;">Req: ' + escapeHtml(specificReqs.join(', ')) + '</div>' : '';
+                var specificLine = specificReqs.length > 0 ? '<div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:4px;">Req: ' + escapeHtml(specificReqs.map(function(x){return String(x).split('|').join(' or ');}).join(', ')) + '</div>' : '';
+                var _enfTag = (t.godTier || t.masterOnly) ? '<div style="font-size:10px;color:#ff66ff;margin-top:4px;font-weight:700;">MASTER HOST ONLY &middot; never assigned by XC, badges or overrides</div>' : '<div style="font-size:10px;margin-top:4px;font-weight:700;color:' + (t.enforceRequirements === false ? '#f87171' : '#4ade80') + ';">' + (t.enforceRequirements === false ? 'XC ONLY (requirements bypassed)' : 'REQUIREMENTS ENFORCED') + (t.stackRequirements === false ? '' : ' &middot; STACKED') + '</div>';
+                specificLine = _enfTag + specificLine;
 
                 // ── Rank privileges (tax / stake / share / abilities) ──
                 var lvl = t.level || 0;
@@ -50288,12 +50582,25 @@ function ppRenderCheckpoints(el) {
                 host.innerHTML = '<span style="font-size:10px;color:rgba(255,255,255,0.25);">No specific badges required.</span>';
                 return;
             }
-            host.innerHTML = list.map(function(name) {
-                return '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:18px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.3);color:#86efac;font-size:11px;font-weight:700;">' +
-                    escapeHtml(name) +
-                    '<span onclick="mcRankRemoveSpecificBadge(\'' + name.replace(/'/g, '\\\'') + '\')" style="cursor:pointer;opacity:0.7;font-size:13px;line-height:1;">&times;</span>' +
+            host.innerHTML = list.map(function(name, i) {
+                var shown = name.split('|').map(function(x) { return x.trim(); }).join(' or ');
+                var armed = window._mcRankAltTarget === name;
+                return '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:18px;background:rgba(34,197,94,0.12);border:1px solid ' + (armed ? '#67e8f9' : 'rgba(34,197,94,0.3)') + ';color:#86efac;font-size:11px;font-weight:700;">' +
+                    escapeHtml(shown) +
+                    '<span title="Add an alternative badge (either one counts)" onclick="mcRankAltStart(' + i + ')" style="cursor:pointer;font-size:10px;padding:0 5px;border-radius:8px;background:rgba(0,212,255,0.15);color:#67e8f9;">+ or</span>' +
+                    '<span onclick="mcRankRemoveSpecificBadge(' + i + ')" style="cursor:pointer;opacity:0.7;font-size:13px;line-height:1;">&times;</span>' +
                     '</span>';
             }).join('');
+        }
+
+        function mcRankAltStart(i) {
+            var hidden = document.getElementById('mc-rank-specific');
+            var list = ((hidden && hidden.value) || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+            window._mcRankAltTarget = list[i] || null;
+            var pk = document.getElementById('mc-rank-specific-picker');
+            if (pk && pk.options[0]) pk.options[0].text = window._mcRankAltTarget ? ('+ Pick the alternative for "' + list[i].split('|').join(' or ') + '"…') : '+ Add a badge requirement…';
+            mcRankRenderSpecificPills();
+            if (pk) { try { pk.focus(); } catch (e) {} }
         }
 
         function mcRankAddSpecificBadge(sel) {
@@ -50302,20 +50609,40 @@ function ppRenderCheckpoints(el) {
             var hidden = document.getElementById('mc-rank-specific');
             if (!hidden) return;
             var list = (hidden.value || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
-            if (list.indexOf(val) < 0) list.push(val);
+            var alt = window._mcRankAltTarget;
+            var at = alt ? list.indexOf(alt) : -1;
+            if (at >= 0) {
+                var parts = alt.split('|');
+                if (parts.indexOf(val) < 0) parts.push(val);
+                list[at] = parts.join('|');
+                window._mcRankAltTarget = null;
+                if (sel.options[0]) sel.options[0].text = '+ Add a badge requirement…';
+            } else if (list.indexOf(val) < 0) list.push(val);
             hidden.value = list.join(', ');
             sel.value = '';
             mcRankRenderSpecificPills();
         }
 
-        function mcRankRemoveSpecificBadge(name) {
+        function mcRankRemoveSpecificBadge(i) {
             var hidden = document.getElementById('mc-rank-specific');
             if (!hidden) return;
             var list = (hidden.value || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
-            list = list.filter(function(x) { return x !== name; });
+            list.splice(i, 1);
+            window._mcRankAltTarget = null;
             hidden.value = list.join(', ');
             mcRankRenderSpecificPills();
         }
+        window.mcRankAltStart = mcRankAltStart;
+        window.mcRankSetEnforceAll = function (on) {
+            try { if (typeof isHost === 'function' && !isHost()) return; } catch (e) {}
+            if (!confirm(on ? 'Enforce badge + checkpoint requirements on EVERY rank again?' : 'BYPASS: ranks will be decided by Lifetime XC only (badge + checkpoint requirements ignored) for everyone. Continue?')) return;
+            mcPflxRanks.forEach(function (r) { if (!r.godTier && !r.masterOnly) r.enforceRequirements = !!on; });
+            mcSaveData('pflxranks');
+            try { _pflxRankFactsCache = {}; } catch (e) {}
+            mcRenderRankings();
+            if (typeof mcBroadcastToApps === 'function') mcBroadcastToApps('pflx_ranks_updated', mcPflxRanks);
+        };
+
 
         // ─ Cohort control matrix ─
         // Per-cohort controls stored on rank.cohortControls: { [cohortId]: { canPromote, canDemote, canOverride, canFreeze } }
@@ -50393,6 +50720,7 @@ function ppRenderCheckpoints(el) {
             var form = document.getElementById('mc-rank-form');
             if (!form) return;
             form.style.display = 'block';
+            (function(){ var e1=document.getElementById('mc-rank-enforce'), e2=document.getElementById('mc-rank-stack'); if(e1) e1.checked=true; if(e2) e2.checked=true; window._mcRankAltTarget=null; var pk=document.getElementById('mc-rank-specific-picker'); if(pk&&pk.options[0]) pk.options[0].text='+ Add a badge requirement…'; })();
 
             // Populate badge picker + types (pulled from mcBadges)
             mcRankRenderBadgePicker();
@@ -50409,6 +50737,8 @@ function ppRenderCheckpoints(el) {
                 el = document.getElementById('mc-rank-unlock'); if (el) el.value = r.xcoinUnlock || 0;
                 el = document.getElementById('mc-rank-maintain'); if (el) el.value = r.xcoinMaintain || 0;
                 el = document.getElementById('mc-rank-cp'); if (el) el.value = r.checkpointsRequired || 0;
+                el = document.getElementById('mc-rank-enforce'); if (el) el.checked = r.enforceRequirements !== false;
+                el = document.getElementById('mc-rank-stack'); if (el) el.checked = r.stackRequirements !== false;
                 el = document.getElementById('mc-rank-badges'); if (el) el.value = Array.isArray(r.badgeTypeRequirements) ? r.badgeTypeRequirements.join(', ') : (r.badgeTypeRequirements || '');
                 el = document.getElementById('mc-rank-specific'); if (el) el.value = Array.isArray(r.specificBadgeRequirements) ? r.specificBadgeRequirements.join(', ') : (r.specificBadgeRequirements || '');
                 // Re-render badge type chips + specific pills with the loaded values
@@ -50518,6 +50848,8 @@ function ppRenderCheckpoints(el) {
                 xcoinUnlock: parseInt(document.getElementById('mc-rank-unlock')?.value || '0', 10),
                 xcoinMaintain: parseInt(document.getElementById('mc-rank-maintain')?.value || '0', 10),
                 checkpointsRequired: parseInt(document.getElementById('mc-rank-cp')?.value || '0', 10),
+                enforceRequirements: document.getElementById('mc-rank-enforce') ? document.getElementById('mc-rank-enforce').checked : true,
+                stackRequirements: document.getElementById('mc-rank-stack') ? document.getElementById('mc-rank-stack').checked : true,
                 badgeTypeRequirements: (document.getElementById('mc-rank-badges')?.value || '').split(',').map(function(s){return s.trim();}).filter(Boolean),
                 specificBadgeRequirements: (document.getElementById('mc-rank-specific')?.value || '').split(',').map(function(s){return s.trim();}).filter(Boolean),
                 autoApply: {
@@ -50537,10 +50869,11 @@ function ppRenderCheckpoints(el) {
                 allCohorts: document.getElementById('mc-rank-all-cohorts')?.checked || false
             };
 
-            if (mcRankEditIndex >= 0) { mcPflxRanks[mcRankEditIndex] = obj; }
+            if (mcRankEditIndex >= 0) { mcPflxRanks[mcRankEditIndex] = Object.assign({}, mcPflxRanks[mcRankEditIndex], obj); }   // merge: keep godTier / masterOnly / abilities
             else { mcPflxRanks.push(obj); }
             mcSaveData('pflxranks');
-            mcCancelRankForm();
+            try { _pflxRankFactsCache = {}; } catch (e) {}
+                mcCancelRankForm();
             mcRenderRankings();
             if (typeof mcBroadcastToApps === 'function') mcBroadcastToApps('pflx_ranks_updated', mcPflxRanks);
         }
@@ -62770,7 +63103,7 @@ function ppRenderCheckpoints(el) {
                 const name = activeSession ? activeSession.name : 'Player';
                 const brand = activeSession ? activeSession.brand : 'Unknown';
                 const xc = activeSession ? (activeSession.xc || 0) : 0;
-                const rank = getRankForXC(xc);
+                const rank = getRankForXC(activeSession || xc);
                 const nextRank = getNextRank(rank);
                 const role = activeSession ? (activeSession.role || 'Student') : 'Student';
                 const cohort = activeSession ? (activeSession.cohort || 'PlayerPool') : 'PlayerPool';
@@ -63884,7 +64217,7 @@ RESPONSE RULES:
             progress: () => {
                 if (!activeSession) return "Log in to see your progress!";
                 const xc = activeSession.xc || 0;
-                const rank = getRankForXC(xc);
+                const rank = getRankForXC(activeSession);
                 const next = getNextRank(rank);
                 let msg = `📊 ${activeSession.name}'s Progress:\n• X-Coin: ${xc.toLocaleString()} XC\n• Rank: ${rank.icon} ${rank.name} (Level ${rank.level})`;
                 if (next) msg += `\n• Next Rank: ${next.name} at ${next.xcUnlock.toLocaleString()} XC`;
@@ -63895,7 +64228,7 @@ RESPONSE RULES:
             rank: () => {
                 if (!activeSession) return "Log in to see your rank!";
                 const xc = activeSession.xc || 0;
-                const rank = getRankForXC(xc);
+                const rank = getRankForXC(activeSession);
                 return `${rank.icon} You're currently ${rank.name} (Level ${rank.level}). Keep earning XC to rank up!`;
             },
             greeting: () => {
@@ -65584,7 +65917,7 @@ RESPONSE RULES:
             // Meta tags — role, cohort, XC, pathway
             const metaTags = document.getElementById('portfolio-meta-tags');
             if (metaTags) {
-                const rank = typeof getRankForXC === 'function' ? getRankForXC(user.totalXcoin || 0) : { name: 'Player', icon: '', level: 1 };
+                const rank = typeof getRankForXC === 'function' ? getRankForXC(user) : { name: 'Player', icon: '', level: 1 };
                 const tags = [];
                 tags.push(`<span style="background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.25);padding:5px 14px;border-radius:20px;font-size:12px;font-weight:700;color:#22c55e;">${rank.icon || '&#x2B50;'} ${rank.name}</span>`);
                 tags.push(`<span style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);padding:5px 14px;border-radius:20px;font-size:12px;font-weight:700;color:rgba(255,255,255,0.5);">${escapeHtml(user.cohort)}</span>`);
@@ -65608,7 +65941,7 @@ RESPONSE RULES:
             // Stats — 6 columns now with richer data
             const statsEl = document.getElementById('portfolio-stats');
             if (statsEl) {
-                const rank = typeof getRankForXC === 'function' ? getRankForXC(user.totalXcoin || 0) : { name: 'Player', icon: '', level: 1 };
+                const rank = typeof getRankForXC === 'function' ? getRankForXC(user) : { name: 'Player', icon: '', level: 1 };
                 const bc = user.badgeCounts || {};
                 const totalBadges = (bc.primary||0) + (bc.premium||0) + (bc.executive||0) + (bc.signature||0);
                 // Aug 19 (Kaitlin: Portfolio shows 4 badges, X-Coin home shows
@@ -66414,7 +66747,7 @@ RESPONSE RULES:
             var badgeCount = Math.max(totalBadges, player.digitalBadges || 0);
             var xc = Number(player.xc || player.totalXcoin || 0);
             var totalXcoin = Number(player.totalXcoin || player.xc || 0);
-            var rank = (typeof getRankForXC === 'function') ? getRankForXC(totalXcoin) : { name: 'Player', icon: '', level: 1 };
+            var rank = (typeof getRankForXC === 'function') ? getRankForXC(player) : { name: 'Player', icon: '', level: 1 };
             var cohort = (Array.isArray(player.cohorts) ? player.cohorts.join(', ') : player.cohort) || 'PlayerPool';
             var taskStats = pflxPlayerTaskStats(player);
             var projects = Array.isArray(data.projects) ? data.projects : [];
@@ -67834,7 +68167,7 @@ RESPONSE RULES:
                 var badges = (bc.primary||0)+(bc.premium||0)+(bc.executive||0)+(bc.signature||0);
                 if (!badges && typeof p?.digitalBadges === 'number') badges = p.digitalBadges;
                 var totalXc = (p && typeof p.totalXcoin === 'number') ? p.totalXcoin : xc;
-                var rank = (typeof getRankForXC === 'function') ? getRankForXC(totalXc || 0) : null;
+                var rank = (typeof getRankForXC === 'function') ? getRankForXC(p || s) : null;
                 var rankLabel = rank ? (rank.name || '—') : '—';
 
                 var nameEl = document.getElementById('pd-name'); if (nameEl) nameEl.textContent = name;
@@ -70141,7 +70474,7 @@ RESPONSE RULES:
                     rank = { icon: s.rankIcon, name: s.rankName, level: s.rankLevel || 1, xcUnlock: 0 };
                 }
             } catch (e) {}
-            if (!rank) rank = getRankForXC(xc);
+            if (!rank) rank = getRankForXC((typeof activeSession === 'object' && activeSession) ? activeSession : xc);
             const nextRank = getNextRank(rank);
 
             // Real player data only — mock checkpoints/projects/tasks removed.
@@ -72346,6 +72679,22 @@ RESPONSE RULES:
                         }
                     }
 
+                    // ── Pro Rank report: X-Coin asks for one player's rank checklist and/or the whole-roster rank index ──
+                    if (msg.type === 'pflx_rank_get') {
+                        var srcRk = ev.source;
+                        if (srcRk && srcRk.postMessage) {
+                            var rkReport = null, rkIndex = null;
+                            try {
+                                if (msg.playerId) {
+                                    var rkP = pflxRankRec({ id: msg.playerId });
+                                    if (!rkP && window.activeSession && window.activeSession.id === msg.playerId) rkP = window.activeSession;
+                                    rkReport = pflxRankReport(rkP || { id: msg.playerId });
+                                }
+                                if (msg.all) rkIndex = pflxRankIndex();
+                            } catch (eRk) { console.warn('[rank] report failed', eRk); }
+                            srcRk.postMessage(JSON.stringify({ type: 'pflx_rank_report', playerId: msg.playerId || null, report: rkReport, index: rkIndex }), '*');
+                        }
+                    }
                     // ── PflxDataBus.mc: sub-app reads Mission Control data ──
                     // sub → Console: "give me tasks/checkpoints/projects/seasons/jobs/submissions"
                     if (msg.type === 'pflx_mc_get' && msg.key) {
@@ -77303,9 +77652,9 @@ RESPONSE RULES:
             try {
                 var _r = null;
                 if (s.rankOverride && typeof mcPflxRanks !== 'undefined' && Array.isArray(mcPflxRanks)) {
-                    _r = mcPflxRanks.find(function (r) { return r.id === s.rankOverride; });
+                    _r = mcPflxRanks.find(function (r) { return r.id === s.rankOverride && (!r.godTier || PflxRankEngine.isMasterHost(s)); });
                 }
-                if (!_r && typeof getRankForXC === 'function') _r = getRankForXC(s.xc || 0);
+                if (!_r && typeof getRankForXC === 'function') _r = getRankForXC(s);
                 if (_r) {
                     s.rank = _r.id || null;
                     s.rankIcon = _r.icon || '';
@@ -79495,9 +79844,9 @@ RESPONSE RULES:
                 // Resolve rank (override wins, else by XC) and propagate the full rank object
                 var resolvedRank = null;
                 if (player.rankOverride && typeof mcPflxRanks !== 'undefined' && Array.isArray(mcPflxRanks)) {
-                    resolvedRank = mcPflxRanks.find(function (r) { return r.id === player.rankOverride; });
+                    resolvedRank = mcPflxRanks.find(function (r) { return r.id === player.rankOverride && (!r.godTier || PflxRankEngine.isMasterHost(player)); });
                 }
-                if (!resolvedRank && typeof getRankForXC === 'function') resolvedRank = getRankForXC(player.xc || 0);
+                if (!resolvedRank && typeof getRankForXC === 'function') resolvedRank = getRankForXC(player);
                 if (resolvedRank) {
                     window.activeSession.rank = resolvedRank.id || null;
                     window.activeSession.rankIcon = resolvedRank.icon || '';
@@ -79688,7 +80037,7 @@ RESPONSE RULES:
                 xc: 1, totalXcoin: 1, digitalBadges: 1, badgeCounts: 1,
                 badges: 1, slogan: 1, image: 1, interests: 1,
                 studioId: 1, pathway: 1, diagnosticResult: 1,
-                level: 1, rankOverride: 1, activity: 1,
+                level: 1, rankOverride: 1, rankBypass: 1, activity: 1,
                 // Queue of X-Coin event popups a player hasn't seen yet (they were
                 // offline when the badge/upgrade/fine landed). Cloud-syncs on the
                 // player record so it replays on their next login, any device.
@@ -80090,8 +80439,8 @@ RESPONSE RULES:
                 // modifiers, sub-app messages).
                 try {
                     if (typeof getRankForXC === 'function') {
-                        var _rankBefore = getRankForXC(_xcBeforeAward);
-                        var _rankAfter = getRankForXC(updated.xc || 0);
+                        var _rankBefore = getRankForXC(updated, { nocache: true, xcDelta: Math.max(0, totalXcDelta || 0), excludeBadge: (awardObj.badge && awardObj.badge.id) || '' });
+                        var _rankAfter = getRankForXC(updated, { nocache: true });
                         if (_rankAfter && (!_rankBefore || (_rankAfter.level || 0) > (_rankBefore.level || 0))) {
                             if (typeof window.pflxEmitXcoinEvent === 'function') {
                                 window.pflxEmitXcoinEvent(playerId, 'rank', {
@@ -81720,7 +82069,7 @@ RESPONSE RULES:
             if (!p) return;
             var cohortsArr = Array.isArray(p.cohorts) ? p.cohorts : (p.cohort || 'PlayerPool').split(/[,;]/).map(function (s) { return s.trim(); }).filter(Boolean);
             var ranks = (typeof mcPflxRanks !== 'undefined' && mcPflxRanks) || [];
-            var rankOpts = '<option value="">Auto (by XC)</option>' + ranks.map(function (r) {
+            var rankOpts = '<option value="">Auto (by XC + requirements)</option>' + ranks.filter(function (r) { return !r.godTier || PflxRankEngine.isMasterHost(p); }).map(function (r) {
                 return '<option value="' + r.id + '"' + (p.rankOverride === r.id ? ' selected' : '') + '>' + (r.icon || '') + ' L' + r.level + ' · ' + r.name + '</option>';
             }).join('');
 
@@ -81800,6 +82149,7 @@ RESPONSE RULES:
                   accessSelectHtml('pm-ed-access', accessNow) +
                   xcStepperFld('pm-ed-xc', 'XC', '1 / span 2', p.xc || 0) +
                   '<div style="display:flex;flex-direction:column;gap:4px;font-family:Rajdhani,sans-serif;font-size:11px;color:#8a92b0;grid-column:1 / span 2;">RANK OVERRIDE (optional — if set, overrides XC-derived rank)<select id="pm-ed-rank" style="' + inputCss() + '">' + rankOpts + '</select></div>' +
+                  '<label style="display:flex;align-items:center;gap:6px;font-family:Rajdhani,sans-serif;font-size:11px;color:#8a92b0;grid-column:1 / span 2;"><input type="checkbox" id="pm-ed-rankbypass"' + (p.rankBypass ? ' checked' : '') + '> RANK BYPASS — rank this player by Lifetime XC only (ignore badge &amp; checkpoint requirements)</label>' +
                   '<div style="display:flex;flex-direction:column;gap:4px;font-family:Rajdhani,sans-serif;font-size:11px;color:#8a92b0;grid-column:1 / span 2;">STARTUP STUDIO (house)<select id="pm-ed-studio" style="' + inputCss() + '">' + studioOpts + '</select></div>' +
                   '<label style="grid-column:1 / span 2;display:flex;align-items:center;gap:8px;font-family:Rajdhani,sans-serif;font-size:13px;color:#8a92b0;"><input type="checkbox" id="pm-ed-bypass"' + (p.onboardingComplete !== false ? ' checked' : '') + '> Onboarding complete (bypass wizard at next login)</label>' +
                   '<label style="grid-column:1 / span 2;display:flex;align-items:center;gap:8px;font-family:Rajdhani,sans-serif;font-size:13px;color:#8a92b0;"><input type="checkbox" id="pm-ed-frozen"' + (p.frozen ? ' checked' : '') + '> Account frozen</label>' +
@@ -81986,6 +82336,8 @@ RESPONSE RULES:
                         // Level removed from UI — derived from rank now
                         var rOv = card.querySelector('#pm-ed-rank').value;
                         p.rankOverride = rOv || null;
+                        var _rbEl = card.querySelector('#pm-ed-rankbypass'); if (_rbEl) p.rankBypass = !!_rbEl.checked;
+                        try { _pflxRankFactsCache = {}; } catch (e) {}
                         // Startup Studio (house) reassignment
                         var sSel = card.querySelector('#pm-ed-studio');
                         if (sSel) p.studioId = sSel.value || null;
@@ -82137,9 +82489,9 @@ RESPONSE RULES:
                 // Resolve rank — rankOverride wins; otherwise derive from XC.
                 var rank = null;
                 if (p.rankOverride && typeof mcPflxRanks !== 'undefined' && Array.isArray(mcPflxRanks)) {
-                    rank = mcPflxRanks.find(function (r) { return r.id === p.rankOverride; });
+                    rank = mcPflxRanks.find(function (r) { return r.id === p.rankOverride && (!r.godTier || PflxRankEngine.isMasterHost(p)); });
                 }
-                if (!rank) rank = (typeof getRankForXC === 'function') ? getRankForXC(p.xc || 0) : { icon: '', name: '' };
+                if (!rank) rank = (typeof getRankForXC === 'function') ? getRankForXC(p) : { icon: '', name: '' };
                 // Access-level chip — derived live so stale roleDisplay never lies
                 var roleLabel = accessMetaOf(accessOf(p)).short;
                 var isHost = isHostRole(p.role);
