@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 276;
+      window.PFLX_PATCH   = 277;
       window.PFLX_BUILD   = '2026.10';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -16233,8 +16233,11 @@
                     var hashed = loadFromHash();
                     if (hashed) return Promise.resolve(hashed);
                     var local = loadFromLocal();
-                    if (local) return Promise.resolve(local);
-                    return loadFromSupabase();
+                    var isPreview = false;
+                    try { isPreview = sessionStorage.getItem('pflx_preview_return') === '1'; } catch (e) {}
+                    if (local && isPreview) return Promise.resolve(local);
+                    // v277: a stale same-device copy used to beat the published cloud snapshot, so the owner saw an old page.
+                    return loadFromSupabase().then(function (cloud) { return cloud || local || null; });
                 }
 
                 function injectExitPreviewButton() {
@@ -66762,10 +66765,21 @@ RESPONSE RULES:
                     if (res && res.data && res.data.data) return { player: player, data: res.data.data };
                     var legacy = await client.from('app_data').select('data').eq('key', 'portfolio_' + id).maybeSingle();
                     if (legacy && legacy.data && legacy.data.data) return { player: player, data: legacy.data.data };
+                    // v277: the owner's portfolio editor saves under the BRAND (pflx_portfolio_<brand>), the viewer only
+                    // looked under the player id, so players whose portfolio was edited as a brand showed "No projects".
+                    var __alts = [];
+                    [player && player.brand, player && player.brandName, idOrBrand].forEach(function (b) { if (!b) return; [b, String(b).toUpperCase(), String(b).toLowerCase()].forEach(function (v) { if (v !== id && __alts.indexOf(v) < 0) __alts.push(v); }); });
+                    for (var __ai = 0; __ai < __alts.length; __ai++) {
+                        var r1 = await client.from('app_data').select('data').eq('key', 'pflx_portfolio_' + __alts[__ai]).maybeSingle();
+                        if (r1 && r1.data && r1.data.data) return { player: player, data: r1.data.data };
+                        var r2 = await client.from('app_data').select('data').eq('key', 'portfolio_' + __alts[__ai]).maybeSingle();
+                        if (r2 && r2.data && r2.data.data) return { player: player, data: r2.data.data };
+                    }
                 }
             } catch (e) { console.warn('[portfolio viewer] cloud fetch failed', e); }
             try {
                 var raw = localStorage.getItem('pflx_portfolio_' + id);
+                if (!raw && player && (player.brand || player.brandName)) raw = localStorage.getItem('pflx_portfolio_' + (player.brand || player.brandName));
                 if (raw) return { player: player, data: JSON.parse(raw) };
             } catch (e) {}
             return { player: player, data: null };
@@ -66831,6 +66845,8 @@ RESPONSE RULES:
             // Match whichever the pflxPlayerBadgesHtml() badge grid below
             // actually ends up rendering (same v1.77 top-up logic).
             var badgeCount = Math.max(totalBadges, player.digitalBadges || 0);
+            var __badgesHtml = pflxPlayerBadgesHtml(player);
+            try { var __bs = window._pflxLastBadgeStats; if (__bs && __bs.hidden && __bs.id === player.id) badgeCount = __bs.total; } catch (e) {}
             var xc = Number(player.xc || player.totalXcoin || 0);
             var totalXcoin = Number(player.totalXcoin || player.xc || 0);
             var rank = (typeof getRankForXC === 'function') ? getRankForXC(player) : { name: 'Player', icon: '', level: 1 };
@@ -66918,7 +66934,7 @@ RESPONSE RULES:
                 '</div>' +
                 '<div>' +
                     '<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;"><span style="font-size:16px;">&#x1F3C5;</span><h3 style="margin:0;font-size:14px;font-weight:800;color:#f5c842;letter-spacing:0.08em;font-family:\'Orbitron\',sans-serif;">BADGE PORTFOLIO</h3></div>' +
-                    pflxPlayerBadgesHtml(player) +
+                    __badgesHtml +
                 '</div>';
         }
 
@@ -67123,6 +67139,7 @@ RESPONSE RULES:
                 earned.push({ id: 'legacy-digitalBadges-' + li, name: 'Primary Badge #' + (li + 1), icon: '&#x1F7E6;', xc: 0 });
             }
 
+            window._pflxLastBadgeStats = { id: player && player.id, total: earned.length, hidden: __hasHid };
             if (totalBadges === 0 && earned.length === 0) {
                 return '<p style="color:rgba(255,255,255,0.3);font-size:13px;text-align:center;padding:30px 0;">No badges earned yet.</p>';
             }
