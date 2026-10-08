@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 278;
+      window.PFLX_PATCH   = 279;
       window.PFLX_BUILD   = '2026.10';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -18204,6 +18204,73 @@
             } catch (err) { /* NotAllowedError etc. — typing still works */ }
         }, true);
 
+
+        // ═══════════ COHORT SIMPLIFICATION (v279) ═══════════
+        // One canonical cohort vocabulary for the whole Console:
+        //  * 'Player Pool' / 'PlayerPool' are ONE cohort ('PlayerPool') — the default every player
+        //    belongs to. Selecting PlayerPool in any filter / assignment means EVERY player.
+        //  * Archived Core N / DD Core N / DD Studio N cohorts no longer exist. A player who still
+        //    carries one is returned to Falcon Studios (ASD email number <= 30) or
+        //    Falcon Studios (MS Division) (>= 31).
+        //  * A player in two cohorts is matched by EACH of them; cohort strings are never offered
+        //    as a merged option ("Falcon Studios, PlayerPool" is two cohorts, not one).
+        window.pflxCohortCanon = function (name) {
+            var s0 = String(name == null ? '' : name).trim();
+            if (!s0) return '';
+            if (s0.toLowerCase().replace(/\s+/g, '') === 'playerpool') return 'PlayerPool';
+            return s0;
+        };
+        window.pflxCohortRetired = function (name) {
+            return /^(dd\s*)?(core|studio)\s*\d+$/i.test(String(name == null ? '' : name).trim());
+        };
+        window.pflxCohortFromEmail = function (p) {
+            var m = /\.(\d{2})@(?:[a-z0-9-]+\.)*asdubai\.org$/i.exec(String((p && p.email) || '').trim());
+            if (!m) return '';
+            return parseInt(m[1], 10) <= 30 ? 'Falcon Studios' : 'Falcon Studios (MS Division)';
+        };
+        window.pflxPlayerCohortList = function (p) {
+            if (!p) return [];
+            var raw = [];
+            if (Array.isArray(p.cohorts)) raw = raw.concat(p.cohorts);
+            if (p.cohort != null) raw.push(p.cohort);
+            var out = [], seen = {}, hadRetired = false;
+            raw.forEach(function (v) {
+                String(v == null ? '' : v).split(/[,;]/).forEach(function (part) {
+                    var c = window.pflxCohortCanon(part);
+                    if (!c) return;
+                    if (window.pflxCohortRetired(c)) { hadRetired = true; return; }
+                    var k = c.toLowerCase();
+                    if (seen[k]) return;
+                    seen[k] = 1; out.push(c);
+                });
+            });
+            if (hadRetired && !out.some(function (c) { return /^falcon studios/i.test(c); })) {
+                var f = window.pflxCohortFromEmail(p);
+                if (f) out.push(f);
+            }
+            return out;
+        };
+        window.pflxPlayerInCohort = function (p, name) {
+            var c = window.pflxCohortCanon(name);
+            if (!c || !p) return false;
+            if (c === 'PlayerPool') return (p.role || 'player') === 'player';
+            var k = c.toLowerCase();
+            return window.pflxPlayerCohortList(p).some(function (x) { return x.toLowerCase() === k; });
+        };
+        // Clean the STORED cohort fields on a record. Returns true when something changed.
+        window.pflxNormalizePlayerCohorts = function (p) {
+            if (!p || p.godTier) return false;
+            var list = window.pflxPlayerCohortList(p);
+            if (!list.length && (p.role || 'player') === 'player') list = ['PlayerPool'];
+            if (!list.length) return false;
+            var joined = list.join(', ');
+            var arrDiff = Array.isArray(p.cohorts) && p.cohorts.join('|') !== list.join('|');
+            if (p.cohort === joined && !arrDiff) return false;
+            p.cohort = joined;
+            p.cohorts = list;
+            return true;
+        };
+
         // ═══════════ COHORT HUB — single source of truth for cohorts (July 10) ═══════════
         // Before this, cohorts lived in THREE places that drifted apart: the
         // hard-coded COHORTS registry, ORGANIZATIONS[*].cohorts arrays, and
@@ -18247,8 +18314,7 @@
             function tight(s) { return norm(s).replace(/\s+/g, ''); }   // duplicate detector ('Player Pool' ≈ 'PlayerPool')
             function roster() { return (typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) ? PLAYERS : []; }
             function playerCohortsOf(p) {
-                if (Array.isArray(p.cohorts) && p.cohorts.length) return p.cohorts;
-                return String(p.cohort || '').split(/[,;]/).map(function (s) { return s.trim(); }).filter(Boolean);
+                return window.pflxPlayerCohortList(p);
             }
             function defaultDef(name, orgKey) {
                 return { name: name, type: orgKey ? 'org' : 'base', org: orgKey || null,
@@ -18271,20 +18337,27 @@
             function list() {
                 var map = {};
                 function touch(name, src) {
+                    name = window.pflxCohortCanon(name);
+                    if (window.pflxCohortRetired(name)) return null;
                     var n = norm(name); if (!n) return null;
                     if (!map[n]) map[n] = { name: name, norm: n, tight: tight(name), variants: [], members: 0, registered: false, org: null };
                     var it = map[n];
                     if (it.variants.indexOf(name) < 0) it.variants.push(name);
                     return it;
                 }
-                Object.keys(COHORTS).forEach(function (k) { var it = touch(k); if (it) { it.registered = true; it.name = k; } });
+                Object.keys(COHORTS).forEach(function (k) { var it = touch(k); if (it) { it.registered = true; it.name = window.pflxCohortCanon(k); } });
                 Object.keys(ORGANIZATIONS).forEach(function (o) {
-                    (ORGANIZATIONS[o].cohorts || []).forEach(function (c) { var it = touch(c); if (it && !it.registered) it.name = c; });
+                    (ORGANIZATIONS[o].cohorts || []).forEach(function (c) { var it = touch(c); if (it && !it.registered) it.name = window.pflxCohortCanon(c); });
                 });
                 roster().forEach(function (p) {
                     if (!p || p.godTier) return;
                     playerCohortsOf(p).forEach(function (c) { var it = touch(c); if (it) it.members++; });
                 });
+                // PlayerPool is the ONE default cohort: it always exists and contains every player.
+                (function () {
+                    var pp = touch('PlayerPool');
+                    if (pp) { pp.registered = true; pp.name = 'PlayerPool'; pp.members = roster().filter(function (p) { return p && !p.godTier && (p.role || 'player') === 'player'; }).length; }
+                })();
                 var arr = Object.keys(map).map(function (n) { var it = map[n]; it.org = orgOfName(it.name); return it; });
                 // flag possible duplicates (same tight form, different norm — e.g. spacing)
                 arr.forEach(function (a) {
@@ -19017,8 +19090,7 @@
             var normSet = {};
             cohortNames.forEach(function (c) { normSet[String(c).trim().toLowerCase()] = true; });
             function playerCohorts(p) {
-                if (Array.isArray(p.cohorts) && p.cohorts.length) return p.cohorts;
-                return String(p.cohort || '').split(/[,;]/).map(function (s) { return s.trim(); }).filter(Boolean);
+                return window.pflxPlayerCohortList(p);
             }
             var roster = (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers) ? mcPlayers : []).filter(function (p) {
                 if (!p || p.godTier) return false;
@@ -19132,7 +19204,7 @@
             const players = PLAYERS.filter(p => p.role === 'player');
             const claimed = players.filter(p => p.claimed);
             const totalXC = players.reduce((sum, p) => sum + (p.xc || 0), 0);
-            const cohorts = [...new Set(players.map(p => p.cohort).filter(Boolean))];
+            const cohorts = [...new Set(players.reduce((a, p) => a.concat(window.pflxPlayerCohortList(p)), []))];
 
             const el = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
             el('hmc-total-players', players.length);
@@ -20783,7 +20855,7 @@
             let players = PLAYERS.filter(p => p && !p.godTier &&
                 (p.role === 'player' || (window.pflxIsHostRole && window.pflxIsHostRole(p.role))));
             players = players.filter(_pflxPlayerVisible); // Phase 3b: cohort/scope visibility
-            if (cohortFilter !== 'all') players = players.filter(p => p.cohort === cohortFilter);
+            if (cohortFilter !== 'all') players = players.filter(p => window.pflxPlayerInCohort(p, cohortFilter));
             if (search) players = players.filter(p =>
                 (p.brand || '').toLowerCase().includes(search) ||
                 (p.name || '').toLowerCase().includes(search) ||
@@ -21502,7 +21574,7 @@
             }
 
             // Stats
-            const members = PLAYERS.filter(p => p.cohort === key);
+            const members = PLAYERS.filter(p => window.pflxPlayerInCohort(p, key));
             document.getElementById('cohort-stat-members').textContent = members.length;
             document.getElementById('cohort-stat-claimed').textContent = members.filter(p => p.claimed).length;
             document.getElementById('cohort-stat-pending').textContent = members.filter(p => !p.claimed).length;
@@ -21869,8 +21941,7 @@
                 // Build the player's cohort list — supports both legacy
                 // single-string `cohort` and the v2 multi-cohort array.
                 var cohorts = [];
-                if (Array.isArray(s.cohorts)) cohorts = s.cohorts.slice();
-                else if (s.cohort) cohorts = String(s.cohort).split(/\s*,\s*/);
+                cohorts = window.pflxPlayerCohortList(s);
                 if (!cohorts.length) cohorts = ['PlayerPool'];
                 // ── Org → Cohort cascade ──
                 // resolveCohortApp returns one of three states:
@@ -21933,8 +22004,7 @@
                 var role = String(s.role || '').toLowerCase();
                 if (/admin|host|teacher|instructor|master/.test(role)) return false;
                 var cohorts = [];
-                if (Array.isArray(s.cohorts)) cohorts = s.cohorts.slice();
-                else if (s.cohort) cohorts = String(s.cohort).split(/\s*,\s*/);
+                cohorts = window.pflxPlayerCohortList(s);
                 if (!cohorts.length) cohorts = ['PlayerPool'];
                 function resolveCohortXLiveOnly(cohortName) {
                     var ov = pflxOverrideByName(cohortName);
@@ -28591,6 +28661,7 @@
                     var pl = PLAYERS.find(function (x) { return x && (x.id === mp.id || (x.brand && mp.brand && x.brand.toUpperCase() === mp.brand.toUpperCase())); });
                     if (!pl) return; // net-new players are handled by _mcBackfillMissingPlayerRows
                     var dirty = false;
+                    try { if (window.pflxNormalizePlayerCohorts(mp)) { mp.updatedAt = Date.now(); } if (window.pflxNormalizePlayerCohorts(pl)) dirty = true; } catch (e) {}
                     var mpXc = Number(mp.xc) || 0, plXc = Number(pl.xc) || 0;
                     if (mpXc > plXc) { pl.xc = mpXc; dirty = true; }
                     var mpTot = Number(mp.totalXcoin) || 0, plTot = Number(pl.totalXcoin) || 0;
@@ -31358,7 +31429,7 @@
                     if (g && g.id && g.name && acceptable.has(__normTag(g.name))) acceptable.add(__normTag(g.id));
                 });
             }
-            function tagMatches(tag) { var k = __normTag(tag); return !!k && acceptable.has(k); }
+            function tagMatches(tag) { var k = __normTag(tag); return !!k && (k.replace(/\s+/g, '') === 'playerpool' || acceptable.has(k)); }
             if (item.cohort && tagMatches(item.cohort)) return true;
             if (Array.isArray(item.cohorts) && item.cohorts.some(tagMatches)) return true;
             if (Array.isArray(item.cohortIds) && item.cohortIds.some(tagMatches)) return true;
@@ -31905,7 +31976,7 @@
                 if (g && g.name) cohortNames.push(g.name);
             });
             if (cohortNames.length === 0) return [];
-            return pool.filter(function (p) { return p && cohortNames.indexOf(p.cohort) !== -1 && (p.role || 'player') === 'player'; });
+            return pool.filter(function (p) { return p && cohortNames.some(function (n) { return window.pflxPlayerInCohort(p, n); }) && (p.role || 'player') === 'player'; });
         }
         // Create (or reuse) a PFLX Chat group named after the project and
         // seed it with the project roster. Opens PFLX Chat panel + jumps
@@ -35752,7 +35823,7 @@ function ppRenderCheckpoints(el) {
             if (!tbody) return;
 
             // All cohorts/studios for filter dropdowns and chips
-            const allCohorts = [...new Set(mcPlayers.map(function(p) { return p.cohort; }).filter(Boolean))].sort();
+            const allCohorts = (function () { var set = {}; mcPlayers.forEach(function (p) { if (!p) return; window.pflxPlayerCohortList(p).forEach(function (c) { set[c] = 1; }); }); set['PlayerPool'] = 1; return Object.keys(set).sort(function (a, b) { if (a === 'PlayerPool') return -1; if (b === 'PlayerPool') return 1; return a.localeCompare(b); }); })();
             const allStudios = [...new Set(mcPlayers.map(function(p) { return p.studioId; }).filter(Boolean))].sort();
 
             // Populate cohort filter dropdown
@@ -35801,8 +35872,8 @@ function ppRenderCheckpoints(el) {
                     var s = search;
                     if (!(p.name||'').toLowerCase().includes(s) && !(p.brand||'').toLowerCase().includes(s) && !(p.email||'').toLowerCase().includes(s)) return false;
                 }
-                if (cohortVal !== 'all' && p.cohort !== cohortVal) return false;
-                if (mcPlayerCohortToggleSet && mcPlayerCohortToggleSet.size > 0 && !mcPlayerCohortToggleSet.has(p.cohort)) return false;
+                if (cohortVal !== 'all' && !window.pflxPlayerInCohort(p, cohortVal)) return false;
+                if (mcPlayerCohortToggleSet && mcPlayerCohortToggleSet.size > 0 && !Array.from(mcPlayerCohortToggleSet).some(function (c) { return window.pflxPlayerInCohort(p, c); })) return false;
                 if (studioVal !== 'all') {
                     if (studioVal === 'none') { if (p.studioId) return false; }
                     else if (p.studioId !== studioVal) return false;
@@ -35848,7 +35919,7 @@ function ppRenderCheckpoints(el) {
                 const total = mcPlayers.filter(function(p) { return p.role !== 'admin'; }).length;
                 const favs = mcPlayers.filter(function(p) { return p.favorite; }).length;
                 const totalXC = mcPlayers.reduce(function(s, p) { return s + (p.xc || 0); }, 0);
-                const cohortCount = new Set(mcPlayers.map(function(p) { return p.cohort; })).size;
+                const cohortCount = (function () { var set = {}; mcPlayers.forEach(function (p) { window.pflxPlayerCohortList(p).forEach(function (c) { set[c] = 1; }); }); set['PlayerPool'] = 1; return Object.keys(set).length; })();
                 statsEl.innerHTML = [
                     { label: 'PLAYERS', value: total, color: '#4f8ef7' },
                     { label: 'FAVORITES', value: favs, color: '#f5c842' },
@@ -37805,8 +37876,7 @@ function ppRenderCheckpoints(el) {
         // ── PER-PLAYER progress (Host Progress dashboard) ──
         function pflxPlayerCohorts(player) {
             if (!player) return [];
-            if (Array.isArray(player.cohorts) && player.cohorts.length) return player.cohorts;
-            return player.cohort ? [player.cohort] : [];
+            return window.pflxPlayerCohortList(player);
         }
         // State of one task FOR a specific player: 'approved' | 'submitted' | 'open'.
         // Prefers a per-player entry in task.submissions[] when present; otherwise
@@ -50071,7 +50141,7 @@ function ppRenderCheckpoints(el) {
                 if (Array.isArray(item.cohortIds) && (item.cohortIds.indexOf(cohortName) !== -1 || item.cohortIds.indexOf(cohortId) !== -1)) return true;
                 return false;
             }
-            var members = (mcPlayers || []).filter(function (p) { return p && p.cohort === cohortName && (p.role || 'player') === 'player'; });
+            var members = (mcPlayers || []).filter(function (p) { return p && window.pflxPlayerInCohort(p, cohortName) && (p.role || 'player') === 'player'; });
             var checkpoints = (typeof mcCheckpoints !== 'undefined' ? mcCheckpoints : []).filter(targetsThis);
             var projects = (typeof mcProjects !== 'undefined' ? mcProjects : []).filter(targetsThis);
             var tasks = (typeof mcTasks !== 'undefined' ? mcTasks : []).filter(targetsThis);
@@ -80245,8 +80315,7 @@ RESPONSE RULES:
                     if (filter.cohort) {
                         arr = arr.filter(function (p) {
                             if (!p) return false;
-                            if (Array.isArray(p.cohorts)) return p.cohorts.indexOf(filter.cohort) >= 0;
-                            return p.cohort === filter.cohort;
+                            return window.pflxPlayerInCohort(p, filter.cohort);
                         });
                     }
                 }
