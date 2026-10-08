@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 275;
+      window.PFLX_PATCH   = 276;
       window.PFLX_BUILD   = '2026.10';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -17501,12 +17501,14 @@
                 }
             } catch (e) {}
             var seen = {}, badges = [];
+            var __hidR = pflxHiddenBadgeSet(p), __hidR2 = pflxHiddenBadgeSet(rec);
+            var __anyHid = Object.keys(__hidR).length + Object.keys(__hidR2).length > 0;
             function addAll(list) {
                 (Array.isArray(list) ? list : []).forEach(function (e) {
                     if (!e) return;
                     var bid = typeof e === 'string' ? e : (e.id || e.badgeId || '');
                     var key = bid || (e.name || '');
-                    if (!key || seen[key] || (opts.excludeBadge && bid === opts.excludeBadge)) return;
+                    if (!key || seen[key] || (opts.excludeBadge && bid === opts.excludeBadge) || __hidR[bid] || __hidR2[bid]) return;
                     seen[key] = 1;
                     var obj = typeof e === 'object' ? e : {};
                     var c = cat[bid];
@@ -17517,7 +17519,7 @@
             }
             addAll(p && p.badges); if (rec) addAll(rec.badges);
             var tc = {}, a = (p && p.badgeCounts) || {}, b2 = (rec && rec.badgeCounts) || {};
-            ['primary', 'premium', 'executive', 'signature'].forEach(function (k) { tc[k] = Math.max(+a[k] || 0, +b2[k] || 0); });
+            if (!__anyHid) ['primary', 'premium', 'executive', 'signature'].forEach(function (k) { tc[k] = Math.max(+a[k] || 0, +b2[k] || 0); });
             var cpFn = function () {
                 var n = 0, pl = rec || p;
                 try {
@@ -26957,6 +26959,28 @@
         }
         window._pflxRememberBadgeImages = _pflxRememberBadgeImages;
         // v274 -- Earned Badges are laid out as a trail: one section per badge type, Legacy last.
+        window.pflxHiddenBadgeSet = function (p) {
+            var m = {};
+            try {
+                var list = p && p.hiddenBadges;
+                if (!list && p && p.id) {
+                    var r = ((typeof PLAYERS !== 'undefined' && Array.isArray(PLAYERS)) ? PLAYERS : []).find(function (x) { return x && x.id === p.id; })
+                        || ((typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) ? mcPlayers : []).find(function (x) { return x && x.id === p.id; });
+                    list = r && r.hiddenBadges;
+                }
+                (Array.isArray(list) ? list : []).forEach(function (k) { m[k] = 1; });
+            } catch (e) {}
+            return m;
+        };
+        window.pflxRecountBadges = function (earned) {
+            var c = { primary: 0, premium: 0, executive: 0, signature: 0 };
+            (earned || []).forEach(function (b) {
+                if (!b || b.legacy) return;
+                var k = (typeof _pflxBadgeCategoryKey === 'function') ? _pflxBadgeCategoryKey(b.category || b.tier || b.type) : 'primary';
+                if (c[k] !== undefined) c[k]++;
+            });
+            return c;
+        };
         window.pflxBadgeTrailHtml = function (groups, total) {
             var defs = [
                 { key: 'primary',   label: 'Professional Endorsements', desc: 'Behavior-based badges recognizing communication, collaboration, and mindset', icon: '&#x1F7E6;', color: '#4f8ef7', rgb: '79,142,247' },
@@ -28473,6 +28497,8 @@
                 merged.digitalBadges = Math.max(num(a.digitalBadges), num(b.digitalBadges), badges.length);
                 var bc = {}; [a.badgeCounts || {}, b.badgeCounts || {}].forEach(function (o) { Object.keys(o).forEach(function (k) { bc[k] = Math.max(bc[k] || 0, num(o[k])); }); });
                 if (Object.keys(bc).length) merged.badgeCounts = bc;
+                var __hb = {}; [].concat(Array.isArray(a.hiddenBadges) ? a.hiddenBadges : [], Array.isArray(b.hiddenBadges) ? b.hiddenBadges : []).forEach(function (k) { __hb[k] = 1; });
+                if (Object.keys(__hb).length) merged.hiddenBadges = Object.keys(__hb);
                 merged.activity = actN(a) >= actN(b) ? a.activity : b.activity;
                 byId[p.id] = merged;
             });
@@ -66595,13 +66621,14 @@ RESPONSE RULES:
             // lives only on the player's stored ref, not the catalog entry
             // — so it has to be merged onto the resolved object here or the
             // tile/popup would have no way to see it.
-            var earned = earnedRefs.map(function (r) {
+            var __hid = pflxHiddenBadgeSet(activeSession); var __hasHid = Object.keys(__hid).length > 0; var earned = earnedRefs.map(function (r) {
                 var found = (typeof mcFindBadge === 'function') ? mcFindBadge(r) : (r && typeof r === 'object' ? r : null);
                 if (!found && r && typeof r === 'object' && r.name) found = { id: r.id, name: r.name, icon: r.icon || '\uD83C\uDF93', xc: Number(r.xcValue || r.xc) || 0, tier: r.type || '', category: r.category || r.type || '', description: r.description || '', image: r.image || '' };
                 if (!found) return null;
                 var endorsements = (r && typeof r === 'object' && typeof r.endorsements === 'number') ? r.endorsements : 1;
                 var _leg = (found && found.legacy) ? String(found.legacy) : ''; var _ev = (r && typeof r === 'object' && r.evidence && r.evidence.length) ? r.evidence : null; return (endorsements > 1 || _leg || _ev) ? Object.assign({}, found, { endorsements: endorsements, legacy: _leg, evidence: _ev, xc: _leg ? 0 : found.xc }) : found;
-            }).filter(Boolean).filter(function (b, i, a) { return !b.id || a.findIndex(function (x) { return x.id === b.id; }) === i; });
+            }).filter(Boolean).filter(function (b, i, a) { return !b.id || a.findIndex(function (x) { return x.id === b.id; }) === i; }).filter(function (b) { return !__hid[b.id]; });
+            if (__hasHid) { bc = pflxRecountBadges(earned); }
 
             if (totalBadges === 0 && earned.length === 0) {
                 container.innerHTML = '<p style="color:rgba(255,255,255,0.3);font-size:13px;text-align:center;padding:30px 0;">No badges earned yet. Complete tasks in X-Coin to build your badge portfolio.</p>';
@@ -67038,7 +67065,7 @@ RESPONSE RULES:
             // grants of the same badge, e.g. "Video Editor x5") through to
             // the resolved catalog object — see the matching comment in
             // portfolioRenderBadges above.
-            var earned = earnedRefs.map(function (r) {
+            var __hid = pflxHiddenBadgeSet(player); var __hasHid = Object.keys(__hid).length > 0; var earned = earnedRefs.map(function (r) {
                 try {
                     var found = (typeof mcFindBadge === 'function') ? mcFindBadge(r) : (r && typeof r === 'object' ? r : null);
                     if (!found && r && typeof r === 'object' && r.name) found = { id: r.id, name: r.name, icon: r.icon || '\uD83C\uDF93', xc: Number(r.xcValue || r.xc) || 0, tier: r.type || '', category: r.category || r.type || '', description: r.description || '', image: r.image || '' };
@@ -67046,7 +67073,8 @@ RESPONSE RULES:
                     var endorsements = (r && typeof r === 'object' && typeof r.endorsements === 'number') ? r.endorsements : 1;
                     var _leg = (found && found.legacy) ? String(found.legacy) : ''; var _ev = (r && typeof r === 'object' && r.evidence && r.evidence.length) ? r.evidence : null; return (endorsements > 1 || _leg || _ev) ? Object.assign({}, found, { endorsements: endorsements, legacy: _leg, evidence: _ev, xc: _leg ? 0 : found.xc }) : found;
                 } catch (e) { return null; }
-            }).filter(Boolean).filter(function (b, i, a) { return !b.id || a.findIndex(function (x) { return x.id === b.id; }) === i; });
+            }).filter(Boolean).filter(function (b, i, a) { return !b.id || a.findIndex(function (x) { return x.id === b.id; }) === i; }).filter(function (b) { return !__hid[b.id]; });
+            if (__hasHid) { bc = pflxRecountBadges(earned); totalBadges = (bc.primary || 0) + (bc.premium || 0) + (bc.executive || 0) + (bc.signature || 0); }
 
             // v1.76 (Ennis: "on Vybe's it doesn't show the badges") — root
             // cause: badgeCounts and player.badges can drift apart (some
@@ -67090,6 +67118,7 @@ RESPONSE RULES:
             // digitalBadges still claims more than every other
             // representation combined.
             var claimedByLegacy = (player && typeof player.digitalBadges === 'number') ? player.digitalBadges : 0;
+            if (__hasHid) claimedByLegacy = 0;
             for (var li = earned.length; li < claimedByLegacy; li++) {
                 earned.push({ id: 'legacy-digitalBadges-' + li, name: 'Primary Badge #' + (li + 1), icon: '&#x1F7E6;', xc: 0 });
             }
