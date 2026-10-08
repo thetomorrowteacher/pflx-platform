@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 270;
+      window.PFLX_PATCH   = 271;
       window.PFLX_BUILD   = '2026.10';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -65675,11 +65675,18 @@ RESPONSE RULES:
         // anywhere after the one-time "Assessment Complete" screen during
         // onboarding. Hidden entirely (not an empty card) for players who
         // signed up before this existed, or skipped the diagnostic.
+        // v271 (Ennis) - vision statements imported from the EXPO deck can be free text ({text}).
+        window.pflxVisionInner = function (vs) {
+            vs = vs || {};
+            var sp = function (t) { return '<span style="color:var(--cyan);font-weight:700;">' + escapeHtml(t || '') + '</span>'; };
+            if (vs.text && !(vs.create || vs.impact || vs.perspective || vs.future)) return sp(vs.text);
+            return 'I want to create ' + sp(vs.create) + ' that will ' + sp(vs.impact) + '. My unique perspective is ' + sp(vs.perspective) + '. In two years, I\'ll be known for ' + sp(vs.future) + '.';
+        };
         function portfolioRenderVision(user) {
             const section = document.getElementById('portfolio-vision-section');
             if (!section) return;
             const vs = user.visionStatement;
-            if (!vs || !(vs.create || vs.impact || vs.perspective || vs.future)) {
+            if (!vs || !(vs.create || vs.impact || vs.perspective || vs.future || vs.text)) {
                 section.style.display = 'none';
                 return;
             }
@@ -65692,7 +65699,7 @@ RESPONSE RULES:
                         <h3 style="margin:0;font-size:14px;font-weight:800;color:var(--cyan);letter-spacing:0.08em;font-family:'Orbitron',sans-serif;">VISION STATEMENT</h3>
                     </div>
                     <div style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:16px 18px;color:#c8cce0;font-size:14px;line-height:1.75;font-family:'Jura',sans-serif;">
-                        I want to create <span style="color:var(--cyan);font-weight:700;">${escapeHtml(vs.create || '')}</span> that will <span style="color:var(--cyan);font-weight:700;">${escapeHtml(vs.impact || '')}</span>. My unique perspective is <span style="color:var(--cyan);font-weight:700;">${escapeHtml(vs.perspective || '')}</span>. In two years, I'll be known for <span style="color:var(--cyan);font-weight:700;">${escapeHtml(vs.future || '')}</span>.
+                        ${window.pflxVisionInner(vs)}
                     </div>
                 </div>
             `;
@@ -66473,12 +66480,12 @@ RESPONSE RULES:
                 // own portfolio (portfolioRenderVision), sourced directly
                 // from the target player's record. Hidden entirely if this
                 // player never completed the diagnostic's vision step.
-                ((player.visionStatement && (player.visionStatement.create || player.visionStatement.impact || player.visionStatement.perspective || player.visionStatement.future)) ? (
+                ((player.visionStatement && (player.visionStatement.create || player.visionStatement.impact || player.visionStatement.perspective || player.visionStatement.future || player.visionStatement.text)) ? (
                 '<div style="margin-bottom:24px;background:rgba(0,240,255,0.04);border:1px solid rgba(0,240,255,0.2);border-radius:16px;padding:22px 24px;position:relative;overflow:hidden;">' +
                     '<div style="position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--cyan),transparent);"></div>' +
                     '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;"><span style="font-size:20px;">&#x1F52E;</span><h3 style="margin:0;font-size:14px;font-weight:800;color:var(--cyan);letter-spacing:0.08em;font-family:\'Orbitron\',sans-serif;">VISION STATEMENT</h3></div>' +
                     '<div style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:16px 18px;color:#c8cce0;font-size:14px;line-height:1.75;font-family:\'Jura\',sans-serif;">' +
-                        'I want to create <span style="color:var(--cyan);font-weight:700;">' + escapeHtml(player.visionStatement.create || '') + '</span> that will <span style="color:var(--cyan);font-weight:700;">' + escapeHtml(player.visionStatement.impact || '') + '</span>. My unique perspective is <span style="color:var(--cyan);font-weight:700;">' + escapeHtml(player.visionStatement.perspective || '') + '</span>. In two years, I\'ll be known for <span style="color:var(--cyan);font-weight:700;">' + escapeHtml(player.visionStatement.future || '') + '</span>.' +
+                        window.pflxVisionInner(player.visionStatement) +
                     '</div>' +
                 '</div>') : '') +
                 '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));gap:12px;margin-bottom:24px;">' + statsHtml + '</div>' +
