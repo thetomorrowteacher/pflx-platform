@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 272;
+      window.PFLX_PATCH   = 273;
       window.PFLX_BUILD   = '2026.10';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -26961,21 +26961,33 @@
                 cat.coins.forEach(function(c) {
                     if (!c || !c.name) return;
                     out.push({
-                        id: mcBadgeIdFromName(c.name),
+                        id: c.id || mcBadgeIdFromName(c.name),
                         name: c.name,
                         description: c.description || '',
-                        xc: c.xc || c.xcReward || c.xcValue || 0,
+                        xc: c.legacy ? 0 : (c.xc || c.xcReward || c.xcValue || 0),
                         tier: tier,
                         category: catName,
                         color: c.color || cat.color || st.color || '#00d4ff',
                         icon: c.icon || cat.icon || st.icon || '🎖',
-                        image: c.image || c.img || c.imageUrl || c.imageURL || c.photo || c.artwork || ''
+                        image: c.image || c.img || c.imageUrl || c.imageURL || c.photo || c.artwork || '',
+                        legacy: c.legacy ? String(c.legacy) : '',
+                        legacyEra: c.legacyEra || ''
                     });
                 });
             });
             return out;
         }
         window.mcNormalizeBadges = mcNormalizeBadges;
+        // v273 -- CritterCoin imports that X-Coin's catalog does not list yet (flagged imported:'crittercoin')
+        // must survive a catalog pull; X-Coin stays the owner of everything it does list.
+        window.pflxMergeKeepImported = function (fresh, old) {
+            try {
+                if (!Array.isArray(fresh) || !Array.isArray(old)) return fresh;
+                var have = {}; fresh.forEach(function (b) { if (b && b.id) have[b.id] = 1; });
+                old.forEach(function (b) { if (b && b.imported && b.id && !have[b.id]) fresh.push(b); });
+            } catch (e) {}
+            return fresh;
+        };
         function mcGetAllBadges() {
             var hardcoded = MC_ALL_BADGES.map(function(b) {
                 return {
@@ -26996,7 +27008,7 @@
                 return {
                     id: b.id || mcBadgeIdFromName(b.name),
                     name: b.name || b.id,
-                    xc: b.xc || b.xcReward || b.xcValue || 0,
+                    xc: b.legacy ? 0 : (b.xc || b.xcReward || b.xcValue || 0),
                     tier: tier,
                     category: category,
                     color: b.color || '#00d4ff',
@@ -27004,6 +27016,8 @@
                     // X-Coin's Digital Badge Management stores an artwork image —
                     // carry it (various field names) so grants + portfolio show it.
                     image: b.image || b.img || b.imageUrl || b.imageURL || b.photo || b.artwork || '',
+                    legacy: b.legacy ? String(b.legacy) : '',
+                    legacyEra: b.legacyEra || '',
                     // v1.80 (Ennis: "its saying no description when there are
                     // descriptions") — mcGetAllBadges() rebuilds a fresh badge
                     // object from every mcBadges entry for id/tier/category
@@ -27041,6 +27055,7 @@
         // player.badgeCounts + the portfolio grid use.
         function _pflxBadgeCategoryKey(cat) {
             var s = String(cat || '').toLowerCase();
+            if (s.indexOf('legacy') >= 0) return 'signature';
             if (s.indexOf('signature') >= 0 || s.indexOf('cert') >= 0 || s.indexOf('mastery') >= 0) return 'signature';
             if (s.indexOf('executive') >= 0 || s.indexOf('job') >= 0) return 'executive';
             if (s.indexOf('premium') >= 0 || s.indexOf('achieve') >= 0) return 'premium';
@@ -29234,7 +29249,7 @@
                 try {
                     var brow = res.side && res.side['coinCategories'];   // v216: fetched above only when changed
                     if (brow && brow.data && Array.isArray(brow.data)) {
-                        var freshBadges = mcNormalizeBadges(brow.data);
+                        var freshBadges = pflxMergeKeepImported(mcNormalizeBadges(brow.data), mcBadges);
                         if (freshBadges.length) {
                             mcBadges = freshBadges;
                             _mcSetItemSafe('pflx_mc_badges', mcBadges);
@@ -29270,7 +29285,7 @@
                             // v216 -- the badge catalog (X-Coin-owned) now updates live too.
                             if (row.key === 'coinCategories') {
                                 if (Array.isArray(row.data)) {
-                                    var __fb = mcNormalizeBadges(row.data);
+                                    var __fb = pflxMergeKeepImported(mcNormalizeBadges(row.data), mcBadges);
                                     if (__fb.length) {
                                         mcBadges = __fb;
                                         _mcSetItemSafe('pflx_mc_badges', mcBadges);
@@ -66539,9 +66554,10 @@ RESPONSE RULES:
             // tile/popup would have no way to see it.
             var earned = earnedRefs.map(function (r) {
                 var found = (typeof mcFindBadge === 'function') ? mcFindBadge(r) : (r && typeof r === 'object' ? r : null);
+                if (!found && r && typeof r === 'object' && r.name) found = { id: r.id, name: r.name, icon: r.icon || '\uD83C\uDF93', xc: Number(r.xcValue || r.xc) || 0, tier: r.type || '', category: r.category || r.type || '', description: r.description || '', image: r.image || '' };
                 if (!found) return null;
                 var endorsements = (r && typeof r === 'object' && typeof r.endorsements === 'number') ? r.endorsements : 1;
-                var _leg = (r && typeof r === 'object' && r.legacyImport) ? (r.legacyImport.source || 'legacy') : (found && found.legacy ? String(found.legacy) : ''); return (endorsements > 1 || _leg) ? Object.assign({}, found, { endorsements: endorsements, legacy: _leg }) : found;
+                var _leg = (found && found.legacy) ? String(found.legacy) : ''; var _ev = (r && typeof r === 'object' && r.evidence && r.evidence.length) ? r.evidence : null; return (endorsements > 1 || _leg || _ev) ? Object.assign({}, found, { endorsements: endorsements, legacy: _leg, evidence: _ev, xc: _leg ? 0 : found.xc }) : found;
             }).filter(Boolean);
 
             if (totalBadges === 0 && earned.length === 0) {
@@ -66601,10 +66617,10 @@ RESPONSE RULES:
                     var artWrapped = '<div style="position:relative;display:inline-block;">' + art +
                         (endorsements > 1 ? '<div style="position:absolute;top:-6px;right:-6px;background:#f5c842;color:#1a1a1a;font-size:10px;font-weight:900;border-radius:10px;padding:1px 6px;border:2px solid #0a0a12;">×' + endorsements + '</div>' : '') +
                         '</div>';
-                    html += '<div onclick="pflxShowBadgeDetail(this)" data-badge-name="' + escapeHtml(bg.name || 'Badge') + '" data-badge-desc="' + escapeHtml(bg.description || '') + '" data-badge-xc="' + (Number(bg.xc) || 0) + '" data-badge-type="' + escapeHtml(tierLabel) + '" data-badge-category="' + escapeHtml(bg.category || '') + '" data-badge-endorsements="' + endorsements + '" data-badge-legacy="' + escapeHtml(bg.legacy || '') + '" style="cursor:pointer;text-align:center;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:14px;padding:12px 8px;transition:border-color .15s;" onmouseover="this.style.borderColor=\'rgba(0,240,255,0.35)\'" onmouseout="this.style.borderColor=\'rgba(255,255,255,0.07)\'">' + artWrapped +
+                    html += '<div onclick="pflxShowBadgeDetail(this)" data-badge-name="' + escapeHtml(bg.name || 'Badge') + '" data-badge-desc="' + escapeHtml(bg.description || '') + '" data-badge-xc="' + (Number(bg.xc) || 0) + '" data-badge-type="' + escapeHtml(tierLabel) + '" data-badge-category="' + escapeHtml(bg.category || '') + '" data-badge-endorsements="' + endorsements + '" data-badge-legacy="' + escapeHtml(bg.legacy || '') + '" data-badge-legacyera="' + escapeHtml(bg.legacyEra || '') + '" data-badge-evidence="' + escapeHtml(bg.evidence ? JSON.stringify(bg.evidence) : '') + '" style="cursor:pointer;text-align:center;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:14px;padding:12px 8px;transition:border-color .15s;" onmouseover="this.style.borderColor=\'rgba(0,240,255,0.35)\'" onmouseout="this.style.borderColor=\'rgba(255,255,255,0.07)\'">' + artWrapped +
                         '<div style="font-size:11px;font-weight:700;color:#e0e6ff;margin-top:8px;line-height:1.25;">' + escapeHtml(bg.name || 'Badge') + '</div>' +
                         '<div style="font-size:9px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:rgba(255,255,255,0.35);margin-top:3px;">' + escapeHtml(tierLabel) + '</div>' +
-                        (bg.legacy ? '<div style="display:inline-block;font-size:8px;font-weight:900;letter-spacing:0.1em;color:#1a1a1a;background:#9ca3af;border-radius:6px;padding:1px 6px;margin-top:3px;">LEGACY</div>' : '') + (bg.xc ? '<div style="font-size:10px;color:#f5c842;margin-top:2px;">+' + bg.xc + ' XC</div>' : '') + '</div>';
+                        (bg.legacy ? '<div style="display:inline-block;font-size:8px;font-weight:900;letter-spacing:0.1em;color:#1a1a1a;background:#9ca3af;border-radius:6px;padding:1px 6px;margin-top:3px;">LEGACY</div>' : '') + (bg.xc && !bg.legacy ? '<div style="font-size:10px;color:#f5c842;margin-top:2px;">+' + bg.xc + ' XC</div>' : '') + '</div>';
                 });
                 html += '</div></div>';
             }
@@ -66915,6 +66931,21 @@ RESPONSE RULES:
             // once, so the overwhelming common case (single-grant badges)
             // shows no endorsement line at all.
             var endorsements = Number(el.getAttribute('data-badge-endorsements') || 1);
+            // v273 -- legacy (retired) badges + work-sample evidence in the popup.
+            var legacy = el.getAttribute('data-badge-legacy') || '';
+            var legacyEra = el.getAttribute('data-badge-legacyera') || '';
+            var evidence = [];
+            try { var _evr = el.getAttribute('data-badge-evidence'); if (_evr) evidence = JSON.parse(_evr) || []; } catch (e) { evidence = []; }
+            var _legHtml = legacy ? '<div style="display:inline-block;font-size:10px;font-weight:900;letter-spacing:0.1em;color:#1a1a1a;background:#9ca3af;border-radius:8px;padding:3px 10px;margin:0 0 8px;">LEGACY &middot; RETIRED</div><p style="font-size:11px;color:rgba(255,255,255,0.45);line-height:1.5;margin:0 0 12px;">' + escapeHtml(legacyEra || 'Retired badge from an earlier PFLX setup. Kept for history; it carries no XC value.') + '</p>' : '';
+            var _evHtml = '';
+            if (evidence.length) {
+                _evHtml = '<div style="text-align:left;margin:4px 0 14px;"><div style="font-size:10px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:rgba(255,255,255,0.4);margin-bottom:6px;">Work sample behind this badge</div>' + evidence.map(function (ev) {
+                    var t = escapeHtml((ev && ev.title) || 'Work sample'); var u = String((ev && ev.url) || '');
+                    return /^https:\/\//i.test(u)
+                        ? '<a href="' + escapeHtml(u) + '" target="_blank" rel="noopener noreferrer" style="display:block;font-size:12px;color:#00f0ff;margin:3px 0;text-decoration:none;">&#x1F517; ' + t + '</a>'
+                        : '<div style="font-size:12px;color:rgba(255,255,255,0.6);margin:3px 0;">&bull; ' + t + '</div>';
+                }).join('') + '</div>';
+            }
             // v1.80 (Ennis: "redundant showing badge type twice") — `type`
             // is always the short tier label (Signature/Primary/...) and
             // `category` is the badge's raw source category name, which
@@ -66938,9 +66969,9 @@ RESPONSE RULES:
                     '<div style="display:flex;justify-content:center;margin-bottom:18px;">' + artHtml + '</div>' +
                     '<h3 style="margin:0 0 6px;font-size:18px;font-weight:900;color:#f0f0ff;">' + escapeHtml(name) + '</h3>' +
                     (type ? '<div style="display:inline-block;font-size:10px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#00f0ff;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);border-radius:20px;padding:3px 12px;margin-bottom:10px;">' + escapeHtml(type) + (category ? ' · ' + escapeHtml(category) : '') + '</div>' : '') +
-                    (desc ? '<p style="font-size:13px;color:rgba(255,255,255,0.65);line-height:1.5;margin:10px 0 14px;">' + escapeHtml(desc) + '</p>' : '<p style="font-size:12px;color:rgba(255,255,255,0.3);margin:10px 0 14px;">No description available.</p>') +
-                    (endorsements > 1 ? '<div style="display:inline-block;font-size:13px;font-weight:700;color:#f5c842;background:rgba(245,200,66,0.1);border:1px solid rgba(245,200,66,0.3);border-radius:20px;padding:6px 16px;margin-bottom:10px;">' + endorsements + ' Endorsements</div><br>' : '') +
-                    (xc ? '<div style="display:inline-block;font-size:13px;font-weight:700;color:#f5c842;background:rgba(245,200,66,0.1);border:1px solid rgba(245,200,66,0.3);border-radius:20px;padding:6px 16px;">+' + xc + ' XC</div>' : '') +
+                    _legHtml + (desc ? '<p style="font-size:13px;color:rgba(255,255,255,0.65);line-height:1.5;margin:10px 0 14px;">' + escapeHtml(desc) + '</p>' : '<p style="font-size:12px;color:rgba(255,255,255,0.3);margin:10px 0 14px;">No description available.</p>') +
+                    _evHtml + (endorsements > 1 ? '<div style="display:inline-block;font-size:13px;font-weight:700;color:#f5c842;background:rgba(245,200,66,0.1);border:1px solid rgba(245,200,66,0.3);border-radius:20px;padding:6px 16px;margin-bottom:10px;">' + endorsements + ' Endorsements</div><br>' : '') +
+                    (xc && !legacy ? '<div style="display:inline-block;font-size:13px;font-weight:700;color:#f5c842;background:rgba(245,200,66,0.1);border:1px solid rgba(245,200,66,0.3);border-radius:20px;padding:6px 16px;">+' + xc + ' XC</div>' : '') +
                 '</div>';
             document.body.appendChild(overlay);
             _pflxBadgeDetailModalEl = overlay;
@@ -66967,9 +66998,10 @@ RESPONSE RULES:
             var earned = earnedRefs.map(function (r) {
                 try {
                     var found = (typeof mcFindBadge === 'function') ? mcFindBadge(r) : (r && typeof r === 'object' ? r : null);
+                    if (!found && r && typeof r === 'object' && r.name) found = { id: r.id, name: r.name, icon: r.icon || '\uD83C\uDF93', xc: Number(r.xcValue || r.xc) || 0, tier: r.type || '', category: r.category || r.type || '', description: r.description || '', image: r.image || '' };
                     if (!found) return null;
                     var endorsements = (r && typeof r === 'object' && typeof r.endorsements === 'number') ? r.endorsements : 1;
-                    var _leg = (r && typeof r === 'object' && r.legacyImport) ? (r.legacyImport.source || 'legacy') : (found && found.legacy ? String(found.legacy) : ''); return (endorsements > 1 || _leg) ? Object.assign({}, found, { endorsements: endorsements, legacy: _leg }) : found;
+                    var _leg = (found && found.legacy) ? String(found.legacy) : ''; var _ev = (r && typeof r === 'object' && r.evidence && r.evidence.length) ? r.evidence : null; return (endorsements > 1 || _leg || _ev) ? Object.assign({}, found, { endorsements: endorsements, legacy: _leg, evidence: _ev, xc: _leg ? 0 : found.xc }) : found;
                 } catch (e) { return null; }
             }).filter(Boolean);
 
@@ -67070,10 +67102,10 @@ RESPONSE RULES:
                     var artWrapped = '<div style="position:relative;display:inline-block;">' + art +
                         (endorsements > 1 ? '<div style="position:absolute;top:-6px;right:-6px;background:#f5c842;color:#1a1a1a;font-size:10px;font-weight:900;border-radius:10px;padding:1px 6px;border:2px solid #0a0a12;">×' + endorsements + '</div>' : '') +
                         '</div>';
-                    html += '<div onclick="pflxShowBadgeDetail(this)" data-badge-name="' + escapeHtml(bg.name || 'Badge') + '" data-badge-desc="' + escapeHtml(bg.description || '') + '" data-badge-xc="' + (Number(bg.xc) || 0) + '" data-badge-type="' + escapeHtml(tierLabel) + '" data-badge-category="' + escapeHtml(bg.category || '') + '" data-badge-endorsements="' + endorsements + '" data-badge-legacy="' + escapeHtml(bg.legacy || '') + '" style="cursor:pointer;text-align:center;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:14px;padding:12px 8px;transition:border-color .15s;" onmouseover="this.style.borderColor=\'rgba(0,240,255,0.35)\'" onmouseout="this.style.borderColor=\'rgba(255,255,255,0.07)\'">' + artWrapped +
+                    html += '<div onclick="pflxShowBadgeDetail(this)" data-badge-name="' + escapeHtml(bg.name || 'Badge') + '" data-badge-desc="' + escapeHtml(bg.description || '') + '" data-badge-xc="' + (Number(bg.xc) || 0) + '" data-badge-type="' + escapeHtml(tierLabel) + '" data-badge-category="' + escapeHtml(bg.category || '') + '" data-badge-endorsements="' + endorsements + '" data-badge-legacy="' + escapeHtml(bg.legacy || '') + '" data-badge-legacyera="' + escapeHtml(bg.legacyEra || '') + '" data-badge-evidence="' + escapeHtml(bg.evidence ? JSON.stringify(bg.evidence) : '') + '" style="cursor:pointer;text-align:center;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:14px;padding:12px 8px;transition:border-color .15s;" onmouseover="this.style.borderColor=\'rgba(0,240,255,0.35)\'" onmouseout="this.style.borderColor=\'rgba(255,255,255,0.07)\'">' + artWrapped +
                         '<div style="font-size:11px;font-weight:700;color:#e0e6ff;margin-top:8px;line-height:1.25;">' + escapeHtml(bg.name || 'Badge') + '</div>' +
                         '<div style="font-size:9px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:rgba(255,255,255,0.35);margin-top:3px;">' + escapeHtml(tierLabel) + '</div>' +
-                        (bg.legacy ? '<div style="display:inline-block;font-size:8px;font-weight:900;letter-spacing:0.1em;color:#1a1a1a;background:#9ca3af;border-radius:6px;padding:1px 6px;margin-top:3px;">LEGACY</div>' : '') + (bg.xc ? '<div style="font-size:10px;color:#f5c842;margin-top:2px;">+' + bg.xc + ' XC</div>' : '') + '</div>';
+                        (bg.legacy ? '<div style="display:inline-block;font-size:8px;font-weight:900;letter-spacing:0.1em;color:#1a1a1a;background:#9ca3af;border-radius:6px;padding:1px 6px;margin-top:3px;">LEGACY</div>' : '') + (bg.xc && !bg.legacy ? '<div style="font-size:10px;color:#f5c842;margin-top:2px;">+' + bg.xc + ' XC</div>' : '') + '</div>';
                 });
                 html += '</div></div>';
             }
