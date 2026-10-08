@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 281;
+      window.PFLX_PATCH   = 282;
       window.PFLX_BUILD   = '2026.10';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -22182,6 +22182,16 @@
             return lvl;
         }
         window.pflxPlayerEvoRank = pflxPlayerEvoRank;
+        // v1.282 -- the player's REAL cohorts, i.e. everything except PlayerPool.
+        // PlayerPool is the default baseline every player sits in; a specific
+        // cohort supersedes it (see pflxPlayerCanAccessApp).
+        function pflxSpecificCohorts(list) {
+            return (list || []).filter(function (c) {
+                var n = (window.pflxCohortCanon ? window.pflxCohortCanon(c) : String(c || ''));
+                return pflxNormCohortName(n) !== 'playerpool' && pflxNormCohortName(n) !== '';
+            });
+        }
+        window.pflxSpecificCohorts = pflxSpecificCohorts;
         function pflxPlayerCanAccessApp(appKey) {
             try {
                 if (!appKey) return true;
@@ -22200,6 +22210,8 @@
                 //   true  → explicit allow in cohort or org
                 //   null  → no setting; treat as open by default
                 //
+                // (SUPERSEDED in v1.282 by the MOST-ACCESS rule applied below --
+                // the old deny-wins rule is kept here for history.)
                 // Deny-wins rule: if ANY cohort the player belongs to has
                 // an explicit deny (either at the cohort level or its
                 // parent org), the player is denied. This matches host
@@ -22209,7 +22221,7 @@
                 // default). The previous union rule was the opposite
                 // and made cohort-level "off" toggles ineffective for
                 // multi-cohort players.
-                function resolveCohortApp(cohortName) {
+                function resolveCohortApp(cohortName, strict) {
                     // 1) the raw saved override map is the source of truth —
                     //    it works even when this build's COHORTS registry
                     //    doesn't contain the cohort (registry drift)
@@ -22218,7 +22230,7 @@
                     if (ov && ov.apps && ov.apps[appKey] === true)  return true;
                     // 2) the in-memory cohort object (normalized lookup —
                     //    name drift like "dd core 3" still resolves)
-                    var c = pflxCohortByName(cohortName) || COHORTS['PlayerPool'];
+                    var c = pflxCohortByName(cohortName) || (strict ? null : COHORTS['PlayerPool']);
                     if (c && c.apps && c.apps[appKey] === false) return false;
                     if (c && c.apps && c.apps[appKey] === true)  return true;
                     var orgKey = c && c.org;
@@ -22228,10 +22240,25 @@
                     }
                     return null; // no explicit setting at cohort or org level
                 }
-                var denied = false;
-                for (var i = 0; i < cohorts.length; i++) {
-                    if (resolveCohortApp(cohorts[i]) === false) { denied = true; break; }
+                // v1.282 -- MOST-ACCESS rule (Ennis, Oct 2026). PlayerPool is the
+                // default every player is in, so it must never LOCK a player out
+                // of something their real cohort grants:
+                //   1. look only at the player's specific cohorts (not PlayerPool);
+                //      an explicit ALLOW in any of them wins (most access);
+                //   2. otherwise an explicit deny in a specific cohort stands;
+                //   3. a specific cohort with no setting says nothing, so the
+                //      player falls back to PlayerPool's setting.
+                // A cohort this build cannot resolve (name drift, retired cohort)
+                // is "no setting" -- it can never unlock anything on its own.
+                var specific = pflxSpecificCohorts(cohorts);
+                var verdict = null, anyAllow = false, anyDeny = false;
+                for (var i = 0; i < specific.length; i++) {
+                    var r = resolveCohortApp(specific[i], true);
+                    if (r === true) anyAllow = true; else if (r === false) anyDeny = true;
                 }
+                if (anyAllow) verdict = true; else if (anyDeny) verdict = false;
+                if (verdict === null) verdict = resolveCohortApp('PlayerPool');
+                var denied = (verdict === false);
                 if (!denied) return true;
                 // ── PRO RANK BYPASS ── a host-set threshold lets players
                 // who've proven themselves through a cohort deny.
@@ -22266,10 +22293,13 @@
                     if (orgKey && ORGANIZATIONS[orgKey] && ORGANIZATIONS[orgKey].xliveOnly === true) return true;
                     return false;
                 }
-                for (var i = 0; i < cohorts.length; i++) {
-                    if (resolveCohortXLiveOnly(cohorts[i])) return true;
+                // v1.282 -- most-access rule: with real cohorts, X-Live-only applies
+                // only when EVERY one of them is X-Live-only; a broader cohort wins.
+                var specificX = pflxSpecificCohorts(cohorts);
+                if (specificX.length) {
+                    return specificX.every(function (c) { return resolveCohortXLiveOnly(c); });
                 }
-                return false;
+                return resolveCohortXLiveOnly('PlayerPool');
             } catch (e) { console.warn('[xlive] restriction-gate error (fail-open to false)', e); return false; }
         }
         window.pflxPlayerIsXLiveOnly = pflxPlayerIsXLiveOnly;
@@ -22289,9 +22319,10 @@
                 var cohorts = Array.isArray(player.cohorts) ? player.cohorts.slice()
                     : String(player.cohort || '').split(/[,;]/).map(function (s) { return s.trim(); }).filter(Boolean);
                 if (!cohorts.length) cohorts = ['PlayerPool'];
-                return cohorts.some(function (c) {
-                    return typeof hmcCohortIsXLiveOnly === 'function' && hmcCohortIsXLiveOnly(c);
-                });
+                var specificR = (typeof pflxSpecificCohorts === 'function') ? pflxSpecificCohorts(cohorts) : cohorts;
+                var chk = function (c) { return typeof hmcCohortIsXLiveOnly === 'function' && hmcCohortIsXLiveOnly(c); };
+                if (specificR.length) return specificR.every(chk);   // v1.282 most-access rule
+                return chk('PlayerPool');
             } catch (e) { return false; }
         };
 
