@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 285;
+      window.PFLX_PATCH   = 286;
       window.PFLX_BUILD   = '2026.10';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -12349,7 +12349,7 @@
                                 <!-- Identity privacy toggle (edit mode only) -->
                                 <label id="portfolio-identity-toggle" style="display:none; align-items:center; gap:8px; margin-top:12px; font-size:11px; color:rgba(255,255,255,0.6); cursor:pointer; font-family:'Share Tech Mono',monospace; letter-spacing:0.06em;">
                                     <input type="checkbox" id="portfolio-hide-realname" onchange="portfolioToggleRealName(this.checked)" style="accent-color:var(--cyan);">
-                                    <span>HIDE MY REAL NAME — show brand only (recommended for under-18)</span>
+                                    <span>KEEP MY REAL NAME PRIVATE — brand only (applies to PFLX players and my published page; hosts always see it)</span>
                                 </label>
                             </div>
                         </div>
@@ -15474,7 +15474,7 @@
                 var cohort = (ev.player && ev.player.cohort) || '';
                 var rule = cohortRule(cohort);
                 if (!rule.enabled) return;
-                var name = (ev.player && ev.player.name) || 'A player';
+                var name = (ev.player && (ev.player.brand || ev.player.brandName || ev.player.name)) || 'A player';
                 var who = rule.hideNames ? 'A player' : ('@' + name);
                 var meta = ev.kind === 'fine'
                     ? { icon: '⚠️', color: '#ef4444', verb: 'was fined', suffix: (ev.xc ? ' (' + ev.xc.toLocaleString() + ' XC)' : '') }
@@ -16869,7 +16869,7 @@
                     root.querySelector('#pflx-xl-step-roster').style.display = 'none';
                     var pinStep = root.querySelector('#pflx-xl-step-pin');
                     pinStep.style.display = '';
-                    root.querySelector('#pflx-xl-selected-name').textContent = player.name || player.brand || 'Player';
+                    root.querySelector('#pflx-xl-selected-name').textContent = player.brand || player.brandName || player.name || 'Player';
                     root.querySelector('#pflx-xl-error').textContent = '';
                     renderPinDots(root);
                 }
@@ -16941,7 +16941,7 @@
                             var btn = document.createElement('button');
                             btn.type = 'button';
                             btn.className = 'pflx-xl-roster-btn';
-                            btn.textContent = p.name || p.brand || 'Player';
+                            btn.textContent = p.brand || p.brandName || p.name || 'Player';
                             btn.addEventListener('click', function () { showPinStep(root, p); });
                             grid.appendChild(btn);
                         });
@@ -17932,7 +17932,7 @@
 
             // Player name
             const nameEl = document.getElementById('toolbar-player-name');
-            if (nameEl) nameEl.textContent = (activeSession.name || 'PLAYER').toUpperCase();
+            if (nameEl) nameEl.textContent = (activeSession.brand || activeSession.name || 'PLAYER').toUpperCase();
 
             // Profile avatar — show the signed-in user's uploaded image when
             // available, otherwise their brand/name initial on a gradient.
@@ -25146,6 +25146,13 @@
                 return p ? (p.brand || p.brandName || p.name) : null;
             } catch (e) { return null; }
         }
+        function _pflxPlayerRealNameById(id) {
+            try {
+                if (typeof PLAYERS === 'undefined') return '';
+                var p = PLAYERS.find(function (x) { return x && x.id === id; });
+                return p ? pflxRealNameOf(p) : '';
+            } catch (e) { return ''; }
+        }
         function _pflxPlayerCohortById(id) {
             try {
                 if (typeof PLAYERS === 'undefined') return null;
@@ -25256,6 +25263,7 @@
                                     cohort: _pflxPlayerCohortById(pid) || t.cohort,
                                     submittedAt: s.date || s.submittedAt,
                                     brand: _pflxPlayerBrandById(pid) || s.playerName || 'Player',
+                                    realName: _pflxPlayerRealNameById(pid),
                                     title: (s.title && s.title !== t.title) ? ('📋 ' + s.title + ' · ' + (t.title || t.name || 'Untitled')) : ('📋 Task: ' + (t.title || t.name || 'Untitled')),   // v285
                                     sub: s.description || s.notes || '',
                                     link: s.link || '',
@@ -25407,7 +25415,7 @@
                         // Clicking the item body opens the actual submission.
                         '<div onclick="pflxOpenApprovalSource(\'' + dataKind + '\',\'' + escapeHtml(dataId) + '\')" title="Open this submission" style="flex:1;min-width:0;cursor:pointer;" onmouseover="this.style.opacity=0.8" onmouseout="this.style.opacity=1">' +
                             '<div style="font-size:13px;color:#e0e6ff;font-weight:700;margin-bottom:3px;">' + icon + ' ' + escapeHtml(it.title) + ' <span style="font-size:9px;color:rgba(255,255,255,0.3);">↗</span></div>' +
-                            '<div style="font-size:11px;color:rgba(255,255,255,0.45);font-family:\'Jura\',sans-serif;">@' + escapeHtml(it.brand) + (it.submittedAt ? ' · ' + new Date(it.submittedAt).toLocaleString() : '') + '</div>' +
+                            '<div style="font-size:11px;color:rgba(255,255,255,0.45);font-family:\'Jura\',sans-serif;">@' + escapeHtml(it.brand) + (it.realName ? ' (' + escapeHtml(it.realName) + ')' : '') + (it.submittedAt ? ' · ' + new Date(it.submittedAt).toLocaleString() : '') + '</div>' +
                         '</div>' +
                     '</div>' +
                     (it.sub ? '<div style="font-size:12px;color:rgba(255,255,255,0.6);margin-bottom:8px;font-family:\'Jura\',sans-serif;line-height:1.5;">' + escapeHtml(String(it.sub).substring(0, 240)) + '</div>' : '') +
@@ -27190,6 +27198,11 @@
         }
         window.pflxNormalizePlayerRecord = pflxNormalizePlayerRecord;
         window.pflxDisplayName = pflxDisplayName;
+        // v286 -- brand-first identity helpers. Real names are for hosts, the owner's own toggle, and nothing else.
+        function pflxBrandOf(p) { return (p && (p.brand || p.brandName || p.name)) || 'Player'; }
+        function pflxRealNameOf(p) { var b = p && (p.brand || p.brandName) || ''; var n = p && p.name || ''; return (n && n !== b) ? n : ''; }
+        function pflxViewerIsHost() { var r = String(window.pflxRole || '').toLowerCase(); return r === 'host' || r === 'admin' || r === 'teacher' || r === 'instructor'; }
+        window.pflxBrandOf = pflxBrandOf; window.pflxRealNameOf = pflxRealNameOf; window.pflxViewerIsHost = pflxViewerIsHost;
         let mcCheckpoints = [];
         let mcTasks = [];
         let mcProjects = [];
@@ -47694,7 +47707,7 @@ function ppRenderCheckpoints(el) {
             if (msgs) {
                 var div = document.createElement('div');
                 div.className = 'vt-chat-msg';
-                var name = (window.activeSession && window.activeSession.name) || 'Player';
+                var name = escapeHtml((window.activeSession && (window.activeSession.brand || window.activeSession.name)) || 'Player');
                 div.innerHTML = '<span class="vt-chat-author">' + name + '</span> ' + input.value.trim();
                 msgs.appendChild(div);
                 msgs.scrollTop = msgs.scrollHeight;
@@ -55524,7 +55537,7 @@ function ppRenderCheckpoints(el) {
             var player = pflxGetCurrentPlayer();
             sess.liveParticipants = sess.liveParticipants || [];
             if (!sess.liveParticipants.find(function(p) { return (p.id || p) === player.id; })) {
-                sess.liveParticipants.push({ id: player.id, name: player.name, cohort: player.cohort, pathway: player.pathway, xc: player.xc || 0, joinedAt: new Date().toISOString() });
+                sess.liveParticipants.push({ id: player.id, name: pflxBrandOf(player), realName: pflxRealNameOf(player), cohort: player.cohort, pathway: player.pathway, xc: player.xc || 0, joinedAt: new Date().toISOString() });
             }
             if (typeof mcSaveData === 'function') mcSaveData('sessions');
             if (typeof mcBroadcastToApps === 'function') mcBroadcastToApps('pflx_session_joined', { sessionId: sess.id, playerId: player.id });
@@ -55543,7 +55556,7 @@ function ppRenderCheckpoints(el) {
             if (slide.acceptResponses === false) return { ok: false, error: 'No responses on this slide' };
             slide.responses = slide.responses || {};
             var player = pflxGetCurrentPlayer();
-            slide.responses[player.id] = Object.assign({}, response, { playerName: player.name, submittedAt: new Date().toISOString() });
+            slide.responses[player.id] = Object.assign({}, response, { playerName: pflxBrandOf(player), realName: pflxRealNameOf(player), submittedAt: new Date().toISOString() });
             if (typeof mcSaveData === 'function') mcSaveData('sessions');
             if (typeof mcBroadcastToApps === 'function') mcBroadcastToApps('pflx_session_response', { sessionId: sess.id, slideId: slide.id, playerId: player.id });
             pflxRenderLiveSessionOverlay(sess.id);
@@ -55638,7 +55651,7 @@ function ppRenderCheckpoints(el) {
                 if (myGroup) {
                     interactive = '<div style="margin-top:16px;padding:14px;background:linear-gradient(135deg,rgba(245,200,66,0.08),rgba(167,139,250,0.06));border:1px solid rgba(245,200,66,0.3);border-radius:12px;">' +
                         '<div style="font-size:11px;color:#f5c842;font-weight:700;margin-bottom:6px;">&#x1F465; YOUR ' + (slide.type === 'partnership' ? 'PARTNER' : 'GROUP') + '</div>' +
-                        myGroup.filter(function(p) { return p.id !== player.id; }).map(function(p) { return '<span class="mc-pill" style="background:rgba(0,212,255,0.08);color:var(--cyan);border-color:rgba(0,212,255,0.3);margin-right:4px;">' + escapeHtml(p.name) + '</span>'; }).join('') +
+                        myGroup.filter(function(p) { return p.id !== player.id; }).map(function(p) { return '<span class="mc-pill" style="background:rgba(0,212,255,0.08);color:var(--cyan);border-color:rgba(0,212,255,0.3);margin-right:4px;">' + escapeHtml(p.brand || p.brandName || p.name) + '</span>'; }).join('') +
                         '</div>';
                 }
             }
@@ -55685,7 +55698,7 @@ function ppRenderCheckpoints(el) {
             // Leaderboard/footer: show participants + my XC earned
             if (footer) {
                 var parts = sess.liveParticipants || [];
-                footer.innerHTML = '<span>&#x1F7E2; ' + parts.length + ' live &middot; You are <b style="color:var(--cyan);">' + escapeHtml(player.name) + '</b></span>';
+                footer.innerHTML = '<span>&#x1F7E2; ' + parts.length + ' live &middot; You are <b style="color:var(--cyan);">' + escapeHtml(pflxBrandOf(player)) + '</b></span>';
             }
         }
 
@@ -57663,9 +57676,9 @@ function ppRenderCheckpoints(el) {
                 entryWindowEnd: matchType === 'async' ? (document.getElementById('dojo-create-entry-end').value || null) : null,
                 maxContestants: maxContestants,
                 launchedBy: player.id,
-                launchedByName: player.name,
+                launchedByName: pflxBrandOf(player),
                 contestants: [],
-                judges: [{ id: player.id, name: player.name }],
+                judges: [{ id: player.id, name: pflxBrandOf(player) }],
                 votes: {},
                 rewards: { xcPool: xcPool, badges: badges },
                 status: 'open',
@@ -57933,7 +57946,7 @@ function ppRenderCheckpoints(el) {
 
             match.contestants.push({
               id: player.id,
-              name: player.name,
+              name: pflxBrandOf(player),
               joinedAt: new Date().toISOString(),
               timerStarted: null,
               submission: null,
@@ -63741,7 +63754,7 @@ function ppRenderCheckpoints(el) {
 
             // Build the PFLX system prompt with live player context
             buildSystemPrompt(userInput) {
-                const name = activeSession ? activeSession.name : 'Player';
+                const name = activeSession ? (activeSession.brand || activeSession.name) : 'Player';
                 const brand = activeSession ? activeSession.brand : 'Unknown';
                 const xc = activeSession ? (activeSession.xc || 0) : 0;
                 const rank = getRankForXC(activeSession || xc);
@@ -64860,7 +64873,7 @@ RESPONSE RULES:
                 const xc = activeSession.xc || 0;
                 const rank = getRankForXC(activeSession);
                 const next = getNextRank(rank);
-                let msg = `📊 ${activeSession.name}'s Progress:\n• X-Coin: ${xc.toLocaleString()} XC\n• Rank: ${rank.icon} ${rank.name} (Level ${rank.level})`;
+                let msg = `📊 ${activeSession.brand || activeSession.name}'s Progress:\n• X-Coin: ${xc.toLocaleString()} XC\n• Rank: ${rank.icon} ${rank.name} (Level ${rank.level})`;
                 if (next) msg += `\n• Next Rank: ${next.name} at ${next.xcUnlock.toLocaleString()} XC`;
                 return msg;
             },
@@ -64873,7 +64886,7 @@ RESPONSE RULES:
                 return `${rank.icon} You're currently ${rank.name} (Level ${rank.level}). Keep earning XC to rank up!`;
             },
             greeting: () => {
-                const name = activeSession ? activeSession.name : 'Player';
+                const name = activeSession ? (activeSession.brand || activeSession.name) : 'Player';
                 return `Hey ${name}! How can I help you today?`;
             },
             default: (input) => {
@@ -65542,7 +65555,7 @@ RESPONSE RULES:
             const avatar = document.createElement('div');
             avatar.className = 'xbot-msg-avatar';
             if (isUser) {
-                avatar.textContent = activeSession ? activeSession.name.charAt(0).toUpperCase() : '?';
+                avatar.textContent = activeSession ? String(activeSession.brand || activeSession.name || '?').charAt(0).toUpperCase() : '?';
                 avatar.style.color = '#fff';
                 avatar.style.fontSize = '13px';
                 avatar.style.fontWeight = '700';
@@ -67388,7 +67401,11 @@ RESPONSE RULES:
         // controls — this is always someone else's portfolio, even when a
         // host views a player's.
         function pflxRenderPortfolioFullHtml(player, data) {
-            var displayName = (data.hideRealName === false && player.name) ? player.name : player.brand;
+            var displayName = player.brand || player.brandName || player.name;
+            // v286 -- brand is the identity. The real name is a sub-line, shown only when the owner switched it on, or to hosts.
+            var __real = pflxRealNameOf(player);
+            var __showReal = !!__real && (data.hideRealName === false || pflxViewerIsHost());
+            var __realLine = __showReal ? ('<div style="margin:0 0 6px;font-size:13px;color:rgba(255,255,255,0.55);font-family:\'Jura\',sans-serif;">' + escapeHtml(__real) + (data.hideRealName !== false ? ' <span style="font-size:9px;letter-spacing:0.1em;color:#f5a500;font-family:\'Share Tech Mono\',monospace;">HOST ONLY</span>' : '') + '</div>') : '';
             var avatar = player.image || '';
             var bc = player.badgeCounts || {};
             var totalBadges = (bc.primary || 0) + (bc.premium || 0) + (bc.executive || 0) + (bc.signature || 0);
@@ -67456,7 +67473,7 @@ RESPONSE RULES:
                     '<div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--cyan),#8b5cf6,transparent);"></div>' +
                     (avatar ? '<img src="' + escapeHtml(avatar) + '" style="width:100px;height:100px;border-radius:22px;object-fit:cover;border:3px solid rgba(255,255,255,0.1);flex-shrink:0;">' : '<div style="width:100px;height:100px;border-radius:22px;background:linear-gradient(135deg,#4f8ef7,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:900;color:#fff;flex-shrink:0;">' + escapeHtml((displayName || '?').charAt(0).toUpperCase()) + '</div>') +
                     '<div style="flex:1;min-width:200px;">' +
-                        '<h2 style="margin:0 0 4px;font-size:26px;font-weight:900;color:#f0f0ff;">' + escapeHtml(displayName || 'Player') + '</h2>' +
+                        '<h2 style="margin:0 0 4px;font-size:26px;font-weight:900;color:#f0f0ff;">' + escapeHtml(displayName || 'Player') + '</h2>' + __realLine +
                         '<div style="margin:0 0 10px;font-size:13px;color:#a78bfa;font-style:italic;font-family:\'Jura\',sans-serif;">' + escapeHtml(data.tagline || 'PFLX Identity') + '</div>' +
                         '<div style="display:flex;gap:10px;flex-wrap:wrap;">' + metaTags.join('') + '</div>' +
                     '</div>' +
@@ -72987,7 +73004,7 @@ RESPONSE RULES:
             if (!t.submission.peerReviews) t.submission.peerReviews = [];
             t.submission.peerReviews.push({
                 reviewerId: activeSession ? activeSession.id : 'peer-' + Date.now(),
-                reviewerName: activeSession ? activeSession.name : 'Anonymous',
+                reviewerName: activeSession ? (activeSession.brand || activeSession.name) : 'Anonymous',
                 feedback: feedback,
                 rating: rating,
                 reviewedAt: new Date().toISOString()
