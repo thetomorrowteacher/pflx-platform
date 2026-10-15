@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 284;
+      window.PFLX_PATCH   = 285;
       window.PFLX_BUILD   = '2026.10';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -10269,6 +10269,11 @@
                                         <div style="margin-top:8px;">
                                             <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:4px;text-transform:uppercase;">Submission Instructions</label>
                                             <textarea id="mc-task-submit-instructions" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:6px;font-size:11px;min-height:40px;box-sizing:border-box;font-family:'Jura',sans-serif;" placeholder="Instructions for players when submitting..."></textarea>
+                                        </div>
+                                        <div style="margin-top:8px;">
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:4px;text-transform:uppercase;">Submission title (auto-name)</label>
+                                            <input id="mc-task-submission-title" type="text" maxlength="90" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px;border-radius:6px;font-size:11px;box-sizing:border-box;font-family:'Jura',sans-serif;" placeholder="{task} - {player}">
+                                            <div style="font-size:10px;color:rgba(255,255,255,0.35);margin-top:4px;line-height:1.5;">Every submission gets a name, and uploads are renamed to it. Tokens: {task} {player} {date}. Example: <b>Discord Name - {player}</b>. Leave blank for &ldquo;{task} - {player}&rdquo;.</div>
                                         </div>
                                     </div>
 
@@ -25251,7 +25256,7 @@
                                     cohort: _pflxPlayerCohortById(pid) || t.cohort,
                                     submittedAt: s.date || s.submittedAt,
                                     brand: _pflxPlayerBrandById(pid) || s.playerName || 'Player',
-                                    title: '📋 Task: ' + (t.title || t.name || 'Untitled'),
+                                    title: (s.title && s.title !== t.title) ? ('📋 ' + s.title + ' · ' + (t.title || t.name || 'Untitled')) : ('📋 Task: ' + (t.title || t.name || 'Untitled')),   // v285
                                     sub: s.description || s.notes || '',
                                     link: s.link || '',
                                     file: s.fileName || '',
@@ -27574,6 +27579,7 @@
                     var body = { action: j.action, playerId: j.playerId };
                     if (j.taskId) body.taskId = j.taskId;
                     if (j.badgeId) body.badgeId = j.badgeId;
+                    if (j.submissionId) body.submissionId = j.submissionId;
                     var r = await post(body);
                     if (r.ok || DROP[r.error]) { remove(j.k); return; }
                     j.tries = (j.tries || 0) + 1;
@@ -27583,12 +27589,12 @@
                 } finally { busy[j.k] = 0; }
             }
             // kind: 'task_approved' (ref = taskId) | 'coin' (ref = badgeId)
-            window.pflxEmailNotify = function (kind, playerId, ref) {
+            window.pflxEmailNotify = function (kind, playerId, ref, ref2) {
                 try {
                     if (off() || !playerId || !ref) return;
-                    if (kind !== 'task_approved' && kind !== 'coin') return;
-                    var j = { k: kind + ':' + playerId + ':' + ref, action: kind, playerId: String(playerId), tries: 0 };
-                    if (kind === 'task_approved') j.taskId = String(ref); else j.badgeId = String(ref);
+                    if (kind !== 'task_approved' && kind !== 'coin' && kind !== 'submission') return;
+                    var j = { k: kind + ':' + playerId + ':' + ref + (ref2 ? ':' + ref2 : ''), action: kind, playerId: String(playerId), tries: 0 };
+                    if (kind === 'task_approved') j.taskId = String(ref); else if (kind === 'submission') { j.taskId = String(ref); if (!ref2) return; j.submissionId = String(ref2); } else j.badgeId = String(ref);
                     if (load().some(function (x) { return x.k === j.k; }) || busy[j.k]) return;
                     update(j);
                     setTimeout(function () { run(j); }, DELAYS[0]);
@@ -27618,6 +27624,103 @@
                 } catch (e) {}
             }
             if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', handleUnsub); else handleUnsub();
+        })();
+
+        // ═══════════════════════════════════════════════════════════════
+        //  v285 -- HOST EMAIL DEEP LINKS (Ennis, Oct 15): the "new submission" email's View /
+        //  Approve / Deny buttons open  /?pflx_review=<taskId>&p=<playerId>&a=view|approve|deny.
+        //  The link is remembered (so it survives login), then once a HOST session is live:
+        //    view    -> opens the submission in Mission Control
+        //    approve -> opens it + asks the host to CONFIRM (nothing is approved by just opening a link)
+        //    deny    -> opens the standard deny box (comment bank, note, optional XC tax) for that submission
+        //  Approval/deny run through the normal pflxApproveSubmission / pflxDenySubmission paths.
+        // ═══════════════════════════════════════════════════════════════
+        (function () {
+            var KEY = 'pflx_pending_review_v1', started = false;
+            function capture() {
+                try {
+                    var q = new URLSearchParams(location.search), t = q.get('pflx_review');
+                    if (!t) return;
+                    var a = String(q.get('a') || 'view').toLowerCase();
+                    if (a !== 'approve' && a !== 'deny') a = 'view';
+                    localStorage.setItem(KEY, JSON.stringify({ taskId: t, playerId: q.get('p') || '', action: a, at: Date.now() }));
+                    try { history.replaceState(null, '', location.pathname); } catch (e) {}
+                } catch (e) {}
+            }
+            function load() {
+                try {
+                    var j = JSON.parse(localStorage.getItem(KEY) || 'null');
+                    if (!j || !j.taskId || Date.now() - (j.at || 0) > 30 * 60 * 1000) { clear(); return null; }
+                    return j;
+                } catch (e) { return null; }
+            }
+            function clear() { try { localStorage.removeItem(KEY); } catch (e) {} }
+            function toast(m, t) { try { if (typeof pflxToast === 'function') pflxToast(m, t || 'info', 6000); } catch (e) {} }
+            function hostSession() {
+                var s = window.activeSession;
+                if (!s || !s.id) return null;
+                var r = String(s.role || '').toLowerCase();
+                var isHostRole = !!(s.hostTier || r === 'admin' || r === 'host' || r === 'teacher' || r === 'instructor');
+                return { s: s, host: isHostRole };
+            }
+            function confirmApprove(task, sub, brand, done) {
+                var old = document.getElementById('pflx-review-confirm'); if (old) old.remove();
+                var el = document.createElement('div');
+                el.id = 'pflx-review-confirm';
+                el.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(3,6,16,0.72);display:flex;align-items:center;justify-content:center;padding:16px;';
+                var xc = task.xcReward ? ' <b style="color:#f5c842;">+' + Number(task.xcReward).toLocaleString() + ' XC</b>' : '';
+                el.innerHTML = '<div style="max-width:460px;width:100%;background:#0b1020;border:1px solid rgba(34,197,94,0.5);border-radius:14px;padding:22px 22px 18px;color:#e0e6ff;font-family:Jura,sans-serif;box-shadow:0 20px 60px rgba(0,0,0,0.6);">' +
+                    '<div style="font-family:Orbitron,sans-serif;font-size:13px;letter-spacing:1.5px;color:#22c55e;margin-bottom:12px;">APPROVE SUBMISSION?</div>' +
+                    '<div style="font-size:14px;line-height:1.6;margin-bottom:6px;"><b>@' + escapeHtml(brand) + '</b> &middot; ' + escapeHtml(sub.title || task.title || 'Task') + '</div>' +
+                    '<div style="font-size:12px;color:rgba(255,255,255,0.55);margin-bottom:16px;">' + escapeHtml(task.title || '') + (xc ? '<br>Releases' + xc + ' and any badges for this task.' : '') + '</div>' +
+                    '<div style="display:flex;gap:10px;flex-wrap:wrap;"><button id="pflx-rc-yes" style="flex:1;min-width:150px;padding:11px 16px;background:linear-gradient(135deg,#22c55e,#16a34a);color:#04120a;border:none;border-radius:8px;font-weight:800;letter-spacing:0.06em;cursor:pointer;">APPROVE</button>' +
+                    '<button id="pflx-rc-no" style="padding:11px 16px;background:rgba(255,255,255,0.05);color:rgba(255,255,255,0.6);border:1px solid rgba(255,255,255,0.12);border-radius:8px;cursor:pointer;">NOT NOW</button></div></div>';
+                document.body.appendChild(el);
+                el.querySelector('#pflx-rc-yes').onclick = function () { el.remove(); done(true); };
+                el.querySelector('#pflx-rc-no').onclick = function () { el.remove(); done(false); };
+            }
+            function run(j) {
+                var task = (typeof mcTasks !== 'undefined' && Array.isArray(mcTasks)) ? mcTasks.find(function (t) { return t && t.id === j.taskId; }) : null;
+                if (!task) return false;
+                var sub = (typeof _mcFindPlayerSub === 'function') ? _mcFindPlayerSub(task, j.playerId) : null;
+                clear();
+                if (!sub) { toast('That submission could not be found. It may have been withdrawn.', 'warn'); return true; }
+                var key = task.id + '::' + (sub.playerId || j.playerId);
+                var brand = (typeof _pflxPlayerBrandById === 'function' && _pflxPlayerBrandById(sub.playerId || j.playerId)) || sub.playerName || 'player';
+                try { if (typeof pflxOpenApprovalSource === 'function') pflxOpenApprovalSource('tasksub', key); } catch (e) {}
+                var st = sub.status || 'pending';
+                if (st !== 'pending') { toast('@' + brand + '’s submission was already ' + st + '.', 'info'); return true; }
+                if (j.action === 'approve') {
+                    setTimeout(function () {
+                        confirmApprove(task, sub, brand, function (yes) { if (yes && typeof pflxApproveSubmission === 'function') pflxApproveSubmission('tasksub', key); });
+                    }, 1100);
+                } else if (j.action === 'deny') {
+                    setTimeout(function () {
+                        if (typeof pflxShowDenyModal === 'function') pflxShowDenyModal([{ kind: 'tasksub', id: key }]);
+                        else if (typeof pflxDenySubmission === 'function') pflxDenySubmission('tasksub', key);
+                    }, 1100);
+                } else toast('Opened @' + brand + '’s submission.', 'info');
+                return true;
+            }
+            function tick() {
+                var j = load(); if (!j) return false;
+                var h = hostSession();
+                if (!h) return true;                       // not logged in yet -- keep waiting
+                if (!h.host) { clear(); toast('That review link is for hosts. Log in with a host account.', 'warn'); return false; }
+                var n = (j.tries || 0) + 1; j.tries = n;
+                if (n < 3) return true;                    // give the cloud pull a couple of seconds
+                if (run(j)) return false;
+                if (n > 25) { clear(); toast('That task was not found. It may have been deleted.', 'warn'); return false; }
+                try { localStorage.setItem(KEY, JSON.stringify(j)); } catch (e) {}
+                return true;
+            }
+            function start() {
+                if (started) return; started = true;
+                var iv = setInterval(function () { if (!tick()) clearInterval(iv); }, 1500);
+                setTimeout(function () { clearInterval(iv); }, 20 * 60 * 1000);
+            }
+            capture();
+            if (load()) { if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start(); }
         })();
 
         function _pflxResolveAwardBadge(badgeRef) {
@@ -34856,6 +34959,10 @@ function ppRenderCheckpoints(el) {
                 '</div>';
             } else if (!canSubmit) {
                 // Read-only — show what they submitted
+                if (existing.title && existing.title !== task.title) {
+                    html += '<div style="font-size:11px;letter-spacing:0.1em;color:rgba(255,255,255,0.4);margin-bottom:4px;">NAME</div>' +
+                        '<div style="font-size:13px;color:#00d4ff;font-weight:700;margin-bottom:14px;padding:8px 12px;background:rgba(0,212,255,0.05);border-radius:8px;">' + escapeHtml(existing.title) + '</div>';
+                }
                 if (existing.description) {
                     html += '<div style="font-size:11px;letter-spacing:0.1em;color:rgba(255,255,255,0.4);margin-bottom:4px;">DESCRIPTION</div>' +
                         '<div style="font-size:13px;color:rgba(255,255,255,0.85);line-height:1.6;margin-bottom:14px;padding:10px 12px;background:rgba(255,255,255,0.03);border-radius:8px;">' + escapeHtml(existing.description) + '</div>';
@@ -34900,6 +35007,13 @@ function ppRenderCheckpoints(el) {
                     html += '<div style="height:14px;"></div>';
                 }
 
+                // v285 — Submission name (required; prefilled from the task's title template)
+                var __pnm = (window.activeSession && (window.activeSession.brand || window.activeSession.name)) || 'Player';
+                var __defNm = (existing.title && existing.title !== task.title) ? existing.title : window.pflxSubNameFor(task, __pnm);
+                html += '<div style="font-size:11px;letter-spacing:0.1em;color:rgba(255,255,255,0.4);margin-bottom:6px;">SUBMISSION NAME *</div>' +
+                    '<input id="' + sid + '-name" type="text" maxlength="90" value="' + escapeHtml(__defNm) + '" oninput="ppRefreshSubFileLabel(\'' + sid + '\')" style="width:100%;padding:10px 12px;background:rgba(255,255,255,0.03);border:1px solid rgba(0,212,255,0.35);border-radius:8px;color:#fff;font-size:13px;outline:none;margin-bottom:6px;box-sizing:border-box;">' +
+                    '<div style="font-size:11px;color:rgba(255,255,255,0.35);margin-bottom:14px;line-height:1.5;">Name what you are turning in. This becomes your file name, so your host can tell it apart. Default names like &ldquo;Screenshot&hellip;&rdquo; are not accepted.</div>';
+
                 // Description (always shown)
                 html += '<div style="font-size:11px;letter-spacing:0.1em;color:rgba(255,255,255,0.4);margin-bottom:6px;">DESCRIPTION *</div>' +
                     '<textarea id="' + sid + '-desc" rows="4" placeholder="What did you do? Reflect on your process." style="width:100%;padding:10px 12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:#fff;font-size:13px;font-family:\'Jura\',sans-serif;resize:vertical;outline:none;margin-bottom:14px;">' + escapeHtml(existing.description || '') + '</textarea>';
@@ -34943,6 +35057,45 @@ function ppRenderCheckpoints(el) {
             el.innerHTML = html;
         }
 
+        // ══ v285 SUBMISSION NAMING (Ennis, Oct 15) ═══════════════════════
+        // Most uploads are screenshots named "Screenshot 2026-10-15 at 7.32.39 AM.png",
+        // which tells a host nothing. Every submission now has a NAME: prefilled from the
+        // task's "Submission title" template ({task} {player} {date}; default "{task} - {player}"),
+        // editable by the player, never blank and never a default camera/screenshot name.
+        // The uploaded file is renamed to that name (keeping its extension).
+        window.pflxSanitizeFileBase = function (name) {
+            return String(name == null ? '' : name).replace(/[\/\\:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 90);
+        };
+        window.pflxFileExt = function (fileName) {
+            var m = String(fileName || '').match(/\.[A-Za-z0-9]{1,6}$/);
+            return m ? m[0].toLowerCase() : '';
+        };
+        window.pflxSubNameFor = function (task, playerName) {
+            var tpl = String((task && task.submissionTitle) || '').trim() || '{task} - {player}';
+            var title = String((task && (task.title || task.name)) || 'Task').slice(0, 60);
+            var d = new Date().toISOString().slice(0, 10);
+            return window.pflxSanitizeFileBase(tpl.replace(/\{task\}/gi, title).replace(/\{player\}/gi, String(playerName || 'Player')).replace(/\{date\}/gi, d));
+        };
+        window.pflxIsGenericName = function (name) {
+            var base = String(name || '').replace(/\.[A-Za-z0-9]{2,5}$/, '').trim().toLowerCase();
+            if (!base) return true;
+            if (/^(screenshot|screen shot|screen_shot|screen recording|simulator screen shot)/.test(base)) return true;
+            if (/^(img|image|photo|pic|picture|untitled|unnamed|capture|snapshot|scan|document|file|download|upload|video|recording|pxl|dsc|dscn|mvimg|whatsapp image|whatsapp video|new image|new file)[\s_\-.()\d]*$/.test(base)) return true;
+            if (/^[\d\s_\-.()]+$/.test(base)) return true;
+            if (/^[0-9a-f]{8}-[0-9a-f]{4}-/.test(base)) return true;
+            if (/\bat \d{1,2}[.:]\d{2}([.:]\d{2})?\s?(am|pm)?\b/.test(base)) return true;
+            return false;
+        };
+        // Show "📎 <submission name>.<ext>" so the player sees what the host will see.
+        window.ppRefreshSubFileLabel = function (sid) {
+            var nameEl = document.getElementById(sid + '-name');
+            var orig = document.getElementById(sid + '-filenamehidden');
+            var label = document.getElementById(sid + '-filename');
+            if (!label || !orig || !orig.value) return;
+            var base = window.pflxSanitizeFileBase(nameEl ? nameEl.value : '');
+            label.textContent = '📎 ' + (base ? base + window.pflxFileExt(orig.value) : orig.value);
+        };
+
         // Handle file pick for the task submission form. Caps at 5MB and base64-
         // encodes into a hidden field so ppSubmitTask can write it onto the task.
         window.ppHandleSubmitFile = function (sid, input) {
@@ -34962,7 +35115,7 @@ function ppRenderCheckpoints(el) {
                 var nameLabel = document.getElementById(sid + '-filename');
                 if (dataEl) dataEl.value = data;
                 if (nameEl) nameEl.value = f.name;
-                if (nameLabel) nameLabel.textContent = '📎 ' + f.name;
+                if (nameLabel) nameLabel.textContent = '📎 ' + f.name; try { window.ppRefreshSubFileLabel(sid); } catch (e2) {}
             };
             reader.readAsDataURL(f);
         };
@@ -35014,6 +35167,16 @@ function ppRenderCheckpoints(el) {
                 });
 
                 if (!desc.trim()) { setErr('A description is required.'); return; }
+                // v285 — submission name: required, never a default screenshot/camera name.
+                var __nameEl = document.getElementById(sid + '-name');
+                var __sbrand = (window.activeSession && (window.activeSession.brand || window.activeSession.name)) || 'Player';
+                var subName = window.pflxSanitizeFileBase(__nameEl ? __nameEl.value : window.pflxSubNameFor(t, __sbrand));
+                if (subName.length < 3) { setErr('Give your submission a name (at least 3 characters).'); return; }
+                if (window.pflxIsGenericName(subName)) {
+                    setErr('Please rename it. "' + subName + '" is a default file name. Try: ' + window.pflxSubNameFor(t, __sbrand));
+                    if (__nameEl) { try { __nameEl.focus(); __nameEl.select(); } catch (e0) {} }
+                    return;
+                }
                 // At least a link or a file if the task allows them
                 var needsArtifact = (t.allowLinkSubmit !== false) || (t.allowFileUpload !== false);
                 if (needsArtifact && !link.trim() && !fileName) {
@@ -35029,6 +35192,8 @@ function ppRenderCheckpoints(el) {
                 // If Storage is unreachable we keep the base64 so the student
                 // never loses their evidence; the row-size guard below still
                 // refuses anything that would bloat the cloud row again.
+                // v285 — the uploaded file takes the submission name (extension kept).
+                if (fileName) fileName = subName + window.pflxFileExt(fileName);
                 var fileUrl = '';
                 if (fileData && String(fileData).indexOf('data:') === 0) {
                     try {
@@ -35057,7 +35222,8 @@ function ppRenderCheckpoints(el) {
                     playerId: __spid,
                     playerName: __sname,
                     date: new Date().toISOString(),
-                    title: t.title || 'Task Submission',
+                    title: subName,                    // v285 — the player's submission name
+                    taskTitle: t.title || 'Task Submission',
                     description: desc.trim(),
                     link: link.trim() || null,
                     fileName: fileName || null,
@@ -35067,6 +35233,8 @@ function ppRenderCheckpoints(el) {
                     status: 'pending'
                 };
                 if (!Array.isArray(t.submissions)) t.submissions = [];
+                // v285 — a resubmission after a rejection is flagged so emails say so.
+                subEntry.resubmitted = t.submissions.some(function (s) { return s && (s.playerId === __spid || s.submittedBy === __spid) && s.status === 'rejected'; });
                 // Replace my earlier non-approved entry rather than stacking.
                 t.submissions = t.submissions.filter(function (s) {
                     return !(s && (s.playerId === __spid || s.submittedBy === __spid) && s.status !== 'approved');
@@ -35086,6 +35254,8 @@ function ppRenderCheckpoints(el) {
                 mcTasks[i] = t;
                 mcSaveData('tasks');
                 try { logActivity(t.submission.submittedBy, 'task_submitted', { taskId: t.id, title: t.title }); } catch (e) {}
+                // v285 -- receipt to the player + alert to the hosts who review it (server re-verifies, dedupes, retries).
+                try { if (typeof window.pflxEmailNotify === 'function') window.pflxEmailNotify('submission', __spid, t.id, subEntry.id); } catch (e) {}
                 if (typeof pflxToast === 'function') pflxToast('Submitted — your host will review soon', 'success');
                 setOk('Submitted! Awaiting host review.');
                 // Re-render so the form switches to read-only mode
@@ -40838,6 +41008,7 @@ function ppRenderCheckpoints(el) {
                 el = document.getElementById('mc-task-allow-file-upload'); if (el) el.checked = t.allowFileUpload !== false;
                 el = document.getElementById('mc-task-allow-link-submit'); if (el) el.checked = t.allowLinkSubmit !== false;
                 el = document.getElementById('mc-task-submit-instructions'); if (el) el.value = t.submitInstructions || '';
+                el = document.getElementById('mc-task-submission-title'); if (el) el.value = t.submissionTitle || '';
                 el = document.getElementById('mc-task-deadline-penalty'); if (el) el.checked = t.deadlinePenalty && t.deadlinePenalty.enabled;
                 el = document.getElementById('mc-task-penalty-type'); if (el) el.value = (t.deadlinePenalty && t.deadlinePenalty.type) || 'fine';
                 el = document.getElementById('mc-task-penalty-amount'); if (el) el.value = (t.deadlinePenalty && t.deadlinePenalty.amount) || 10;
@@ -40914,6 +41085,7 @@ function ppRenderCheckpoints(el) {
                 el = document.getElementById('mc-task-allow-file-upload'); if (el) el.checked = true;
                 el = document.getElementById('mc-task-allow-link-submit'); if (el) el.checked = true;
                 el = document.getElementById('mc-task-submit-instructions'); if (el) el.value = '';
+                el = document.getElementById('mc-task-submission-title'); if (el) el.value = '';
                 el = document.getElementById('mc-task-deadline-penalty'); if (el) el.checked = false;
                 el = document.getElementById('mc-task-penalty-type'); if (el) el.value = 'fine';
                 el = document.getElementById('mc-task-penalty-amount'); if (el) el.value = 10;
@@ -43204,6 +43376,7 @@ function ppRenderCheckpoints(el) {
                 allowFileUpload: document.getElementById('mc-task-allow-file-upload')?.checked !== false,
                 allowLinkSubmit: document.getElementById('mc-task-allow-link-submit')?.checked !== false,
                 submitInstructions: document.getElementById('mc-task-submit-instructions')?.value || '',
+                submissionTitle: (document.getElementById('mc-task-submission-title')?.value || '').trim(),   // v285
                 deadlinePenalty: document.getElementById('mc-task-deadline-penalty')?.checked ? {
                     enabled: true,
                     type: document.getElementById('mc-task-penalty-type')?.value || 'fine',
