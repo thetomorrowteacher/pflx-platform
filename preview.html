@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 288;
+      window.PFLX_PATCH   = 289;
       window.PFLX_BUILD   = '2026.10';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -11334,6 +11334,16 @@
                                         <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Description</label>
                                         <textarea id="mc-job-desc" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;min-height:80px;font-family:'Jura',sans-serif;" placeholder="Job description..."></textarea>
                                     </div>
+
+                                    <div style="margin-bottom:12px;">
+                                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                                            <label style="font-size:11px;color:rgba(255,255,255,0.4);text-transform:uppercase;">Links &amp; Content <span style="font-weight:400;text-transform:none;color:rgba(255,255,255,0.3);">(Drive folder, Doc, Slides, image, video&hellip;)</span></label>
+                                            <button type="button" class="mc-btn" style="font-size:10px;padding:4px 10px;" onclick="mcQLAdd('qjob')">+ Add Link</button>
+                                        </div>
+                                        <div id="mc-qjob-quicklinks-list"></div>
+                                        <div id="mc-qjob-quicklinks-empty" style="font-size:11px;color:rgba(255,255,255,0.25);">No links yet. Paste a Google Drive folder, Doc, Slides, Canva, YouTube or image link for a live preview. Hired players get these on their Task.</div>
+                                    </div>
+                                    <div id="mc-job-points-total" style="margin:4px 0 0;font-size:11px;color:#f5c842;font-weight:800;letter-spacing:0.04em;"></div>
 
                                     <div style="font-size:10px;font-weight:800;letter-spacing:0.14em;color:rgba(167,243,208,0.75);text-transform:uppercase;margin:18px 0 10px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.06);">Rewards &mdash; passed to every hire&rsquo;s Task</div>
                                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
@@ -32625,7 +32635,7 @@
                 standaloneTasks.forEach(function (t) {
                     html += '<div onclick="event.stopPropagation();ppNav(\'task-detail\',{id:\'' + escapeHtml(String(t.id || '')) + '\'})" style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:rgba(79,142,247,0.05);border:1px solid rgba(79,142,247,0.18);border-radius:8px;margin-bottom:6px;cursor:pointer;">' +
                         '<span style="font-size:12px;color:#c9d6ff;">' + statusIcon(t) + ' ' + escapeHtml(t.title || t.name || 'Task') + '</span>' +
-                        ((t.xcReward || t.xc) ? '<span style="font-size:10px;color:#f5c842;font-family:monospace;">' + (t.xcReward || t.xc) + ' XC</span>' : '') + '</div>';
+                        (pflxPointsAvailable(t) ? '<span title="' + escapeHtml(pflxPointsTitle(t)) + '" style="font-size:10px;color:#f5c842;font-family:monospace;">' + pflxPointsLabel(t) + ' XC</span>' : '') + '</div>';
                 });
             } else {
                 html += '<div style="font-size:11px;color:rgba(255,255,255,0.3);text-align:center;padding:10px;">No tasks or projects yet.</div>';
@@ -32670,7 +32680,7 @@
                 tasks.forEach(function (t) {
                     html += '<div onclick="event.stopPropagation();ppNav(\'task-detail\',{id:\'' + escapeHtml(String(t.id || '')) + '\'})" style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:rgba(79,142,247,0.05);border:1px solid rgba(79,142,247,0.18);border-radius:8px;margin-bottom:6px;cursor:pointer;">' +
                         '<span style="font-size:12px;color:#c9d6ff;">' + statusIcon(t) + ' ' + escapeHtml(t.title || t.name || 'Task') + '</span>' +
-                        ((t.xcReward || t.xc) ? '<span style="font-size:10px;color:#f5c842;font-family:monospace;">' + (t.xcReward || t.xc) + ' XC</span>' : '') + '</div>';
+                        (pflxPointsAvailable(t) ? '<span title="' + escapeHtml(pflxPointsTitle(t)) + '" style="font-size:10px;color:#f5c842;font-family:monospace;">' + pflxPointsLabel(t) + ' XC</span>' : '') + '</div>';
                 });
             } else {
                 html += '<div style="font-size:11px;color:rgba(255,255,255,0.3);text-align:center;padding:10px;">No tasks yet.</div>';
@@ -32962,7 +32972,7 @@
             if (parentCp) extra += '<div style="font-size:10px;color:rgba(255,255,255,0.35);margin-bottom:6px;">↪ ' + escapeHtml(parentCp.name || 'Checkpoint') + '</div>';
             if (proj.description) extra += '<div style="font-size:11px;color:#8a92b0;margin-bottom:8px;">' + escapeHtml(String(proj.description).substring(0, 160)) + '</div>';
             var chips = '';
-            if (proj.xcRewardPool || proj.xcReward) chips += '<span style="font-family:monospace;font-size:11px;color:#f5c842;font-weight:700;">⚡ ' + (proj.xcRewardPool || proj.xcReward) + ' XC</span>';
+            if (pflxPointsAvailable(proj)) chips += '<span title="' + escapeHtml(pflxPointsTitle(proj)) + '" style="font-family:monospace;font-size:11px;color:#f5c842;font-weight:700;">⚡ ' + pflxPointsLabel(proj) + ' XC</span>';
             if (urg && urg.label) chips += '<span style="font-size:10px;color:rgba(' + urg.rgb + ',1);">' + escapeHtml(urg.label) + '</span>';
             if (chips) extra += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:4px;">' + chips + '</div>';
             if (extra) extra = '<div style="padding:12px 16px 0;">' + extra + '</div>';
@@ -33109,7 +33119,7 @@
                 checklistHtml +
                 resHtml +
                 '<div style="display:flex;gap:6px;margin-top:auto;padding-top:10px;flex-wrap:wrap;">' +
-                    ((t.xcReward || t.xc) ? '<span style="font-size:10px;color:#f5c842;font-family:monospace;font-weight:700;">⚡ ' + (t.xcReward || t.xc) + ' XC</span>' : '') +
+                    (pflxPointsAvailable(t) ? '<span title="' + escapeHtml(pflxPointsTitle(t)) + '" style="font-size:10px;color:#f5c842;font-family:monospace;font-weight:700;">⚡ ' + pflxPointsLabel(t) + ' XC</span>' : '') +
                     ((Array.isArray(t.rewardBadges) && t.rewardBadges.length) ? t.rewardBadges.slice(0, 2).map(function (b) { var bn = typeof b === 'string' ? b : (b && (b.name || b.id)) || 'Badge'; return '<span style="font-size:9px;background:rgba(167,139,250,0.1);border:1px solid rgba(167,139,250,0.3);color:#a78bfa;padding:2px 7px;border-radius:6px;font-weight:700;">\u{1F3C5} ' + escapeHtml(String(bn)) + '</span>'; }).join('') : '') +
                 '</div>' +
             '</div>';
@@ -33394,7 +33404,7 @@
                         html += '<div onclick="event.stopPropagation();ppNav(\'task-detail\',{id:\'' + (t.id || '') + '\'})" style="background:rgba(' + phMeta.rgb + ',0.05);border:1px solid rgba(' + phMeta.rgb + ',0.25);border-left:3px solid rgba(' + phMeta.rgb + ',0.85);border-radius:8px;padding:10px 12px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(' + phMeta.rgb + ',0.10)\'" onmouseout="this.style.background=\'rgba(' + phMeta.rgb + ',0.05)\'">' +
                             '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px;margin-bottom:4px;">' +
                                 '<div style="font-family:Orbitron,sans-serif;font-size:9px;font-weight:800;color:rgba(' + phMeta.rgb + ',1);letter-spacing:0.08em;text-transform:uppercase;">' + phMeta.label + '</div>' +
-                                (t.xcReward || t.xc ? '<div style="font-family:monospace;font-size:10px;color:#f5c842;font-weight:700;">' + (t.xcReward || t.xc) + ' XC</div>' : '') +
+                                (pflxPointsAvailable(t) ? '<div title="' + escapeHtml(pflxPointsTitle(t)) + '" style="font-family:monospace;font-size:10px;color:#f5c842;font-weight:700;">' + pflxPointsLabel(t) + ' XC</div>' : '') +
                             '</div>' +
                             '<div style="font-size:12px;color:#e0e6ff;font-weight:600;line-height:1.3;margin-bottom:4px;">' + escapeHtml(String(t.title || t.name || 'Task').substring(0, 60)) + '</div>' +
                             daysHtml +
@@ -34192,7 +34202,7 @@ function ppRenderCheckpoints(el) {
                     '<div style="flex:1;">' + ppProgressBar(comp.pct, comp.pct === 100 ? '#22c55e' : '#a78bfa') + '</div>' +
                     '<span style="font-size:11px;color:rgba(255,255,255,0.4);white-space:nowrap;">' + comp.pct + '%' + (comp.total ? ' ' + String.fromCharCode(183) + ' ' + comp.done + '/' + comp.total : '') + '</span></div>';
                 cardHtml += '<div style="display:flex;gap:12px;margin-top:8px;flex-wrap:wrap;">' +
-                    ((proj.xcRewardPool || proj.xcReward) ? '<span style="font-family:\'Share Tech Mono\',monospace;font-size:12px;color:#f5c842;font-weight:700;">' + (proj.xcRewardPool || proj.xcReward) + ' XC</span>' : '') +
+                    (pflxPointsAvailable(proj) ? '<span title="' + escapeHtml(pflxPointsTitle(proj)) + '" style="font-family:\'Share Tech Mono\',monospace;font-size:12px;color:#f5c842;font-weight:700;">' + pflxPointsLabel(proj) + ' XC</span>' : '') +
                     (urg && urg.label ? '<span style="font-size:10px;color:rgba(' + urg.rgb + ',1);">' + escapeHtml(urg.label) + '</span>' : '') +
                     '</div>';
                 // Sept 12 (Ennis: dropdown arrows for Checkpoints/Projects to
@@ -34306,7 +34316,7 @@ function ppRenderCheckpoints(el) {
             html += '<div style="display:flex;gap:20px;flex-wrap:wrap;font-size:11px;color:rgba(255,255,255,0.6);">';
             if (cp.startDate) html += '<div><span style="color:rgba(255,255,255,0.4);">START:</span> <span style="color:#22c55e;font-family:monospace;">' + escapeHtml(cp.startDate) + '</span></div>';
             if (cp.endDate) html += '<div><span style="color:rgba(255,255,255,0.4);">DEADLINE:</span> <span style="color:' + (cpUrg && cpUrg.days < 0 ? '#ef4444' : '#f5a500') + ';font-family:monospace;">' + escapeHtml(cp.endDate) + '</span></div>';
-            if (cp.xc || cp.xcReward) html += '<div><span style="color:rgba(255,255,255,0.4);">REWARD:</span> <span style="color:#f5c842;font-family:monospace;font-weight:700;">⚡ ' + (cp.xc || cp.xcReward) + ' XC</span></div>';
+            if (pflxPointsAvailable(cp)) html += '<div><span style="color:rgba(255,255,255,0.4);">REWARD:</span> <span title="' + escapeHtml(pflxPointsTitle(cp)) + '" style="color:#f5c842;font-family:monospace;font-weight:700;">⚡ ' + pflxPointsLabel(cp) + ' XC</span></div>';
             html += '</div>';
 
             // Snapshot info
@@ -34397,7 +34407,7 @@ function ppRenderCheckpoints(el) {
                                 '<span style="font-size:14px;">' + icon + '</span>' +
                                 '<span style="flex:1;font-size:12px;color:' + col + ';' + (done ? 'text-decoration:line-through;' : '') + '">' + escapeHtml(t.title || t.name || 'Task') + reqLabel + '</span>' +
                                 (chip ? '<span style="margin-right:6px;">' + chip + '</span>' : '') +
-                                (t.xcReward || t.xc ? '<span style="font-size:11px;color:#f5c842;font-family:\'Share Tech Mono\',monospace;">' + (t.xcReward || t.xc) + ' XC</span>' : '') + '</div>';
+                                (pflxPointsAvailable(t) ? '<span title="' + escapeHtml(pflxPointsTitle(t)) + '" style="font-size:11px;color:#f5c842;font-family:\'Share Tech Mono\',monospace;">' + pflxPointsLabel(t) + ' XC</span>' : '') + '</div>';
                         });
                         html += '</div>';
                     }
@@ -34418,7 +34428,7 @@ function ppRenderCheckpoints(el) {
                         '<div style="flex:1;">' +
                         '<div style="font-size:13px;color:' + col + ';font-weight:600;' + (done ? 'text-decoration:line-through;' : '') + '">' + escapeHtml(t.title || t.name || 'Task') + reqLabel + '</div>' +
                         (t.description ? '<div style="font-size:11px;color:#6a7290;margin-top:2px;">' + escapeHtml(String(t.description).substring(0, 80)) + '</div>' : '') + '</div>' +
-                        (t.xcReward || t.xc ? '<span style="font-size:12px;color:#f5c842;font-weight:700;font-family:\'Share Tech Mono\',monospace;">' + (t.xcReward || t.xc) + ' XC</span>' : '') + '</div>';
+                        (pflxPointsAvailable(t) ? '<span title="' + escapeHtml(pflxPointsTitle(t)) + '" style="font-size:12px;color:#f5c842;font-weight:700;font-family:\'Share Tech Mono\',monospace;">' + pflxPointsLabel(t) + ' XC</span>' : '') + '</div>';
                 });
             }
 
@@ -34461,7 +34471,7 @@ function ppRenderCheckpoints(el) {
             var myId = me.id || me.brand || me.brandName || '';
             html += '<div id="ppmc-jobs-list" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(var(--pflx-card-min, 360px), 1fr));gap:16px;align-items:start;">';
             myJobs.forEach(function(job) {
-                var xcVal = job.xcReward || job.xc || 0;
+                var xcVal = pflxPointsAvailable(job); // v289: base + badge XC
                 var endDate = job.endDate || job.deadline;
                 var urgency = (typeof _mcUrgencyForDueDate === 'function') ? _mcUrgencyForDueDate(endDate) : null;
                 // Real hired/applied detection (array-aware).
@@ -34488,6 +34498,11 @@ function ppRenderCheckpoints(el) {
                     (xcVal > 0 ? '<span style="background:rgba(245,200,66,0.16);color:#f5c842;padding:5px 12px;border-radius:12px;font-size:12px;font-weight:800;border:1px solid rgba(245,200,66,0.4);white-space:nowrap;box-shadow:0 0 10px rgba(245,200,66,0.14);">⚡ ' + xcVal + ' XC</span>' : '') +
                     (urgency && endDate ? '<span style="background:rgba(' + urgency.rgb + ',0.14);color:rgba(' + urgency.rgb + ',1);padding:4px 10px;border-radius:10px;font-size:10px;font-weight:700;border:1px solid rgba(' + urgency.rgb + ',0.35);white-space:nowrap;">📅 ' + urgency.label + '</span>' : '') +
                     '</div></div>';
+
+                // v289 — Job content links, previewable inline.
+                if (Array.isArray(job.links) && job.links.length) {
+                    html += '<div style="margin-bottom:10px;"><div style="font-size:9px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.35);margin-bottom:5px;">&#x1F517; JOB CONTENT</div>' + pflxResourceRowsHtml(job.links) + '</div>';
+                }
 
                 // Slot / applicant summary
                 var slotStr = (Array.isArray(job.hired) ? job.hired.length : 0) + ' / ' + (job.slots || 1) + ' hired';
@@ -34761,8 +34776,8 @@ function ppRenderCheckpoints(el) {
                     var dueChip = (t.dueDate && urgency)
                         ? '<span style="background:rgba(' + urgency.rgb + ',0.14);color:rgba(' + urgency.rgb + ',1);padding:4px 9px;border-radius:10px;font-size:10px;font-weight:700;border:1px solid rgba(' + urgency.rgb + ',0.35);white-space:nowrap;">📅 ' + urgency.label + '</span>'
                         : '';
-                    var xcChip = (t.xcReward || t.xc)
-                        ? '<span style="background:rgba(245,200,66,0.16);color:#f5c842;padding:4px 9px;border-radius:10px;font-size:11px;font-weight:800;border:1px solid rgba(245,200,66,0.4);white-space:nowrap;box-shadow:0 0 8px rgba(245,200,66,0.14);">⚡ ' + (t.xcReward || t.xc) + '</span>'
+                    var xcChip = pflxPointsAvailable(t)
+                        ? '<span title="' + escapeHtml(pflxPointsTitle(t)) + '" style="background:rgba(245,200,66,0.16);color:#f5c842;padding:4px 9px;border-radius:10px;font-size:11px;font-weight:800;border:1px solid rgba(245,200,66,0.4);white-space:nowrap;box-shadow:0 0 8px rgba(245,200,66,0.14);">⚡ ' + pflxPointsLabel(t) + '</span>'
                         : '';
                     var assigneeChip = pflxAssigneeChipHtml(t, { showWhenAll: false });
                     var pid = (window.activeSession || {}).id;
@@ -35005,7 +35020,9 @@ function ppRenderCheckpoints(el) {
             if (Array.isArray(task.links) && task.links.length) {
                 html += '<div class="mc-card" style="padding:18px 22px;margin-bottom:14px;">' +
                     '<div style="font-family:\'Orbitron\',sans-serif;font-size:11px;color:rgba(255,255,255,0.4);letter-spacing:1.5px;margin-bottom:10px;">🔗 RESOURCES FROM HOST</div>';
-                task.links.forEach(function (l) {
+                // v289 — rows now carry an inline Preview (embed) toggle.
+                html += pflxResourceRowsHtml(task.links);
+                if (false) task.links.forEach(function (l) {
                     var url = typeof l === 'string' ? l : (l && l.url) || '';
                     var label = typeof l === 'string' ? l : (l && (l.label || l.title || l.url)) || url;
                     if (!url) return;
@@ -35446,8 +35463,8 @@ function ppRenderCheckpoints(el) {
                     var dueChip = (t.dueDate && urgency)
                         ? '<span style="background:rgba(' + urgency.rgb + ',0.14);color:rgba(' + urgency.rgb + ',1);padding:4px 9px;border-radius:10px;font-size:10px;font-weight:700;border:1px solid rgba(' + urgency.rgb + ',0.35);white-space:nowrap;">📅 ' + urgency.label + '</span>'
                         : '';
-                    var xcChip = (t.xcReward || t.xc)
-                        ? '<span style="background:rgba(245,200,66,0.16);color:#f5c842;padding:4px 9px;border-radius:10px;font-size:11px;font-weight:800;border:1px solid rgba(245,200,66,0.4);white-space:nowrap;box-shadow:0 0 8px rgba(245,200,66,0.14);">⚡ ' + (t.xcReward || t.xc) + '</span>'
+                    var xcChip = pflxPointsAvailable(t)
+                        ? '<span title="' + escapeHtml(pflxPointsTitle(t)) + '" style="background:rgba(245,200,66,0.16);color:#f5c842;padding:4px 9px;border-radius:10px;font-size:11px;font-weight:800;border:1px solid rgba(245,200,66,0.4);white-space:nowrap;box-shadow:0 0 8px rgba(245,200,66,0.14);">⚡ ' + pflxPointsLabel(t) + '</span>'
                         : '';
                     // Sept 4 fix (Kaitlin: 2 tasks she never touched
                     // showed "Submitted") — this chip read the task's GLOBAL
@@ -35494,7 +35511,7 @@ function ppRenderCheckpoints(el) {
                         '<div class="pp-card-body"><div style="display:flex;align-items:center;gap:10px;">' +
                         '<span style="font-size:14px;">✅</span>' +
                         '<span style="flex:1;font-size:12px;color:rgba(255,255,255,0.4);text-decoration:line-through;">' + escapeHtml(t.title || t.name || 'Task') + '</span>' +
-                        (t.xcReward || t.xc ? '<span style="font-size:11px;color:rgba(245,200,66,0.5);font-family:\'Share Tech Mono\',monospace;">+' + (t.xcReward || t.xc) + ' XC</span>' : '') + '</div></div></div>';
+                        (pflxPointsAvailable(t) ? '<span title="' + escapeHtml(pflxPointsTitle(t)) + '" style="font-size:11px;color:rgba(245,200,66,0.5);font-family:\'Share Tech Mono\',monospace;">+' + pflxPointsLabel(t) + ' XC</span>' : '') + '</div></div></div>';
                 
                 return cardHtml;
             });
@@ -35605,7 +35622,7 @@ function ppRenderCheckpoints(el) {
                             '<div style="font-size:13px;color:#f0f0ff;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📋 ' + escapeHtml(t.title || 'Untitled') + '</div>' +
                             (t.approvedAt ? '<div style="font-size:10px;color:rgba(255,255,255,0.35);margin-top:2px;font-family:monospace;">Approved ' + escapeHtml(t.approvedAt) + '</div>' : '') +
                         '</div>' +
-                        (t.xcReward ? '<span style="background:rgba(245,200,66,0.16);color:#f5c842;padding:4px 10px;border-radius:10px;font-size:11px;font-weight:800;border:1px solid rgba(245,200,66,0.35);white-space:nowrap;">⚡ ' + t.xcReward + '</span>' : '') +
+                        (pflxPointsAvailable(t) > 0 ? '<span title="' + escapeHtml(pflxPointsTitle(t)) + '" style="background:rgba(245,200,66,0.16);color:#f5c842;padding:4px 10px;border-radius:10px;font-size:11px;font-weight:800;border:1px solid rgba(245,200,66,0.35);white-space:nowrap;">⚡ ' + pflxPointsLabel(t) + '</span>' : '') +
                     '</div>';
                 });
                 if (approvedTasks.length > 40) html += '<div style="text-align:center;color:rgba(255,255,255,0.35);font-size:11px;padding:12px;font-style:italic;">+ ' + (approvedTasks.length - 40) + ' more approved tasks in your history</div>';
@@ -39727,7 +39744,7 @@ function ppRenderCheckpoints(el) {
                             '</div>' +
                             '<div style="display:flex;gap:5px;flex-wrap:wrap;">' +
                                 (t.dueDate ? '<span style="background:rgba(' + urgency.rgb + ',0.14);color:rgba(' + urgency.rgb + ',1);padding:3px 7px;border-radius:8px;font-size:9px;font-weight:700;border:1px solid rgba(' + urgency.rgb + ',0.3);">📅 ' + urgency.label + '</span>' : '') +
-                                (t.xcReward ? '<span style="background:rgba(245,200,66,0.16);color:#f5c842;padding:3px 7px;border-radius:8px;font-size:9px;font-weight:800;border:1px solid rgba(245,200,66,0.35);">⚡ ' + t.xcReward + '</span>' : '') +
+                                (pflxPointsAvailable(t) > 0 ? '<span title="' + escapeHtml(pflxPointsTitle(t)) + '" style="background:rgba(245,200,66,0.16);color:#f5c842;padding:3px 7px;border-radius:8px;font-size:9px;font-weight:800;border:1px solid rgba(245,200,66,0.35);">⚡ ' + pflxPointsLabel(t) + '</span>' : '') +
                             '</div>' +
                         '</div>';
                     });
@@ -40244,7 +40261,7 @@ function ppRenderCheckpoints(el) {
                 }
                 // XC cell: rewards gold, penalties unmistakably red.
                 var xcCell = [];
-                if ((t.xcReward || 0) > 0) xcCell.push('<span style="color:#f5c842;">⚡ ' + t.xcReward + '</span>');
+                if ((t.xcReward || 0) >= 0 && pflxPointsAvailable(t) > 0) xcCell.push('<span title="' + escapeHtml(pflxPointsTitle(t)) + '" style="color:#f5c842;">⚡ ' + pflxPointsLabel(t) + '</span>');
                 if ((t.xcReward || 0) < 0) xcCell.push('<span style="color:#ef4444;font-weight:800;" title="XC penalty">▼ ' + t.xcReward + ' XC</span>');
                 var _dp = t.deadlinePenalty;
                 if (_dp && _dp.enabled && (_dp.amount || 0) > 0) xcCell.push('<span style="color:#ef4444;font-weight:800;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.4);border-radius:6px;padding:1px 7px;font-size:10px;" title="Late penalty (' + escapeHtml(_dp.type || 'fine') + (_dp.graceDays ? ', ' + _dp.graceDays + 'd grace' : '') + ')">⏰ −' + _dp.amount + ' LATE</span>');
@@ -40489,8 +40506,8 @@ function ppRenderCheckpoints(el) {
                 // XC chips (July 15, Ennis): rewards stay gold; penalties are
                 // unmistakably RED — a −50 late fine must never read as a reward.
                 var xcChip = '';
-                if ((t.xcReward || 0) > 0) {
-                    xcChip = '<span style="background:rgba(245,200,66,0.16);color:#f5c842;padding:5px 10px;border-radius:12px;font-size:11px;font-weight:800;border:1px solid rgba(245,200,66,0.4);white-space:nowrap;box-shadow:0 0 8px rgba(245,200,66,0.14);">⚡ ' + t.xcReward + ' XC</span>';
+                if ((t.xcReward || 0) >= 0 && pflxPointsAvailable(t) > 0) {
+                    xcChip = '<span title="' + escapeHtml(pflxPointsTitle(t)) + '" style="background:rgba(245,200,66,0.16);color:#f5c842;padding:5px 10px;border-radius:12px;font-size:11px;font-weight:800;border:1px solid rgba(245,200,66,0.4);white-space:nowrap;box-shadow:0 0 8px rgba(245,200,66,0.14);">⚡ ' + pflxPointsLabel(t) + ' XC</span>';
                 } else if ((t.xcReward || 0) < 0) {
                     xcChip = '<span style="background:rgba(239,68,68,0.14);color:#ef4444;padding:5px 10px;border-radius:12px;font-size:11px;font-weight:800;border:1px solid rgba(239,68,68,0.45);white-space:nowrap;" title="XC penalty">▼ ' + t.xcReward + ' XC PENALTY</span>';
                 }
@@ -40911,7 +40928,7 @@ function ppRenderCheckpoints(el) {
                 var statusColor = hasSubmitted ? '#f5c842' : (cpLock ? '#8a92b0' : '#4ade80');
                 var statusText = hasSubmitted ? 'SUBMITTED' : (cpLock ? 'LOCKED' : 'OPEN');
                 var duePill = t.dueDate ? '<span style="font-size:10px;padding:2px 8px;border-radius:6px;background:rgba(239,68,68,0.1);color:#f87171;">Due: ' + t.dueDate + '</span>' : '';
-                var xcPill = '<span style="font-size:10px;padding:2px 8px;border-radius:6px;background:rgba(245,200,66,0.1);color:#fbbf24;">' + (t.xcReward || 0) + ' XC</span>';
+                var xcPill = '<span title="' + escapeHtml(pflxPointsTitle(t)) + '" style="font-size:10px;padding:2px 8px;border-radius:6px;background:rgba(245,200,66,0.1);color:#fbbf24;">' + pflxPointsLabel(t) + ' XC</span>';
 
                 return '<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:14px;padding:16px;">' +
                     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
@@ -43095,6 +43112,7 @@ function ppRenderCheckpoints(el) {
                 rewardBadges: Array.isArray(task.rewardBadges) ? task.rewardBadges.slice() : [],
                 exclusiveBadgeId: task.exclusiveBadgeId || '',
                 fineTaxIds: Array.isArray(task.fineTaxIds) ? task.fineTaxIds.slice() : [],
+                links: Array.isArray(task.links) ? task.links.slice() : [],
                 priority: task.priority || 'normal',
                 allowFileUpload: task.allowFileUpload !== false,
                 allowLinkSubmit: task.allowLinkSubmit !== false,
@@ -44740,6 +44758,69 @@ function ppRenderCheckpoints(el) {
             } catch (e) { return 0; }
         }
         window.pflxItemBadgeXC = pflxItemBadgeXC;
+
+        // v289 (Ennis, Oct 19): "the tasks or anything in MC should show the
+        // full amount of points available. You will need to add up the points
+        // from the attached badges as well." Base XC + XC of every attached
+        // digital badge (+ a Job's Exclusive Badge if it is not already in
+        // rewardBadges). Badge XC is real: the approval path credits it.
+        function pflxPointsAvailable(item) {
+            if (!item) return 0;
+            var base = Number(item.xcRewardPool || item.xcReward || item.xc || 0) || 0;
+            var badgeXc = pflxItemBadgeXC(item);
+            if (item.exclusiveBadgeId && !(Array.isArray(item.rewardBadges) && item.rewardBadges.indexOf(item.exclusiveBadgeId) !== -1)) {
+                badgeXc += pflxItemBadgeXC({ rewardBadges: [item.exclusiveBadgeId] });
+            }
+            return base + badgeXc;
+        }
+        window.pflxPointsAvailable = pflxPointsAvailable;
+        // "1,950 XC" with the split in a tooltip string.
+        function pflxPointsLabel(item) { return Number(pflxPointsAvailable(item)).toLocaleString(); }
+        window.pflxPointsLabel = pflxPointsLabel;
+        function pflxPointsTitle(item) {
+            if (!item) return '';
+            var base = Number(item.xcRewardPool || item.xcReward || item.xc || 0) || 0;
+            var tot = pflxPointsAvailable(item);
+            return tot !== base ? (base.toLocaleString() + ' XC base + ' + (tot - base).toLocaleString() + ' XC from badges') : 'XC reward';
+        }
+        window.pflxPointsTitle = pflxPointsTitle;
+
+        // v289 — host resources (links) as rows with an inline embed preview
+        // toggle, using the same pflxEmbedSrc() normalizer as the MC link
+        // editor (YouTube, Slides, Docs, Drive folders/files, Canva, images).
+        function pflxResourceRowsHtml(links, opts) {
+            opts = opts || {};
+            var arr = (Array.isArray(links) ? links : []).map(function (l) {
+                var url = typeof l === 'string' ? l : (l && l.url) || '';
+                var label = typeof l === 'string' ? l : (l && (l.label || l.title)) || '';
+                return { url: String(url || '').trim(), label: label };
+            }).filter(function (l) { return l.url; });
+            if (!arr.length) return '';
+            return arr.map(function (l, i) {
+                var pid = 'pflx-res-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+                var isImg = /\.(png|jpe?g|gif|webp|svg)(\?|#|$)/i.test(l.url);
+                var src = isImg ? l.url : ((typeof pflxEmbedSrc === 'function') ? pflxEmbedSrc(l.url) : l.url);
+                var media = isImg
+                    ? '<img src="' + escapeHtml(src) + '" style="width:100%;height:100%;object-fit:contain;background:#000;" alt="">'
+                    : '<iframe data-src="' + escapeHtml(src) + '" style="width:100%;height:100%;border:0;" sandbox="allow-scripts allow-same-origin allow-presentation allow-popups allow-popups-to-escape-sandbox allow-forms allow-downloads" allow="autoplay *; clipboard-write *; encrypted-media *; fullscreen *; picture-in-picture *" allowfullscreen></iframe>';
+                return '<div style="margin-bottom:6px;" onclick="event.stopPropagation()">' +
+                    '<div style="display:flex;align-items:center;gap:6px;">' +
+                        '<a href="' + escapeHtml(l.url) + '" target="_blank" rel="noopener" style="flex:1;min-width:0;display:block;padding:7px 10px;background:rgba(0,212,255,0.05);border:1px solid rgba(0,212,255,0.18);border-radius:8px;color:#00d4ff;font-size:12px;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">&#x1F517; ' + escapeHtml(l.label || l.url) + '</a>' +
+                        '<button type="button" class="mc-btn" style="padding:6px 10px;font-size:10px;flex-shrink:0;" onclick="event.stopPropagation();pflxToggleResourceEmbed(\'' + pid + '\',this)">&#x25B6; Preview</button>' +
+                    '</div>' +
+                    '<div id="' + pid + '" style="display:none;margin-top:6px;width:100%;aspect-ratio:16/9;border-radius:8px;overflow:hidden;background:#000;border:1px solid rgba(255,255,255,0.08);">' + media + '</div>' +
+                '</div>';
+            }).join('');
+        }
+        window.pflxResourceRowsHtml = pflxResourceRowsHtml;
+        window.pflxToggleResourceEmbed = function (id, btn) {
+            var box = document.getElementById(id); if (!box) return;
+            var open = box.style.display === 'none';
+            box.style.display = open ? 'block' : 'none';
+            var fr = box.querySelector('iframe[data-src]');
+            if (open && fr && !fr.getAttribute('src')) fr.setAttribute('src', fr.getAttribute('data-src'));
+            if (btn) btn.innerHTML = open ? '&#x2715; Close' : '&#x25B6; Preview';
+        };
 
         function mcRenderProjects() {
             // ── STOMP GUARD 5 (July 2026 incident) ──
@@ -49766,6 +49847,8 @@ function ppRenderCheckpoints(el) {
                 __exSel.value = __jx.exclusiveBadgeId || '';
             }
             try { mcQBadgeInit('qjob', Array.isArray(__jx.rewardBadges) ? __jx.rewardBadges : []); } catch (e) {}
+            try { mcQLInit('qjob', Array.isArray(__jx.links) ? __jx.links : []); } catch (e) {}
+            try { setTimeout(mcJobRecalcPoints, 0); } catch (e) {}
             try { mcQFineInit('qjob', Array.isArray(__jx.fineTaxIds) ? __jx.fineTaxIds : []); } catch (e) {}
             var __pr = document.getElementById('mc-job-priority'); if (__pr) __pr.value = __jx.priority || 'normal';
             var __fu = document.getElementById('mc-job-allow-file-upload'); if (__fu) __fu.checked = __jx.allowFileUpload !== false;
@@ -49798,6 +49881,25 @@ function ppRenderCheckpoints(el) {
             form.style.display = 'block';
         }
 
+        // v289 — live "points available" line in the Job form.
+        function mcJobRecalcPoints() {
+            var el = document.getElementById('mc-job-points-total'); if (!el) return;
+            var probe = {
+                xcReward: parseInt((document.getElementById('mc-job-xc') || {}).value || 0, 10) || 0,
+                rewardBadges: (typeof mcQBadgeRead === 'function') ? mcQBadgeRead('qjob') : [],
+                exclusiveBadgeId: (document.getElementById('mc-job-exclusive-badge') || {}).value || ''
+            };
+            var tot = pflxPointsAvailable(probe);
+            el.textContent = 'TOTAL POINTS AVAILABLE: ' + tot.toLocaleString() + ' XC' + (tot !== probe.xcReward ? '  (' + probe.xcReward.toLocaleString() + ' base + ' + (tot - probe.xcReward).toLocaleString() + ' from badges)' : '');
+        }
+        window.mcJobRecalcPoints = mcJobRecalcPoints;
+        document.addEventListener('input', function (e) { if (e.target && e.target.id === 'mc-job-xc') mcJobRecalcPoints(); });
+        document.addEventListener('change', function (e) {
+            var t = e.target; if (!t) return;
+            if (t.id === 'mc-job-exclusive-badge' || (t.closest && t.closest('#mc-qjob-badges-list'))) setTimeout(mcJobRecalcPoints, 0);
+        });
+        document.addEventListener('click', function (e) { var t = e.target; if (t && t.closest && t.closest('#mc-qjob-badges-chips')) setTimeout(mcJobRecalcPoints, 0); });
+
         function mcCancelJobForm() {
             var form = document.getElementById('mc-job-form');
             if (form) form.style.display = 'none';
@@ -49828,6 +49930,7 @@ function ppRenderCheckpoints(el) {
                 exclusiveBadgeId: document.getElementById('mc-job-exclusive-badge')?.value || '',
                 rewardBadges: (typeof mcQBadgeRead === 'function') ? mcQBadgeRead('qjob') : [],
                 fineTaxIds: (typeof mcQFineRead === 'function') ? mcQFineRead('qjob') : [],
+                links: (typeof mcQLRead === 'function') ? mcQLRead('qjob') : [],
                 priority: document.getElementById('mc-job-priority')?.value || 'normal',
                 allowFileUpload: !!document.getElementById('mc-job-allow-file-upload')?.checked,
                 allowLinkSubmit: !!document.getElementById('mc-job-allow-link-submit')?.checked,
@@ -50002,13 +50105,15 @@ function ppRenderCheckpoints(el) {
                     '</div>' +
                     // Description
                     '<div style="font-size:12px;color:rgba(255,255,255,0.5);line-height:1.5;margin-bottom:12px;">' + escapeHtml(j.description || '') + '</div>' +
+                    // v289 — Job links / content with inline preview
+                    (Array.isArray(j.links) && j.links.length ? '<div style="margin-bottom:10px;">' + pflxResourceRowsHtml(j.links) + '</div>' : '') +
                     // Lineage chain
                     lineagePanel +
                     // Applicants panel (if applicable)
                     applicantsPanel +
                     // Metadata pills
                     '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;margin-bottom:12px;">' +
-                    '<span style="background:rgba(0,240,255,0.08);color:#00d4ff;font-size:10px;font-weight:600;padding:4px 8px;border-radius:6px;">⚡ ' + (j.xcReward || 0) + ' XC</span>' +
+                    '<span title="' + escapeHtml(pflxPointsTitle(j)) + '" style="background:rgba(0,240,255,0.08);color:#00d4ff;font-size:10px;font-weight:600;padding:4px 8px;border-radius:6px;">⚡ ' + pflxPointsLabel(j) + ' XC</span>' +
                     '<span style="background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.5);font-size:10px;padding:4px 8px;border-radius:6px;">👥 ' + (j.slots || 1) + ' slot' + (j.slots !== 1 ? 's' : '') + '</span>' +
                     (applicants.length ? '<span style="background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.5);font-size:10px;padding:4px 8px;border-radius:6px;">📨 ' + applicants.length + ' applicant' + (applicants.length !== 1 ? 's' : '') + '</span>' : '') +
                     (hired.length ? '<span style="background:rgba(34,197,94,0.08);color:#22c55e;font-size:10px;padding:4px 8px;border-radius:6px;">✅ ' + hired.length + ' hired</span>' : '') +
@@ -50097,6 +50202,7 @@ function ppRenderCheckpoints(el) {
                 rewardBadges: badges,
                 exclusiveBadgeId: job.exclusiveBadgeId || '',
                 fineTaxIds: Array.isArray(job.fineTaxIds) ? job.fineTaxIds.slice() : [],
+                links: Array.isArray(job.links) ? job.links.map(function (l) { return Object.assign({}, l); }) : [],
                 priority: job.priority || 'normal',
                 allowFileUpload: job.allowFileUpload !== false,
                 allowLinkSubmit: job.allowLinkSubmit !== false,
@@ -50159,6 +50265,7 @@ function ppRenderCheckpoints(el) {
                     rewardBadges: __rw.rewardBadges.slice(),
                     exclusiveBadgeId: __rw.exclusiveBadgeId,
                     fineTaxIds: __rw.fineTaxIds.slice(),
+                    links: __rw.links.slice(),
                     allowFileUpload: __rw.allowFileUpload,
                     allowLinkSubmit: __rw.allowLinkSubmit,
                     submitInstructions: __rw.submitInstructions
@@ -50849,7 +50956,7 @@ function ppRenderCheckpoints(el) {
                             '<div style="font-size:12px;color:#f0f0ff;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(t.title || 'Task') + '</div>' +
                             '<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">' + chips + '</div>' +
                         '</div>' +
-                        (t.xcReward || t.xc ? '<span style="font-size:10px;color:#f5c842;font-family:monospace;font-weight:700;flex-shrink:0;">⚡ ' + (t.xcReward || t.xc) + '</span>' : '') +
+                        (pflxPointsAvailable(t) ? '<span title="' + escapeHtml(pflxPointsTitle(t)) + '" style="font-size:10px;color:#f5c842;font-family:monospace;font-weight:700;flex-shrink:0;">⚡ ' + pflxPointsLabel(t) + '</span>' : '') +
                     '</div>';
                 }).join('')
                 : '<div style="color:rgba(255,255,255,0.3);font-size:12px;padding:12px;text-align:center;">No tasks assigned to this cohort.</div>';
