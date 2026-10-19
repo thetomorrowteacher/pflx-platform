@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 286;
+      window.PFLX_PATCH   = 287;
       window.PFLX_BUILD   = '2026.10';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -11311,10 +11311,12 @@
                                     <button class="mc-btn mc-btn-green" onclick="mcShowJobForm(-1)">+ Post Job</button>
                                 </div>
 
-                                <!-- Job Form -->
+                                <!-- Job Form — v287: opens as a Mission Control popup (see MC FORM POPUP
+                                     module) and carries the same reward settings a Task does, because
+                                     every hire becomes a Task. -->
                                 <div id="mc-job-form" style="display:none;background:rgba(10,18,40,0.5);border:1px solid rgba(79,142,247,0.3);border-radius:12px;padding:20px;margin-bottom:20px;">
                                     <div style="font-size:14px;font-weight:700;color:#a7f3d0;margin-bottom:16px;">JOB POSTING</div>
-                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                                    <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px;margin-bottom:12px;">
                                         <div>
                                             <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Title *</label>
                                             <input type="text" id="mc-job-title" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="Job title">
@@ -11323,11 +11325,84 @@
                                             <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">XC Reward *</label>
                                             <input type="number" id="mc-job-xc" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="500" min="0">
                                         </div>
-                                    </div>
-                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
                                         <div>
                                             <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Slots Available</label>
                                             <input type="number" id="mc-job-slots" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" placeholder="1" min="1">
+                                        </div>
+                                    </div>
+                                    <div style="margin-bottom:12px;">
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Description</label>
+                                        <textarea id="mc-job-desc" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;min-height:80px;font-family:'Jura',sans-serif;" placeholder="Job description..."></textarea>
+                                    </div>
+
+                                    <div style="font-size:10px;font-weight:800;letter-spacing:0.14em;color:rgba(167,243,208,0.75);text-transform:uppercase;margin:18px 0 10px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.06);">Rewards &mdash; passed to every hire&rsquo;s Task</div>
+                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">&#x1F48E; Exclusive Badge <span style="font-weight:400;text-transform:none;color:rgba(255,255,255,0.3);">(earned by completing this Job)</span></label>
+                                            <select id="mc-job-exclusive-badge" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;border-color:rgba(245,200,66,0.35);">
+                                                <option value="">None</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Digital Badges</label>
+                                            <div style="position:relative;">
+                                                <div id="mc-qjob-badges-chips" onclick="mcQBadgeDropdownToggle('qjob')" style="min-height:38px;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:6px 8px;cursor:pointer;display:flex;flex-wrap:wrap;gap:4px;align-items:center;box-sizing:border-box;">
+                                                    <span style="color:rgba(255,255,255,0.35);font-size:12px;">Select badges&hellip;</span>
+                                                </div>
+                                                <div id="mc-qjob-badges-dropdown" style="display:none;position:absolute;z-index:20;top:100%;left:0;right:0;margin-top:4px;background:#0c1220;border:1px solid rgba(0,212,255,0.3);border-radius:8px;padding:8px;max-height:220px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.5);">
+                                                    <input type="text" id="mc-qjob-badges-search" placeholder="Search badges&hellip;" oninput="mcQBadgeFilter('qjob')" style="width:100%;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px 8px;border-radius:5px;font-size:12px;margin-bottom:6px;box-sizing:border-box;">
+                                                    <div id="mc-qjob-badges-list"></div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Fine / Tax Allocation <span style="font-weight:400;text-transform:none;color:rgba(255,255,255,0.3);">(from X-Coin)</span></label>
+                                            <div style="position:relative;">
+                                                <div id="mc-qjob-finetax-chips" onclick="mcQFineDropdownToggle('qjob')" style="min-height:38px;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:6px 8px;cursor:pointer;display:flex;flex-wrap:wrap;gap:4px;align-items:center;box-sizing:border-box;">
+                                                    <span style="color:rgba(255,255,255,0.35);font-size:12px;">Select fines/taxes&hellip;</span>
+                                                </div>
+                                                <div id="mc-qjob-finetax-dropdown" style="display:none;position:absolute;z-index:20;top:100%;left:0;right:0;margin-top:4px;background:#0c1220;border:1px solid rgba(0,212,255,0.3);border-radius:8px;padding:8px;max-height:220px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.5);">
+                                                    <input type="text" id="mc-qjob-finetax-search" placeholder="Search fines/taxes&hellip;" oninput="mcQFineFilter('qjob')" style="width:100%;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:6px 8px;border-radius:5px;font-size:12px;margin-bottom:6px;box-sizing:border-box;">
+                                                    <div id="mc-qjob-finetax-list"></div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Priority</label>
+                                            <select id="mc-job-priority" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                                <option value="urgent">&#x25C9; Urgent</option>
+                                                <option value="high">&#x25C9; High</option>
+                                                <option value="normal" selected>&#x25CB; Normal</option>
+                                                <option value="low">&middot; Low</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div style="font-size:10px;font-weight:800;letter-spacing:0.14em;color:rgba(167,243,208,0.75);text-transform:uppercase;margin:18px 0 10px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.06);">Placement &amp; timeline</div>
+                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Checkpoint</label>
+                                            <select id="mc-job-checkpoint" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                                <option value="">None</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">&#x1F3AC; Source Project</label>
+                                            <select id="mc-job-project" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;border-color:rgba(139,92,246,0.28);" title="When someone is hired, the created Task nests inside this Project">
+                                                <option value="">None (standalone Job)</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;">
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Timeline Start</label>
+                                            <input type="date" id="mc-job-start" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                                        </div>
+                                        <div>
+                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Timeline End <span style="font-weight:400;text-transform:none;color:rgba(255,255,255,0.3);">(Task due date)</span></label>
+                                            <input type="date" id="mc-job-end" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
                                         </div>
                                         <div>
                                             <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Status</label>
@@ -11338,40 +11413,21 @@
                                             </select>
                                         </div>
                                     </div>
-                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
-                                        <div>
-                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Checkpoint</label>
-                                            <select id="mc-job-checkpoint" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
-                                                <option value="">None</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">🎬 Source Project</label>
-                                            <select id="mc-job-project" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(139,92,246,0.28);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;" title="When someone is hired, the created Task nests inside this Project">
-                                                <option value="">None (standalone Job)</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
-                                        <div>
-                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Timeline Start</label>
-                                            <input type="date" id="mc-job-start" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
-                                        </div>
-                                        <div></div>
-                                    </div>
-                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
-                                        <div>
-                                            <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Timeline End</label>
-                                            <input type="date" id="mc-job-end" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;">
-                                        </div>
+
+                                    <div style="font-size:10px;font-weight:800;letter-spacing:0.14em;color:rgba(167,243,208,0.75);text-transform:uppercase;margin:18px 0 10px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.06);">Submission</div>
+                                    <div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px;">
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;"><input type="checkbox" id="mc-job-allow-file-upload" checked> Allow file upload</label>
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#e0e6ff;cursor:pointer;"><input type="checkbox" id="mc-job-allow-link-submit" checked> Allow link submission</label>
                                     </div>
                                     <div style="margin-bottom:12px;">
-                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Description</label>
-                                        <textarea id="mc-job-desc" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;min-height:80px;box-sizing:border-box;font-family:'Jura',sans-serif;" placeholder="Job description..."></textarea>
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Submission Instructions</label>
+                                        <textarea id="mc-job-submit-instructions" style="width:100%;background:rgba(10,18,40,0.7);border:1px solid rgba(255,255,255,0.08);color:#e0e6ff;padding:8px;border-radius:6px;font-size:12px;box-sizing:border-box;min-height:56px;font-family:'Jura',sans-serif;" placeholder="What should the hired player hand in?"></textarea>
                                     </div>
+
+                                    <div style="font-size:10px;font-weight:800;letter-spacing:0.14em;color:rgba(167,243,208,0.75);text-transform:uppercase;margin:18px 0 10px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.06);">Who can apply</div>
                                     <div style="margin-bottom:16px;">
-                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;text-transform:uppercase;">Assign to Cohorts</label>
-                                        <div id="mc-job-cohorts" style="display:flex;flex-direction:column;gap:6px;"></div>
+                                        <label style="display:block;font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;">Assign to Cohorts</label>
+                                        <div id="mc-job-cohorts" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px;"></div>
                                     </div>
                                     <div style="display:flex;gap:8px;justify-content:flex-end;">
                                         <button class="mc-btn" onclick="mcCancelJobForm()" style="padding:8px 16px;">Cancel</button>
@@ -43035,6 +43091,14 @@ function ppRenderCheckpoints(el) {
                 // can recognize it later.
                 sourceTaskId: task.id,
                 sourceProjectId: project ? project.id : '',
+                // v287 — the Job inherits the Task's reward settings.
+                rewardBadges: Array.isArray(task.rewardBadges) ? task.rewardBadges.slice() : [],
+                exclusiveBadgeId: task.exclusiveBadgeId || '',
+                fineTaxIds: Array.isArray(task.fineTaxIds) ? task.fineTaxIds.slice() : [],
+                priority: task.priority || 'normal',
+                allowFileUpload: task.allowFileUpload !== false,
+                allowLinkSubmit: task.allowLinkSubmit !== false,
+                submitInstructions: task.submitInstructions || '',
                 convertedBy: (window.activeSession && (activeSession.brand || activeSession.name)) || 'unknown',
                 convertedAt: Date.now(),
                 createdAt: nowIso
@@ -49683,6 +49747,31 @@ function ppRenderCheckpoints(el) {
                 });
             }
 
+            // v287 — Task-parity reward fields (Ennis, 19 Oct: "job postings
+            // become Tasks then it should have some of the same settings").
+            var __jx = idx >= 0 ? (mcJobs[idx] || {}) : {};
+            var __exSel = document.getElementById('mc-job-exclusive-badge');
+            if (__exSel) {
+                var __allB = (typeof mcGetAllBadges === 'function') ? mcGetAllBadges() : [];
+                var __exB = __allB.filter(function (b) { return _mcIsExclusiveBadge(b); });
+                var __exIds = __exB.map(function (b) { return b.id; });
+                // Keep a previously chosen badge visible even if its tier changed.
+                if (__jx.exclusiveBadgeId && __exIds.indexOf(__jx.exclusiveBadgeId) < 0) {
+                    var __prev = __allB.find(function (b) { return b.id === __jx.exclusiveBadgeId; });
+                    if (__prev) __exB.unshift(__prev);
+                }
+                __exSel.innerHTML = '<option value="">None</option>' + __exB.map(function (b) {
+                    return '<option value="' + escapeHtml(b.id) + '">' + escapeHtml(b.name) + (b.xc ? ' (' + b.xc + ' XC)' : '') + '</option>';
+                }).join('');
+                __exSel.value = __jx.exclusiveBadgeId || '';
+            }
+            try { mcQBadgeInit('qjob', Array.isArray(__jx.rewardBadges) ? __jx.rewardBadges : []); } catch (e) {}
+            try { mcQFineInit('qjob', Array.isArray(__jx.fineTaxIds) ? __jx.fineTaxIds : []); } catch (e) {}
+            var __pr = document.getElementById('mc-job-priority'); if (__pr) __pr.value = __jx.priority || 'normal';
+            var __fu = document.getElementById('mc-job-allow-file-upload'); if (__fu) __fu.checked = __jx.allowFileUpload !== false;
+            var __lk = document.getElementById('mc-job-allow-link-submit'); if (__lk) __lk.checked = __jx.allowLinkSubmit !== false;
+            var __si = document.getElementById('mc-job-submit-instructions'); if (__si) __si.value = __jx.submitInstructions || '';
+
             if (idx >= 0) {
                 var j = mcJobs[idx];
                 document.getElementById('mc-job-title').value = j.title || '';
@@ -49700,6 +49789,7 @@ function ppRenderCheckpoints(el) {
                 document.getElementById('mc-job-slots').value = 1;
                 document.getElementById('mc-job-status').value = 'open';
                 document.getElementById('mc-job-checkpoint').value = '';
+                var _projEl0 = document.getElementById('mc-job-project'); if (_projEl0) _projEl0.value = '';
                 document.getElementById('mc-job-start').value = '';
                 document.getElementById('mc-job-end').value = '';
                 document.getElementById('mc-job-desc').value = '';
@@ -49733,9 +49823,22 @@ function ppRenderCheckpoints(el) {
             // set it (via the Job form's new selector) the auto-created
             // hired-player task cascades to that Project's taskIds.
             var projectId = document.getElementById('mc-job-project')?.value || '';
+            // v287 — Task-parity reward fields.
+            var __jobReward = {
+                exclusiveBadgeId: document.getElementById('mc-job-exclusive-badge')?.value || '',
+                rewardBadges: (typeof mcQBadgeRead === 'function') ? mcQBadgeRead('qjob') : [],
+                fineTaxIds: (typeof mcQFineRead === 'function') ? mcQFineRead('qjob') : [],
+                priority: document.getElementById('mc-job-priority')?.value || 'normal',
+                allowFileUpload: !!document.getElementById('mc-job-allow-file-upload')?.checked,
+                allowLinkSubmit: !!document.getElementById('mc-job-allow-link-submit')?.checked,
+                submitInstructions: (document.getElementById('mc-job-submit-instructions')?.value || '').trim(),
+                updatedAt: Date.now()
+            };
             if (mcCurrentJobIdx >= 0) {
                 var existing = mcJobs[mcCurrentJobIdx];
-                mcJobs[mcCurrentJobIdx] = {
+                // v287 — start from the existing record so fields this form
+                // doesn't show (sourceTaskId, convertedAt, …) survive an edit.
+                mcJobs[mcCurrentJobIdx] = Object.assign({}, existing, __jobReward, {
                     id: existing.id,
                     title: title,
                     description: desc,
@@ -49752,9 +49855,9 @@ function ppRenderCheckpoints(el) {
                     hired: existing.hired || [],
                     generatedProjectId: existing.generatedProjectId || '',
                     createdAt: existing.createdAt
-                };
+                });
             } else {
-                mcJobs.push({
+                mcJobs.push(Object.assign({
                     id: 'job-' + Date.now(),
                     title: title,
                     description: desc,
@@ -49770,7 +49873,7 @@ function ppRenderCheckpoints(el) {
                     applicants: [],
                     hired: [],
                     createdAt: new Date().toISOString().split('T')[0]
-                });
+                }, __jobReward));
             }
 
             mcSaveData('jobs');
@@ -49908,6 +50011,18 @@ function ppRenderCheckpoints(el) {
                     '<span style="background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.5);font-size:10px;padding:4px 8px;border-radius:6px;">👥 ' + (j.slots || 1) + ' slot' + (j.slots !== 1 ? 's' : '') + '</span>' +
                     (applicants.length ? '<span style="background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.5);font-size:10px;padding:4px 8px;border-radius:6px;">📨 ' + applicants.length + ' applicant' + (applicants.length !== 1 ? 's' : '') + '</span>' : '') +
                     (hired.length ? '<span style="background:rgba(34,197,94,0.08);color:#22c55e;font-size:10px;padding:4px 8px;border-radius:6px;">✅ ' + hired.length + ' hired</span>' : '') +
+                    (function () {
+                        // v287 — show the Job's badge rewards on its card.
+                        var out = '';
+                        try {
+                            var all = mcGetAllBadges();
+                            var nm = function (id) { var b = all.find(function (x) { return x.id === id; }); return b ? b.name : id; };
+                            if (j.exclusiveBadgeId) out += '<span style="background:rgba(245,200,66,0.10);color:#f5c842;border:1px solid rgba(245,200,66,0.35);font-size:10px;font-weight:700;padding:4px 8px;border-radius:6px;">💎 ' + escapeHtml(nm(j.exclusiveBadgeId)) + '</span>';
+                            var others = (j.rewardBadges || []).filter(function (id) { return id !== j.exclusiveBadgeId; });
+                            if (others.length) out += '<span style="background:rgba(139,92,246,0.12);color:#c4b5fd;font-size:10px;font-weight:700;padding:4px 8px;border-radius:6px;" title="' + escapeHtml(others.map(nm).join(', ')) + '">🎖 ' + others.length + ' badge' + (others.length === 1 ? '' : 's') + '</span>';
+                        } catch (e) {}
+                        return out;
+                    })() +
                     '</div>' +
                     // Action buttons
                     '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:auto;padding-top:12px;border-top:1px solid rgba(255,255,255,0.04);">' +
@@ -49963,14 +50078,56 @@ function ppRenderCheckpoints(el) {
         // Called from mcSaveJobForm AND mcHireApplicant so both save paths
         // create the assignee's Task + cascade to source Project. Returns
         // the count of tasks created so callers can toast.
+        // v287 — "Exclusive" badges are the Jobs tier. The live catalog files
+        // them as tier `executive`, category "Executive Badges (Jobs)"; accept
+        // an explicit `exclusive` tier too.
+        function _mcIsExclusiveBadge(b) {
+            if (!b) return false;
+            var t = String(b.tier || '').toLowerCase(), c = String(b.category || '').toLowerCase();
+            return t === 'exclusive' || t === 'executive' || c.indexOf('exclusive') >= 0 || c.indexOf('(jobs)') >= 0;
+        }
+        window._mcIsExclusiveBadge = _mcIsExclusiveBadge;
+        // The reward fields a Job hands to each hire's Task (same field names
+        // the Task form and the award path already use).
+        function _mcJobTaskRewardFields(job) {
+            var badges = Array.isArray(job.rewardBadges) ? job.rewardBadges.slice() : [];
+            if (job.exclusiveBadgeId && badges.indexOf(job.exclusiveBadgeId) < 0) badges.push(job.exclusiveBadgeId);
+            return {
+                rewardBadges: badges,
+                exclusiveBadgeId: job.exclusiveBadgeId || '',
+                fineTaxIds: Array.isArray(job.fineTaxIds) ? job.fineTaxIds.slice() : [],
+                priority: job.priority || 'normal',
+                allowFileUpload: job.allowFileUpload !== false,
+                allowLinkSubmit: job.allowLinkSubmit !== false,
+                submitInstructions: job.submitInstructions || ''
+            };
+        }
+        window._mcJobTaskRewardFields = _mcJobTaskRewardFields;
+
         function _mcSyncJobHiresToTasks(savedJob) {
             if (!savedJob || !Array.isArray(savedJob.hired) || savedJob.hired.length === 0) return 0;
             var newlyCreatedTaskIds = [];
+            var __rw = _mcJobTaskRewardFields(savedJob);
+            var __refreshed = false;
             savedJob.hired.forEach(function (hiredPlayerId) {
                 var existingTask = mcTasks.find(function (t) {
                     return t && t.jobId === savedJob.id && (t.playerId === hiredPlayerId || (Array.isArray(t.assignedTo) && t.assignedTo.indexOf(hiredPlayerId) !== -1));
                 });
-                if (existingTask) return;
+                if (existingTask) {
+                    // v287 — keep an already-created hire Task in step with the
+                    // Job's reward settings until it is approved (approved
+                    // Tasks have paid out, so they are never rewritten).
+                    var __st = String(existingTask.status || '').toLowerCase();
+                    if (__st !== 'approved' && __st !== 'completed') {
+                        var __before = JSON.stringify(_mcJobTaskRewardFields(existingTask));
+                        if (__before !== JSON.stringify(__rw)) {
+                            Object.assign(existingTask, JSON.parse(JSON.stringify(__rw)));
+                            existingTask.updatedAt = Date.now();
+                            __refreshed = true;
+                        }
+                    }
+                    return;
+                }
                 var newTaskId = 'task-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
                 mcTasks.push({
                     id: newTaskId,
@@ -49991,15 +50148,19 @@ function ppRenderCheckpoints(el) {
                     // individual or specified for the Cohort."
                     roundId: savedJob.checkpoint || '',
                     status: 'open',
-                    priority: 'normal',
+                    priority: __rw.priority,
                     xcReward: savedJob.xcReward || 0,
                     dueDate: savedJob.endDate || '',
                     createdAt: new Date().toISOString().split('T')[0],
                     completedAt: '',
                     backFromJobId: savedJob.id,
                     originTaskId: savedJob.sourceTaskId || '',
-                    allowFileUpload: true,
-                    allowLinkSubmit: true
+                    rewardBadges: __rw.rewardBadges.slice(),
+                    exclusiveBadgeId: __rw.exclusiveBadgeId,
+                    fineTaxIds: __rw.fineTaxIds.slice(),
+                    allowFileUpload: __rw.allowFileUpload,
+                    allowLinkSubmit: __rw.allowLinkSubmit,
+                    submitInstructions: __rw.submitInstructions
                 });
                 newlyCreatedTaskIds.push(newTaskId);
             });
@@ -50035,7 +50196,7 @@ function ppRenderCheckpoints(el) {
                     if (__hireProjChanged) mcSaveData('projects');
                 }
             }
-            if (newlyCreatedTaskIds.length > 0) {
+            if (newlyCreatedTaskIds.length > 0 || __refreshed) {
                 mcSaveData('tasks');
                 try { mcRenderTasks(); } catch (e) {}
             }
@@ -89657,5 +89818,132 @@ window.PFLX_ISSUES = {"version":"1.0","issues":{"aiko":{"key":"aiko","chapter":1
 <!-- ═══ PATCH PLATFORM v234 -- SparkLab embedded in the Ideate quests ═══ -->
 <!-- ═══ PATCH PLATFORM v236 -- the Nexus fills the top and fades out ═══ -->
 <!-- ═══ /PATCH PLATFORM v233 ═══ -->
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     PATCH PLATFORM v287 — MISSION CONTROL FORM POPUP (Ennis, Oct 19):
+     "I would rather a pop up settings for Mission Control and not the
+     current setup." Every Mission Control editor form that used to open
+     inline at the top of its panel now opens in a centred popup over a
+     dimmed, blurred backdrop (Figure-ground: "Dim what's behind the
+     focus").
+     How: the forms are untouched. A MutationObserver watches each form's
+     style; when a form becomes visible it (and its Quick/Advanced tabs)
+     is lifted into the popup, and put back in place when hidden. So every
+     existing open / save / cancel function keeps working as-is.
+     Backdrop clicks deliberately do NOT close (protects unsaved work);
+     close with ✕ or the form's own Cancel.
+     ═══════════════════════════════════════════════════════════════════ -->
+<style id="mc-form-modal-css">
+#mc-form-modal-overlay{position:fixed;inset:0;z-index:999990;display:none;align-items:flex-start;justify-content:center;
+  background:rgba(3,6,16,0.72);-webkit-backdrop-filter:blur(5px) saturate(0.7);backdrop-filter:blur(5px) saturate(0.7);
+  padding:40px 16px;box-sizing:border-box;overflow-y:auto;opacity:0;transition:opacity .16s ease;}
+#mc-form-modal-overlay.open{display:flex;}
+#mc-form-modal-overlay.shown{opacity:1;}
+#mc-form-modal-dialog{position:relative;width:100%;max-width:980px;background:linear-gradient(180deg,#0d1730 0%,#0a1226 100%);
+  border:1px solid rgba(0,212,255,0.28);border-radius:16px;box-shadow:0 30px 80px rgba(0,0,0,0.65),0 0 0 1px rgba(255,255,255,0.03) inset;
+  transform:translateY(8px) scale(.985);transition:transform .18s ease;}
+#mc-form-modal-overlay.shown #mc-form-modal-dialog{transform:none;}
+#mc-form-modal-head{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;padding:14px 18px;
+  background:rgba(10,18,38,0.96);border-bottom:1px solid rgba(255,255,255,0.06);border-radius:16px 16px 0 0;}
+#mc-form-modal-title{flex:1;font-family:Orbitron,'Jura',sans-serif;font-size:12px;font-weight:800;letter-spacing:.16em;color:#a7f3d0;text-transform:uppercase;}
+#mc-form-modal-close{width:34px;height:34px;border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.04);
+  color:#e0e6ff;font-size:16px;cursor:pointer;line-height:1;}
+#mc-form-modal-close:hover{border-color:rgba(239,68,68,0.5);color:#f87171;}
+#mc-form-modal-body{padding:18px 20px 20px;}
+#mc-form-modal-body > .mc-fm-form{margin:0 !important;background:transparent !important;border:none !important;padding:0 !important;}
+#mc-form-modal-body > .mc-fm-form > div:first-child{display:none;} /* title moves to the popup header */
+#mc-form-modal-body > .mc-fm-tabs{margin-bottom:14px !important;}
+body.mc-form-modal-lock{overflow:hidden !important;}
+@media (max-width:640px){#mc-form-modal-overlay{padding:12px 8px;}#mc-form-modal-body [style*="grid-template-columns"]{grid-template-columns:1fr !important;}}
+</style>
+<script>
+(function () {
+    var FORMS = ['mc-program-tab-form','mc-quick-cp-form','mc-cp-form','mc-quick-task-form','mc-task-form',
+                 'mc-quick-project-form','mc-project-form','mc-season-form','mc-badge-form','mc-job-form',
+                 'mc-session-form','mc-rank-form'];
+    var TABS = { 'mc-quick-task-form':'mc-task-form-mode-tabs', 'mc-task-form':'mc-task-form-mode-tabs',
+                 'mc-quick-cp-form':'mc-cp-form-mode-tabs', 'mc-cp-form':'mc-cp-form-mode-tabs',
+                 'mc-quick-project-form':'mc-project-form-mode-tabs', 'mc-project-form':'mc-project-form-mode-tabs' };
+    var homes = {}; var overlay, body, titleEl, pending = false, wired = {};
+    function vis(el) { return !!el && el.style.display !== 'none' && getComputedStyle(el).display !== 'none'; }
+    function build() {
+        if (overlay) return;
+        overlay = document.createElement('div'); overlay.id = 'mc-form-modal-overlay';
+        overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true');
+        overlay.innerHTML = '<div id="mc-form-modal-dialog"><div id="mc-form-modal-head"><div id="mc-form-modal-title"></div>' +
+            '<button type="button" id="mc-form-modal-close" title="Close" aria-label="Close">&#10005;</button></div>' +
+            '<div id="mc-form-modal-body"></div></div>';
+        document.body.appendChild(overlay);
+        body = overlay.querySelector('#mc-form-modal-body'); titleEl = overlay.querySelector('#mc-form-modal-title');
+        overlay.querySelector('#mc-form-modal-close').addEventListener('click', closeActive);
+    }
+    function lift(id, cls) {
+        var el = document.getElementById(id); if (!el || el.parentNode === body) return;
+        if (!homes[id]) { homes[id] = document.createComment('mc-fm-home:' + id); }
+        el.parentNode.insertBefore(homes[id], el);
+        el.classList.add(cls); body.appendChild(el);
+    }
+    function drop(id, cls) {
+        var el = document.getElementById(id), home = homes[id];
+        if (!el || !home || el.parentNode !== body || !home.parentNode) return;
+        home.parentNode.insertBefore(el, home); home.parentNode.removeChild(home); el.classList.remove(cls);
+    }
+    function reconcile() {
+        pending = false; build();
+        var open = FORMS.filter(function (id) { return vis(document.getElementById(id)); });
+        var tabsWanted = {};
+        open.forEach(function (id) { if (TABS[id]) tabsWanted[TABS[id]] = true; });
+        // put away anything that is no longer showing
+        FORMS.forEach(function (id) { if (open.indexOf(id) < 0) drop(id, 'mc-fm-form'); });
+        Object.keys(TABS).forEach(function (k) { var t = TABS[k]; if (!tabsWanted[t]) drop(t, 'mc-fm-tabs'); });
+        if (!open.length) {
+            if (overlay.classList.contains('open')) {
+                overlay.classList.remove('shown'); overlay.classList.remove('open');
+                document.body.classList.remove('mc-form-modal-lock');
+            }
+            return;
+        }
+        Object.keys(tabsWanted).forEach(function (t) { lift(t, 'mc-fm-tabs'); });
+        var wasOpen = overlay.classList.contains('open');
+        open.forEach(function (id) { lift(id, 'mc-fm-form'); });
+        // tabs sit above the forms
+        Object.keys(tabsWanted).forEach(function (t) { var te = document.getElementById(t); if (te) body.insertBefore(te, body.firstChild); });
+        var head = document.getElementById(open[0]).firstElementChild;
+        titleEl.textContent = head ? (head.textContent || '').trim() : 'Settings';
+        if (!wasOpen) {
+            overlay.classList.add('open'); document.body.classList.add('mc-form-modal-lock');
+            overlay.scrollTop = 0;
+            requestAnimationFrame(function () { overlay.classList.add('shown'); });
+            setTimeout(function () {
+                var f = body.querySelector('.mc-fm-form input[type="text"], .mc-fm-form input:not([type]), .mc-fm-form textarea');
+                try { if (f) f.focus({ preventScroll: true }); } catch (e) {}
+            }, 60);
+        }
+    }
+    function schedule() { if (!pending) { pending = true; setTimeout(reconcile, 0); } }
+    function closeActive() {
+        var open = FORMS.filter(function (id) { return vis(document.getElementById(id)); });
+        open.forEach(function (id) {
+            var el = document.getElementById(id);
+            var btn = Array.prototype.find.call(el.querySelectorAll('button'), function (b) {
+                return /cancel/i.test(b.getAttribute('onclick') || '') || /^\s*cancel\s*$/i.test(b.textContent || '');
+            });
+            if (btn) btn.click(); else el.style.display = 'none';
+        });
+        schedule();
+    }
+    window.mcFormModalClose = closeActive;
+    function wire() {
+        var mo = new MutationObserver(schedule);
+        FORMS.forEach(function (id) {
+            var el = document.getElementById(id);
+            if (el && !wired[id]) { wired[id] = true; mo.observe(el, { attributes: true, attributeFilter: ['style', 'class'] }); }
+        });
+        if (FORMS.some(function (id) { return vis(document.getElementById(id)); })) schedule();
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire); else wire();
+    window.addEventListener('load', wire);
+})();
+</script>
 </body>
 </html>
