@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 295;
+      window.PFLX_PATCH   = 296;
       // v295 -- server-side login. pflx-auth checks the PIN and returns a
       // signed sign-in pass; every app (and Notes sync) uses the pass, never
       // the PIN. Stored per device; expires after 30 days.
@@ -81,11 +81,25 @@
           login: function (who, pin) { return call({ action: 'login', who: String(who || ''), pin: String(pin || '') }).then(function (r) { if (r && r.ok) save(r); return r || { ok: false }; }); },
           verify: function (tok) { var t = tok || (cur() || {}).token; if (!t) return Promise.resolve({ ok: false, error: 'no_token' }); return call({ action: 'verify', token: t }); },
           setPin: function (newPin, targetId) { var c = cur(); if (!c) return Promise.resolve({ ok: false, error: 'not_signed_in' }); return call({ action: 'setPin', token: c.token, newPin: String(newPin || ''), targetId: targetId || undefined }); },
+          // v296 -- account claiming and sign-up happen on the server too.
+          claimVerify: function (email, code) { return call({ action: 'claimVerify', email: String(email || ''), code: String(code || '') }); },
+          claim: function (ticket, newPin) { return call({ action: 'claim', ticket: String(ticket || ''), newPin: String(newPin || '') }).then(function (r) { if (r && r.ok) save(r); return r || { ok: false }; }); },
+          register: function (o) { o = o || {}; return call({ action: 'register', brand: String(o.brand || ''), name: String(o.name || ''), email: String(o.email || ''), pin: String(o.pin || '') }).then(function (r) { if (r && r.ok) save(r); return r || { ok: false }; }); },
           token: function () { var c = cur(); return c ? c.token : ''; },
           current: cur,
           clear: function () { try { localStorage.removeItem(TK); } catch (e) {} }
         };
       })();
+      // v296 -- a host creating a player sets that player's PIN on the server.
+      window.pflxHostSetPin = function (id, pin) {
+        if (!id || !/^[0-9]{4,6}$/.test(String(pin || '')) || !window.pflxAuth) return;
+        window.pflxAuth.setPin(String(pin), id).then(function (r) {
+          if (!r || !r.ok) {
+            console.warn('[pflx-auth] host setPin failed for', id, r && r.error);
+            try { if (typeof window.pflxShowSaveToast === 'function') window.pflxShowSaveToast("Player saved, but their PIN didn't reach the server — use Reset PIN"); } catch (e) {}
+          }
+        });
+      };
       window.PFLX_BUILD   = '2026.10';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -22922,10 +22936,9 @@
                     return;
                 }
                 if (r.error === 'email_not_configured') {
-                    // Host has not set the Gmail secrets yet -> keep the old behaviour so claiming never dead-ends.
-                    console.warn('[claim] email sending not configured; legacy temp-PIN fallback');
-                    var done = ctx.onVerified; newPlayerData._claimCtx = null;
-                    done(true);
+                    // v296 -- no unverified fallback: a PIN is only ever set by the server after a verified code.
+                    desc.textContent = "Email codes are switched off right now.";
+                    pflxClaimMsg('Ask your host to reset your PIN from Player Management.');
                     return;
                 }
                 desc.textContent = 'We could not send a code to ' + pflxMaskEmail(ctx.email) + '.';
@@ -22963,12 +22976,14 @@
                 if (code.length !== 4) { shakeEl(inp); return; }
                 var vb = document.getElementById('claim-code-verify-btn');
                 vb.disabled = true;
-                var r = await pflxClaimApi('verify', { email: ctx.email, code: code });
+                var r = (window.pflxAuth && window.pflxAuth.claimVerify) ? await window.pflxAuth.claimVerify(ctx.email, code) : { ok: false, error: 'network' };
                 vb.disabled = false;
                 if (r.ok) {
                     if (_pflxClaimTimer) { clearInterval(_pflxClaimTimer); _pflxClaimTimer = null; }
                     newPlayerData._claimCtx = null;
                     inp.value = '';
+                    newPlayerData._claimTicket = r.ticket || null;   // v296 -- spent by pflxAuth.claim when the PIN is chosen
+                    newPlayerData._serverClaimed = false;
                     ctx.onVerified(false);
                     return;
                 }
@@ -22978,6 +22993,29 @@
                 else if (r.error === 'locked') pflxClaimMsg('Too many wrong tries. Wait a moment, then tap Resend for a new code.');
                 else pflxClaimMsg(pflxClaimErrorText(r));
             });
+
+            // v296 -- spend the claim ticket (or, if already claimed this sign-up, just update the PIN).
+            // Returns true when the server has the new PIN; shows the reason and returns false otherwise.
+            async function pflxServerClaim(pin, btn) {
+                if (!window.pflxAuth) { alert("Couldn't reach the PFLX server. Reload the page and try again."); return false; }
+                if (!newPlayerData._serverClaimed && !newPlayerData._claimTicket) {
+                    alert('Please verify the code we emailed you first.');
+                    showStep('step-claim-email');
+                    return false;
+                }
+                if (btn) btn.disabled = true;
+                var r = newPlayerData._serverClaimed ? await window.pflxAuth.setPin(pin) : await window.pflxAuth.claim(newPlayerData._claimTicket, pin);
+                if (btn) btn.disabled = false;
+                if (r && r.ok) { newPlayerData._serverClaimed = true; newPlayerData._claimTicket = null; try { pflxSignupDraftSave(); } catch (e) {} return true; }
+                if (r && (r.error === 'expired' || r.error === 'not_signed_in' || r.error === 'invalid_token')) {
+                    newPlayerData._claimTicket = null; newPlayerData._serverClaimed = false;
+                    alert('Your email code has expired. Request a new one to finish.');
+                    showStep('step-claim-email');
+                    return false;
+                }
+                alert(r && r.error === 'bad_pin' ? 'Your PIN must be 4 digits.' : "Couldn't save your PIN right now. Check your connection and try again.");
+                return false;
+            }
 
             // Shared claim-flow entry (July 15): every path that discovers a
             // pre-entered account funnels here — one way in, zero duplicates.
@@ -23118,24 +23156,30 @@
             });
 
             // === STEP 5: Change PIN ===
-            document.getElementById('set-pin-btn').addEventListener('click', () => {
+            document.getElementById('set-pin-btn').addEventListener('click', async () => {
                 const p1 = document.getElementById('new-pin-1').value;
                 const p2 = document.getElementById('new-pin-2').value;
                 if (p1.length !== 4) { shakeEl(document.getElementById('new-pin-1')); return; }
                 if (p1 !== p2) { shakeEl(document.getElementById('new-pin-2')); document.getElementById('new-pin-2').value = ''; return; }
                 newPlayerData.pin = p1;
+                // v296 -- claiming (or resetting) a host-entered account: the SERVER sets the PIN,
+                // spending the one-time ticket the emailed code earned. No PIN is written to the
+                // shared database any more.
+                if (newPlayerData.resetPlayer || newPlayerData.isImported) {
+                    var __cr = await pflxServerClaim(p1, document.getElementById('set-pin-btn'));
+                    if (!__cr) return;
+                }
                 // ── PIN RESET path (July 19) — an already-claimed account is
                 // recovering access. Update the existing record's PIN in place
                 // (PLAYERS + mcPlayers + BRANDS + cloud) and log straight in.
                 // No diagnostic, no onboarding, no new record, XC untouched.
                 if (newPlayerData.resetPlayer) {
                     var __rp = newPlayerData.resetPlayer;
-                    __rp.pin = p1; __rp.claimed = true; __rp.updatedAt = Date.now();
-                    try { if (typeof BRANDS !== 'undefined' && __rp.brand) BRANDS[__rp.brand] = p1; } catch (e) {}
+                    __rp.claimed = true; __rp.updatedAt = Date.now();
                     try {
                         if (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) {
                             var __mp = mcPlayers.find(function (x) { return x && (x.id === __rp.id || (__rp.brand && x.brand === __rp.brand)); });
-                            if (__mp) { __mp.pin = p1; __mp.claimed = true; __mp.updatedAt = Date.now(); }
+                            if (__mp) { __mp.claimed = true; __mp.updatedAt = Date.now(); }
                             if (typeof mcSaveData === 'function') mcSaveData('players');
                         }
                     } catch (e) {}
@@ -23493,7 +23537,7 @@
                         ts: Date.now(),
                         npd: {
                             fullName: newPlayerData.fullName, email: newPlayerData.email,
-                            pin: newPlayerData.pin || '', tempPin: newPlayerData.tempPin || '',
+                            serverClaimed: !!newPlayerData._serverClaimed,
                             brandName: newPlayerData.brandName || '', cohort: newPlayerData.cohort || 'PlayerPool',
                             isImported: !!newPlayerData.isImported,
                             importedPlayerId: (newPlayerData.importedPlayer && newPlayerData.importedPlayer.id) || null,
@@ -23509,6 +23553,8 @@
                     var d = JSON.parse(localStorage.getItem(SIGNUP_DRAFT_KEY) || 'null');
                     if (!d || !d.npd) return false;
                     Object.assign(newPlayerData, d.npd);
+                    newPlayerData._serverClaimed = !!d.npd.serverClaimed;
+                    delete newPlayerData.serverClaimed; newPlayerData.tempPin = '';
                     if (d.npd.importedPlayerId && typeof _pflxRosterFind === 'function') {
                         var imp = _pflxRosterFind(function (p) { return p.id === d.npd.importedPlayerId; });
                         if (imp) { newPlayerData.isImported = true; newPlayerData.importedPlayer = imp; }
@@ -23519,7 +23565,7 @@
                         cadState.results = d.cad.results || null;
                         cadState.vision = d.cad.vision || cadState.vision;
                     }
-                    if (!newPlayerData.pin) { showStep('step-change-pin'); return true; }
+                    if (!newPlayerData.pin && !newPlayerData._serverClaimed) { showStep('step-change-pin'); return true; }
                     if (cadState.step === 'complete' && cadState.results) { cadFinishToOnboarding(); return true; }
                     showStep('step-diagnostic');
                     cadRender();
@@ -24057,7 +24103,7 @@
             document.getElementById('onboard-finish').addEventListener('click', () => showStep('step-final-pin'));
 
             // === STEP 7: Final PIN ===
-            document.getElementById('final-pin-btn').addEventListener('click', () => {
+            document.getElementById('final-pin-btn').addEventListener('click', async () => {
                 const p1 = document.getElementById('final-pin-1').value;
                 const p2 = document.getElementById('final-pin-2').value;
                 if (p1.length !== 4) { shakeEl(document.getElementById('final-pin-1')); return; }
@@ -24102,11 +24148,43 @@
                         if (_sMeta) newPlayerData.studioName = _sMeta.name;
                     } catch (e) {}
                 }
+                // v296 -- the account and its PIN live on the server. A host-entered account is
+                // claimed with the emailed-code ticket; a brand-new player is registered and the
+                // server picks the id. Only then is the profile written to the shared roster.
+                var __finalBtn = document.getElementById('final-pin-btn');
+                var __newId = null;
+                if (newPlayerData.isImported && newPlayerData.importedPlayer) {
+                    if (!newPlayerData._serverClaimed && !newPlayerData._claimTicket) {
+                        // Matched a host-entered account by email/name without proving the email yet.
+                        pflxBeginClaimVerify(newPlayerData.importedPlayer, newPlayerData.email, function () {
+                            showStep('step-final-pin');
+                            setTimeout(function () { __finalBtn.click(); }, 60);
+                        });
+                        return;
+                    }
+                    if (!(await pflxServerClaim(p1, __finalBtn))) return;
+                } else {
+                    __finalBtn.disabled = true;
+                    var __rr = window.pflxAuth ? await window.pflxAuth.register({ brand: newPlayerData.brandName, name: newPlayerData.fullName, email: newPlayerData.email, pin: p1 }) : { ok: false };
+                    __finalBtn.disabled = false;
+                    if (!__rr || !__rr.ok) {
+                        if (__rr && __rr.error === 'brand_taken') {
+                            alert('The brand name "' + newPlayerData.brandName + '" is already taken. Pick another one.');
+                            try { showStep('step-onboarding'); showOnboardPage(5); } catch (e) {}
+                            return;
+                        }
+                        alert(__rr && __rr.error === 'too_many_attempts'
+                            ? 'Too many new accounts from this network. Wait 15 minutes and try again.'
+                            : "Couldn't create your account right now. Check your connection and try again.");
+                        return;
+                    }
+                    __newId = __rr.player.id;
+                }
                 const newPlayer = {
                     id: (newPlayerData.isImported && newPlayerData.importedPlayer && newPlayerData.importedPlayer.id)
                         ? newPlayerData.importedPlayer.id
-                        : 'player-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
-                    brand: newPlayerData.brandName, pin: p1, name: newPlayerData.fullName,
+                        : __newId,
+                    brand: newPlayerData.brandName, name: newPlayerData.fullName,
                     email: newPlayerData.email,
                     // Cohort rule (July 15): host-assigned cohort ALWAYS wins for
                     // imported players; everyone else lands in PlayerPool.
@@ -24172,7 +24250,7 @@
                 } else {
                     PLAYERS.push(newPlayer);
                 }
-                BRANDS[newPlayerData.brandName] = p1;
+                BRANDS[newPlayerData.brandName] = '';
                 // Persist to localStorage so PLAYERS / BRANDS rehydrate on the next load
                 try { if (typeof pflxIdentityPersistNewPlayer === 'function') pflxIdentityPersistNewPlayer(newPlayer); } catch(e) {}
                 try { if (typeof pflxIdentityPersist === 'function') pflxIdentityPersist(newPlayer); } catch(e) {}
@@ -24189,7 +24267,7 @@
                             var __cid = newPlayer.id, __now2 = Date.now();
                             var __mp2 = mcPlayers.find(function (x) { return x && x.id === __cid; });
                             if (__mp2) {
-                                ['pin', 'claimed', 'brand', 'brandName', 'email', 'slogan', 'interests', 'studioId', 'studioName',
+                                ['claimed', 'brand', 'brandName', 'email', 'slogan', 'interests', 'studioId', 'studioName',
                                  'pathway', 'brandType', 'visionStatement', 'diagnosticScores', 'diagnosticTopPathways',
                                  'diagnosticStyle', 'diagnosticComplete', 'onboardingComplete', 'role', 'roleDisplay'].forEach(function (k) {
                                     if (newPlayer[k] !== undefined && newPlayer[k] !== null) __mp2[k] = newPlayer[k];
@@ -24209,7 +24287,7 @@
                     if (!/admin|host|teacher|instructor/i.test(String(newPlayer.role || ''))) {
                         var __prevSes = window.activeSession;
                         pflxAwardOnboardingSignature({ id: newPlayer.id, brand: newPlayer.brand, name: newPlayer.name,
-                            email: newPlayer.email, pin: newPlayer.pin, cohort: newPlayer.cohort, role: newPlayer.role,
+                            email: newPlayer.email, cohort: newPlayer.cohort, role: newPlayer.role,
                             studioId: newPlayer.studioId, pathway: newPlayer.pathway, xc: newPlayer.xc, level: newPlayer.level });
                         window.activeSession = __prevSes;
                     }
@@ -37337,6 +37415,7 @@ function ppRenderCheckpoints(el) {
                     favorite: false
                 };
                 mcApplyTierToRecord(newPlayer);
+                try { if (window.pflxHostSetPin) window.pflxHostSetPin(newPlayer.id, newPlayer.pin); } catch (e) {}
                 mcPlayers.push(newPlayer);
                 // v1.40 — also publish an individual identity row
                 // (pflx_player_<id>). That's the ONLY format the login
@@ -83087,7 +83166,8 @@ RESPONSE RULES:
                             claimed: bypass, onboardingComplete: bypass, __pflxCustom: true, activity: []
                         };
                         PLAYERS.push(newP);
-                        BRANDS[brand] = pin;
+                        BRANDS[brand] = '';
+                        try { if (window.pflxHostSetPin) window.pflxHostSetPin(newP.id, pin); } catch (e) {}
                         broadcastPlayerChange(newP);
                         if (typeof window.pflxIdentityPersistNewPlayer === 'function') window.pflxIdentityPersistNewPlayer(newP);
                         // July 15 (Ennis): filters/search persist through add/edit/delete.
@@ -83139,7 +83219,8 @@ RESPONSE RULES:
                                 claimed: bypass, onboardingComplete: bypass, __pflxCustom: true, activity: []
                             };
                             PLAYERS.push(newP);
-                            BRANDS[brand] = pin;
+                            BRANDS[brand] = '';
+                            try { if (window.pflxHostSetPin) window.pflxHostSetPin(newP.id, pin); } catch (e) {}
                             if (typeof window.pflxIdentityPersistNewPlayer === 'function') window.pflxIdentityPersistNewPlayer(newP);
                             added++;
                         });
