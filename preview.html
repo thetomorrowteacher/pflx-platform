@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 290;
+      window.PFLX_PATCH   = 291;
       window.PFLX_BUILD   = '2026.10';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -38585,6 +38585,10 @@ function ppRenderCheckpoints(el) {
                 mcCheckpoints.forEach(function (cp) {
                     if (!cp || !cp.id || !cp.endDate || cp.endDate >= today) return; // only checkpoints past their end date
                     if (cp.status === 'inactive') return;                            // drafts never taxed
+                    // v291 (Ennis, Oct 20): a checkpoint that never opened can't be
+                    // late. Alpha sat at 'upcoming' past its end date and every
+                    // player was marked processed against it.
+                    if (/^(upcoming|draft|locked|scheduled)$/i.test(String(cp.status || ''))) return;
                     var pool = (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers)) ? mcPlayers : [];
                     pool.forEach(function (player) {
                         if (!player || !player.id || player.role === 'admin') return;
@@ -82054,15 +82058,24 @@ RESPONSE RULES:
                     if (Array.isArray(it.hired)) it.hired.forEach(function (x) { if (x) ids[x] = 1; });
                     return Object.keys(ids);
                 }
+                // v291 — only real player ids can be fined. assignedTo often
+                // holds COHORT names ("Global Digital Intern"), which were being
+                // treated as player ids. Keeps today's behaviour (no cohort-wide
+                // auto-fines) explicit instead of accidental.
+                var __realPids = {};
+                try { (typeof mcPlayers !== 'undefined' && Array.isArray(mcPlayers) ? mcPlayers : []).forEach(function (p) { if (p && p.id) __realPids[p.id] = 1; }); } catch (e) {}
                 function sweep(arr, trigger, targetType, flag) {
                     if (!Array.isArray(arr)) return;
                     arr.forEach(function (it) {
                         if (!it) return;
                         var st = String(it.status || '').toLowerCase();
                         if (st === 'approved' || st === 'completed' || st === 'rejected' || st === 'done') return;
+                        // v291 — never-opened items have no deadline to miss.
+                        if (st === 'upcoming' || st === 'inactive' || st === 'draft' || st === 'locked' || st === 'scheduled') return;
                         var t = dueTs(it); if (t == null || t > now) return;
                         var fired = it._missFired || {};
                         assignedIds(it).forEach(function (pid) {
+                            if (!__realPids[pid]) return;
                             if (fired[pid]) return;
                             fired[pid] = true; dirty[flag] = true;
                             window.pflxModifiers.fireEvent(trigger, { playerId: pid, targetType: targetType, targetId: it.id, cohort: it.cohort });
