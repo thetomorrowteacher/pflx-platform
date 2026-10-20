@@ -57,7 +57,35 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 294;
+      window.PFLX_PATCH   = 295;
+      // v295 -- server-side login. pflx-auth checks the PIN and returns a
+      // signed sign-in pass; every app (and Notes sync) uses the pass, never
+      // the PIN. Stored per device; expires after 30 days.
+      window.pflxAuth = (function () {
+        var TK = 'pflx_auth_v1';
+        function ep() { return (window.PFLX_SUPABASE_URL || '') + '/functions/v1/pflx-auth'; }
+        function call(body) {
+          var anon = window.PFLX_SUPABASE_ANON || '';
+          return fetch(ep(), { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: anon, Authorization: 'Bearer ' + anon }, body: JSON.stringify(body) })
+            .then(function (r) { return r.json().catch(function () { return { ok: false, error: 'server_error' }; }); },
+                  function () { return { ok: false, error: 'offline' }; });
+        }
+        function cur() { try { var t = JSON.parse(localStorage.getItem(TK) || 'null'); if (t && t.token && t.exp > Date.now()) return t; } catch (e) {} return null; }
+        function save(r) {
+          try {
+            var exp = 0; try { exp = JSON.parse(atob(r.token.split('.')[0].replace(/-/g, '+').replace(/_/g, '/'))).exp; } catch (e) {}
+            localStorage.setItem(TK, JSON.stringify({ token: r.token, pid: r.player.id, brand: r.player.brand, role: r.player.role, exp: exp || (Date.now() + 2592000000) }));
+          } catch (e) {}
+        }
+        return {
+          login: function (who, pin) { return call({ action: 'login', who: String(who || ''), pin: String(pin || '') }).then(function (r) { if (r && r.ok) save(r); return r || { ok: false }; }); },
+          verify: function (tok) { var t = tok || (cur() || {}).token; if (!t) return Promise.resolve({ ok: false, error: 'no_token' }); return call({ action: 'verify', token: t }); },
+          setPin: function (newPin, targetId) { var c = cur(); if (!c) return Promise.resolve({ ok: false, error: 'not_signed_in' }); return call({ action: 'setPin', token: c.token, newPin: String(newPin || ''), targetId: targetId || undefined }); },
+          token: function () { var c = cur(); return c ? c.token : ''; },
+          current: cur,
+          clear: function () { try { localStorage.removeItem(TK); } catch (e) {} }
+        };
+      })();
       window.PFLX_BUILD   = '2026.10';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -16907,7 +16935,6 @@
                         return (players || []).filter(function (p) {
                             if (!p || p.godTier) return false;
                             if (p.role && p.role !== 'player') return false;
-                            if (!p.pin) return false;
                             var cohorts = Array.isArray(p.cohorts) ? p.cohorts.slice()
                                 : String(p.cohort || '').split(/[,;]/).map(function (s) { return s.trim(); }).filter(Boolean);
                             if (!cohorts.length) cohorts = ['PlayerPool'];
@@ -16940,7 +16967,7 @@
                         user: player.name || player.brand || 'Player',
                         brand: player.brand || player.name || 'Player',
                         xc: String(player.xc || 0),
-                        pin: player.pin || '',
+                        token: (window.pflxAuth && window.pflxAuth.token()) || '',
                         role: player.role || 'Student',
                         cohort: player.cohort || 'PlayerPool',
                         tier: 'novice',
@@ -17006,7 +17033,12 @@
 
                 function attemptLogin(root) {
                     if (!selectedPlayer) return;
-                    if (window.pflxXLivePinMatches(selectedPlayer, pinBuffer)) {
+                    var __buf = pinBuffer, __sel = selectedPlayer;
+                    window.pflxAuth.login(__sel.id || __sel.brand, __buf).then(function (__r) {
+                        if (__r && __r.ok) __xlOk(); else __xlBad(__r && __r.error === 'too_many_attempts' ? 'Too many tries — wait 15 minutes.' : 'Incorrect PIN — try again.');
+                    });
+                    return;
+                    function __xlOk() {
                         window.pflxXLiveSetRemembered(selectedPlayer.id || selectedPlayer.brand);
                         var pinStep = root.querySelector('#pflx-xl-step-pin');
                         pinStep.innerHTML = '';
@@ -17017,13 +17049,14 @@
                         var baseUrl = (typeof APP_BASE_URLS !== 'undefined' && APP_BASE_URLS.lite) ? APP_BASE_URLS.lite : 'https://thetomorrowteacher.github.io/x-live';
                         var url = window.pflxXLiveBuildRedirectURL(selectedPlayer, baseUrl);
                         setTimeout(function () { window.location.href = url; }, 500);
-                    } else {
+                    }
+                    function __xlBad(msg) {
                         pinBuffer = '';
                         renderPinDots(root);
                         var dotsEl = root.querySelector('#pflx-xl-pin-dots');
                         dotsEl.classList.add('pflx-xl-shake');
                         setTimeout(function () { dotsEl.classList.remove('pflx-xl-shake'); }, 400);
-                        root.querySelector('#pflx-xl-error').textContent = 'Incorrect PIN — try again.';
+                        root.querySelector('#pflx-xl-error').textContent = msg;
                     }
                 }
 
@@ -17278,100 +17311,100 @@
         // hydratePlayers below. Test-data mock players were stripped on
         // 2026-05-29 so the host's Player Management deletes are durable.
         const PLAYERS = [
-            { id: 'admin-0', brand: 'PrototypeFLX', pin: '0000', name: 'PrototypeFLX', email: 'host@prototypeflx.com', cohort: 'N/A', role: 'admin', claimed: true, xc: Infinity, rankOverride: 'Master Admin', godTier: true },
-            { id: 'admin-1', brand: 'TheTomorrowTeacher', pin: '1111', name: 'Mr. Johnson', email: 'ennisjohnsonjr@thetomorrowteacher.org', cohort: 'N/A', role: 'admin', claimed: true, xc: 0 },
+            { id: 'admin-0', brand: 'PrototypeFLX', pin: '', name: 'PrototypeFLX', email: '', cohort: 'N/A', role: 'admin', claimed: true, xc: Infinity, rankOverride: 'Master Admin', godTier: true },
+            { id: 'admin-1', brand: 'TheTomorrowTeacher', pin: '', name: 'Mr. Johnson', email: '', cohort: 'N/A', role: 'admin', claimed: true, xc: 0 },
             // Removed: player-1 PixelProphet Alex Rivera, player-2 MotionMaster Jordan Lee,
             // player-3 CodeCrafter Sam Chen — they were test mocks and kept resurrecting
             // on every page load even after host deletes.
-            { id: 'player-import-1774891628714-0', brand: 'Aurora', pin: '4645', name: 'Aadhya Khanna', email: 'aadhyakhanna@prototypeflx.com', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-1', brand: 'Barnie', pin: '4112', name: 'Aarna Nagory', email: 'anagory.30@asdubai.org', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-2', brand: 'MetaLink', pin: '8727', name: 'Abdullah Haddad', email: 'ahaddad.31@asdubai.org', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-3', brand: 'Gobblify', pin: '9411', name: 'Advik Bajpai', email: 'abajpai.30@asdubai.org', cohort: 'DD Core 2', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-4', brand: 'Cheesecode', pin: '7633', name: 'Ahmad Hussein', email: 'ahussein.31@asdubai.org', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-5', brand: 'Liora', pin: '8874', name: 'Aiyanah Gharaibeh', email: 'agharaibeh.30@asdubai.org', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-6', brand: 'Z-Force', pin: '5381', name: 'Ali Adas', email: 'aadas.31@asdubai.org', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-7', brand: 'Oblivion', pin: '9844', name: 'Ali Aziz', email: 'aaziz.30@asdubai.org', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-8', brand: 'Heat-Seeker', pin: '1043', name: 'Ali Moloo', email: 'amoloo.31@asdubai.org', cohort: 'DD Core 3', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-9', brand: 'TharaJewel', pin: '6129', name: 'Annika Devraj', email: 'adevraj.28@asdubai.org', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-10', brand: 'Striker.VX', pin: '1816', name: 'Armaan Chaudhary', email: 'achaudhary.31@asdubai.org', cohort: 'DD Core 5', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-11', brand: 'BrandName?', pin: '9206', name: 'Aryana Husain', email: 'ahusain.28@asdubai.org', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-12', brand: 'Ember', pin: '2272', name: 'Aurangzeb Ismail', email: 'aismail.31@asdubai.org', cohort: 'DD Core 3', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-13', brand: 'Kenex', pin: '4909', name: 'Ayed Osaimi', email: 'aosaimi.31@asdubai.org', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-14', brand: 'AetherTech', pin: '8649', name: 'Brady Lung', email: 'blung.30@asdubai.org', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-15', brand: 'NovaWave', pin: '3681', name: 'Caden Hemmy', email: 'chemmy.30@asdubai.org', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-16', brand: 'VoYder', pin: '3750', name: 'Cameron Miller', email: 'cmiller.31@asdubai.org', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-17', brand: 'Spark', pin: '4413', name: 'Carl Demirjian', email: 'cdemirjian.31@asdubai.org', cohort: 'DD Core 5', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-18', brand: 'Finn', pin: '6225', name: 'Charis Koutsoukos', email: 'ckoutsoukos.31@asdubai.org', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-19', brand: 'Harmonix', pin: '6797', name: 'Charlotte Otto', email: 'cotto.31@asdubai.org', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-20', brand: 'Goldkick', pin: '8542', name: 'Dana Aref', email: 'daref.31@asdubai.org', cohort: 'DD Core 3', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-21', brand: 'EC-Tech', pin: '1646', name: 'Dreyken Phanbuh', email: 'dphanbuh.31@asdubai.org', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-22', brand: 'Mechaslam', pin: '8127', name: 'Emilio Lacherade', email: 'elacherade.30@asdubai.org', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-23', brand: 'Sentinel', pin: '6849', name: 'Esam Baigmohamed', email: 'esbaigmohamed.31@asdubai.org', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-24', brand: 'VividStudios', pin: '9144', name: 'Eshaal Siddiqi', email: 'esiddiqi.29@asdubai.org', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-25', brand: 'NeuroFlux', pin: '4817', name: 'Essence Johnson', email: 'ejohnson.30@asdubai.org', cohort: 'DD Studio 3', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-26', brand: 'InfernoForge', pin: '4176', name: 'Ethan Kibalian', email: 'ekibalian.31@asdubai.org', cohort: 'DD Core 5', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-27', brand: 'DOSHY', pin: '2979', name: 'Francesca Ciccopiedi', email: 'fciccopiedi.30@asdubai.org', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-28', brand: 'CrossTech', pin: '1080', name: 'Gillie French', email: 'gfrench.30@asdubai.org', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-29', brand: 'SafeGuard', pin: '8620', name: 'Irwin Rosh', email: 'ikottaparamba.31@asdubai.org', cohort: 'DD Core 3', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-30', brand: 'XingCo', pin: '7806', name: 'Ishaan Lal', email: 'ilal.30@asdubai.org', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-31', brand: 'Harmony X', pin: '2876', name: 'Ishaanvi Awtani', email: 'iawtani.30@asdubai.org', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-32', brand: 'NexusTech', pin: '3075', name: 'Jack Khouri', email: 'jkhouri.31@asdubai.org', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-33', brand: 'Abyssal', pin: '4061', name: 'James Boocher', email: 'jboocher.30@asdubai.org', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-34', brand: 'TechGear', pin: '2894', name: 'Jeongwoo Lim', email: 'jlim.30@asdubai.org', cohort: 'DD Core 3', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-35', brand: 'Bronx', pin: '9013', name: 'John Khoury', email: 'jkhoury.30@asdubai.org', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-36', brand: 'ION', pin: '6754', name: 'Jude Schulze', email: 'jschulze.30@asdubai.org', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-37', brand: 'Vyatech', pin: '5773', name: 'Kaavya Singh', email: 'kaavyasingh@prototypeflx.com', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-38', brand: 'Atlas', pin: '8537', name: 'Kai Anand', email: 'kanand.31@asdubai.org', cohort: 'DD Core 5', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-39', brand: 'Wonderglow', pin: '5960', name: 'Kay Bouez', email: 'kbouez.31@asdubai.org', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-40', brand: 'Empurrgy', pin: '4601', name: 'Kenz Alami', email: 'kalami.30@asdubai.org', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-41', brand: 'BrandName?', pin: '3142', name: 'Kiyan Devjiyani', email: 'kiyandevjiyani@prototypeflx.com', cohort: 'Falcon Studios (MS Division)', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-42', brand: 'Vavoosh', pin: '8190', name: 'Lamar Zoya', email: 'lzoya.27@asdubai.org', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-43', brand: 'Sakura', pin: '9078', name: 'Lianna Alansari', email: 'lalansari.30@asdubai.org', cohort: 'Falcon Studios (MS Division)', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-44', brand: 'LumaCore', pin: '3415', name: 'Liv Thomas', email: 'lthomas.30@asdubai.org', cohort: 'DD Core 3', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-45', brand: 'AceThePlace', pin: '5179', name: 'Luke Nelson', email: 'lnelson.31@asdubai.org', cohort: 'DD Core 5', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-46', brand: 'MGK', pin: '6905', name: 'Malak Khlat', email: 'mkhlat.30@asdubai.org', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-47', brand: 'Blu', pin: '4631', name: 'Maria Seddiqi', email: 'mseddiqi.31@asdubai.org', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-48', brand: 'CedarSonic', pin: '2149', name: 'Maryam Elbadawi', email: 'melbadawi.31@asdubai.org', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-49', brand: 'TerraTech', pin: '7465', name: 'Maxi Fredriksson', email: 'mfredriksson.30@asdubai.org', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-50', brand: 'Volleywave', pin: '3145', name: 'Mia Ghannoum', email: 'mghannoum.30@asdubai.org', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-51', brand: 'Storm', pin: '6994', name: 'Mia Pocha', email: 'mpocha.30@asdubai.org', cohort: 'DD Core 3', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-52', brand: 'NovaTech', pin: '5320', name: 'Mohammad Ghanim', email: 'mghanim.31@asdubai.org', cohort: 'DD Core 1', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-53', brand: 'Apex', pin: '4098', name: 'Muhammad Allana', email: 'mallana.31@asdubai.org', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-54', brand: 'Sustain', pin: '9128', name: 'Naina Bajaj', email: 'sbajaj.27@asdubai.org', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-55', brand: 'Trinity', pin: '2078', name: 'Naiya Baigmohamed', email: 'nbaigmohamed.31@asdubai.org', cohort: 'DD Core 3', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-56', brand: 'Bandit', pin: '9120', name: 'Neil Mahajan', email: 'ymahajan.31@asdubai.org', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-57', brand: 'PrimeIce', pin: '5123', name: 'Nicholas Advani', email: 'nadvani.31@asdubai.org', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-58', brand: 'VoltTech', pin: '6149', name: 'Nicolas Baliyan', email: 'nbaliyan.31@asdubai.org', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-59', brand: 'CyberA', pin: '2775', name: 'Nimr Alnahi', email: 'nalnahi.31@asdubai.org', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-60', brand: 'Dartal', pin: '1844', name: 'Noah Koffi', email: 'nkoffi.30@asdubai.org', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-61', brand: 'Jazmoon', pin: '9612', name: 'Nora Heath', email: 'nheath.30@asdubai.org', cohort: 'DD Core 2', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-62', brand: 'Multi-Mastery', pin: '8553', name: 'Omar Abdulla', email: 'oabdulla.31@asdubai.org', cohort: 'DD Core 2', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-63', brand: 'Voltura', pin: '2969', name: 'Omar Fahmi', email: 'ofahmi.30@asdubai.org', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-64', brand: 'EvoMax', pin: '5518', name: 'Peter Lapcik', email: 'plapcik.31@asdubai.org', cohort: 'DD Core 5', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-65', brand: '?uestioning', pin: '8478', name: 'Rami EL Ghalal', email: 'relghalal.31@asdubai.org', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-66', brand: 'TitanSystems', pin: '5882', name: 'Rasheed Salama', email: 'rsalama.31@asdubai.org', cohort: 'DD Core 3', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-67', brand: 'FlowTech', pin: '8582', name: 'Riah Mirza', email: 'rmirza.30@asdubai.org', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-68', brand: 'Volt', pin: '1969', name: 'Rishon Singal', email: 'rsingal.30@asdubai.org', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-69', brand: 'RonAxis', pin: '7269', name: 'Ronav Singal', email: 'rsingal.27@asdubai.org', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-70', brand: 'Matrix', pin: '7989', name: 'Ryan Kamel', email: 'rkamel.31@asdubai.org', cohort: 'DD Core 5', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-71', brand: 'Twice', pin: '3360', name: 'Sammy Diab', email: 'sdiab.31@asdubai.org', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-72', brand: 'PassionStudios', pin: '4068', name: 'Sarah Bose', email: 'sarahbose@prototypeflx.com', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-73', brand: 'Sushidoge', pin: '1362', name: 'Seungjoo Yoo', email: 'syoo.30@asdubai.org', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-74', brand: 'Cultiv8', pin: '5474', name: 'Shana Sivasubramaniam', email: 'ssivasubramaniam.30@asdubai.org', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-75', brand: 'Kamath Industries', pin: '4436', name: 'Shrey Kamath', email: 'shreykamath@prototypeflx.com', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-76', brand: 'CedarTree', pin: '2949', name: 'Sophia Hariri', email: 'shariri.31@asdubai.org', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-77', brand: 'Lita', pin: '9788', name: 'Sophie Maghami', email: 'sghaemmaghami.30@asdubai.org', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-78', brand: 'LaVerite', pin: '9920', name: 'Tala Abbas', email: 'tabbas.27@asdubai.org', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-79', brand: 'TheTikoVerse', pin: '1554', name: 'Tarek Aref Tiko', email: 'taref.29@asdubai.org', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-80', brand: 'StudioConnoisseur', pin: '9731', name: 'Tarek Shanshal', email: 'tshanshal.29@asdubai.org', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-81', brand: 'Nova', pin: '3769', name: 'Tiantian Zhou', email: 'tzhou.27@asdubai.org', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-82', brand: 'SharkHound', pin: '4877', name: 'Tyler Kulkarni', email: 'tkulkarni.30@asdubai.org', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-83', brand: 'Zorian', pin: '1739', name: 'Wali Mayo', email: 'wmayo.30@asdubai.org', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-84', brand: 'Wanova', pin: '1214', name: 'Walid Shanshal', email: 'wshanshal.29@asdubai.org', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-85', brand: 'CyberLynx', pin: '3445', name: 'Yavuz Akinci', email: 'yakinci.31@asdubai.org', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-86', brand: 'HydroForge', pin: '3354', name: 'Yigit Akinci', email: 'yiakinci.31@asdubai.org', cohort: 'DD Core 3', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-87', brand: 'Vortex', pin: '3353', name: 'Zachary Melamed', email: 'zmelamed.30@asdubai.org', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
-            { id: 'player-import-1774891628716-88', brand: 'CelTech', pin: '7281', name: 'Zoe Gegenheimer', email: 'zgegenheimer.30@asdubai.org', cohort: 'DD Core 3', role: 'player', claimed: false, xc: 0 }
+            { id: 'player-import-1774891628714-0', brand: 'Aurora', pin: '', name: 'Aadhya Khanna', email: '', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-1', brand: 'Barnie', pin: '', name: 'Aarna Nagory', email: '', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-2', brand: 'MetaLink', pin: '', name: 'Abdullah Haddad', email: '', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-3', brand: 'Gobblify', pin: '', name: 'Advik Bajpai', email: '', cohort: 'DD Core 2', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-4', brand: 'Cheesecode', pin: '', name: 'Ahmad Hussein', email: '', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-5', brand: 'Liora', pin: '', name: 'Aiyanah Gharaibeh', email: '', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-6', brand: 'Z-Force', pin: '', name: 'Ali Adas', email: '', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-7', brand: 'Oblivion', pin: '', name: 'Ali Aziz', email: '', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-8', brand: 'Heat-Seeker', pin: '', name: 'Ali Moloo', email: '', cohort: 'DD Core 3', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-9', brand: 'TharaJewel', pin: '', name: 'Annika Devraj', email: '', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-10', brand: 'Striker.VX', pin: '', name: 'Armaan Chaudhary', email: '', cohort: 'DD Core 5', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-11', brand: 'BrandName?', pin: '', name: 'Aryana Husain', email: '', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-12', brand: 'Ember', pin: '', name: 'Aurangzeb Ismail', email: '', cohort: 'DD Core 3', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-13', brand: 'Kenex', pin: '', name: 'Ayed Osaimi', email: '', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-14', brand: 'AetherTech', pin: '', name: 'Brady Lung', email: '', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-15', brand: 'NovaWave', pin: '', name: 'Caden Hemmy', email: '', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-16', brand: 'VoYder', pin: '', name: 'Cameron Miller', email: '', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-17', brand: 'Spark', pin: '', name: 'Carl Demirjian', email: '', cohort: 'DD Core 5', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-18', brand: 'Finn', pin: '', name: 'Charis Koutsoukos', email: '', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-19', brand: 'Harmonix', pin: '', name: 'Charlotte Otto', email: '', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-20', brand: 'Goldkick', pin: '', name: 'Dana Aref', email: '', cohort: 'DD Core 3', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-21', brand: 'EC-Tech', pin: '', name: 'Dreyken Phanbuh', email: '', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-22', brand: 'Mechaslam', pin: '', name: 'Emilio Lacherade', email: '', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-23', brand: 'Sentinel', pin: '', name: 'Esam Baigmohamed', email: '', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-24', brand: 'VividStudios', pin: '', name: 'Eshaal Siddiqi', email: '', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-25', brand: 'NeuroFlux', pin: '', name: 'Essence Johnson', email: '', cohort: 'DD Studio 3', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-26', brand: 'InfernoForge', pin: '', name: 'Ethan Kibalian', email: '', cohort: 'DD Core 5', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-27', brand: 'DOSHY', pin: '', name: 'Francesca Ciccopiedi', email: '', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-28', brand: 'CrossTech', pin: '', name: 'Gillie French', email: '', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-29', brand: 'SafeGuard', pin: '', name: 'Irwin Rosh', email: '', cohort: 'DD Core 3', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-30', brand: 'XingCo', pin: '', name: 'Ishaan Lal', email: '', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-31', brand: 'Harmony X', pin: '', name: 'Ishaanvi Awtani', email: '', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-32', brand: 'NexusTech', pin: '', name: 'Jack Khouri', email: '', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-33', brand: 'Abyssal', pin: '', name: 'James Boocher', email: '', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-34', brand: 'TechGear', pin: '', name: 'Jeongwoo Lim', email: '', cohort: 'DD Core 3', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-35', brand: 'Bronx', pin: '', name: 'John Khoury', email: '', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-36', brand: 'ION', pin: '', name: 'Jude Schulze', email: '', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-37', brand: 'Vyatech', pin: '', name: 'Kaavya Singh', email: '', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-38', brand: 'Atlas', pin: '', name: 'Kai Anand', email: '', cohort: 'DD Core 5', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-39', brand: 'Wonderglow', pin: '', name: 'Kay Bouez', email: '', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-40', brand: 'Empurrgy', pin: '', name: 'Kenz Alami', email: '', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-41', brand: 'BrandName?', pin: '', name: 'Kiyan Devjiyani', email: '', cohort: 'Falcon Studios (MS Division)', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-42', brand: 'Vavoosh', pin: '', name: 'Lamar Zoya', email: '', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-43', brand: 'Sakura', pin: '', name: 'Lianna Alansari', email: '', cohort: 'Falcon Studios (MS Division)', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-44', brand: 'LumaCore', pin: '', name: 'Liv Thomas', email: '', cohort: 'DD Core 3', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-45', brand: 'AceThePlace', pin: '', name: 'Luke Nelson', email: '', cohort: 'DD Core 5', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-46', brand: 'MGK', pin: '', name: 'Malak Khlat', email: '', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-47', brand: 'Blu', pin: '', name: 'Maria Seddiqi', email: '', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-48', brand: 'CedarSonic', pin: '', name: 'Maryam Elbadawi', email: '', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-49', brand: 'TerraTech', pin: '', name: 'Maxi Fredriksson', email: '', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-50', brand: 'Volleywave', pin: '', name: 'Mia Ghannoum', email: '', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-51', brand: 'Storm', pin: '', name: 'Mia Pocha', email: '', cohort: 'DD Core 3', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-52', brand: 'NovaTech', pin: '', name: 'Mohammad Ghanim', email: '', cohort: 'DD Core 1', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-53', brand: 'Apex', pin: '', name: 'Muhammad Allana', email: '', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-54', brand: 'Sustain', pin: '', name: 'Naina Bajaj', email: '', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-55', brand: 'Trinity', pin: '', name: 'Naiya Baigmohamed', email: '', cohort: 'DD Core 3', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-56', brand: 'Bandit', pin: '', name: 'Neil Mahajan', email: '', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-57', brand: 'PrimeIce', pin: '', name: 'Nicholas Advani', email: '', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-58', brand: 'VoltTech', pin: '', name: 'Nicolas Baliyan', email: '', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-59', brand: 'CyberA', pin: '', name: 'Nimr Alnahi', email: '', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-60', brand: 'Dartal', pin: '', name: 'Noah Koffi', email: '', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-61', brand: 'Jazmoon', pin: '', name: 'Nora Heath', email: '', cohort: 'DD Core 2', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-62', brand: 'Multi-Mastery', pin: '', name: 'Omar Abdulla', email: '', cohort: 'DD Core 2', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-63', brand: 'Voltura', pin: '', name: 'Omar Fahmi', email: '', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-64', brand: 'EvoMax', pin: '', name: 'Peter Lapcik', email: '', cohort: 'DD Core 5', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-65', brand: '?uestioning', pin: '', name: 'Rami EL Ghalal', email: '', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-66', brand: 'TitanSystems', pin: '', name: 'Rasheed Salama', email: '', cohort: 'DD Core 3', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-67', brand: 'FlowTech', pin: '', name: 'Riah Mirza', email: '', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-68', brand: 'Volt', pin: '', name: 'Rishon Singal', email: '', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-69', brand: 'RonAxis', pin: '', name: 'Ronav Singal', email: '', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-70', brand: 'Matrix', pin: '', name: 'Ryan Kamel', email: '', cohort: 'DD Core 5', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-71', brand: 'Twice', pin: '', name: 'Sammy Diab', email: '', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-72', brand: 'PassionStudios', pin: '', name: 'Sarah Bose', email: '', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-73', brand: 'Sushidoge', pin: '', name: 'Seungjoo Yoo', email: '', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-74', brand: 'Cultiv8', pin: '', name: 'Shana Sivasubramaniam', email: '', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-75', brand: 'Kamath Industries', pin: '', name: 'Shrey Kamath', email: '', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-76', brand: 'CedarTree', pin: '', name: 'Sophia Hariri', email: '', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-77', brand: 'Lita', pin: '', name: 'Sophie Maghami', email: '', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-78', brand: 'LaVerite', pin: '', name: 'Tala Abbas', email: '', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-79', brand: 'TheTikoVerse', pin: '', name: 'Tarek Aref Tiko', email: '', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-80', brand: 'StudioConnoisseur', pin: '', name: 'Tarek Shanshal', email: '', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-81', brand: 'Nova', pin: '', name: 'Tiantian Zhou', email: '', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-82', brand: 'SharkHound', pin: '', name: 'Tyler Kulkarni', email: '', cohort: 'Player Pool', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-83', brand: 'Zorian', pin: '', name: 'Wali Mayo', email: '', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-84', brand: 'Wanova', pin: '', name: 'Walid Shanshal', email: '', cohort: 'Falcon Studios', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-85', brand: 'CyberLynx', pin: '', name: 'Yavuz Akinci', email: '', cohort: 'DD Studio 2', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-86', brand: 'HydroForge', pin: '', name: 'Yigit Akinci', email: '', cohort: 'DD Core 3', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-87', brand: 'Vortex', pin: '', name: 'Zachary Melamed', email: '', cohort: 'DD Studio 7', role: 'player', claimed: false, xc: 0 },
+            { id: 'player-import-1774891628716-88', brand: 'CelTech', pin: '', name: 'Zoe Gegenheimer', email: '', cohort: 'DD Core 3', role: 'player', claimed: false, xc: 0 }
         ];
 
         // Brand→pin auth lookup — includes ALL players (imported students have assigned PINs)
@@ -17606,7 +17639,7 @@
                 user: activeSession.name || safeBrand,
                 brand: safeBrand,
                 xc: String(activeSession.xc || 0),
-                pin: activeSession.pin || '',
+                token: (window.pflxAuth && window.pflxAuth.token()) || '',
                 role: activeSession.role || 'Student',
                 cohort: activeSession.cohort || 'PlayerPool',
                 tier: tier,
@@ -21385,7 +21418,8 @@
             if (!player) return;
             const newPin = String(Math.floor(1000 + Math.random() * 9000));
             player.pin = newPin;
-            hmcAddBroadcast(`🔑 PIN reset for ${player.brand || player.name}: ${newPin}`);
+            try { window.pflxAuth.setPin(newPin, player.id).then(function (r) { if (!r || !r.ok) { try { pflxToast('PIN saved here but not on the server (' + ((r && r.error) || 'error') + ')', 'error'); } catch (e) {} } }); } catch (e) {}
+            hmcAddBroadcast(`🔑 PIN reset for ${player.brand || player.name}`);
             alert(`New PIN for ${player.brand || player.name}: ${newPin}`);
         }
 
@@ -21405,7 +21439,7 @@
         function hmcExportPlayers() {
             const players = PLAYERS.filter(p => p.role === 'player');
             const csv = 'Brand,Name,Email,Cohort,XC,Claimed,PIN\n' +
-                players.map(p => `"${p.brand}","${p.name}","${p.email}","${p.cohort}",${p.xc || 0},${p.claimed},${p.pin}`).join('\n');
+                players.map(p => `"${p.brand}","${p.name}","${p.email}","${p.cohort}",${p.xc || 0},${p.claimed}`).join('\n');
             const blob = new Blob([csv], { type: 'text/csv' });
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
@@ -22604,7 +22638,9 @@
                     var brandEl = document.getElementById('brand-select');
                     var pinEl = document.getElementById('pin-input');
                     if (brandEl) brandEl.value = saved.brand;
-                    if (pinEl && saved.pin) pinEl.value = saved.pin;
+                    if (saved.pin) { try { delete saved.pin; localStorage.setItem('pflx_remember_v1', JSON.stringify(saved)); } catch (e) {} }
+                    var __rp = window.pflxAuth && window.pflxAuth.current();
+                    if (pinEl && __rp && String(__rp.brand || '').toLowerCase() === String(saved.brand).toLowerCase()) pinEl.placeholder = 'Signed in — press LOGIN';
                     var rm = document.getElementById('login-remember');
                     if (rm) rm.checked = true;
                 } catch (e) {}
@@ -22633,24 +22669,33 @@
                 const brand = window.pflxResolveBrandKey(document.getElementById('brand-select').value);
                 const pin = document.getElementById('pin-input').value;
                 if (!brand) { shakeEl(document.getElementById('brand-select')); return; }
-                if (BRANDS[brand] === pin) {
-                    // Persist credentials when Keep-me-signed-in is checked.
-                    // Stored locally only — never sent anywhere. 4-digit PIN
-                    // scoped to this device, same security profile as any
-                    // browser-remembered password.
+                // v295 -- the PIN is checked by the server (pflx-auth), which
+                // returns a sign-in pass. Keep-me-signed-in remembers the
+                // brand + pass on this device, never the PIN.
+                var __ok = function () {
                     try {
                         var keepEl = document.getElementById('login-remember');
-                        if (keepEl && keepEl.checked) {
-                            localStorage.setItem('pflx_remember_v1', JSON.stringify({
-                                brand: brand, pin: pin, ts: Date.now()
-                            }));
-                        } else {
-                            localStorage.removeItem('pflx_remember_v1');
-                        }
+                        if (keepEl && keepEl.checked) localStorage.setItem('pflx_remember_v1', JSON.stringify({ brand: brand, ts: Date.now() }));
+                        else { localStorage.removeItem('pflx_remember_v1'); }
                     } catch (e) {}
                     loginUser(brand);
+                };
+                var __bad = function (msg) {
+                    shakeEl(document.getElementById('pin-input')); document.getElementById('pin-input').value = '';
+                    if (msg) { try { if (typeof pflxToast === 'function') pflxToast(msg, 'error'); } catch (e) {} }
+                };
+                var __pass = window.pflxAuth && window.pflxAuth.current();
+                if (!pin && __pass && String(__pass.brand || '').toLowerCase() === String(brand).toLowerCase()) {
+                    window.pflxAuth.verify(__pass.token).then(function (r) { if (r && r.ok) __ok(); else { window.pflxAuth.clear(); __bad('Please enter your PIN.'); } });
+                    return;
                 }
-                else { shakeEl(document.getElementById('pin-input')); document.getElementById('pin-input').value = ''; }
+                if (!pin) { __bad(); return; }
+                window.pflxAuth.login(brand, pin).then(function (r) {
+                    if (r && r.ok) return __ok();
+                    if (r && r.error === 'too_many_attempts') return __bad('Too many tries — wait 15 minutes and try again.');
+                    if (r && r.error === 'offline' && typeof BRANDS !== 'undefined' && BRANDS[brand] === pin) return __ok();
+                    __bad(r && r.error === 'offline' ? 'Can\'t reach PFLX — check your connection.' : '');
+                });
             });
             document.getElementById('pin-input').addEventListener('keypress', e => { if (e.key === 'Enter') document.getElementById('login-btn').click(); });
 
@@ -37222,6 +37267,7 @@ function ppRenderCheckpoints(el) {
                     // fix as the PLAYERS mirror a few lines below.
                     mcPlayers[idx].totalXcoin = xc;
                     mcPlayers[idx].level = level;
+                    if (pin && String(pin) !== String(mcPlayers[idx].pin || '')) { try { window.pflxAuth.setPin(pin, mcPlayers[idx].id); } catch (e) {} }
                     mcPlayers[idx].pin = pin;
                     mcPlayers[idx].image = image;
                     mcPlayers[idx].studioId = studioId;
@@ -79067,7 +79113,7 @@ RESPONSE RULES:
                     id:                 profile.id            || base.id,
                     brandName:          profile.brand         || profile.brandName || base.brandName,
                     brand:              profile.brand         || base.brand,
-                    pin:                profile.pin           || base.pin,
+                    pin:                undefined, // v295: never stored on the device
                     name:               profile.name          || base.name,
                     email:              profile.email         || base.email,
                     role:               profile.role          || base.role || 'Student',
@@ -79770,6 +79816,7 @@ RESPONSE RULES:
                 // it in place, signing out and reloading would auto-fill
                 // the previous player's credentials and feel broken.
                 try { localStorage.removeItem('pflx_remember_v1'); } catch (e) {}
+                try { window.pflxAuth && window.pflxAuth.clear(); } catch (e) {}
                 window.location.reload();
             } catch (e) { console.warn('[identity] signOut failed', e); }
         };
@@ -79777,14 +79824,22 @@ RESPONSE RULES:
         function tryAutoLogin() {
             try {
                 var u = window.pflxIdentityLoad();
-                if (!u || !u.brand || !u.pin) return;
+                if (!u || !u.brand) return;
                 if (!u.onboardingComplete && !u.onboarded) return;
                 if (u.keepSignedIn === false) return;
-                if (typeof BRANDS !== 'undefined' && BRANDS[u.brand] && BRANDS[u.brand] === u.pin) {
-                    if (typeof loginUser === 'function') {
-                        console.info('[identity] auto-login as', u.brand);
-                        loginUser(u.brand);
-                    }
+                var __c = window.pflxAuth && window.pflxAuth.current();
+                var __mine = __c && (__c.pid === u.id || String(__c.brand || '').toLowerCase() === String(u.brand).toLowerCase());
+                if (__mine) {
+                    if (typeof loginUser === 'function') { console.info('[identity] auto-login (pass) as', u.brand); loginUser(u.brand); }
+                    return;
+                }
+                if (u.pin && window.pflxAuth) {
+                    // v295 one-time migration: swap the saved PIN for a pass.
+                    var __pin = u.pin;
+                    window.pflxAuth.login(u.id || u.brand, __pin).then(function (r) {
+                        try { var raw = JSON.parse(localStorage.getItem(IDENTITY_KEY) || '{}'); delete raw.pin; localStorage.setItem(IDENTITY_KEY, JSON.stringify(raw)); } catch (e) {}
+                        if (r && r.ok && typeof loginUser === 'function') { console.info('[identity] auto-login (migrated) as', u.brand); loginUser(u.brand); }
+                    });
                 }
             } catch (e) { console.warn('[identity] auto-login failed', e); }
         }
@@ -90743,11 +90798,12 @@ window.PFLX_GOOGLE_CLIENT_ID = window.PFLX_GOOGLE_CLIENT_ID || '276938884976-48s
     // pflx-notes Edge Function, which checks the player's id + PIN. Newest
     // copy of each note wins; deletes travel as tombstones.
     var EP = function () { return (window.PFLX_SUPABASE_URL || '') + '/functions/v1/pflx-notes'; };
-    function sess() { var s = window.activeSession; return (s && s.id && s.pin != null && s.pin !== '') ? s : null; }
+    function sess() { var s = window.activeSession; return (s && s.id && ((window.pflxAuth && window.pflxAuth.token()) || (s.pin != null && s.pin !== ''))) ? s : null; }
     function call(action, extra) {
         var s = sess(); if (!s) return Promise.reject(new Error('not logged in'));
         var anon = window.PFLX_SUPABASE_ANON || '';
-        var body = Object.assign({ playerId: s.id, pin: String(s.pin), action: action }, extra || {});
+        var __tok = window.pflxAuth && window.pflxAuth.token();
+        var body = Object.assign(__tok ? { token: __tok, action: action } : { playerId: s.id, pin: String(s.pin), action: action }, extra || {});
         return fetch(EP(), { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: anon, Authorization: 'Bearer ' + anon }, body: JSON.stringify(body) })
             .then(function (r) { return r.json().catch(function () { return { ok: false }; }); })
             .then(function (j) { if (!j || !j.ok) throw new Error((j && j.error) || 'sync failed'); return j; });
