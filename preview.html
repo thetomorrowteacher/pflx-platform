@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 291;
+      window.PFLX_PATCH   = 292;
       window.PFLX_BUILD   = '2026.10';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -15429,6 +15429,7 @@
                         <button type="button" class="xbot-notes-btn" data-xn="link" title="Add / edit link" style="width:28px;height:26px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:5px;color:#e0e6ff;cursor:pointer;">🔗</button>
                         <button type="button" class="xbot-notes-btn" data-xn="table" title="Insert table / table options" style="width:28px;height:26px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:5px;color:#e0e6ff;cursor:pointer;">▦</button>
                         <button type="button" class="xbot-notes-btn" data-xn="cal" title="Insert calendar planner (Weekly / Daily)" style="width:28px;height:26px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:5px;color:#e0e6ff;cursor:pointer;">📅</button>
+                        <button type="button" class="xbot-notes-btn" id="xn-google-btn" onclick="window.pflxGoogleNotesMenu && window.pflxGoogleNotesMenu(this)" title="Google (optional) — send to Docs, sync Tasks &amp; Calendar" style="width:28px;height:26px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:5px;color:#e0e6ff;cursor:pointer; font-weight:800;color:#8ab4f8;">G</button>
                         <button class="xbot-notes-btn" onclick="window.xbotNotesDownloadActive()" title="Download this note as a standalone file" style="margin-left:auto;padding:0 10px;height:26px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:5px;color:#4ade80;font-size:11px;cursor:pointer;white-space:nowrap;">⬇ Save as File</button>
                     </div>
                     <div id="xbot-notes-editor" contenteditable="true" oninput="window.xbotNotesScheduleSave()" data-placeholder="Jot down anything you want to remember…" style="width:100%;min-height:200px;padding:10px;background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.12);border-radius:8px;color:#e0e6ff;font-family:'Rajdhani',sans-serif;font-size:13px;box-sizing:border-box;overflow-y:auto;"></div>
@@ -90312,6 +90313,7 @@ window.XN_EXPORT_CSS = '.xn-doc ul, .xn-doc ol { padding-left: 28px; margin: 4px
             '<span class="xn-cal-title">📅 ' + title + '</span>' +
             '<button type="button" data-xncal="week" class="' + (view === 'week' ? 'on' : '') + '">Weekly</button>' +
             '<button type="button" data-xncal="day" class="' + (view === 'day' ? 'on' : '') + '">Daily</button>' +
+            '<button type="button" data-xncal="google" title="Google Tasks / Calendar (optional)">G ▾</button>' +
             '<button type="button" data-xncal="remove" title="Remove calendar">✕</button></div>';
         Array.prototype.slice.call(block.children).forEach(function (c) { if (!c.classList.contains('xn-cal-store')) c.remove(); });
         block.insertAdjacentHTML('afterbegin', bar + '<div class="xn-cal-body">' + body + '</div>');
@@ -90332,6 +90334,7 @@ window.XN_EXPORT_CSS = '.xn-doc ul, .xn-doc ol { padding-left: 28px; margin: 4px
         dirty();
     }
     function calNav(block, act) {
+        if (act === 'google') { var gb = block.querySelector('[data-xncal="google"]'); if (window.pflxGoogleCalMenu) window.pflxGoogleCalMenu(block, gb); return; }
         calSync(block);
         if (act === 'remove') { if (confirm('Remove this calendar and everything in it?')) { block.remove(); dirty(); } return; }
         var a = parseYmd(block.getAttribute('data-anchor')), view = block.getAttribute('data-view') || 'week';
@@ -90341,6 +90344,7 @@ window.XN_EXPORT_CSS = '.xn-doc ul, .xn-doc ol { padding-left: 28px; margin: 4px
         block.setAttribute('data-view', view); block.setAttribute('data-anchor', ymd(a));
         calRender(block); dirty();
     }
+    window.xnCalSync = calSync; window.xnCalRender = calRender;
     window.xnCalSyncAll = function () { var e = ed(); if (e) e.querySelectorAll('.xn-cal').forEach(calSync); };
     window.xnCalRenderAll = function () { var e = ed(); if (e) e.querySelectorAll('.xn-cal').forEach(function (b) { calRender(b); }); };
 
@@ -90423,6 +90427,277 @@ window.XN_EXPORT_CSS = '.xn-doc ul, .xn-doc ol { padding-left: 28px; margin: 4px
         }
     }
     wrap(); if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wrap); window.addEventListener('load', wrap);
+})();
+
+</script>
+<script>
+window.PFLX_GOOGLE_CLIENT_ID = window.PFLX_GOOGLE_CLIENT_ID || ''; // v292: set once Ennis creates the OAuth Web client
+(function () {
+    // PATCH PLATFORM v292 — optional Google connection (Ennis, Oct 20):
+    // "make that optional when needed and not for full site login".
+    // Nothing here runs until someone clicks a Google action. Google's own
+    // sign-in script (GIS) is loaded on demand, an access token is asked
+    // for only the scope that action needs, and tokens live in memory /
+    // sessionStorage only. No client secret, no server.
+    var SC = {
+        docs: 'https://www.googleapis.com/auth/drive.file',
+        tasks: 'https://www.googleapis.com/auth/tasks',
+        cal: 'https://www.googleapis.com/auth/calendar.events'
+    };
+    function clientId() { return String(window.PFLX_GOOGLE_CLIENT_ID || '').trim(); }
+    function toast(m, t) { try { if (typeof pflxToast === 'function') pflxToast(m, t || 'info'); else console.log('[google]', m); } catch (e) {} }
+    var gisP = null;
+    function loadGis() {
+        if (window.google && google.accounts && google.accounts.oauth2) return Promise.resolve();
+        if (gisP) return gisP;
+        gisP = new Promise(function (res, rej) {
+            var s = document.createElement('script'); s.src = 'https://accounts.google.com/gsi/client'; s.async = true;
+            s.onload = function () { res(); }; s.onerror = function () { gisP = null; rej(new Error('Could not load Google sign-in')); };
+            document.head.appendChild(s);
+        });
+        return gisP;
+    }
+    var TK = 'pflx_google_token_v1';
+    function readTok() { try { var t = JSON.parse(sessionStorage.getItem(TK) || 'null'); if (t && t.exp > Date.now() + 60000) return t; } catch (e) {} return null; }
+    function saveTok(t) { try { sessionStorage.setItem(TK, JSON.stringify(t)); } catch (e) {} paintStatus(); }
+    function hasScope(t, sc) { return !!t && (' ' + t.scope + ' ').indexOf(' ' + sc + ' ') !== -1; }
+    function token(scopeKeys) {
+        var need = scopeKeys.map(function (k) { return SC[k]; });
+        var t = readTok();
+        if (t && need.every(function (sc) { return hasScope(t, sc); })) return Promise.resolve(t.access);
+        if (!clientId()) return Promise.reject(new Error('Google is not set up for PFLX yet (missing client ID).'));
+        return loadGis().then(function () {
+            return new Promise(function (res, rej) {
+                var prev = t ? t.scope.split(' ') : [];
+                var all = prev.concat(need).filter(function (v, i, a) { return v && a.indexOf(v) === i; });
+                var tc = google.accounts.oauth2.initTokenClient({
+                    client_id: clientId(), scope: all.join(' '), include_granted_scopes: true,
+                    callback: function (r) {
+                        if (!r || r.error || !r.access_token) { rej(new Error(r && r.error === 'access_denied' ? 'Google access was not allowed.' : 'Google sign-in was cancelled.')); return; }
+                        var nt = { access: r.access_token, scope: r.scope || all.join(' '), exp: Date.now() + (Number(r.expires_in) || 3600) * 1000 };
+                        if (!need.every(function (sc) { return hasScope(nt, sc); })) { saveTok(nt); rej(new Error('Please tick the Google permission boxes so PFLX can do this.')); return; }
+                        saveTok(nt); res(nt.access);
+                    },
+                    error_callback: function (e) { rej(new Error(e && e.type === 'popup_closed' ? 'Google sign-in window was closed.' : 'Google sign-in was blocked — allow pop-ups for PFLX and try again.')); }
+                });
+                tc.requestAccessToken({ prompt: '' });
+            });
+        });
+    }
+    function api(scopeKeys, method, url, body, ctype) {
+        return token(scopeKeys).then(function (tok) {
+            var h = { Authorization: 'Bearer ' + tok };
+            if (body != null) h['Content-Type'] = ctype || 'application/json';
+            return fetch(url, { method: method, headers: h, body: body == null ? undefined : (typeof body === 'string' ? body : JSON.stringify(body)) }).then(function (r) {
+                if (r.status === 401) { try { sessionStorage.removeItem(TK); } catch (e) {} paintStatus(); throw new Error('Google session expired — click again to reconnect.'); }
+                if (r.status === 204) return null;
+                return r.json().then(function (j) { if (!r.ok) { var err = new Error((j && j.error && j.error.message) || ('Google error ' + r.status)); err.status = r.status; throw err; } return j; });
+            });
+        });
+    }
+    window.pflxGoogle = {
+        connected: function () { return !!readTok(); },
+        connect: function () { return token(['docs']).then(function () { toast('Google connected for this session.', 'success'); }); },
+        disconnect: function () {
+            var t = readTok(); try { sessionStorage.removeItem(TK); } catch (e) {}
+            if (t && window.google && google.accounts && google.accounts.oauth2) { try { google.accounts.oauth2.revoke(t.access, function () {}); } catch (e) {} }
+            paintStatus(); toast('Google disconnected.', 'info');
+        },
+        preload: function () { if (clientId()) loadGis().catch(function () {}); },
+        api: api
+    };
+    function paintStatus() {
+        var b = document.getElementById('xn-google-btn'); if (!b) return;
+        b.title = readTok() ? 'Google connected — Docs / Tasks / Calendar' : 'Google (optional) — send to Docs, sync Tasks & Calendar';
+        b.style.borderColor = readTok() ? 'rgba(74,222,128,0.6)' : 'rgba(255,255,255,0.12)';
+    }
+
+    // ---------- Notes → Google Docs ----------
+    var MAP = 'pflx_xn_gdoc_map_v1';
+    function docMap() { try { return JSON.parse(localStorage.getItem(MAP) || '{}'); } catch (e) { return {}; } }
+    function activeNote() {
+        var pick = document.getElementById('xbot-notes-picker'), title = document.getElementById('xbot-notes-title'), body = document.getElementById('xbot-notes-editor');
+        if (!pick || !pick.value || !body) return null;
+        try { window.xnCalSyncAll && window.xnCalSyncAll(); } catch (e) {}
+        return { id: pick.value, title: (title && title.value) || 'Untitled Note', html: body.innerHTML };
+    }
+    function docHtml(n) {
+        var tmp = document.createElement('div'); tmp.innerHTML = n.html;
+        tmp.querySelectorAll('.xn-cal-bar, .xn-cal-store').forEach(function (x) { x.remove(); });
+        tmp.querySelectorAll('ul.xn-check li').forEach(function (li) {
+            li.insertBefore(document.createTextNode(li.classList.contains('xn-done') ? '☑ ' : '☐ '), li.firstChild);
+            if (li.classList.contains('xn-done')) li.style.textDecoration = 'line-through';
+        });
+        tmp.querySelectorAll('ul.xn-check').forEach(function (u) { u.style.listStyleType = 'none'; });
+        tmp.querySelectorAll('.xn-cal-head').forEach(function (h) { h.outerHTML = '<p><b>' + h.textContent + '</b></p>'; });
+        tmp.querySelectorAll('table').forEach(function (t) { t.setAttribute('border', '1'); t.style.borderCollapse = 'collapse'; });
+        return '<html><head><meta charset="utf-8"></head><body><h1>' + String(n.title).replace(/</g, '&lt;') + '</h1>' + tmp.innerHTML + '</body></html>';
+    }
+    function sendToDocs() {
+        var n = activeNote(); if (!n) { toast('Pick or create a note first.', 'error'); return; }
+        var map = docMap(), id = map[n.id], html = docHtml(n);
+        var create = function () {
+            var bnd = 'pflx' + Date.now();
+            var multi = '--' + bnd + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' +
+                JSON.stringify({ name: n.title, mimeType: 'application/vnd.google-apps.document' }) +
+                '\r\n--' + bnd + '\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n' + html + '\r\n--' + bnd + '--';
+            return api(['docs'], 'POST', 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink', multi, 'multipart/related; boundary=' + bnd);
+        };
+        var p = id
+            ? api(['docs'], 'PATCH', 'https://www.googleapis.com/upload/drive/v3/files/' + id + '?uploadType=media&fields=id,webViewLink', html, 'text/html; charset=UTF-8')
+                .then(function (r) { return api(['docs'], 'PATCH', 'https://www.googleapis.com/drive/v3/files/' + id + '?fields=id,webViewLink', { name: n.title }).then(function () { return r; }); })
+                .catch(function (e) { if (e.status === 404) return create(); throw e; })
+            : create();
+        p.then(function (r) {
+            map[n.id] = r.id; try { localStorage.setItem(MAP, JSON.stringify(map)); } catch (e) {}
+            toast((id ? 'Google Doc updated' : 'Saved to Google Docs') + ' — opening it…', 'success');
+            window.open(r.webViewLink || ('https://docs.google.com/document/d/' + r.id + '/edit'), '_blank', 'noopener');
+        }).catch(function (e) { toast(e.message, 'error'); });
+    }
+
+    // ---------- Calendar planner ↔ Google Tasks / Calendar ----------
+    function liText(li) {
+        var c = li.cloneNode(true); c.querySelectorAll('ul,ol').forEach(function (x) { x.remove(); });
+        return (c.textContent || '').replace(/\s+/g, ' ').trim();
+    }
+    function blockItems(block) {
+        // Every checklist item in this planner, across ALL stored dates.
+        window.xnCalSync(block);
+        var out = [];
+        block.querySelectorAll('.xn-cal-store > [data-date]').forEach(function (slot) {
+            var d = slot.getAttribute('data-date');
+            slot.querySelectorAll('li').forEach(function (li) { var t = liText(li); if (t) out.push({ li: li, date: d, text: t }); });
+        });
+        return out;
+    }
+    function done(block, msg) { window.xnCalRender(block); try { window.xbotNotesScheduleSave && window.xbotNotesScheduleSave(); } catch (e) {} toast(msg, 'success'); }
+    function plannerList() {
+        return api(['tasks'], 'GET', 'https://tasks.googleapis.com/tasks/v1/users/@me/lists?maxResults=100').then(function (r) {
+            var hit = (r.items || []).find(function (l) { return l.title === 'PFLX Planner'; });
+            return hit ? hit.id : api(['tasks'], 'POST', 'https://tasks.googleapis.com/tasks/v1/users/@me/lists', { title: 'PFLX Planner' }).then(function (l) { return l.id; });
+        });
+    }
+    function syncTasks(block) {
+        var items = blockItems(block);
+        if (!items.length) { toast('Add some checklist items to the planner first.', 'info'); return; }
+        toast('Syncing ' + items.length + ' item' + (items.length === 1 ? '' : 's') + ' with Google Tasks…', 'info');
+        plannerList().then(function (list) {
+            var base = 'https://tasks.googleapis.com/tasks/v1/lists/' + encodeURIComponent(list) + '/tasks';
+            var made = 0, ticked = 0, pushed = 0;
+            return items.reduce(function (chain, it) {
+                return chain.then(function () {
+                    var id = it.li.getAttribute('data-gtask'), mine = it.li.classList.contains('xn-done');
+                    var fresh = function () {
+                        return api(['tasks'], 'POST', base, { title: it.text, due: it.date + 'T00:00:00.000Z', status: mine ? 'completed' : 'needsAction' })
+                            .then(function (t) { it.li.setAttribute('data-gtask', t.id); made++; });
+                    };
+                    if (!id) return fresh();
+                    return api(['tasks'], 'GET', base + '/' + encodeURIComponent(id)).then(function (g) {
+                        var gDone = g.status === 'completed';
+                        var patch = {};
+                        if (g.title !== it.text) patch.title = it.text;
+                        if (gDone && !mine) { it.li.classList.add('xn-done'); ticked++; }
+                        else if (mine && !gDone) { patch.status = 'completed'; pushed++; }
+                        if (!Object.keys(patch).length) return;
+                        return api(['tasks'], 'PATCH', base + '/' + encodeURIComponent(id), patch);
+                    }).catch(function (e) { if (e.status === 404) { it.li.removeAttribute('data-gtask'); return fresh(); } throw e; });
+                });
+            }, Promise.resolve()).then(function () {
+                done(block, 'Google Tasks synced — ' + made + ' new, ' + pushed + ' ticked in Google, ' + ticked + ' ticked here (list "PFLX Planner").');
+            });
+        }).catch(function (e) { toast(e.message, 'error'); try { window.xnCalRender(block); } catch (x) {} });
+    }
+    function tz() { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch (e) { return 'UTC'; } }
+    function eventBody(it) {
+        var m = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*[-–:]?\s+(.*)$/i.exec(it.text);
+        var nextDay = function (d) { var p = d.split('-'); var x = new Date(+p[0], +p[1] - 1, +p[2] + 1); return x.getFullYear() + '-' + ('0' + (x.getMonth() + 1)).slice(-2) + '-' + ('0' + x.getDate()).slice(-2); };
+        if (m && (m[2] || m[3]) && +m[1] <= 23) {
+            var h = +m[1], mi = +(m[2] || 0), ap = (m[3] || '').toLowerCase();
+            if (ap === 'pm' && h < 12) h += 12; if (ap === 'am' && h === 12) h = 0;
+            var pad = function (v) { return ('0' + v).slice(-2); };
+            var s = it.date + 'T' + pad(h) + ':' + pad(mi) + ':00', eh = Math.min(h + 1, 23);
+            return { summary: m[4], start: { dateTime: s, timeZone: tz() }, end: { dateTime: it.date + 'T' + pad(eh) + ':' + pad(h + 1 > 23 ? 59 : mi) + ':00', timeZone: tz() }, description: 'From PFLX Planner' };
+        }
+        return { summary: it.text, start: { date: it.date }, end: { date: nextDay(it.date) }, description: 'From PFLX Planner' };
+    }
+    var CAL = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
+    function pushCalendar(block) {
+        var items = blockItems(block);
+        if (!items.length) { toast('Add some items to the planner first.', 'info'); return; }
+        var made = 0, upd = 0;
+        items.reduce(function (chain, it) {
+            return chain.then(function () {
+                var id = it.li.getAttribute('data-gevent'), body = eventBody(it);
+                var fresh = function () { return api(['cal'], 'POST', CAL, body).then(function (ev) { it.li.setAttribute('data-gevent', ev.id); made++; }); };
+                if (!id) return fresh();
+                return api(['cal'], 'PATCH', CAL + '/' + encodeURIComponent(id), body).then(function () { upd++; })
+                    .catch(function (e) { if (e.status === 404 || e.status === 410) { it.li.removeAttribute('data-gevent'); return fresh(); } throw e; });
+            });
+        }, Promise.resolve()).then(function () {
+            done(block, 'Google Calendar updated — ' + made + ' added, ' + upd + ' refreshed. Tip: start an item with a time ("9am Film b-roll") for a timed event.');
+        }).catch(function (e) { toast(e.message, 'error'); try { window.xnCalRender(block); } catch (x) {} });
+    }
+    function pullCalendar(block) {
+        window.xnCalSync(block);
+        var view = block.getAttribute('data-view') === 'day' ? 'day' : 'week';
+        var a = String(block.getAttribute('data-anchor')).split('-'); var s = new Date(+a[0], +a[1] - 1, +a[2]);
+        if (view === 'week') s.setDate(s.getDate() - ((s.getDay() + 6) % 7));
+        var e = new Date(s); e.setDate(s.getDate() + (view === 'week' ? 7 : 1));
+        var url = CAL + '?singleEvents=true&orderBy=startTime&maxResults=250&timeMin=' + encodeURIComponent(s.toISOString()) + '&timeMax=' + encodeURIComponent(e.toISOString());
+        api(['cal'], 'GET', url).then(function (r) {
+            var st = block.querySelector('.xn-cal-store'), added = 0;
+            var have = {}; block.querySelectorAll('[data-gevent]').forEach(function (li) { have[li.getAttribute('data-gevent')] = 1; });
+            (r.items || []).forEach(function (ev) {
+                if (have[ev.id] || ev.status === 'cancelled') return;
+                var day = ev.start && (ev.start.date || (ev.start.dateTime ? (function (d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); })(new Date(ev.start.dateTime)) : ''));
+                if (!day) return;
+                var time = ev.start.dateTime ? new Date(ev.start.dateTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + ' ' : '';
+                var slot = st.querySelector('[data-date="' + day + '"]');
+                if (!slot) { slot = document.createElement('div'); slot.setAttribute('data-date', day); slot.innerHTML = '<ul class="xn-check"></ul>'; st.appendChild(slot); }
+                var ul = slot.querySelector('ul.xn-check'); if (!ul) { ul = document.createElement('ul'); ul.className = 'xn-check'; slot.appendChild(ul); }
+                ul.querySelectorAll('li').forEach(function (li) { if (!li.textContent.trim()) li.remove(); });
+                var li = document.createElement('li'); li.setAttribute('data-gevent', ev.id); li.textContent = time + (ev.summary || '(no title)');
+                ul.appendChild(li); added++;
+            });
+            done(block, added ? ('Brought in ' + added + ' event' + (added === 1 ? '' : 's') + ' from Google Calendar.') : 'No new Google Calendar events in this ' + view + '.');
+        }).catch(function (e2) { toast(e2.message, 'error'); });
+    }
+
+    // ---------- menus ----------
+    function menu(btn, html, onPick) {
+        window.pflxGoogle.preload();
+        var pop = document.createElement('div'); pop.className = 'xn-pop'; pop.innerHTML = html;
+        document.querySelectorAll('.xn-pop').forEach(function (p) { p.remove(); });
+        document.body.appendChild(pop);
+        var r = btn.getBoundingClientRect();
+        pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - pop.offsetWidth - 8)) + 'px';
+        var top = r.bottom + 4; if (top + pop.offsetHeight > window.innerHeight - 8) top = Math.max(8, r.top - pop.offsetHeight - 4); pop.style.top = top + 'px';
+        pop.addEventListener('mousedown', function (e) { e.preventDefault(); });
+        pop.addEventListener('click', function (e) { var b = e.target.closest('[data-v]'); if (!b) return; pop.remove(); onPick(b.getAttribute('data-v')); });
+        setTimeout(function () { document.addEventListener('mousedown', function off(e) { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('mousedown', off); } }); }, 0);
+    }
+    var NOTE_SETUP = '<div class="xn-lbl" style="text-transform:none;letter-spacing:0;line-height:1.4;">Google isn&rsquo;t set up for PFLX yet &mdash; ask your host.</div>';
+    window.pflxGoogleNotesMenu = function (btn) {
+        var on = readTok();
+        menu(btn, '<div class="xn-lbl">Google &middot; optional</div>' + (clientId() ? '' : NOTE_SETUP) +
+            '<button type="button" data-v="docs">📄  Send note to Google Docs</button>' +
+            '<div class="xn-sep"></div>' +
+            (on ? '<button type="button" data-v="off">⏏  Disconnect Google</button>' : '<button type="button" data-v="on">🔗  Connect Google</button>') +
+            '<div class="xn-lbl" style="text-transform:none;letter-spacing:0;line-height:1.35;max-width:220px;">Only used when you pick a Google action. Your PFLX login is unchanged.</div>',
+            function (v) {
+                if (v === 'docs') sendToDocs();
+                else if (v === 'on') window.pflxGoogle.connect().catch(function (e) { toast(e.message, 'error'); });
+                else if (v === 'off') window.pflxGoogle.disconnect();
+            });
+    };
+    window.pflxGoogleCalMenu = function (block, btn) {
+        menu(btn, '<div class="xn-lbl">Google &middot; this planner</div>' + (clientId() ? '' : NOTE_SETUP) +
+            '<button type="button" data-v="tasks">✅  Sync checkboxes with Google Tasks</button>' +
+            '<button type="button" data-v="push">📅  Add items to Google Calendar</button>' +
+            '<button type="button" data-v="pull">⬇  Bring in Google Calendar events</button>',
+            function (v) { if (v === 'tasks') syncTasks(block); else if (v === 'push') pushCalendar(block); else if (v === 'pull') pullCalendar(block); });
+    };
+    setTimeout(paintStatus, 0); window.addEventListener('load', paintStatus);
 })();
 
 </script>
