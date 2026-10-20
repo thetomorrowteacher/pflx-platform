@@ -57,7 +57,7 @@
       // only on a real product milestone. Any element tagged
       // data-pflx-version="short|long|login" is filled automatically.
       window.PFLX_VERSION = '1.0.0';
-      window.PFLX_PATCH   = 293;
+      window.PFLX_PATCH   = 294;
       window.PFLX_BUILD   = '2026.10';
       // v201 -- official PFLX loading-screen music (all users, all apps).
       window.PFLX_OFFICIAL_LOADING_TRACK = {
@@ -15393,6 +15393,17 @@
 #xbot-notes-editor .xn-cal-cell ul.xn-check { padding-left: 20px; margin: 0; }
 #xbot-notes-editor .xn-cal-cell ul.xn-check li::before { left: -17px; }
 #xbot-notes-editor .xn-cal-store { display: none; }
+#xbot-notes-editor .xn-cal-month { display: grid; grid-template-columns: repeat(7, minmax(96px, 1fr)); }
+#xbot-notes-editor .xn-cal-wd { padding: 4px 6px; font-size: 10px; letter-spacing: 0.08em; color: #6a7290; text-transform: uppercase; border-bottom: 1px solid rgba(0,240,255,0.12); user-select: none; }
+#xbot-notes-editor .xn-cal-month .xn-cal-col { border-bottom: 1px solid rgba(0,240,255,0.10); }
+#xbot-notes-editor .xn-cal-month .xn-cal-col:nth-child(7n+7) { border-right: 0; }
+#xbot-notes-editor .xn-cal-month .xn-cal-head { border-bottom: 0; cursor: pointer; padding: 3px 6px 0; }
+#xbot-notes-editor .xn-cal-month .xn-cal-head:hover { color: #00f0ff; }
+#xbot-notes-editor .xn-cal-month .xn-cal-cell { min-height: 58px; font-size: 11px; }
+#xbot-notes-editor .xn-cal-month .xn-cal-col.out { opacity: 0.4; }
+#xbot-notes-editor .xn-cal-month .xn-cal-cell ul.xn-check:only-child > li:only-child:not(.xn-done):has(> br:only-child)::before { opacity: 0; }
+#xbot-notes-editor .xn-cal-month .xn-cal-col:hover .xn-cal-cell li::before, #xbot-notes-editor .xn-cal-month .xn-cal-cell:focus-within li::before { opacity: 1 !important; }
+
 .xn-pop { position: fixed; z-index: 2147483647; background: #0c1426; border: 1px solid rgba(0,240,255,0.35); border-radius: 8px; padding: 6px; box-shadow: 0 12px 30px rgba(0,0,0,0.6); font-family: 'Rajdhani', sans-serif; color: #e0e6ff; font-size: 12px; min-width: 150px; }
 .xn-pop button { display: block; width: 100%; text-align: left; background: transparent; border: 0; color: #e0e6ff; padding: 6px 8px; border-radius: 5px; cursor: pointer; font-size: 12px; font-family: inherit; }
 .xn-pop button:hover { background: rgba(0,240,255,0.12); }
@@ -15405,7 +15416,7 @@
                 </style>
                 <div id="xbot-notes-section" style="flex:1;overflow-y:auto;padding:16px;display:none;">
                     <div style="font-family:'Orbitron',sans-serif;font-size:10px;color:rgba(0,240,255,0.7);letter-spacing:2px;margin-bottom:10px;">MY NOTES</div>
-                    <div style="font-size:11px;color:#6a7290;margin-bottom:10px;">Private to you for this session — nobody else can see these, including the host.</div>
+                    <div style="font-size:11px;color:#6a7290;margin-bottom:10px;">Private to you — nobody else can see these, including the host. Synced to your account on every device you log in on.</div>
                     <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
                         <select id="xbot-notes-picker" onchange="window.xbotNotesSelect(this.value)" style="flex:1;min-width:120px;padding:6px 8px;background:rgba(10,18,40,0.6);border:1px solid rgba(0,240,255,0.12);border-radius:6px;color:#e0e6ff;font-family:'Rajdhani',sans-serif;font-size:12px;"></select>
                         <button class="xbot-notes-btn" onclick="window.xbotNotesNew()" title="New note" style="padding:6px 10px;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);border-radius:6px;color:#00f0ff;font-size:11px;font-weight:700;cursor:pointer;">+ New</button>
@@ -61834,6 +61845,8 @@ function ppRenderCheckpoints(el) {
         var xbotNotesSaveTimer = null;
         var xbotNotesLoadedKey = null;
         var xbotNotesStore = null; // { notes: [{id,title,html,updatedAt}], activeId }
+        window.__xbotNotesGet = function () { return xbotNotesStore; };   // v294 cloud sync hooks
+        window.__xbotNotesSet = function (v) { xbotNotesStore = v; };
         // v185 -- pure migration/normalization: takes whatever the OLD raw
         // localStorage string was (v184's plain text, this version's own
         // JSON, garbage, or nothing) and returns a well-formed store, never
@@ -90284,13 +90297,28 @@ window.XN_EXPORT_CSS = '.xn-doc ul, .xn-doc ol { padding-left: 28px; margin: 4px
         });
     }
     function calRender(block) {
-        var view = block.getAttribute('data-view') === 'day' ? 'day' : 'week';
+        var view = block.getAttribute('data-view'); if (view !== 'day' && view !== 'month') view = 'week';
         var anchor = parseYmd(block.getAttribute('data-anchor'));
         var st = calStore(block), today = ymd(new Date());
         function content(d) { var s = st.querySelector('[data-date="' + d + '"]'); return s ? s.innerHTML : EMPTY_CELL; }
         var fmt = function (d, o) { return d.toLocaleDateString(undefined, o); };
         var title, body;
-        if (view === 'week') {
+        if (view === 'month') {
+            // v294 — Monthly view: Monday-start weeks covering the month.
+            var first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+            var ms = monday(first), last = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0);
+            var weeks = Math.ceil(((last - ms) / 86400000 + 1) / 7);
+            title = fmt(first, { month: 'long', year: 'numeric' });
+            body = '<div class="xn-cal-month">';
+            ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(function (w) { body += '<div class="xn-cal-wd">' + w + '</div>'; });
+            for (var q = 0; q < weeks * 7; q++) {
+                var dq = new Date(ms); dq.setDate(ms.getDate() + q); var kq = ymd(dq);
+                var out = dq.getMonth() !== anchor.getMonth();
+                body += '<div class="xn-cal-col' + (kq === today ? ' today' : '') + (out ? ' out' : '') + '"><div class="xn-cal-head" data-xncal-day="' + kq + '" title="Open this day">' + dq.getDate() + '</div>' +
+                    '<div class="xn-cal-cell" contenteditable="true" data-date="' + kq + '">' + content(kq) + '</div></div>';
+            }
+            body += '</div>';
+        } else if (view === 'week') {
             var m = monday(anchor), end = new Date(m); end.setDate(m.getDate() + 6);
             title = fmt(m, { month: 'short', day: 'numeric' }) + ' – ' + fmt(end, { month: 'short', day: 'numeric', year: 'numeric' });
             body = '<div class="xn-cal-week">';
@@ -90313,6 +90341,7 @@ window.XN_EXPORT_CSS = '.xn-doc ul, .xn-doc ol { padding-left: 28px; margin: 4px
             '<span class="xn-cal-title">📅 ' + title + '</span>' +
             '<button type="button" data-xncal="week" class="' + (view === 'week' ? 'on' : '') + '">Weekly</button>' +
             '<button type="button" data-xncal="day" class="' + (view === 'day' ? 'on' : '') + '">Daily</button>' +
+            '<button type="button" data-xncal="month" class="' + (view === 'month' ? 'on' : '') + '">Monthly</button>' +
             '<button type="button" data-xncal="google" title="Google Tasks / Calendar (optional)">G ▾</button>' +
             '<button type="button" data-xncal="remove" title="Remove calendar">✕</button></div>';
         Array.prototype.slice.call(block.children).forEach(function (c) { if (!c.classList.contains('xn-cal-store')) c.remove(); });
@@ -90338,8 +90367,9 @@ window.XN_EXPORT_CSS = '.xn-doc ul, .xn-doc ol { padding-left: 28px; margin: 4px
         calSync(block);
         if (act === 'remove') { if (confirm('Remove this calendar and everything in it?')) { block.remove(); dirty(); } return; }
         var a = parseYmd(block.getAttribute('data-anchor')), view = block.getAttribute('data-view') || 'week';
-        if (act === 'week' || act === 'day') view = act;
+        if (act === 'week' || act === 'day' || act === 'month') view = act;
         else if (act === 'today') a = new Date();
+        else if (view === 'month') { a = new Date(a.getFullYear(), a.getMonth() + (act === 'next' ? 1 : -1), 1); }
         else { var step = view === 'week' ? 7 : 1; a.setDate(a.getDate() + (act === 'next' ? step : -step)); }
         block.setAttribute('data-view', view); block.setAttribute('data-anchor', ymd(a));
         calRender(block); dirty();
@@ -90377,7 +90407,7 @@ window.XN_EXPORT_CSS = '.xn-doc ul, .xn-doc ol { padding-left: 28px; margin: 4px
                     var l = p.querySelector('#xn-grid-lbl'); if (l) l.textContent = 'Insert table ' + R + ' × ' + C;
                 });
                 break;
-            case 'cal': openPop(btn, '<div class="xn-lbl">Calendar planner</div><button type="button" data-v="week">📅  Weekly view</button><button type="button" data-v="day">🗓  Daily view</button>', function (v) { insertCalendar(v); }); break;
+            case 'cal': openPop(btn, '<div class="xn-lbl">Calendar planner</div><button type="button" data-v="week">📅  Weekly view</button><button type="button" data-v="day">🗓  Daily view</button><button type="button" data-v="month">🗓  Monthly view</button>', function (v) { insertCalendar(v); }); break;
         }
     }
     document.addEventListener('mousedown', function (ev) {
@@ -90387,6 +90417,8 @@ window.XN_EXPORT_CSS = '.xn-doc ul, .xn-doc ol { padding-left: 28px; margin: 4px
         var b = ev.target.closest && ev.target.closest('[data-xn]');
         if (b) { ev.preventDefault(); act(b.getAttribute('data-xn'), b); return; }
         var e = ed(); if (!e || !e.contains(ev.target)) return;
+        var dh = ev.target.closest('[data-xncal-day]');
+        if (dh) { ev.preventDefault(); var blk = dh.closest('.xn-cal'); calSync(blk); blk.setAttribute('data-view', 'day'); blk.setAttribute('data-anchor', dh.getAttribute('data-xncal-day')); calRender(blk); dirty(); return; }
         var cb = ev.target.closest('[data-xncal]');
         if (cb) { ev.preventDefault(); calNav(cb.closest('.xn-cal'), cb.getAttribute('data-xncal')); return; }
         var a = ev.target.closest('a[href]');
@@ -90639,10 +90671,11 @@ window.PFLX_GOOGLE_CLIENT_ID = window.PFLX_GOOGLE_CLIENT_ID || '276938884976-48s
     }
     function pullCalendar(block) {
         window.xnCalSync(block);
-        var view = block.getAttribute('data-view') === 'day' ? 'day' : 'week';
+        var view = block.getAttribute('data-view'); if (view !== 'day' && view !== 'month') view = 'week';
         var a = String(block.getAttribute('data-anchor')).split('-'); var s = new Date(+a[0], +a[1] - 1, +a[2]);
-        if (view === 'week') s.setDate(s.getDate() - ((s.getDay() + 6) % 7));
-        var e = new Date(s); e.setDate(s.getDate() + (view === 'week' ? 7 : 1));
+        if (view === 'month') s = new Date(s.getFullYear(), s.getMonth(), 1);
+        if (view !== 'day') s.setDate(s.getDate() - ((s.getDay() + 6) % 7));
+        var e = new Date(s); e.setDate(s.getDate() + (view === 'month' ? 42 : view === 'week' ? 7 : 1));
         var url = CAL + '?singleEvents=true&orderBy=startTime&maxResults=250&timeMin=' + encodeURIComponent(s.toISOString()) + '&timeMax=' + encodeURIComponent(e.toISOString());
         api(['cal'], 'GET', url).then(function (r) {
             var st = block.querySelector('.xn-cal-store'), added = 0;
@@ -90698,6 +90731,136 @@ window.PFLX_GOOGLE_CLIENT_ID = window.PFLX_GOOGLE_CLIENT_ID || '276938884976-48s
             function (v) { if (v === 'tasks') syncTasks(block); else if (v === 'push') pushCalendar(block); else if (v === 'pull') pullCalendar(block); });
     };
     setTimeout(paintStatus, 0); window.addEventListener('load', paintStatus);
+})();
+
+</script>
+<script>
+(function () {
+    // PATCH PLATFORM v294 — X-Bot Notes sync across devices (Ennis, Oct 20:
+    // "what happens to my saved notes... This should sync... link across
+    // devices"). The device copy (localStorage) stays as the instant cache;
+    // every save is also pushed to the private pflx_notes table through the
+    // pflx-notes Edge Function, which checks the player's id + PIN. Newest
+    // copy of each note wins; deletes travel as tombstones.
+    var EP = function () { return (window.PFLX_SUPABASE_URL || '') + '/functions/v1/pflx-notes'; };
+    function sess() { var s = window.activeSession; return (s && s.id && s.pin != null && s.pin !== '') ? s : null; }
+    function call(action, extra) {
+        var s = sess(); if (!s) return Promise.reject(new Error('not logged in'));
+        var anon = window.PFLX_SUPABASE_ANON || '';
+        var body = Object.assign({ playerId: s.id, pin: String(s.pin), action: action }, extra || {});
+        return fetch(EP(), { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: anon, Authorization: 'Bearer ' + anon }, body: JSON.stringify(body) })
+            .then(function (r) { return r.json().catch(function () { return { ok: false }; }); })
+            .then(function (j) { if (!j || !j.ok) throw new Error((j && j.error) || 'sync failed'); return j; });
+    }
+    function store() { return window.__xbotNotesGet ? window.__xbotNotesGet() : null; }
+    function key() { var s = window.activeSession; return s && s.id ? window.pflxXBotNotesLocalKey(s) : null; }
+    function status(t) { var el = document.getElementById('xbot-notes-status'); if (el && t) el.textContent = t; }
+    var PK = function () { return 'pflx_xbot_notes_pushed_' + ((window.activeSession || {}).id || ''); };
+    function pushedMap() { try { return JSON.parse(localStorage.getItem(PK()) || '{}'); } catch (e) { return {}; } }
+    function savePushed(m) { try { localStorage.setItem(PK(), JSON.stringify(m)); } catch (e) {} }
+    var lastTyped = 0;
+    document.addEventListener('input', function (e) { if (e.target && e.target.closest && e.target.closest('#xbot-notes-section')) lastTyped = Date.now(); }, true);
+
+    var pushTimer = null, pushing = false;
+    function schedulePush() { if (pushTimer) clearTimeout(pushTimer); pushTimer = setTimeout(push, 1500); }
+    function push() {
+        var st = store(); if (!st || !sess() || pushing) return;
+        var pm = pushedMap(), out = [];
+        (st.notes || []).forEach(function (n) { if ((n.updatedAt || 0) > (pm[n.id] || 0)) out.push({ id: n.id, title: n.title || '', html: n.html || '', updatedAt: n.updatedAt || Date.now(), deleted: false }); });
+        (st.deleted || []).forEach(function (d) { if ((d.updatedAt || 0) > (pm[d.id] || 0)) out.push({ id: d.id, title: '', html: '', updatedAt: d.updatedAt, deleted: true }); });
+        if (!out.length) return;
+        pushing = true;
+        call('put', { notes: out }).then(function () {
+            out.forEach(function (n) { pm[n.id] = n.updatedAt; }); savePushed(pm);
+            status('Synced ✓ ' + window.xbotNotesFormatSavedTime().replace('Saved ', ''));
+        }).catch(function () { status('Saved on this device — will sync when back online'); })
+          .then(function () { pushing = false; });
+    }
+    function pull() {
+        var st = store(); if (!st || !sess()) return Promise.resolve();
+        return call('list').then(function (j) {
+            st = store(); if (!st) return;
+            st.deleted = st.deleted || [];
+            var byId = {}; (st.notes || []).forEach(function (n) { byId[n.id] = n; });
+            var tomb = {}; st.deleted.forEach(function (d) { tomb[d.id] = d; });
+            var pm = pushedMap(), changed = false, activeChanged = false, typingGuard = Date.now() - lastTyped < 5000;
+            (j.notes || []).forEach(function (r) {
+                var loc = byId[r.id];
+                if (r.deleted) {
+                    if (loc && (loc.updatedAt || 0) <= r.updatedAt) {
+                        st.notes = st.notes.filter(function (n) { return n.id !== r.id; });
+                        if (st.activeId === r.id) { st.activeId = st.notes.length ? st.notes[0].id : null; activeChanged = true; }
+                        changed = true;
+                    }
+                    if (!tomb[r.id]) { st.deleted.push({ id: r.id, updatedAt: r.updatedAt }); tomb[r.id] = 1; }
+                    pm[r.id] = Math.max(pm[r.id] || 0, r.updatedAt);
+                    return;
+                }
+                if (tomb[r.id] && tomb[r.id].updatedAt >= r.updatedAt) return;
+                if (!loc) { st.notes.push({ id: r.id, title: r.title, html: r.html, updatedAt: r.updatedAt }); changed = true; }
+                else if (r.updatedAt > (loc.updatedAt || 0)) {
+                    if (r.id === st.activeId && typingGuard) return;
+                    loc.title = r.title; loc.html = r.html; loc.updatedAt = r.updatedAt; changed = true;
+                    if (r.id === st.activeId) activeChanged = true;
+                }
+                pm[r.id] = Math.max(pm[r.id] || 0, r.updatedAt);
+            });
+            savePushed(pm);
+            if (!st.activeId && st.notes.length) { st.activeId = st.notes[0].id; activeChanged = true; }
+            if (changed) {
+                try { var k = key(); if (k) localStorage.setItem(k, JSON.stringify(st)); } catch (e) {}
+                window.xbotNotesRenderList();
+                if (activeChanged) window.xbotNotesRenderActive();
+            }
+            status(changed ? 'Synced from your other devices ✓' : 'Synced ✓');
+            push(); // anything only this device has
+        }).catch(function (e) { if (sess()) status('Saved on this device — cloud sync unavailable right now'); });
+    }
+    window.xbotNotesCloudPull = pull;
+
+    function wrap() {
+        if (window.xbotNotesSaveNow && !window.xbotNotesSaveNow._pn) {
+            var s0 = window.xbotNotesSaveNow;
+            window.xbotNotesSaveNow = function () { var r = s0.apply(this, arguments); schedulePush(); return r; };
+            window.xbotNotesSaveNow._pn = 1;
+        }
+        if (window.xbotNotesLoad && !window.xbotNotesLoad._pn) {
+            var l0 = window.xbotNotesLoad;
+            window.xbotNotesLoad = function () { var r = l0.apply(this, arguments); setTimeout(pull, 50); return r; };
+            window.xbotNotesLoad._pn = 1;
+        }
+        if (window.xbotNotesDeleteActive && !window.xbotNotesDeleteActive._pn) {
+            var d0 = window.xbotNotesDeleteActive;
+            window.xbotNotesDeleteActive = function () {
+                var st = store(), id = st && st.activeId;
+                var before = st ? st.notes.length : 0;
+                var r = d0.apply(this, arguments);
+                st = store();
+                if (id && st && st.notes.length < before) {
+                    st.deleted = st.deleted || []; st.deleted.push({ id: id, updatedAt: Date.now() });
+                    try { var k = key(); if (k) localStorage.setItem(k, JSON.stringify(st)); } catch (e) {}
+                    schedulePush();
+                }
+                return r;
+            };
+            window.xbotNotesDeleteActive._pn = 1;
+        }
+    }
+    wrap(); window.addEventListener('load', wrap);
+    function notesVisible() { var s = document.getElementById('xbot-notes-section'); return !!s && s.offsetParent !== null; }
+    window.addEventListener('focus', function () { if (notesVisible()) pull(); });
+    setInterval(function () { if (notesVisible() && document.visibilityState === 'visible') pull(); }, 45000);
+    // Another tab on this device saved notes: reload them here too.
+    window.addEventListener('storage', function (e) {
+        var k = key(); if (!k || e.key !== k || !e.newValue) return;
+        try {
+            var incoming = JSON.parse(e.newValue), st = store(); if (!st || !incoming || !Array.isArray(incoming.notes)) return;
+            if (Date.now() - lastTyped < 5000) return;
+            var keepActive = st.activeId;
+            window.__xbotNotesSet(Object.assign(incoming, { activeId: incoming.notes.some(function (n) { return n.id === keepActive; }) ? keepActive : incoming.activeId }));
+            window.xbotNotesRenderList(); window.xbotNotesRenderActive();
+        } catch (x) {}
+    });
 })();
 
 </script>
